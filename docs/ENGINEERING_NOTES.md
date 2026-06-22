@@ -59,7 +59,7 @@ docs
 - Image attachment contract: temporary-by-default PNG data passed only through the current chat request
 - WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
 - Voice contracts: recorder, STT provider, TTS provider, speech player
-- Local voice adapters: Windows MCI WAV record/playback, Whisper-style CLI STT, Piper-style CLI TTS
+- Local voice adapters: NAudio WAV record/playback, Faster-Whisper CLI STT wrapper, Piper CLI TTS wrapper
 - Voice safety: risky spoken commands are blocked in Phase 1C before they can be sent as action requests
 - Spoken response cleaner: removes URLs, markdown clutter, code blocks, stack traces, metadata, and citation markers
 - Correction reports now carry optional voice transcript/provider metadata without retaining raw audio
@@ -88,7 +88,7 @@ For this bootstrap, no external NuGet packages are required.
 
 ## Voice Settings
 
-Phase 1C voice setup is environment-variable based. This keeps the first slice local, explicit, and package-light.
+Phase 1C voice setup is environment-variable based. This keeps the first slice local and explicit while the WPF settings surface is still young.
 
 ```powershell
 $env:ALI_WHISPER_EXE = "C:\path\to\whisper-cli.exe"
@@ -104,6 +104,16 @@ $env:ALI_PIPER_ARGS = "--model ""{model}"" --output_file ""{output}"""
 The speech tool policy rejects `http://` and `https://` references in STT/TTS executable, model, or argument configuration. Speech is local-only in this phase.
 
 Raw microphone WAV files are temporary by default. They are deleted after transcription unless a future explicit retention control is added. TTS WAV output is also temporary by default and deleted after playback.
+
+Current developer resource layout:
+
+```text
+lib\voice\python-venv
+lib\voice\whisper
+lib\voice\piper
+```
+
+The wrapper script `tools\voice\local_whisper_stt.py` uses Faster-Whisper locally and writes both transcript text and JSON segment metadata. Segments with high no-speech probability or weak average log probability are rejected so suspicious audio cannot become a command.
 
 ## Runtime Settings
 
@@ -234,11 +244,19 @@ Push to Talk
 Manual integration status:
 
 ```text
-Real microphone recording: implemented through Windows MCI, requires human desktop test
-Real Whisper transcription: implemented as local CLI adapter, requires ALI_WHISPER_* configuration
-Real Piper speech: implemented as local CLI adapter, requires ALI_PIPER_* configuration
+Real microphone recording: implemented through NAudio and VoiceWorkbench-derived DSP
+Real Faster-Whisper transcription: implemented as local CLI wrapper with no-speech guard
+Real Piper speech: implemented as local CLI wrapper using copied lib\voice resources
 Cloud STT/TTS: intentionally blocked
 Wake word: not implemented
 Barge-in: not implemented
 Risky voice actions: blocked in Phase 1C
+```
+
+Live gate status:
+
+```text
+Mechanical chain with no guard: passed once, but transcript was suspicious high-no-speech output.
+Guarded chain: correctly rejected the suspicious transcript.
+Remaining blocker: tune/select the real microphone path so guarded STT accepts deliberate speech.
 ```

@@ -11,6 +11,7 @@ using Ali.Core.Runtime;
 using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
 using Ali.Infrastructure.Runtime;
+using Ali.Infrastructure.Voice;
 
 namespace Ali.App.Wpf.ViewModels;
 
@@ -72,8 +73,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
 
-        VoiceInputDevices.Add("Default microphone");
-        VoiceOutputDevices.Add("Default speaker");
+        LoadVoiceDevices();
         _sttStatus = _services.SpeechToText.IsConfigured
             ? $"STT ready: {_services.SpeechToText.ProviderName}"
             : "STT not configured. Set ALI_WHISPER_EXE for local transcription.";
@@ -275,13 +275,25 @@ public sealed class MainWindowViewModel : ObservableObject
     public string SelectedVoiceInputDevice
     {
         get => _selectedVoiceInputDevice;
-        set => SetProperty(ref _selectedVoiceInputDevice, value);
+        set
+        {
+            if (SetProperty(ref _selectedVoiceInputDevice, value))
+            {
+                ApplyVoiceInputDevice(value);
+            }
+        }
     }
 
     public string SelectedVoiceOutputDevice
     {
         get => _selectedVoiceOutputDevice;
-        set => SetProperty(ref _selectedVoiceOutputDevice, value);
+        set
+        {
+            if (SetProperty(ref _selectedVoiceOutputDevice, value))
+            {
+                ApplyVoiceOutputDevice(value);
+            }
+        }
     }
 
     public bool IsRecording
@@ -774,7 +786,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await _services.VoiceRecorder.StartAsync(directory, _activeVoiceInput.Token).ConfigureAwait(true);
             IsRecording = true;
-            VoiceStatus = "Recording from default microphone...";
+            VoiceStatus = $"Recording from {SelectedVoiceInputDevice}...";
             SttStatus = _services.SpeechToText.IsConfigured
                 ? "Waiting for recording to stop."
                 : "Recording works, but local STT is not configured.";
@@ -1101,5 +1113,66 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var profile = _services.Orchestrator.Runtime.ActiveProfile;
         return $"{profile.DisplayName} | {profile.Quantization} | {profile.ContextTokens:N0} ctx";
+    }
+
+    private void LoadVoiceDevices()
+    {
+        VoiceInputDevices.Clear();
+        var inputDevices = NAudioVoiceRecorder.GetInputDevices();
+        if (inputDevices.Count == 0)
+        {
+            VoiceInputDevices.Add("0: Default microphone");
+        }
+        else
+        {
+            foreach (var device in inputDevices)
+            {
+                VoiceInputDevices.Add($"{device.DeviceNumber}: {device.Name}");
+            }
+        }
+
+        SelectedVoiceInputDevice = VoiceInputDevices[0];
+
+        VoiceOutputDevices.Clear();
+        foreach (var device in NAudioWaveSpeechPlayer.GetOutputDevices())
+        {
+            VoiceOutputDevices.Add($"{device.DeviceNumber}: {device.Name}");
+        }
+
+        if (VoiceOutputDevices.Count == 0)
+        {
+            VoiceOutputDevices.Add("-1: Default playback device");
+        }
+
+        SelectedVoiceOutputDevice = VoiceOutputDevices[0];
+    }
+
+    private void ApplyVoiceInputDevice(string selectedDevice)
+    {
+        if (_services.VoiceRecorder is NAudioVoiceRecorder recorder
+            && TryReadDeviceNumber(selectedDevice, out var deviceNumber))
+        {
+            recorder.InputDeviceNumber = deviceNumber;
+        }
+    }
+
+    private void ApplyVoiceOutputDevice(string selectedDevice)
+    {
+        if (_services.SpeechPlayer is NAudioWaveSpeechPlayer player
+            && TryReadDeviceNumber(selectedDevice, out var deviceNumber))
+        {
+            player.OutputDeviceNumber = deviceNumber;
+        }
+    }
+
+    private static bool TryReadDeviceNumber(string selectedDevice, out int deviceNumber)
+    {
+        deviceNumber = 0;
+        var separatorIndex = selectedDevice.IndexOf(':', StringComparison.Ordinal);
+        var numberText = separatorIndex >= 0
+            ? selectedDevice[..separatorIndex]
+            : selectedDevice;
+
+        return int.TryParse(numberText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceNumber);
     }
 }

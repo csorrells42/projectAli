@@ -51,23 +51,27 @@ The current first proof vision model is `qwen3-vl:8b`. It proves the local scree
 
 Phase 1C voice is local-only.
 
-Ali records a temporary WAV file from the Windows default microphone. The raw audio is deleted after transcription unless a future retention setting is explicitly added.
+Ali records a temporary WAV file from the selected local microphone. The raw audio is deleted after transcription unless a retention setting or validation flag explicitly keeps it.
 
-Ali can use a local Whisper-style command-line transcriber when configured:
+The current local voice resources live under Ali's own `lib\voice` folder:
+
+- `lib\voice\python-venv`
+- `lib\voice\whisper`
+- `lib\voice\piper`
+
+For this developer build, configure the local speech environment from:
 
 ```powershell
-$env:ALI_WHISPER_EXE = "C:\path\to\whisper-cli.exe"
-$env:ALI_WHISPER_MODEL = "C:\path\to\model.bin"
+.\tools\voice\ALI_LOCAL_VOICE_ENV.example.ps1
 ```
 
-Ali can use a local Piper-style command-line speaker when configured:
+Ali uses a local Faster-Whisper wrapper for STT and a local Piper wrapper for TTS. The STT wrapper writes confidence metadata and rejects suspicious no-speech/low-confidence segments instead of turning noise into a command.
 
-```powershell
-$env:ALI_PIPER_EXE = "C:\path\to\piper.exe"
-$env:ALI_PIPER_MODEL = "C:\path\to\voice.onnx"
-```
+Installed local proof resources: 26 en-US Piper voices and Faster-Whisper caches for `tiny.en`, `base.en`, `small.en`, `medium.en`, and `large-v3`.
 
 If local STT or TTS is not configured, Ali says so in the voice status area. She does not use cloud speech and does not pretend a transcript or spoken response succeeded.
+
+Current voice certification status: the local wiring from mic to STT to qwen3:14b to Piper to Stop Speaking to correction metadata has been proven mechanically. The guarded STT pass is still blocked on trustworthy microphone capture/tuning, so voice-command reliability is not yet certified.
 
 Voice can ask ordinary chat questions. Voice cannot yet run commands, change models, edit calendars, install things, delete memories, or do destructive actions. Those spoken requests are blocked in this phase and require visible typed confirmation later.
 

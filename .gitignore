@@ -7,3 +7,9 @@ TestResults/
 *.suo
 outputs/
 work/
+lib/voice/python-venv/
+lib/voice/piper/*.onnx
+lib/voice/piper/*.onnx.json
+lib/voice/whisper/CACHEDIR.TAG
+lib/voice/whisper/.locks/
+lib/voice/whisper/models--Systran--faster-whisper-*/

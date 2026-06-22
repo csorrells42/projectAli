@@ -88,10 +88,10 @@ public sealed class AliServices
         var permissions = new PermissionService();
         var orchestrator = new ConversationOrchestrator(runtime, permissions, correctionQueue);
 
-        var voiceRecorder = new MciWaveAudioRecorder();
+        var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions.FromEnvironment());
         var textToSpeech = new PiperCliTextToSpeechProvider(PiperCliTextToSpeechOptions.FromEnvironment(dataRoot));
-        var speechPlayer = new MciWaveSpeechPlayer();
+        var speechPlayer = new NAudioWaveSpeechPlayer();
 
         return new AliServices(
             dataRoot,

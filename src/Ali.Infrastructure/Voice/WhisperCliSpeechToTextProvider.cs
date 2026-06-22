@@ -111,7 +111,11 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
         text = text.Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException("Local STT returned an empty transcript.");
+            var metadataTextPath = outputBase + ".json";
+            var metadataSummary = File.Exists(metadataTextPath)
+                ? $" Metadata: {TrimForUser(await File.ReadAllTextAsync(metadataTextPath, cancellationToken).ConfigureAwait(false))}"
+                : string.Empty;
+            throw new InvalidOperationException($"Local STT returned an empty transcript.{metadataSummary}");
         }
 
         return new SpeechTranscript(text, ProviderName, Mode, DateTimeOffset.UtcNow);

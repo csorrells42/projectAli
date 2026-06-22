@@ -18,11 +18,11 @@ Current status: Phase 0 / Phase 1C bootstrap.
 - Preview image attachments before sending.
 - Mark image attachments as retained or temporary.
 - Push-to-talk voice controls in the WPF chat surface.
-- Temporary local WAV recording through the Windows default microphone.
-- Local-only Whisper-style STT CLI adapter boundary.
+- Temporary local WAV recording through NAudio with selectable input device support.
+- Local-only Faster-Whisper STT wrapper with no-speech confidence filtering.
 - Editable transcript review before sending a voice prompt.
-- Local-only Piper-style TTS CLI adapter boundary.
-- Stop speaking control for local WAV playback.
+- Local-only Piper TTS wrapper using copied `lib\voice` resources.
+- Stop speaking control for NAudio WAV playback.
 - Speech response cleanup so URLs, code blocks, logs, and markdown clutter are not read aloud.
 - Streaming bootstrap response from a local deterministic runtime stub.
 - Optional local OpenAI-compatible runtime adapter with explicit health check activation.
@@ -107,6 +107,20 @@ This proves Ali's local screenshot/image path. It is not the final Ali vision mo
 
 Phase 1C does not use cloud speech. Ali records temporary WAV files locally and only calls local executables configured by environment variables.
 
+Developer speech resources are copied under:
+
+```text
+lib\voice
+```
+
+Use the local helper script as the starting point:
+
+```powershell
+.\tools\voice\ALI_LOCAL_VOICE_ENV.example.ps1
+```
+
+Installed proof resources include 26 en-US Piper voices and Faster-Whisper caches for `tiny.en`, `base.en`, `small.en`, `medium.en`, and `large-v3`.
+
 Whisper-style STT:
 
 ```powershell
@@ -135,6 +149,8 @@ $env:ALI_PIPER_ARGS = "--model ""{model}"" --output_file ""{output}"""
 ```
 
 If those tools are not configured, Ali shows that honestly in the voice status area and skips local STT/TTS rather than pretending.
+
+Voice status note: the local mic -> STT -> qwen3:14b -> Piper -> stop-speaking -> correction-metadata chain has been proven mechanically. Guarded voice-command reliability still needs microphone path tuning before it is considered field-certified.
 
 ## KISS Rules
 
