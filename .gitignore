@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+.nuget_scratch/
+TestResults/
+*.user
+*.suo
+outputs/
+work/
