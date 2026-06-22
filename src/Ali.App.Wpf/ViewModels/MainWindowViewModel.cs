@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
 using Ali.Core.Runtime;
+using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
 using Ali.Infrastructure.Runtime;
 
@@ -18,8 +19,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AliServices _services;
     private readonly string _conversationId = $"conv_{Guid.NewGuid():N}";
     private CancellationTokenSource? _activeResponse;
+    private CancellationTokenSource? _activeVoiceInput;
+    private CancellationTokenSource? _activeSpeech;
     private string _composerText = string.Empty;
     private bool _isBusy;
+    private bool _isRecording;
+    private bool _isTranscribing;
+    private bool _isSpeaking;
     private string _statusText = "Ready. Local runtime is not configured yet.";
     private string _runtimeDisplay;
     private string _runtimeEndpointText = string.Empty;
@@ -36,6 +42,14 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeHealthResult = "No runtime health check has been run.";
     private string _activeRuntimeStatus = "Using safe deterministic stub.";
     private string _attachmentStatus = "Screenshots are temporary by default.";
+    private string _voiceStatus = "Voice idle.";
+    private string _sttStatus;
+    private string _ttsStatus;
+    private string _lastTranscript = string.Empty;
+    private string _editableTranscript = string.Empty;
+    private string _selectedVoiceInputDevice = "Default microphone";
+    private string _selectedVoiceOutputDevice = "Default speaker";
+    private VoiceTurnMetadata? _lastVoiceMetadata;
 
     public MainWindowViewModel(AliServices services)
     {
@@ -53,6 +67,19 @@ public sealed class MainWindowViewModel : ObservableObject
         PasteImageCommand = new AsyncRelayCommand(AddClipboardImageAsync);
         CaptureScreenCommand = new AsyncRelayCommand(CaptureFullScreenAsync);
         RemoveAttachmentCommand = new RelayCommand(RemoveAttachment);
+        StartVoiceRecordingCommand = new AsyncRelayCommand(StartVoiceRecordingAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        StopVoiceRecordingCommand = new AsyncRelayCommand(StopVoiceRecordingOrTranscriptionAsync, () => IsRecording || IsTranscribing);
+        SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
+        StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
+
+        VoiceInputDevices.Add("Default microphone");
+        VoiceOutputDevices.Add("Default speaker");
+        _sttStatus = _services.SpeechToText.IsConfigured
+            ? $"STT ready: {_services.SpeechToText.ProviderName}"
+            : "STT not configured. Set ALI_WHISPER_EXE for local transcription.";
+        _ttsStatus = _services.TextToSpeech.IsConfigured
+            ? $"TTS ready: {_services.TextToSpeech.ProviderName}"
+            : "TTS not configured. Set ALI_PIPER_EXE and ALI_PIPER_MODEL for local speech.";
 
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
@@ -68,6 +95,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
 
     public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
+
+    public ObservableCollection<string> VoiceInputDevices { get; } = new();
+
+    public ObservableCollection<string> VoiceOutputDevices { get; } = new();
 
     public ICommand SendCommand { get; }
 
@@ -92,6 +123,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand CaptureScreenCommand { get; }
 
     public ICommand RemoveAttachmentCommand { get; }
+
+    public ICommand StartVoiceRecordingCommand { get; }
+
+    public ICommand StopVoiceRecordingCommand { get; }
+
+    public ICommand SendTranscriptCommand { get; }
+
+    public ICommand StopSpeakingCommand { get; }
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
@@ -197,6 +236,90 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _attachmentStatus, value);
     }
 
+    public string VoiceStatus
+    {
+        get => _voiceStatus;
+        private set => SetProperty(ref _voiceStatus, value);
+    }
+
+    public string SttStatus
+    {
+        get => _sttStatus;
+        private set => SetProperty(ref _sttStatus, value);
+    }
+
+    public string TtsStatus
+    {
+        get => _ttsStatus;
+        private set => SetProperty(ref _ttsStatus, value);
+    }
+
+    public string LastTranscript
+    {
+        get => _lastTranscript;
+        private set => SetProperty(ref _lastTranscript, value);
+    }
+
+    public string EditableTranscript
+    {
+        get => _editableTranscript;
+        set
+        {
+            if (SetProperty(ref _editableTranscript, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public string SelectedVoiceInputDevice
+    {
+        get => _selectedVoiceInputDevice;
+        set => SetProperty(ref _selectedVoiceInputDevice, value);
+    }
+
+    public string SelectedVoiceOutputDevice
+    {
+        get => _selectedVoiceOutputDevice;
+        set => SetProperty(ref _selectedVoiceOutputDevice, value);
+    }
+
+    public bool IsRecording
+    {
+        get => _isRecording;
+        private set
+        {
+            if (SetProperty(ref _isRecording, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public bool IsTranscribing
+    {
+        get => _isTranscribing;
+        private set
+        {
+            if (SetProperty(ref _isTranscribing, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public bool IsSpeaking
+    {
+        get => _isSpeaking;
+        private set
+        {
+            if (SetProperty(ref _isSpeaking, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
     public string ComposerText
     {
         get => _composerText;
@@ -236,6 +359,19 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         ComposerText = string.Empty;
+        await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+    }
+
+    private async Task SendTextAsync(
+        string text,
+        VoiceInputOrigin inputOrigin,
+        VoiceTurnMetadata? voiceMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(text) || IsBusy)
+        {
+            return;
+        }
+
         IsBusy = true;
         StatusText = "Streaming local response...";
 
@@ -257,6 +393,8 @@ public sealed class MainWindowViewModel : ObservableObject
             DateTimeOffset.UtcNow,
             EvidenceStatus.Unknown,
             sourceAttachmentCount: attachments.Count,
+            sourceInputOrigin: inputOrigin,
+            sourceVoiceMetadata: voiceMetadata,
             sourceUserMessageId: userMessageId,
             sourceQuestion: text);
 
@@ -265,6 +403,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Messages.Add(assistantMessage);
 
         _activeResponse = new CancellationTokenSource();
+        var completed = false;
 
         try
         {
@@ -282,6 +421,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             StatusText = "Response complete.";
+            completed = true;
         }
         catch (OperationCanceledException)
         {
@@ -295,6 +435,11 @@ public sealed class MainWindowViewModel : ObservableObject
             IsBusy = false;
             ClearTemporaryAttachments();
             UpdateRuntimeStatus();
+        }
+
+        if (completed && inputOrigin == VoiceInputOrigin.Voice && !string.IsNullOrWhiteSpace(assistantMessage.Text))
+        {
+            await SpeakAssistantAnswerAsync(assistantMessage.Text, voiceMetadata).ConfigureAwait(true);
         }
     }
 
@@ -418,7 +563,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 message.EvidenceStatus,
                 message.SourceAttachmentCount > 0 ? CorrectionCategory.MisreadScreenshot : CorrectionCategory.Other,
                 userNote: "Flagged from WPF bootstrap chat.",
-                CancellationToken.None).ConfigureAwait(true);
+                voiceMetadata: message.SourceVoiceMetadata,
+                cancellationToken: CancellationToken.None).ConfigureAwait(true);
 
             message.IsFlaggedForCorrection = true;
             StatusText = $"Flagged for correction: {report.Id}";
@@ -608,6 +754,265 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task StartVoiceRecordingAsync()
+    {
+        if (IsRecording || IsTranscribing)
+        {
+            return;
+        }
+
+        StopSpeaking();
+        _activeVoiceInput?.Dispose();
+        _activeVoiceInput = new CancellationTokenSource();
+
+        var directory = Path.Combine(
+            _services.DataRoot,
+            "SessionAudio",
+            DateTimeOffset.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+
+        try
+        {
+            await _services.VoiceRecorder.StartAsync(directory, _activeVoiceInput.Token).ConfigureAwait(true);
+            IsRecording = true;
+            VoiceStatus = "Recording from default microphone...";
+            SttStatus = _services.SpeechToText.IsConfigured
+                ? "Waiting for recording to stop."
+                : "Recording works, but local STT is not configured.";
+        }
+        catch (Exception ex)
+        {
+            _services.VoiceRecorder.Cancel();
+            IsRecording = false;
+            VoiceStatus = $"Recording could not start: {ex.Message}";
+        }
+    }
+
+    private async Task StopVoiceRecordingOrTranscriptionAsync()
+    {
+        if (IsTranscribing)
+        {
+            _activeVoiceInput?.Cancel();
+            SttStatus = "Transcription cancellation requested.";
+            return;
+        }
+
+        if (!IsRecording)
+        {
+            return;
+        }
+
+        VoiceAudioInput? audioInput = null;
+        try
+        {
+            audioInput = await _services.VoiceRecorder.StopAsync(_activeVoiceInput?.Token ?? CancellationToken.None).ConfigureAwait(true);
+            IsRecording = false;
+            VoiceStatus = "Recording stopped.";
+        }
+        catch (OperationCanceledException)
+        {
+            VoiceStatus = "Voice input canceled.";
+            SttStatus = "Recording canceled.";
+            IsRecording = false;
+            if (audioInput is not null)
+            {
+                DeleteVoiceAudioIfTemporary(audioInput);
+            }
+
+            _activeVoiceInput?.Dispose();
+            _activeVoiceInput = null;
+            return;
+        }
+        catch (Exception ex)
+        {
+            VoiceStatus = "Voice recording did not stop cleanly.";
+            SttStatus = ex.Message;
+            IsRecording = false;
+            if (audioInput is not null)
+            {
+                DeleteVoiceAudioIfTemporary(audioInput);
+            }
+
+            _activeVoiceInput?.Dispose();
+            _activeVoiceInput = null;
+            return;
+        }
+
+        _ = TranscribeAudioAsync(audioInput);
+    }
+
+    private async Task TranscribeAudioAsync(VoiceAudioInput audioInput)
+    {
+        try
+        {
+            IsTranscribing = true;
+            SttStatus = "Transcribing locally...";
+
+            var transcript = await _services.SpeechToText.TranscribeAsync(
+                audioInput,
+                _activeVoiceInput?.Token ?? CancellationToken.None).ConfigureAwait(true);
+
+            LastTranscript = transcript.Text;
+            EditableTranscript = transcript.Text;
+            _lastVoiceMetadata = new VoiceTurnMetadata(
+                VoiceInputOrigin.Voice,
+                transcript.Text,
+                transcript.ProviderName,
+                transcript.Mode,
+                _services.TextToSpeech.ProviderName,
+                _services.TextToSpeech.VoiceId,
+                audioInput.RetainAudio);
+
+            VoiceStatus = "Transcript ready to review.";
+            SttStatus = $"Transcript created by {transcript.ProviderName}.";
+        }
+        catch (OperationCanceledException)
+        {
+            VoiceStatus = "Voice input canceled.";
+            SttStatus = "Transcription canceled.";
+        }
+        catch (Exception ex)
+        {
+            VoiceStatus = "Voice input did not produce a transcript.";
+            SttStatus = ex.Message;
+        }
+        finally
+        {
+            IsTranscribing = false;
+            DeleteVoiceAudioIfTemporary(audioInput);
+            _activeVoiceInput?.Dispose();
+            _activeVoiceInput = null;
+        }
+    }
+
+    private async Task SendTranscriptAsync()
+    {
+        var transcript = EditableTranscript.Trim();
+        if (string.IsNullOrWhiteSpace(transcript) || IsBusy)
+        {
+            return;
+        }
+
+        if (VoiceCommandSafety.RequiresVisibleConfirmation(transcript))
+        {
+            VoiceStatus = VoiceCommandSafety.BlockedPhaseOneCMessage();
+            StatusText = VoiceStatus;
+            return;
+        }
+
+        var voiceMetadata = (_lastVoiceMetadata ?? new VoiceTurnMetadata(
+            VoiceInputOrigin.Voice,
+            transcript,
+            _services.SpeechToText.ProviderName,
+            _services.SpeechToText.Mode,
+            _services.TextToSpeech.ProviderName,
+            _services.TextToSpeech.VoiceId,
+            RawAudioRetained: false)) with
+        {
+            Transcript = transcript,
+            TextToSpeechProvider = _services.TextToSpeech.ProviderName,
+            TextToSpeechVoice = _services.TextToSpeech.VoiceId
+        };
+
+        VoiceStatus = "Voice transcript sent to Ali.";
+        await SendTextAsync(transcript, VoiceInputOrigin.Voice, voiceMetadata).ConfigureAwait(true);
+    }
+
+    private async Task SpeakAssistantAnswerAsync(string assistantText, VoiceTurnMetadata? voiceMetadata)
+    {
+        var spokenText = SpeechOutputCleaner.Clean(assistantText);
+        if (string.IsNullOrWhiteSpace(spokenText))
+        {
+            TtsStatus = "No speakable response after cleanup.";
+            return;
+        }
+
+        if (!_services.TextToSpeech.IsConfigured)
+        {
+            TtsStatus = "Local TTS is not configured. Text answer is available.";
+            VoiceStatus = "Speech skipped because local TTS is not configured.";
+            return;
+        }
+
+        _activeSpeech?.Cancel();
+        _services.SpeechPlayer.Stop();
+        _activeSpeech?.Dispose();
+        _activeSpeech = new CancellationTokenSource();
+
+        SpeechSynthesisResult? speech = null;
+        IsSpeaking = true;
+        try
+        {
+            TtsStatus = "Synthesizing local speech...";
+            var settings = new VoiceSettings(
+                voiceMetadata?.TextToSpeechVoice ?? _services.TextToSpeech.VoiceId,
+                Rate: 1.0,
+                RetainAudio: false);
+
+            speech = await _services.TextToSpeech.SynthesizeAsync(
+                spokenText,
+                settings,
+                _activeSpeech.Token).ConfigureAwait(true);
+
+            TtsStatus = "Speaking local response...";
+            await _services.SpeechPlayer.PlayAsync(speech.AudioPath, _activeSpeech.Token).ConfigureAwait(true);
+            TtsStatus = "Speech complete.";
+            VoiceStatus = "Voice loop complete.";
+        }
+        catch (OperationCanceledException)
+        {
+            TtsStatus = "Speech stopped.";
+        }
+        catch (Exception ex)
+        {
+            TtsStatus = $"Speech failed: {ex.Message}";
+        }
+        finally
+        {
+            IsSpeaking = false;
+            if (speech is not null && !speech.RetainAudio && File.Exists(speech.AudioPath))
+            {
+                TryDeleteFile(speech.AudioPath);
+            }
+
+            _activeSpeech?.Dispose();
+            _activeSpeech = null;
+        }
+    }
+
+    private void StopSpeaking()
+    {
+        _activeSpeech?.Cancel();
+        _services.SpeechPlayer.Stop();
+        IsSpeaking = false;
+        if (!string.IsNullOrWhiteSpace(TtsStatus))
+        {
+            TtsStatus = "Speech stopped.";
+        }
+    }
+
+    private static void DeleteVoiceAudioIfTemporary(VoiceAudioInput audioInput)
+    {
+        if (!audioInput.RetainAudio)
+        {
+            TryDeleteFile(audioInput.FilePath);
+        }
+    }
+
+    private static void TryDeleteFile(string filePath)
+    {
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+        catch
+        {
+            // Temporary audio cleanup is best-effort.
+        }
+    }
+
     private void ApplyRuntimeOptions(OpenAiCompatibleRuntimeOptions options)
     {
         RuntimeEnabled = options.Enabled;
@@ -669,6 +1074,26 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RevertToLastKnownGoodCommand is RelayCommand revertLastKnownGood)
         {
             revertLastKnownGood.RaiseCanExecuteChanged();
+        }
+
+        if (StartVoiceRecordingCommand is AsyncRelayCommand startVoice)
+        {
+            startVoice.RaiseCanExecuteChanged();
+        }
+
+        if (StopVoiceRecordingCommand is AsyncRelayCommand stopVoice)
+        {
+            stopVoice.RaiseCanExecuteChanged();
+        }
+
+        if (SendTranscriptCommand is AsyncRelayCommand sendTranscript)
+        {
+            sendTranscript.RaiseCanExecuteChanged();
+        }
+
+        if (StopSpeakingCommand is RelayCommand stopSpeaking)
+        {
+            stopSpeaking.RaiseCanExecuteChanged();
         }
     }
 

@@ -1,10 +1,35 @@
 using Ali.Core.Evidence;
 using Ali.Core.Models;
+using Ali.Core.Voice;
 
 namespace Ali.Core.Feedback;
 
 public sealed class CorrectionQueueService(ICorrectionQueueStore store)
 {
+    public Task<CorrectionReport> FlagIncorrectAsync(
+        string conversationId,
+        string userMessageId,
+        string assistantMessageId,
+        string question,
+        string answer,
+        ModelProfile modelProfile,
+        EvidenceStatus answerEvidenceStatus,
+        CorrectionCategory category,
+        string? userNote,
+        CancellationToken cancellationToken) =>
+        FlagIncorrectAsync(
+            conversationId,
+            userMessageId,
+            assistantMessageId,
+            question,
+            answer,
+            modelProfile,
+            answerEvidenceStatus,
+            category,
+            userNote,
+            voiceMetadata: null,
+            cancellationToken);
+
     public async Task<CorrectionReport> FlagIncorrectAsync(
         string conversationId,
         string userMessageId,
@@ -15,6 +40,7 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
         EvidenceStatus answerEvidenceStatus,
         CorrectionCategory category,
         string? userNote,
+        VoiceTurnMetadata? voiceMetadata,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
@@ -43,7 +69,14 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
             Temperature: modelProfile.Temperature,
             StreamingEnabled: modelProfile.StreamingEnabled,
             AnswerEvidenceStatus: answerEvidenceStatus,
-            UserNote: userNote);
+            UserNote: userNote,
+            InputOrigin: voiceMetadata?.InputOrigin ?? VoiceInputOrigin.Typed,
+            VoiceTranscript: voiceMetadata?.Transcript,
+            SpeechToTextProvider: voiceMetadata?.SpeechToTextProvider,
+            SpeechToTextMode: voiceMetadata?.SpeechToTextMode,
+            TextToSpeechProvider: voiceMetadata?.TextToSpeechProvider,
+            TextToSpeechVoice: voiceMetadata?.TextToSpeechVoice,
+            RawAudioRetained: voiceMetadata?.RawAudioRetained ?? false);
 
         await store.SaveAsync(report, cancellationToken).ConfigureAwait(false);
         return report;

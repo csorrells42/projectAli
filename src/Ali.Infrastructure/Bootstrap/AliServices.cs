@@ -2,8 +2,10 @@ using Ali.Core.Feedback;
 using Ali.Core.Orchestration;
 using Ali.Core.Permissions;
 using Ali.Core.Runtime;
+using Ali.Core.Voice;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Storage;
+using Ali.Infrastructure.Voice;
 
 namespace Ali.Infrastructure.Bootstrap;
 
@@ -15,12 +17,20 @@ public sealed class AliServices
         string dataRoot,
         SafeActivatingLocalRuntime runtimeController,
         ConversationOrchestrator orchestrator,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        IVoiceRecorder voiceRecorder,
+        ISpeechToTextProvider speechToText,
+        ITextToSpeechProvider textToSpeech,
+        ISpeechPlayer speechPlayer)
     {
         DataRoot = dataRoot;
         RuntimeController = runtimeController;
         Orchestrator = orchestrator;
         _httpClient = httpClient;
+        VoiceRecorder = voiceRecorder;
+        SpeechToText = speechToText;
+        TextToSpeech = textToSpeech;
+        SpeechPlayer = speechPlayer;
     }
 
     public string DataRoot { get; }
@@ -32,6 +42,14 @@ public sealed class AliServices
     public SafeActivatingLocalRuntime RuntimeController { get; }
 
     public ConversationOrchestrator Orchestrator { get; }
+
+    public IVoiceRecorder VoiceRecorder { get; }
+
+    public ISpeechToTextProvider SpeechToText { get; }
+
+    public ITextToSpeechProvider TextToSpeech { get; }
+
+    public ISpeechPlayer SpeechPlayer { get; }
 
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
@@ -70,6 +88,19 @@ public sealed class AliServices
         var permissions = new PermissionService();
         var orchestrator = new ConversationOrchestrator(runtime, permissions, correctionQueue);
 
-        return new AliServices(dataRoot, runtime, orchestrator, httpClient);
+        var voiceRecorder = new MciWaveAudioRecorder();
+        var speechToText = new WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions.FromEnvironment());
+        var textToSpeech = new PiperCliTextToSpeechProvider(PiperCliTextToSpeechOptions.FromEnvironment(dataRoot));
+        var speechPlayer = new MciWaveSpeechPlayer();
+
+        return new AliServices(
+            dataRoot,
+            runtime,
+            orchestrator,
+            httpClient,
+            voiceRecorder,
+            speechToText,
+            textToSpeech,
+            speechPlayer);
     }
 }

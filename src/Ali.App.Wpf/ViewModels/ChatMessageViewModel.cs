@@ -1,5 +1,6 @@
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
+using Ali.Core.Voice;
 
 namespace Ali.App.Wpf.ViewModels;
 
@@ -16,6 +17,8 @@ public sealed class ChatMessageViewModel : ObservableObject
         DateTimeOffset createdAt,
         EvidenceStatus evidenceStatus,
         int sourceAttachmentCount = 0,
+        VoiceInputOrigin sourceInputOrigin = VoiceInputOrigin.Typed,
+        VoiceTurnMetadata? sourceVoiceMetadata = null,
         string? sourceUserMessageId = null,
         string? sourceQuestion = null)
     {
@@ -25,6 +28,8 @@ public sealed class ChatMessageViewModel : ObservableObject
         CreatedAt = createdAt;
         _evidenceStatus = evidenceStatus;
         SourceAttachmentCount = sourceAttachmentCount;
+        SourceInputOrigin = sourceInputOrigin;
+        SourceVoiceMetadata = sourceVoiceMetadata;
         SourceUserMessageId = sourceUserMessageId;
         SourceQuestion = sourceQuestion;
     }
@@ -42,6 +47,10 @@ public sealed class ChatMessageViewModel : ObservableObject
     public string? SourceQuestion { get; }
 
     public int SourceAttachmentCount { get; }
+
+    public VoiceInputOrigin SourceInputOrigin { get; }
+
+    public VoiceTurnMetadata? SourceVoiceMetadata { get; }
 
     public bool CanFlagAsIncorrect => Role == ChatRole.Assistant;
 

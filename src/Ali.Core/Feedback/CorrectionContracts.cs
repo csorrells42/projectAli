@@ -1,4 +1,5 @@
 using Ali.Core.Evidence;
+using Ali.Core.Voice;
 
 namespace Ali.Core.Feedback;
 
@@ -13,6 +14,8 @@ public enum CorrectionCategory
     BadToolResult,
     MemoryError,
     CalendarOrReminderError,
+    VoiceTranscriptionError,
+    SpokenResponseError,
     Other
 }
 
@@ -52,7 +55,14 @@ public sealed record CorrectionReport(
     EvidenceStatus AnswerEvidenceStatus,
     string? UserNote = null,
     string? ExpectedAnswer = null,
-    string? CorrectedAnswer = null);
+    string? CorrectedAnswer = null,
+    VoiceInputOrigin InputOrigin = VoiceInputOrigin.Typed,
+    string? VoiceTranscript = null,
+    string? SpeechToTextProvider = null,
+    string? SpeechToTextMode = null,
+    string? TextToSpeechProvider = null,
+    string? TextToSpeechVoice = null,
+    bool RawAudioRetained = false);
 
 public interface ICorrectionQueueStore
 {

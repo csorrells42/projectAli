@@ -4,8 +4,10 @@ using Ali.Core.Models;
 using Ali.Core.Permissions;
 using Ali.Core.Runtime;
 using Ali.Core.Truthfulness;
+using Ali.Core.Voice;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Storage;
+using Ali.Infrastructure.Voice;
 
 if (args.Contains("--real-runtime", StringComparer.OrdinalIgnoreCase))
 {
@@ -34,7 +36,18 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI stream parser extracts content delta", TestOpenAiStreamParserExtractsContentDelta),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
-    ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot)
+    ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
+    ("voice audio input is temporary by default", TestVoiceAudioInputIsTemporaryByDefault),
+    ("voice transcript becomes user chat text", TestVoiceTranscriptBecomesUserChatText),
+    ("speech tool policy refuses cloud STT endpoint", TestSpeechPolicyRefusesCloudSttEndpoint),
+    ("speech tool policy refuses cloud TTS endpoint", TestSpeechPolicyRefusesCloudTtsEndpoint),
+    ("local STT fake success path", TestLocalSttFakeSuccessPath),
+    ("local STT fake failure path", TestLocalSttFakeFailurePath),
+    ("local TTS fake success path", TestLocalTtsFakeSuccessPath),
+    ("speech player stop cancels playback", TestSpeechPlayerStopCancelsPlayback),
+    ("spoken response cleaner strips clutter", TestSpokenResponseCleanerStripsClutter),
+    ("voice risky command requires visible confirmation", TestVoiceRiskyCommandRequiresVisibleConfirmation),
+    ("voice origin correction queue metadata", TestVoiceOriginCorrectionQueueMetadata)
 };
 
 var failed = 0;
@@ -283,6 +296,154 @@ static async Task TestCorrectionQueueStoresRuntimeSnapshot()
     Equal(profile.StreamingEnabled, reports[0].StreamingEnabled);
 }
 
+static Task TestVoiceAudioInputIsTemporaryByDefault()
+{
+    var audio = new VoiceAudioInput("voice.wav", "audio/wav", RetainAudio: false, DateTimeOffset.UtcNow);
+
+    Equal("audio/wav", audio.ContentType);
+    Equal(false, audio.RetainAudio);
+    return Task.CompletedTask;
+}
+
+static Task TestVoiceTranscriptBecomesUserChatText()
+{
+    var transcript = new SpeechTranscript("What is your name?", "fake local STT", "unit-test", DateTimeOffset.UtcNow);
+    var request = new ChatRequest("conv_voice", "msg_voice", transcript.Text, Array.Empty<ChatMessage>());
+
+    Equal("What is your name?", request.UserText);
+    return Task.CompletedTask;
+}
+
+static Task TestSpeechPolicyRefusesCloudSttEndpoint()
+{
+    ThrowsInvalidOperation(() => LocalSpeechToolPolicy.EnsureLocalOnly("Speech-to-text", "https://api.example.com/stt"));
+    return Task.CompletedTask;
+}
+
+static Task TestSpeechPolicyRefusesCloudTtsEndpoint()
+{
+    ThrowsInvalidOperation(() => LocalSpeechToolPolicy.EnsureLocalOnly("Text-to-speech", "https://api.example.com/tts"));
+    return Task.CompletedTask;
+}
+
+static async Task TestLocalSttFakeSuccessPath()
+{
+    var provider = new FakeSpeechToTextProvider("hello Ali");
+    var transcript = await provider.TranscribeAsync(
+        new VoiceAudioInput("fake.wav", "audio/wav", RetainAudio: false, DateTimeOffset.UtcNow),
+        CancellationToken.None);
+
+    Equal("hello Ali", transcript.Text);
+    Equal("Fake local STT", transcript.ProviderName);
+    Equal("unit-test", transcript.Mode);
+}
+
+static async Task TestLocalSttFakeFailurePath()
+{
+    var provider = new FakeSpeechToTextProvider("ignored", fail: true);
+
+    await ThrowsInvalidOperationAsync(() => provider.TranscribeAsync(
+        new VoiceAudioInput("fake.wav", "audio/wav", RetainAudio: false, DateTimeOffset.UtcNow),
+        CancellationToken.None));
+}
+
+static async Task TestLocalTtsFakeSuccessPath()
+{
+    var provider = new FakeTextToSpeechProvider();
+    var result = await provider.SynthesizeAsync(
+        "hello",
+        new VoiceSettings("fake-voice", Rate: 1.0, RetainAudio: false),
+        CancellationToken.None);
+
+    Equal("Fake local TTS", result.ProviderName);
+    Equal("fake-voice", result.VoiceId);
+    Equal(false, result.RetainAudio);
+}
+
+static async Task TestSpeechPlayerStopCancelsPlayback()
+{
+    var player = new FakeSpeechPlayer();
+    using var cancellation = new CancellationTokenSource();
+    var playTask = player.PlayAsync("fake.wav", cancellation.Token);
+
+    player.Stop();
+    cancellation.Cancel();
+    await playTask;
+
+    Equal(true, player.StopRequested);
+    Equal(false, player.IsSpeaking);
+}
+
+static Task TestSpokenResponseCleanerStripsClutter()
+{
+    var cleaned = SpeechOutputCleaner.Clean(
+        """
+        # Heading
+        Source: local test
+        Visit https://example.com/details [1]
+        ```csharp
+        Console.WriteLine("nope");
+        ```
+           at Fake.Stack.Trace()
+        Final answer.
+        """);
+
+    Equal(false, cleaned.Contains("https://", StringComparison.OrdinalIgnoreCase));
+    Equal(false, cleaned.Contains("```", StringComparison.OrdinalIgnoreCase));
+    Equal(false, cleaned.Contains("Source:", StringComparison.OrdinalIgnoreCase));
+    Contains("Code block omitted", cleaned);
+    Contains("Final answer.", cleaned);
+    return Task.CompletedTask;
+}
+
+static Task TestVoiceRiskyCommandRequiresVisibleConfirmation()
+{
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("delete my reminder for tomorrow"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("run this PowerShell command"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("switch to the 32b model"));
+    Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("what is the capital of Alabama"));
+    return Task.CompletedTask;
+}
+
+static async Task TestVoiceOriginCorrectionQueueMetadata()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var store = new FileCorrectionQueueStore(directory);
+    var queue = new CorrectionQueueService(store);
+    var profile = CreateRuntimeOptions("fake-local-model").ToModelProfile(isLastKnownGood: true);
+    var voice = new VoiceTurnMetadata(
+        VoiceInputOrigin.Voice,
+        Transcript: "What did I say?",
+        SpeechToTextProvider: "Fake local STT",
+        SpeechToTextMode: "unit-test",
+        TextToSpeechProvider: "Fake local TTS",
+        TextToSpeechVoice: "fake-voice",
+        RawAudioRetained: false);
+
+    var report = await queue.FlagIncorrectAsync(
+        conversationId: "conv_voice",
+        userMessageId: "msg_user_voice",
+        assistantMessageId: "msg_assistant_voice",
+        question: "What did I say?",
+        answer: "You asked a question.",
+        modelProfile: profile,
+        answerEvidenceStatus: EvidenceStatus.Unverified,
+        category: CorrectionCategory.Other,
+        userNote: "Voice metadata check.",
+        voiceMetadata: voice,
+        cancellationToken: CancellationToken.None);
+
+    var stored = (await store.ListAsync(CancellationToken.None)).Single(item => item.Id == report.Id);
+
+    Equal(VoiceInputOrigin.Voice, stored.InputOrigin);
+    Equal("What did I say?", stored.VoiceTranscript);
+    Equal("Fake local STT", stored.SpeechToTextProvider);
+    Equal("unit-test", stored.SpeechToTextMode);
+    Equal("Fake local TTS", stored.TextToSpeechProvider);
+    Equal("fake-voice", stored.TextToSpeechVoice);
+    Equal(false, stored.RawAudioRetained);
+}
+
 static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model, bool supportsVision = false) =>
     new(
         Enabled: true,
@@ -323,6 +484,34 @@ static void Contains(string expectedFragment, string actual)
     {
         throw new InvalidOperationException($"Expected '{actual}' to contain '{expectedFragment}'.");
     }
+}
+
+static void ThrowsInvalidOperation(Action action)
+{
+    try
+    {
+        action();
+    }
+    catch (InvalidOperationException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException("Expected InvalidOperationException was not thrown.");
+}
+
+static async Task ThrowsInvalidOperationAsync(Func<Task> action)
+{
+    try
+    {
+        await action();
+    }
+    catch (InvalidOperationException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException("Expected InvalidOperationException was not thrown.");
 }
 
 static async Task RunRealRuntimeValidationAsync()
@@ -600,4 +789,76 @@ internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
         {
             Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
         };
+}
+
+internal sealed class FakeSpeechToTextProvider(string transcript, bool fail = false) : ISpeechToTextProvider
+{
+    public string ProviderName => "Fake local STT";
+
+    public string Mode => "unit-test";
+
+    public bool IsConfigured => true;
+
+    public Task<SpeechTranscript> TranscribeAsync(VoiceAudioInput audioInput, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (fail)
+        {
+            throw new InvalidOperationException("Fake local STT failure.");
+        }
+
+        return Task.FromResult(new SpeechTranscript(transcript, ProviderName, Mode, DateTimeOffset.UtcNow));
+    }
+}
+
+internal sealed class FakeTextToSpeechProvider : ITextToSpeechProvider
+{
+    public string ProviderName => "Fake local TTS";
+
+    public string VoiceId => "fake-voice";
+
+    public bool IsConfigured => true;
+
+    public Task<SpeechSynthesisResult> SynthesizeAsync(
+        string text,
+        VoiceSettings settings,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new SpeechSynthesisResult(
+            "fake.wav",
+            ProviderName,
+            settings.VoiceId,
+            settings.RetainAudio,
+            DateTimeOffset.UtcNow));
+    }
+}
+
+internal sealed class FakeSpeechPlayer : ISpeechPlayer
+{
+    public bool IsSpeaking { get; private set; }
+
+    public bool StopRequested { get; private set; }
+
+    public Task PlayAsync(string audioPath, CancellationToken cancellationToken)
+    {
+        IsSpeaking = true;
+        return Task.Run(
+            async () =>
+            {
+                while (!StopRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    await Task.Delay(10, CancellationToken.None);
+                }
+
+                IsSpeaking = false;
+            },
+            CancellationToken.None);
+    }
+
+    public void Stop()
+    {
+        StopRequested = true;
+        IsSpeaking = false;
+    }
 }

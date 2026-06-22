@@ -163,6 +163,56 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
+                    <Border BorderBrush="#DDE2EA" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,10">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,8">
+                                <StackPanel>
+                                    <TextBlock Text="Voice" FontWeight="SemiBold" Foreground="#111827" />
+                                    <TextBlock Text="{Binding VoiceStatus}" Foreground="#4B5563" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Content="Push to Talk" Command="{Binding StartVoiceRecordingCommand}" Margin="0,0,8,0" />
+                                    <Button Content="Stop Recording" Command="{Binding StopVoiceRecordingCommand}" Margin="0,0,8,0" />
+                                    <Button Content="Stop Speaking" Command="{Binding StopSpeakingCommand}" Margin="0" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Input" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding VoiceInputDevices}" SelectedItem="{Binding SelectedVoiceInputDevice}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Output" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding VoiceOutputDevices}" SelectedItem="{Binding SelectedVoiceOutputDevice}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="{Binding SttStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" />
+                            <TextBlock Text="{Binding TtsStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,6" />
+
+                            <TextBlock Text="Transcript" Style="{StaticResource FieldLabel}" />
+                            <TextBox MinHeight="34"
+                                     MaxHeight="82"
+                                     VerticalScrollBarVisibility="Auto"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     Text="{Binding EditableTranscript, UpdateSourceTrigger=PropertyChanged}" />
+                            <DockPanel>
+                                <TextBlock Text="{Binding LastTranscript}" Foreground="#6B7280" TextWrapping="Wrap" />
+                                <Button DockPanel.Dock="Right"
+                                        Content="Send Transcript"
+                                        Command="{Binding SendTranscriptCommand}"
+                                        Margin="8,0,0,0" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />

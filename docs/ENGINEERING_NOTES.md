@@ -14,6 +14,7 @@ WPF composer
 -> correction queue persistence
 -> optional screenshot/image attachments
 -> local vision payload proof
+-> local voice loop boundary
 ```
 
 The active runtime starts as a local deterministic development stub. It does not pretend to be a real model.
@@ -57,6 +58,11 @@ docs
 - Runtime settings UI: load/save/check/activate/revert without a model library
 - Image attachment contract: temporary-by-default PNG data passed only through the current chat request
 - WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
+- Voice contracts: recorder, STT provider, TTS provider, speech player
+- Local voice adapters: Windows MCI WAV record/playback, Whisper-style CLI STT, Piper-style CLI TTS
+- Voice safety: risky spoken commands are blocked in Phase 1C before they can be sent as action requests
+- Spoken response cleaner: removes URLs, markdown clutter, code blocks, stack traces, metadata, and citation markers
+- Correction reports now carry optional voice transcript/provider metadata without retaining raw audio
 
 ## Bootstrap Storage
 
@@ -79,6 +85,25 @@ Keep these simple:
 Build/test commands are executable code and package restore can run external logic. Treat restore/build/test with appropriate permission once Ali executes them herself.
 
 For this bootstrap, no external NuGet packages are required.
+
+## Voice Settings
+
+Phase 1C voice setup is environment-variable based. This keeps the first slice local, explicit, and package-light.
+
+```powershell
+$env:ALI_WHISPER_EXE = "C:\path\to\whisper-cli.exe"
+$env:ALI_WHISPER_MODEL = "C:\path\to\model.bin"
+$env:ALI_WHISPER_ARGS = "-m ""{model}"" -f ""{audio}"" -otxt -of ""{outputBase}"""
+
+$env:ALI_PIPER_EXE = "C:\path\to\piper.exe"
+$env:ALI_PIPER_MODEL = "C:\path\to\voice.onnx"
+$env:ALI_PIPER_VOICE = "local-piper-voice"
+$env:ALI_PIPER_ARGS = "--model ""{model}"" --output_file ""{output}"""
+```
+
+The speech tool policy rejects `http://` and `https://` references in STT/TTS executable, model, or argument configuration. Speech is local-only in this phase.
+
+Raw microphone WAV files are temporary by default. They are deleted after transcription unless a future explicit retention control is added. TTS WAV output is also temporary by default and deleted after playback.
 
 ## Runtime Settings
 
@@ -187,3 +212,33 @@ Vision answer: Solid red background
 ```
 
 Important implementation note: `qwen3-vl:8b` can emit hidden `reasoning` before final `content`. Ali must not display that reasoning as the answer. The proof vision profile therefore uses a 512-token output budget so the model has enough room to produce final answer content while context remains at the safe first-run value of 4096.
+
+## Phase 1C Local Voice Loop
+
+Date: 2026-06-22
+
+Implemented:
+
+```text
+Push to Talk
+-> Windows default microphone WAV recording
+-> local STT provider boundary
+-> visible editable transcript
+-> send transcript through existing Ali text path
+-> local TTS provider boundary
+-> Windows WAV playback
+-> Stop Speaking
+-> correction queue voice metadata
+```
+
+Manual integration status:
+
+```text
+Real microphone recording: implemented through Windows MCI, requires human desktop test
+Real Whisper transcription: implemented as local CLI adapter, requires ALI_WHISPER_* configuration
+Real Piper speech: implemented as local CLI adapter, requires ALI_PIPER_* configuration
+Cloud STT/TTS: intentionally blocked
+Wake word: not implemented
+Barge-in: not implemented
+Risky voice actions: blocked in Phase 1C
+```

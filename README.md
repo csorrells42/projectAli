@@ -2,7 +2,7 @@
 
 Ali is a local-first, WPF-based C# assistant.
 
-Current status: Phase 0 / Phase 1B bootstrap.
+Current status: Phase 0 / Phase 1C bootstrap.
 
 ## What Works Now
 
@@ -17,6 +17,13 @@ Current status: Phase 0 / Phase 1B bootstrap.
 - Capture full screen into the composer.
 - Preview image attachments before sending.
 - Mark image attachments as retained or temporary.
+- Push-to-talk voice controls in the WPF chat surface.
+- Temporary local WAV recording through the Windows default microphone.
+- Local-only Whisper-style STT CLI adapter boundary.
+- Editable transcript review before sending a voice prompt.
+- Local-only Piper-style TTS CLI adapter boundary.
+- Stop speaking control for local WAV playback.
+- Speech response cleanup so URLs, code blocks, logs, and markdown clutter are not read aloud.
 - Streaming bootstrap response from a local deterministic runtime stub.
 - Optional local OpenAI-compatible runtime adapter with explicit health check activation.
 - OpenAI-compatible image payloads for local vision-capable models.
@@ -25,6 +32,7 @@ Current status: Phase 0 / Phase 1B bootstrap.
 - Evidence status labels.
 - `Flag as incorrect` button on assistant answers.
 - File-backed correction queue for bootstrap validation, including screenshot misread category routing.
+- Voice-origin correction metadata for transcript, STT provider/mode, TTS provider/voice, and raw-audio retention state.
 - Permission risk classes for command, network, package, calendar, model, LAN, and destructive actions.
 - Truthfulness policy helpers for receipt-backed action claims.
 
@@ -94,6 +102,39 @@ qwen3-vl:8b
 ```
 
 This proves Ali's local screenshot/image path. It is not the final Ali vision model decision.
+
+## Optional Local Voice Setup
+
+Phase 1C does not use cloud speech. Ali records temporary WAV files locally and only calls local executables configured by environment variables.
+
+Whisper-style STT:
+
+```powershell
+$env:ALI_WHISPER_EXE = "C:\path\to\whisper-cli.exe"
+$env:ALI_WHISPER_MODEL = "C:\path\to\model.bin"
+```
+
+Optional STT argument template:
+
+```powershell
+$env:ALI_WHISPER_ARGS = "-m ""{model}"" -f ""{audio}"" -otxt -of ""{outputBase}"""
+```
+
+Piper-style TTS:
+
+```powershell
+$env:ALI_PIPER_EXE = "C:\path\to\piper.exe"
+$env:ALI_PIPER_MODEL = "C:\path\to\voice.onnx"
+$env:ALI_PIPER_VOICE = "local-piper-voice"
+```
+
+Optional TTS argument template:
+
+```powershell
+$env:ALI_PIPER_ARGS = "--model ""{model}"" --output_file ""{output}"""
+```
+
+If those tools are not configured, Ali shows that honestly in the voice status area and skips local STT/TTS rather than pretending.
 
 ## KISS Rules
 
