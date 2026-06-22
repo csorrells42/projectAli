@@ -3,11 +3,12 @@ namespace Ali.Infrastructure.Voice;
 public static class InputChannelModeCatalog
 {
     public const int MaximumSelectableInputs = 8;
-    public const string MonoSumLabel = "Auto mix";
+    public const string HighestEnergyLabel = "Auto strongest";
+    public const string MonoSumLabel = "Mono fold-down";
 
     public static IReadOnlyList<string> CreateLabels(int channelCount)
     {
-        var labels = new List<string> { MonoSumLabel };
+        var labels = new List<string> { HighestEnergyLabel, MonoSumLabel };
         var selectableCount = Math.Clamp(channelCount, 1, MaximumSelectableInputs);
         for (var channel = 1; channel <= selectableCount; channel++)
         {
@@ -20,6 +21,8 @@ public static class InputChannelModeCatalog
     public static string ToLabel(InputChannelMode mode) =>
         mode switch
         {
+            InputChannelMode.HighestEnergy => HighestEnergyLabel,
+            InputChannelMode.MonoSum => MonoSumLabel,
             InputChannelMode.Input1Left => "Input 1",
             InputChannelMode.Input2Right => "Input 2",
             InputChannelMode.Input3 => "Input 3",
@@ -28,12 +31,18 @@ public static class InputChannelModeCatalog
             InputChannelMode.Input6 => "Input 6",
             InputChannelMode.Input7 => "Input 7",
             InputChannelMode.Input8 => "Input 8",
-            _ => MonoSumLabel
+            _ => HighestEnergyLabel
         };
 
     public static InputChannelMode FromLabel(string? label) =>
         Normalize(label) switch
         {
+            "auto strongest" => InputChannelMode.HighestEnergy,
+            "auto" => InputChannelMode.HighestEnergy,
+            "highest energy" => InputChannelMode.HighestEnergy,
+            "mono fold-down" => InputChannelMode.MonoSum,
+            "mono folddown" => InputChannelMode.MonoSum,
+            "mono sum" => InputChannelMode.MonoSum,
             "input 1" => InputChannelMode.Input1Left,
             "input 2" => InputChannelMode.Input2Right,
             "input 3" => InputChannelMode.Input3,
@@ -42,7 +51,7 @@ public static class InputChannelModeCatalog
             "input 6" => InputChannelMode.Input6,
             "input 7" => InputChannelMode.Input7,
             "input 8" => InputChannelMode.Input8,
-            _ => MonoSum
+            _ => InputChannelMode.HighestEnergy
         };
 
     public static InputChannelMode FromStorageValue(string? value)
@@ -71,8 +80,6 @@ public static class InputChannelModeCatalog
             InputChannelMode.Input8 => 7,
             _ => null
         };
-
-    private static InputChannelMode MonoSum => InputChannelMode.MonoSum;
 
     private static string Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value)

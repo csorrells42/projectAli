@@ -154,10 +154,10 @@ public sealed class NAudioInputLevelMonitor : IDisposable
         var sampleCount = buffer.Length / sizeof(short);
         var frameCount = sampleCount / channels;
         var samples = new float[frameCount];
+        var selectedChannel = ResolveSelectedChannel(buffer, frameCount, channels, channelMode);
 
         for (var frame = 0; frame < frameCount; frame++)
         {
-            var selectedChannel = InputChannelModeCatalog.ChannelIndex(channelMode);
             if (selectedChannel is not null)
             {
                 var channelIndex = Math.Clamp(selectedChannel.Value, 0, channels - 1);
@@ -176,6 +176,37 @@ public sealed class NAudioInputLevelMonitor : IDisposable
         }
 
         return samples;
+    }
+
+    private static int? ResolveSelectedChannel(
+        ReadOnlySpan<byte> buffer,
+        int frameCount,
+        int channels,
+        InputChannelMode channelMode)
+    {
+        if (channelMode != InputChannelMode.HighestEnergy || channels <= 1)
+        {
+            return InputChannelModeCatalog.ChannelIndex(channelMode);
+        }
+
+        var bestChannel = 0;
+        var bestEnergy = -1d;
+        for (var channel = 0; channel < channels; channel++)
+        {
+            var energy = 0d;
+            for (var frame = 0; frame < frameCount; frame++)
+            {
+                energy += Math.Abs(BitConverter.ToInt16(buffer.Slice((frame * channels + channel) * sizeof(short), sizeof(short))));
+            }
+
+            if (energy > bestEnergy)
+            {
+                bestEnergy = energy;
+                bestChannel = channel;
+            }
+        }
+
+        return bestChannel;
     }
 
     private static IReadOnlyList<int> BuildCaptureChannelCandidates(int deviceNumber, InputChannelMode channelMode)

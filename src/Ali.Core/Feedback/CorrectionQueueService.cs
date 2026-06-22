@@ -79,7 +79,10 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
             RawAudioRetained: voiceMetadata?.RawAudioRetained ?? false,
             VoiceInputDeviceNumber: voiceMetadata?.InputDeviceNumber,
             VoiceInputDeviceName: voiceMetadata?.InputDeviceName,
+            VoiceInputChannelMode: voiceMetadata?.InputChannelMode,
             VoiceInputPreset: voiceMetadata?.InputPreset,
+            VoiceExtraInputGainDb: voiceMetadata?.ExtraInputGainDb,
+            VoiceNormalizeBeforeStt: voiceMetadata?.NormalizeBeforeStt ?? false,
             SpeechToTextModel: voiceMetadata?.SpeechToTextModel,
             TextToSpeechModel: voiceMetadata?.TextToSpeechModel,
             SuspiciousOrNoSpeech: voiceMetadata?.SuspiciousOrNoSpeech ?? false);

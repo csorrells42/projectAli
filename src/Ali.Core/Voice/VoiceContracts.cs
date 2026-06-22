@@ -40,7 +40,10 @@ public sealed record VoiceTurnMetadata(
     bool RawAudioRetained,
     int? InputDeviceNumber = null,
     string? InputDeviceName = null,
+    string? InputChannelMode = null,
     string? InputPreset = null,
+    double? ExtraInputGainDb = null,
+    bool NormalizeBeforeStt = false,
     string? SpeechToTextModel = null,
     string? TextToSpeechModel = null,
     bool SuspiciousOrNoSpeech = false);

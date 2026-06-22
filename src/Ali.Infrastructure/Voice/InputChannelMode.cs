@@ -2,6 +2,7 @@ namespace Ali.Infrastructure.Voice;
 
 public enum InputChannelMode
 {
+    HighestEnergy,
     MonoSum,
     Input1Left,
     Input2Right,

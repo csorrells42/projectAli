@@ -65,7 +65,10 @@ public sealed record CorrectionReport(
     bool RawAudioRetained = false,
     int? VoiceInputDeviceNumber = null,
     string? VoiceInputDeviceName = null,
+    string? VoiceInputChannelMode = null,
     string? VoiceInputPreset = null,
+    double? VoiceExtraInputGainDb = null,
+    bool VoiceNormalizeBeforeStt = false,
     string? SpeechToTextModel = null,
     string? TextToSpeechModel = null,
     bool SuspiciousOrNoSpeech = false);

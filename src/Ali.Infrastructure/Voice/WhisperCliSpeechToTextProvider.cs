@@ -18,6 +18,17 @@ public sealed record WhisperCliSpeechToTextOptions(
             Environment.GetEnvironmentVariable("ALI_WHISPER_OUTPUT_SUFFIX") ?? ".txt");
 }
 
+public sealed record WhisperCliDebugInfo(
+    string? ExecutablePath,
+    string? ModelPath,
+    string InputAudioPath,
+    string ArgumentsTemplate,
+    int? ExitCode,
+    string Transcript,
+    string StandardError,
+    TimeSpan Elapsed,
+    DateTimeOffset CreatedAt);
+
 public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions options) : ISpeechToTextProvider
 {
     public string ProviderName => "Local Whisper CLI";
@@ -25,6 +36,8 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
     public string Mode => "local-cli";
 
     public string ModelPath => options.ModelPath ?? string.Empty;
+
+    public WhisperCliDebugInfo? LastDebugInfo { get; private set; }
 
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(options.ExecutablePath)
@@ -83,6 +96,8 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
             EnableRaisingEvents = true
         };
 
+        var startedAt = DateTimeOffset.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
         process.Start();
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -99,9 +114,17 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
 
         var stdout = await stdoutTask.ConfigureAwait(false);
         var stderr = await stderrTask.ConfigureAwait(false);
+        stopwatch.Stop();
 
         if (process.ExitCode != 0)
         {
+            LastDebugInfo = CreateDebugInfo(
+                audioInput.FilePath,
+                process.ExitCode,
+                transcript: string.Empty,
+                stderr,
+                stopwatch.Elapsed,
+                startedAt);
             throw new InvalidOperationException(
                 $"Local STT process failed with exit code {process.ExitCode}. {TrimForUser(stderr)}");
         }
@@ -111,6 +134,13 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
             : stdout;
 
         text = text.Trim();
+        LastDebugInfo = CreateDebugInfo(
+            audioInput.FilePath,
+            process.ExitCode,
+            text,
+            stderr,
+            stopwatch.Elapsed,
+            startedAt);
         if (string.IsNullOrWhiteSpace(text))
         {
             var metadataTextPath = outputBase + ".json";
@@ -122,6 +152,24 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
 
         return new SpeechTranscript(text, ProviderName, Mode, DateTimeOffset.UtcNow);
     }
+
+    private WhisperCliDebugInfo CreateDebugInfo(
+        string inputAudioPath,
+        int? exitCode,
+        string transcript,
+        string standardError,
+        TimeSpan elapsed,
+        DateTimeOffset createdAt) =>
+        new(
+            options.ExecutablePath,
+            options.ModelPath,
+            inputAudioPath,
+            options.ArgumentsTemplate,
+            exitCode,
+            TrimForUser(transcript),
+            TrimForUser(standardError),
+            elapsed,
+            createdAt);
 
     private static string RenderTemplate(
         string template,

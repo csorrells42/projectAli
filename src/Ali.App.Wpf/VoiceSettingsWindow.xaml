@@ -47,6 +47,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
@@ -105,7 +106,67 @@
                             </StackPanel>
                         </Grid>
 
-                        <Border Grid.Row="2"
+                        <Border Grid.Row="2" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="220" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Extra input gain" Style="{StaticResource FieldLabel}" />
+                                    <Slider Minimum="-12"
+                                            Maximum="24"
+                                            TickFrequency="1"
+                                            IsSnapToTickEnabled="True"
+                                            Value="{Binding ExtraInputGainDb, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Text="{Binding ExtraInputGainDb, StringFormat={}{0:+0.#;-0.#;0} dB}"
+                                               Foreground="#4B5563"
+                                               FontSize="12" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Record 5 Second Sample"
+                                                Command="{Binding RecordVoiceSampleCommand}"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Play Last Sample"
+                                                Command="{Binding PlayVoiceSampleCommand}"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Delete Sample"
+                                                Command="{Binding DeleteVoiceSampleCommand}"
+                                                Margin="0" />
+                                    </StackPanel>
+                                    <Button Content="Run Calibration"
+                                            Command="{Binding CalibrateVoiceCommand}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,8,0,0" />
+                                    <TextBlock Text="{Binding VoiceSampleStatus}"
+                                               Foreground="#4B5563"
+                                               TextWrapping="Wrap"
+                                               FontSize="12"
+                                               Margin="0,8,0,0" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="4">
+                                    <CheckBox Content="Normalize before STT"
+                                              IsChecked="{Binding NormalizeBeforeStt}"
+                                              Margin="0,4,0,8" />
+                                    <CheckBox Content="Retain debug audio"
+                                              IsChecked="{Binding RetainDebugAudio}"
+                                              Margin="0,0,0,8" />
+                                    <TextBlock Text="{Binding VoiceCalibrationStatus}"
+                                               Foreground="#4B5563"
+                                               TextWrapping="Wrap"
+                                               FontSize="12" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="3"
                                 Background="#07121E"
                                 BorderBrush="#182C3E"
                                 BorderThickness="1"
@@ -258,6 +319,7 @@
                             <StackPanel>
                                 <TextBlock Text="{Binding TtsStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" />
                                 <TextBlock Text="{Binding VoiceSettingsStatusText}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding LastSttDebugText}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0" />
                             </StackPanel>
                             <Button DockPanel.Dock="Right"
                                     Content="Apply"

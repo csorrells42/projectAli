@@ -241,10 +241,11 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             var sampleCount = buffer.Length / sizeof(float);
             var frameCount = sampleCount / channels;
             var samples = new float[frameCount];
+            var selectedChannel = ResolveSelectedChannel(buffer, frameCount, channels, channelMode, isFloat: true);
 
             for (var frame = 0; frame < frameCount; frame++)
             {
-                samples[frame] = PickFloatChannel(buffer, frame, channels, channelMode);
+                samples[frame] = PickFloatChannel(buffer, frame, channels, selectedChannel);
             }
 
             return samples;
@@ -255,10 +256,11 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             var sampleCount = buffer.Length / sizeof(short);
             var frameCount = sampleCount / channels;
             var samples = new float[frameCount];
+            var selectedChannel = ResolveSelectedChannel(buffer, frameCount, channels, channelMode, isFloat: false);
 
             for (var frame = 0; frame < frameCount; frame++)
             {
-                samples[frame] = PickPcm16Channel(buffer, frame, channels, channelMode);
+                samples[frame] = PickPcm16Channel(buffer, frame, channels, selectedChannel);
             }
 
             return samples;
@@ -267,9 +269,8 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         return [];
     }
 
-    private static float PickFloatChannel(ReadOnlySpan<byte> buffer, int frame, int channels, InputChannelMode channelMode)
+    private static float PickFloatChannel(ReadOnlySpan<byte> buffer, int frame, int channels, int? selectedChannel)
     {
-        var selectedChannel = InputChannelModeCatalog.ChannelIndex(channelMode);
         if (selectedChannel is null)
         {
             var sum = 0f;
@@ -285,9 +286,8 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         return BitConverter.ToSingle(buffer.Slice((frame * channels + channelIndex) * sizeof(float), sizeof(float)));
     }
 
-    private static float PickPcm16Channel(ReadOnlySpan<byte> buffer, int frame, int channels, InputChannelMode channelMode)
+    private static float PickPcm16Channel(ReadOnlySpan<byte> buffer, int frame, int channels, int? selectedChannel)
     {
-        var selectedChannel = InputChannelModeCatalog.ChannelIndex(channelMode);
         if (selectedChannel is null)
         {
             var sum = 0f;
@@ -301,6 +301,67 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
 
         var channelIndex = Math.Clamp(selectedChannel.Value, 0, channels - 1);
         return BitConverter.ToInt16(buffer.Slice((frame * channels + channelIndex) * sizeof(short), sizeof(short))) / 32768f;
+    }
+
+    private static int? ResolveSelectedChannel(
+        ReadOnlySpan<byte> buffer,
+        int frameCount,
+        int channels,
+        InputChannelMode channelMode,
+        bool isFloat)
+    {
+        if (channelMode == InputChannelMode.HighestEnergy && channels > 1)
+        {
+            return isFloat
+                ? HighestEnergyFloatChannel(buffer, frameCount, channels)
+                : HighestEnergyPcm16Channel(buffer, frameCount, channels);
+        }
+
+        return InputChannelModeCatalog.ChannelIndex(channelMode);
+    }
+
+    private static int HighestEnergyFloatChannel(ReadOnlySpan<byte> buffer, int frameCount, int channels)
+    {
+        var bestChannel = 0;
+        var bestEnergy = -1d;
+        for (var channel = 0; channel < channels; channel++)
+        {
+            var energy = 0d;
+            for (var frame = 0; frame < frameCount; frame++)
+            {
+                energy += Math.Abs(BitConverter.ToSingle(buffer.Slice((frame * channels + channel) * sizeof(float), sizeof(float))));
+            }
+
+            if (energy > bestEnergy)
+            {
+                bestEnergy = energy;
+                bestChannel = channel;
+            }
+        }
+
+        return bestChannel;
+    }
+
+    private static int HighestEnergyPcm16Channel(ReadOnlySpan<byte> buffer, int frameCount, int channels)
+    {
+        var bestChannel = 0;
+        var bestEnergy = -1d;
+        for (var channel = 0; channel < channels; channel++)
+        {
+            var energy = 0d;
+            for (var frame = 0; frame < frameCount; frame++)
+            {
+                energy += Math.Abs(BitConverter.ToInt16(buffer.Slice((frame * channels + channel) * sizeof(short), sizeof(short))));
+            }
+
+            if (energy > bestEnergy)
+            {
+                bestEnergy = energy;
+                bestChannel = channel;
+            }
+        }
+
+        return bestChannel;
     }
 
     private static IReadOnlyList<int> BuildCaptureChannelCandidates(int deviceNumber, InputChannelMode channelMode)
