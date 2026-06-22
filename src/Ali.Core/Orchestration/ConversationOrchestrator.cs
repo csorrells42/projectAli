@@ -30,6 +30,7 @@ public sealed class ConversationOrchestrator(
         string assistantMessageId,
         string userText,
         IReadOnlyList<ChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
@@ -37,7 +38,10 @@ public sealed class ConversationOrchestrator(
         ArgumentException.ThrowIfNullOrWhiteSpace(assistantMessageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userText);
 
-        var request = new ChatRequest(conversationId, userMessageId, userText, history);
+        var request = new ChatRequest(conversationId, userMessageId, userText, history)
+        {
+            Attachments = attachments
+        };
 
         await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
         {

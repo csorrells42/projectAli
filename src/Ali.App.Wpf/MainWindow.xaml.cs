@@ -12,8 +12,22 @@ public partial class MainWindow : Window
         DataContext = viewModel;
     }
 
-    private async void ComposerTextBox_OnKeyDown(object sender, KeyEventArgs e)
+    private async void ComposerTextBox_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (e.Key == Key.V && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            if (DataContext is MainWindowViewModel currentViewModel)
+            {
+                await currentViewModel.AddClipboardImageAsync().ConfigureAwait(true);
+                if (System.Windows.Clipboard.ContainsImage())
+                {
+                    e.Handled = true;
+                }
+            }
+
+            return;
+        }
+
         if (e.Key != Key.Enter || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
         {
             return;
@@ -21,9 +35,9 @@ public partial class MainWindow : Window
 
         e.Handled = true;
 
-        if (DataContext is MainWindowViewModel viewModel)
+        if (DataContext is MainWindowViewModel sendViewModel)
         {
-            await viewModel.SendAsync().ConfigureAwait(true);
+            await sendViewModel.SendAsync().ConfigureAwait(true);
         }
     }
 }

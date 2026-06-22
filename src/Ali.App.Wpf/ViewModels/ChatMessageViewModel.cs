@@ -15,6 +15,7 @@ public sealed class ChatMessageViewModel : ObservableObject
         string text,
         DateTimeOffset createdAt,
         EvidenceStatus evidenceStatus,
+        int sourceAttachmentCount = 0,
         string? sourceUserMessageId = null,
         string? sourceQuestion = null)
     {
@@ -23,6 +24,7 @@ public sealed class ChatMessageViewModel : ObservableObject
         _text = text;
         CreatedAt = createdAt;
         _evidenceStatus = evidenceStatus;
+        SourceAttachmentCount = sourceAttachmentCount;
         SourceUserMessageId = sourceUserMessageId;
         SourceQuestion = sourceQuestion;
     }
@@ -38,6 +40,8 @@ public sealed class ChatMessageViewModel : ObservableObject
     public string? SourceUserMessageId { get; }
 
     public string? SourceQuestion { get; }
+
+    public int SourceAttachmentCount { get; }
 
     public bool CanFlagAsIncorrect => Role == ChatRole.Assistant;
 

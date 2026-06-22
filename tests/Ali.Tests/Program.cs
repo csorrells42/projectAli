@@ -13,6 +13,12 @@ if (args.Contains("--real-runtime", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--real-vision", StringComparer.OrdinalIgnoreCase))
+{
+    await RunRealVisionValidationAsync();
+    return;
+}
+
 var tests = new List<(string Name, Func<Task> Run)>
 {
     ("truthfulness reports unknown without receipt", TestTruthfulnessUnknownWithoutReceipt),
@@ -24,6 +30,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("runtime settings save and load", TestRuntimeSettingsSaveAndLoad),
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
+    ("vision health check sends image content", TestVisionHealthCheckSendsImageContent),
     ("OpenAI stream parser extracts content delta", TestOpenAiStreamParserExtractsContentDelta),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
@@ -145,7 +152,7 @@ static Task TestOpenAiStreamParserExtractsContentDelta()
 static async Task TestRuntimeSettingsSaveAndLoad()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
-    var options = CreateRuntimeOptions("fake-local-model");
+    var options = CreateRuntimeOptions("fake-local-model", supportsVision: true);
 
     RuntimeSettingsStore.Save(directory, options);
     var loaded = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(directory);
@@ -157,6 +164,7 @@ static async Task TestRuntimeSettingsSaveAndLoad()
     Equal(options.OutputTokenLimit, loaded.OutputTokenLimit);
     Equal(options.Temperature, loaded.Temperature);
     Equal(options.StreamingEnabled, loaded.StreamingEnabled);
+    Equal(options.SupportsVision, loaded.SupportsVision);
 
     await Task.CompletedTask;
 }
@@ -193,6 +201,19 @@ static async Task TestSuccessfulHealthCheckCanActivateRuntime()
     Equal(true, controller.ActivateLastHealthChecked());
     Equal(options.Model, controller.ActiveProfile.PackageId);
     Equal(options.Endpoint.ToString(), controller.ActiveProfile.RuntimeEndpoint);
+}
+
+static async Task TestVisionHealthCheckSendsImageContent()
+{
+    var options = CreateRuntimeOptions("fake-vision-model", supportsVision: true);
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+
+    var health = await runtime.CheckHealthAsync(CancellationToken.None);
+
+    Equal(true, health.Succeeded);
+    Equal(true, handler.ImageRequestCount > 0);
+    Contains("\"image_url\":{\"url\":\"data:image/png;base64,", handler.LastChatBody);
 }
 
 static Task TestOpenAiResponseParserExtractsMessageContent()
@@ -262,7 +283,7 @@ static async Task TestCorrectionQueueStoresRuntimeSnapshot()
     Equal(profile.StreamingEnabled, reports[0].StreamingEnabled);
 }
 
-static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model) =>
+static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model, bool supportsVision = false) =>
     new(
         Enabled: true,
         Endpoint: new Uri("http://127.0.0.1:11434/v1/"),
@@ -276,7 +297,7 @@ static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model) =>
         Temperature: 0.2,
         TopP: null,
         StreamingEnabled: true,
-        SupportsVision: false,
+        SupportsVision: supportsVision,
         SupportsToolCalls: false,
         AllowPrivateLanEndpoint: false);
 
@@ -441,8 +462,95 @@ static async Task<bool> ValidateCancellationAfterFirstTokenAsync(ILocalModelRunt
     return sawToken && cancellation.IsCancellationRequested;
 }
 
+static async Task RunRealVisionValidationAsync()
+{
+    var endpoint = new Uri(Environment.GetEnvironmentVariable("ALI_REAL_VISION_ENDPOINT") ?? "http://127.0.0.1:11434/v1/");
+    var model = Environment.GetEnvironmentVariable("ALI_REAL_VISION_MODEL") ?? "qwen3-vl:8b";
+    var dataRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Ali",
+        "BootstrapData");
+
+    var options = new OpenAiCompatibleRuntimeOptions(
+        Enabled: true,
+        Endpoint: endpoint,
+        Model: model,
+        DisplayName: $"Proof vision model {model}",
+        Family: "Qwen VL",
+        Size: "8B",
+        Quantization: "Ollama package default",
+        ContextTokens: 4096,
+        OutputTokenLimit: 512,
+        Temperature: 0.2,
+        TopP: 0.9,
+        StreamingEnabled: true,
+        SupportsVision: true,
+        SupportsToolCalls: false,
+        AllowPrivateLanEndpoint: false);
+
+    RuntimeSettingsStore.Save(dataRoot, options);
+
+    var fallback = new DevelopmentLocalModelRuntime();
+    var candidate = new OpenAiCompatibleLocalModelRuntime(new HttpClient(), options);
+    var runtime = new SafeActivatingLocalRuntime(fallback, candidate);
+
+    var health = await runtime.CheckCandidateAsync(CancellationToken.None);
+    Console.WriteLine($"VISION_HEALTH_SUCCESS={health.Succeeded}");
+    Console.WriteLine($"VISION_HEALTH_SUMMARY={health.Summary}");
+    Console.WriteLine($"VISION_HEALTH_ENDPOINT={health.Endpoint}");
+    Console.WriteLine($"VISION_HEALTH_MODEL={health.ModelPackageId}");
+    Console.WriteLine($"VISION_HEALTH_ELAPSED_MS={health.Elapsed.TotalMilliseconds:N0}");
+    Console.WriteLine($"VISION_HEALTH_STREAMING={health.StreamingSupported}");
+
+    if (!health.Succeeded)
+    {
+        Environment.ExitCode = 3;
+        return;
+    }
+
+    Console.WriteLine($"VISION_ACTIVE_BEFORE_ACTIVATE={runtime.ActiveProfile.PackageId}");
+    var activated = runtime.ActivateLastHealthChecked();
+    Console.WriteLine($"VISION_ACTIVATED={activated}");
+    Console.WriteLine($"VISION_ACTIVE_AFTER_ACTIVATE={runtime.ActiveProfile.PackageId}");
+
+    var prompt = "Describe the attached image in one short phrase. /no_think";
+    var request = new ChatRequest(
+        ConversationId: "real_vision_validation",
+        UserMessageId: "real_vision_user",
+        UserText: prompt,
+        History: Array.Empty<ChatMessage>())
+    {
+        Attachments = new[]
+        {
+            new ChatAttachment(
+                Id: "real_vision_red_pixel",
+                Kind: AttachmentKind.Image,
+                FileName: "red-pixel.png",
+                ContentType: "image/png",
+                Base64Data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/luzQ8wAAAABJRU5ErkJggg==",
+                RetainAfterSession: false,
+                CreatedAt: DateTimeOffset.UtcNow)
+        }
+    };
+
+    var chunks = new List<string>();
+    await foreach (var token in runtime.StreamChatAsync(request, CancellationToken.None))
+    {
+        chunks.Add(token.Text);
+    }
+
+    var answer = string.Concat(chunks).ReplaceLineEndings(" ").Trim();
+    Console.WriteLine($"VISION_PROMPT={prompt}");
+    Console.WriteLine($"VISION_ANSWER_LENGTH={answer.Length}");
+    Console.WriteLine($"VISION_ANSWER={answer}");
+}
+
 internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
 {
+    public int ImageRequestCount { get; private set; }
+
+    public string LastChatBody { get; private set; } = string.Empty;
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -467,6 +575,12 @@ internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
         var body = request.Content is null
             ? string.Empty
             : await request.Content.ReadAsStringAsync(cancellationToken);
+        LastChatBody = body;
+
+        if (body.Contains("image_url", StringComparison.OrdinalIgnoreCase))
+        {
+            ImageRequestCount++;
+        }
 
         if (body.Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase))
         {

@@ -7,7 +7,24 @@ public sealed record ChatRequest(
     string ConversationId,
     string UserMessageId,
     string UserText,
-    IReadOnlyList<ChatMessage> History);
+    IReadOnlyList<ChatMessage> History)
+{
+    public IReadOnlyList<ChatAttachment> Attachments { get; init; } = Array.Empty<ChatAttachment>();
+}
+
+public sealed record ChatAttachment(
+    string Id,
+    AttachmentKind Kind,
+    string FileName,
+    string ContentType,
+    string Base64Data,
+    bool RetainAfterSession,
+    DateTimeOffset CreatedAt);
+
+public enum AttachmentKind
+{
+    Image
+}
 
 public sealed record ChatMessage(
     string Id,

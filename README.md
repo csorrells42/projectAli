@@ -2,7 +2,7 @@
 
 Ali is a local-first, WPF-based C# assistant.
 
-Current status: Phase 0 / Phase 1A bootstrap.
+Current status: Phase 0 / Phase 1B bootstrap.
 
 ## What Works Now
 
@@ -13,13 +13,18 @@ Current status: Phase 0 / Phase 1A bootstrap.
   - `Ali.Tests`
 - WPF shell with left navigation and Chat home base.
 - ChatGPT-style composer with Enter to send and Shift+Enter for newline.
+- Paste image from clipboard with `Ctrl+V`.
+- Capture full screen into the composer.
+- Preview image attachments before sending.
+- Mark image attachments as retained or temporary.
 - Streaming bootstrap response from a local deterministic runtime stub.
 - Optional local OpenAI-compatible runtime adapter with explicit health check activation.
+- OpenAI-compatible image payloads for local vision-capable models.
 - Runtime Settings panel with load, save, check, activate, stub revert, and last-known-good revert.
 - Stop/cancel support for active response streaming.
 - Evidence status labels.
 - `Flag as incorrect` button on assistant answers.
-- File-backed correction queue for bootstrap validation.
+- File-backed correction queue for bootstrap validation, including screenshot misread category routing.
 - Permission risk classes for command, network, package, calendar, model, LAN, and destructive actions.
 - Truthfulness policy helpers for receipt-backed action claims.
 
@@ -81,6 +86,14 @@ qwen3:14b
 ```
 
 This proves Ali's local text runtime path. It is not the final Ali model decision.
+
+Current first proof vision model:
+
+```text
+qwen3-vl:8b
+```
+
+This proves Ali's local screenshot/image path. It is not the final Ali vision model decision.
 
 ## KISS Rules
 

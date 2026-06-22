@@ -12,6 +12,8 @@ WPF composer
 -> evidence status
 -> flag as incorrect
 -> correction queue persistence
+-> optional screenshot/image attachments
+-> local vision payload proof
 ```
 
 The active runtime starts as a local deterministic development stub. It does not pretend to be a real model.
@@ -53,6 +55,8 @@ docs
 - `LocalEndpointPolicy`: refuses public/cloud endpoints in local-only mode
 - `SafeActivatingLocalRuntime`: keeps the fallback active until health passes
 - Runtime settings UI: load/save/check/activate/revert without a model library
+- Image attachment contract: temporary-by-default PNG data passed only through the current chat request
+- WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
 
 ## Bootstrap Storage
 
@@ -108,6 +112,7 @@ The local runtime health check verifies:
 - `/models` works and lists the selected model, or the prompt call proves the model is callable.
 - A tiny non-streaming chat completion returns content.
 - A tiny streaming chat completion returns content when streaming is enabled.
+- When vision is enabled, a tiny local image completion returns content.
 - Cancellation is honored.
 - Latency, endpoint, model, context, output limit, temperature, and streaming support are recorded in the result.
 
@@ -145,3 +150,40 @@ Streamed answer: I am using the Qwen3 model.
 Stop/cancel: passed after first token
 Correction queue runtime snapshot: stored
 ```
+
+## First Real Local Vision Heartbeat
+
+Date: 2026-06-22
+
+The first real local vision validation used:
+
+```text
+Runtime: Ollama
+Endpoint: http://127.0.0.1:11434/v1/
+Model/package ID: qwen3-vl:8b
+Installed package size: 6.1 GB
+Installed model parameters: 8.8B
+Installed quantization: Q4_K_M
+Model architecture: qwen3vl
+Native model context length: 262144
+Ali configured context: 4096
+Ali max output: 512
+Temperature: 0.2
+Top-p: 0.9
+Streaming: enabled
+Vision: enabled
+```
+
+This is the first proof vision model only. It is not the final Ali vision model decision.
+
+Validation result:
+
+```text
+Health check: passed
+Activation before explicit request: no
+Explicit activation: passed
+Vision prompt: Describe the attached image in one short phrase. /no_think
+Vision answer: Solid red background
+```
+
+Important implementation note: `qwen3-vl:8b` can emit hidden `reasoning` before final `content`. Ali must not display that reasoning as the answer. The proof vision profile therefore uses a 512-token output budget so the model has enough room to produce final answer content while context remains at the safe first-run value of 4096.

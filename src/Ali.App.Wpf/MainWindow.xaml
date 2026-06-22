@@ -132,34 +132,66 @@
             </Border>
 
             <Border Grid.Row="2" Grid.Column="0" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,16,16,0">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,8">
+                        <TextBlock Text="{Binding AttachmentStatus}" Foreground="#4B5563" VerticalAlignment="Center" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="Paste Image" Command="{Binding PasteImageCommand}" Margin="0,0,8,0" />
+                            <Button Content="Capture Screen" Command="{Binding CaptureScreenCommand}" Margin="0" />
+                        </StackPanel>
+                    </DockPanel>
 
-                    <TextBox x:Name="ComposerTextBox"
-                             MinHeight="46"
-                             MaxHeight="150"
-                             VerticalScrollBarVisibility="Auto"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             BorderThickness="0"
-                             FontSize="15"
-                             Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
-                             KeyDown="ComposerTextBox_OnKeyDown" />
+                    <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ImageAttachmentViewModel}">
+                                <Border BorderBrush="#DDE2EA" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,8,8" Width="150">
+                                    <StackPanel>
+                                        <Image Source="{Binding FilePath}" Height="74" Stretch="Uniform" />
+                                        <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="#4B5563" Margin="0,6,0,0" />
+                                        <CheckBox Content="Retain" IsChecked="{Binding RetainAfterSession}" Margin="0,4,0,0" />
+                                        <Button Content="Remove"
+                                                Command="{Binding DataContext.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
 
-                    <Button Grid.Column="1"
-                            Content="Stop"
-                            Margin="12,0,0,0"
-                            Command="{Binding StopCommand}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-                    <Button Grid.Column="2"
-                            Content="Send"
-                            Margin="8,0,0,0"
-                            Command="{Binding SendCommand}" />
-                </Grid>
+                        <TextBox x:Name="ComposerTextBox"
+                                 MinHeight="46"
+                                 MaxHeight="150"
+                                 VerticalScrollBarVisibility="Auto"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 BorderThickness="0"
+                                 FontSize="15"
+                                 Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
+                                 KeyDown="ComposerTextBox_OnKeyDown" />
+
+                        <Button Grid.Column="1"
+                                Content="Stop"
+                                Margin="12,0,0,0"
+                                Command="{Binding StopCommand}" />
+
+                        <Button Grid.Column="2"
+                                Content="Send"
+                                Margin="8,0,0,0"
+                                Command="{Binding SendCommand}" />
+                    </Grid>
+                </StackPanel>
             </Border>
 
             <Border Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="16">
@@ -212,6 +244,10 @@
 
                         <CheckBox Content="Streaming enabled"
                                   IsChecked="{Binding RuntimeStreamingEnabled}"
+                                  Margin="0,0,0,4" />
+
+                        <CheckBox Content="Model supports images"
+                                  IsChecked="{Binding RuntimeVisionEnabled}"
                                   Margin="0,0,0,12" />
 
                         <TextBlock Text="Settings file" Style="{StaticResource FieldLabel}" />

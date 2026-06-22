@@ -9,6 +9,11 @@ You can:
 - Type in the composer.
 - Press Enter to send.
 - Press Shift+Enter for a new line.
+- Paste a copied screenshot or image with `Ctrl+V`.
+- Use `Paste Image` when the clipboard contains an image.
+- Use `Capture Screen` to attach a full-screen screenshot.
+- Preview and remove image attachments before sending.
+- Check `Retain` on an attachment only when you want Ali to keep it after the current send.
 - Stop an active response.
 - Flag an assistant answer as incorrect.
 
@@ -34,7 +39,9 @@ Ali refuses public/cloud runtime endpoints in local-only mode.
 
 Use `Revert to Stub` any time you want to return to the deterministic local test runtime.
 
-The current first proof model is `qwen3:14b`. It proves the local text path works; it is not the final Ali model selection.
+The current first proof text model is `qwen3:14b`. It proves the local text path works; it is not the final Ali model selection.
+
+The current first proof vision model is `qwen3-vl:8b`. It proves the local screenshot/image path works; it is not the final Ali vision model selection.
 
 ## Important Truth Rule
 
@@ -56,12 +63,13 @@ Ali preserves:
 
 The original answer is not rewritten.
 
+If the flagged answer used a screenshot or image attachment, Ali routes it as a screenshot/image misread correction.
+
 ## Coming Next
 
 - Real local model endpoint setup
-- Screenshot paste and local vision
-- Push-to-talk voice
 - Source/search controls
+- Push-to-talk voice
 - Memory controls
 - Backup and restore
 - Simple installer with repair mode

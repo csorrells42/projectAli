@@ -1,6 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Globalization;
+using System.IO;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
 using Ali.Core.Runtime;
@@ -26,10 +30,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeTopPText = string.Empty;
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
+    private bool _runtimeVisionEnabled;
     private bool _canActivateRuntime;
     private bool _canRevertToLastKnownGood;
     private string _runtimeHealthResult = "No runtime health check has been run.";
     private string _activeRuntimeStatus = "Using safe deterministic stub.";
+    private string _attachmentStatus = "Screenshots are temporary by default.";
 
     public MainWindowViewModel(AliServices services)
     {
@@ -44,6 +50,9 @@ public sealed class MainWindowViewModel : ObservableObject
         ActivateRuntimeCommand = new RelayCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
         RevertToStubCommand = new RelayCommand(_ => RevertToStub(), _ => !IsBusy);
         RevertToLastKnownGoodCommand = new RelayCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
+        PasteImageCommand = new AsyncRelayCommand(AddClipboardImageAsync);
+        CaptureScreenCommand = new AsyncRelayCommand(CaptureFullScreenAsync);
+        RemoveAttachmentCommand = new RelayCommand(RemoveAttachment);
 
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
@@ -57,6 +66,8 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
+
+    public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
 
     public ICommand SendCommand { get; }
 
@@ -75,6 +86,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RevertToStubCommand { get; }
 
     public ICommand RevertToLastKnownGoodCommand { get; }
+
+    public ICommand PasteImageCommand { get; }
+
+    public ICommand CaptureScreenCommand { get; }
+
+    public ICommand RemoveAttachmentCommand { get; }
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
@@ -132,6 +149,12 @@ public sealed class MainWindowViewModel : ObservableObject
         set => SetProperty(ref _runtimeStreamingEnabled, value);
     }
 
+    public bool RuntimeVisionEnabled
+    {
+        get => _runtimeVisionEnabled;
+        set => SetProperty(ref _runtimeVisionEnabled, value);
+    }
+
     public bool CanActivateRuntime
     {
         get => _canActivateRuntime;
@@ -166,6 +189,12 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _activeRuntimeStatus;
         private set => SetProperty(ref _activeRuntimeStatus, value);
+    }
+
+    public string AttachmentStatus
+    {
+        get => _attachmentStatus;
+        private set => SetProperty(ref _attachmentStatus, value);
     }
 
     public string ComposerText
@@ -219,12 +248,15 @@ public sealed class MainWindowViewModel : ObservableObject
             DateTimeOffset.UtcNow,
             EvidenceStatus.Verified);
 
+        var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
+
         var assistantMessage = new ChatMessageViewModel(
             assistantMessageId,
             ChatRole.Assistant,
             string.Empty,
             DateTimeOffset.UtcNow,
             EvidenceStatus.Unknown,
+            sourceAttachmentCount: attachments.Count,
             sourceUserMessageId: userMessageId,
             sourceQuestion: text);
 
@@ -242,6 +274,7 @@ public sealed class MainWindowViewModel : ObservableObject
                                assistantMessageId,
                                text,
                                history,
+                               attachments,
                                _activeResponse.Token))
             {
                 assistantMessage.Text += chunk.Text;
@@ -260,6 +293,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _activeResponse.Dispose();
             _activeResponse = null;
             IsBusy = false;
+            ClearTemporaryAttachments();
             UpdateRuntimeStatus();
         }
     }
@@ -382,7 +416,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 message.Text,
                 _services.Orchestrator.Runtime.ActiveProfile,
                 message.EvidenceStatus,
-                CorrectionCategory.Other,
+                message.SourceAttachmentCount > 0 ? CorrectionCategory.MisreadScreenshot : CorrectionCategory.Other,
                 userNote: "Flagged from WPF bootstrap chat.",
                 CancellationToken.None).ConfigureAwait(true);
 
@@ -447,9 +481,131 @@ public sealed class MainWindowViewModel : ObservableObject
             Temperature: temperature,
             TopP: topP,
             StreamingEnabled: RuntimeStreamingEnabled,
-            SupportsVision: false,
+            SupportsVision: RuntimeVisionEnabled,
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false);
+    }
+
+    public async Task AddClipboardImageAsync()
+    {
+        if (!System.Windows.Clipboard.ContainsImage())
+        {
+            AttachmentStatus = "Clipboard does not contain an image.";
+            return;
+        }
+
+        var image = System.Windows.Clipboard.GetImage();
+        if (image is null)
+        {
+            AttachmentStatus = "Clipboard image could not be read.";
+            return;
+        }
+
+        await AddBitmapSourceAsync(image, "clipboard").ConfigureAwait(true);
+    }
+
+    private async Task CaptureFullScreenAsync()
+    {
+        var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds;
+        if (bounds is null)
+        {
+            AttachmentStatus = "No primary screen was available.";
+            return;
+        }
+
+        using var bitmap = new Bitmap(bounds.Value.Width, bounds.Value.Height);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(bounds.Value.Left, bounds.Value.Top, 0, 0, bounds.Value.Size);
+        }
+
+        await using var stream = new MemoryStream();
+        bitmap.Save(stream, ImageFormat.Png);
+        await AddPngBytesAsync(stream.ToArray(), "full-screen").ConfigureAwait(true);
+    }
+
+    private async Task AddBitmapSourceAsync(BitmapSource bitmapSource, string sourceName)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmapSource));
+
+        await using var stream = new MemoryStream();
+        encoder.Save(stream);
+        await AddPngBytesAsync(stream.ToArray(), sourceName).ConfigureAwait(true);
+    }
+
+    private async Task AddPngBytesAsync(byte[] pngBytes, string sourceName)
+    {
+        var directory = Path.Combine(
+            _services.DataRoot,
+            "SessionImages",
+            DateTimeOffset.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(directory);
+
+        var id = $"img_{Guid.NewGuid():N}";
+        var fileName = $"{sourceName}-{id}.png";
+        var filePath = Path.Combine(directory, fileName);
+        await File.WriteAllBytesAsync(filePath, pngBytes).ConfigureAwait(true);
+
+        Attachments.Add(new ImageAttachmentViewModel(
+            id,
+            fileName,
+            filePath,
+            "image/png",
+            Convert.ToBase64String(pngBytes),
+            DateTimeOffset.UtcNow));
+
+        AttachmentStatus = $"{Attachments.Count} image attachment(s). Temporary by default.";
+    }
+
+    private void RemoveAttachment(object? parameter)
+    {
+        if (parameter is not ImageAttachmentViewModel attachment)
+        {
+            return;
+        }
+
+        Attachments.Remove(attachment);
+        DeleteAttachmentIfTemporary(attachment);
+        AttachmentStatus = Attachments.Count == 0
+            ? "Screenshots are temporary by default."
+            : $"{Attachments.Count} image attachment(s). Temporary by default.";
+    }
+
+    private void ClearTemporaryAttachments()
+    {
+        foreach (var attachment in Attachments.ToList())
+        {
+            if (!attachment.RetainAfterSession)
+            {
+                DeleteAttachmentIfTemporary(attachment);
+                Attachments.Remove(attachment);
+            }
+        }
+
+        AttachmentStatus = Attachments.Count == 0
+            ? "Screenshots are temporary by default."
+            : $"{Attachments.Count} retained image attachment(s).";
+    }
+
+    private static void DeleteAttachmentIfTemporary(ImageAttachmentViewModel attachment)
+    {
+        if (attachment.RetainAfterSession)
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(attachment.FilePath))
+            {
+                File.Delete(attachment.FilePath);
+            }
+        }
+        catch
+        {
+            // Temporary cleanup should not hide the verified answer or correction flow.
+        }
     }
 
     private void ApplyRuntimeOptions(OpenAiCompatibleRuntimeOptions options)
@@ -462,6 +618,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeTemperatureText = options.Temperature.ToString(CultureInfo.InvariantCulture);
         RuntimeTopPText = options.TopP?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         RuntimeStreamingEnabled = options.StreamingEnabled;
+        RuntimeVisionEnabled = options.SupportsVision;
     }
 
     private static string FormatHealthResult(RuntimeHealthCheck health)

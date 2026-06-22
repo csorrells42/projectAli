@@ -142,6 +142,18 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 }
             }
 
+            if (_options.SupportsVision)
+            {
+                var visionText = await SendNonStreamingPromptAsync(
+                    BuildVisionProbeRequest(),
+                    cancellationToken).ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(visionText))
+                {
+                    return FailureHealth(started, "Tiny vision prompt returned an empty response.", streamingSupported);
+                }
+            }
+
             if (!await CheckCancellationAsync().ConfigureAwait(false))
             {
                 return FailureHealth(started, "Cancellation probe did not cancel cleanly.", streamingSupported);
@@ -255,12 +267,12 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             .Select(message => new
             {
                 role = message.Role.ToString().ToLowerInvariant(),
-                content = message.Text
+                content = (object)message.Text
             })
             .Append(new
             {
                 role = "user",
-                content = request.UserText
+                content = BuildUserContent(request)
             })
             .ToArray();
 
@@ -317,6 +329,53 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             UserMessageId: "health_user",
             UserText: userText,
             History: Array.Empty<ChatMessage>());
+
+    private static ChatRequest BuildVisionProbeRequest() =>
+        BuildProbeRequest("Describe this image in one short phrase. /no_think") with
+        {
+            Attachments = new[]
+            {
+                new ChatAttachment(
+                    Id: "vision_probe_red_pixel",
+                    Kind: AttachmentKind.Image,
+                    FileName: "red-pixel.png",
+                    ContentType: "image/png",
+                    Base64Data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/luzQ8wAAAABJRU5ErkJggg==",
+                    RetainAfterSession: false,
+                    CreatedAt: DateTimeOffset.UtcNow)
+            }
+        };
+
+    private static object BuildUserContent(ChatRequest request)
+    {
+        if (request.Attachments.Count == 0)
+        {
+            return request.UserText;
+        }
+
+        var content = new List<object>
+        {
+            new
+            {
+                type = "text",
+                text = request.UserText
+            }
+        };
+
+        foreach (var attachment in request.Attachments.Where(item => item.Kind == AttachmentKind.Image))
+        {
+            content.Add(new
+            {
+                type = "image_url",
+                image_url = new
+                {
+                    url = $"data:{attachment.ContentType};base64,{attachment.Base64Data}"
+                }
+            });
+        }
+
+        return content.ToArray();
+    }
 
     private sealed record ModelsCheckResult(bool Succeeded, string Summary)
     {
