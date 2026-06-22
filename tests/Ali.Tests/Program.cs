@@ -55,7 +55,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("spoken response cleaner strips clutter", TestSpokenResponseCleanerStripsClutter),
     ("voice settings persist microphone and preset", TestVoiceSettingsPersistMicrophoneAndPreset),
     ("missing saved microphone warns and falls back", TestMissingSavedMicrophoneWarnsAndFallsBack),
+    ("input channel catalog supports Scarlett-style inputs", TestInputChannelCatalogSupportsScarlettInputs),
     ("voice input level classifier detects silence good and clipping", TestVoiceInputLevelClassifier),
+    ("spectrum analyzer emits live bars", TestSpectrumAnalyzerEmitsLiveBars),
     ("speech transcript guard rejects suspicious text", TestSpeechTranscriptGuardRejectsSuspiciousText),
     ("voice risky command requires visible confirmation", TestVoiceRiskyCommandRequiresVisibleConfirmation),
     ("voice origin correction queue metadata", TestVoiceOriginCorrectionQueueMetadata)
@@ -419,7 +421,13 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
         LastSuccessfulSttDeviceName: "Headset Mic",
         LastSuccessfulTtsDeviceNumber: -1,
         LastSuccessfulTtsDeviceName: "Default playback device",
-        SelectedInputPreset: VoiceInputPreset.HeadsetMic);
+        SelectedInputPreset: VoiceInputPreset.HeadsetMic,
+        SelectedInputChannelMode: nameof(InputChannelMode.Input2Right),
+        WhisperExecutablePath: @"C:\Ali\lib\voice\whisper.exe",
+        WhisperModelPath: @"C:\Ali\lib\voice\faster-whisper",
+        PiperExecutablePath: @"C:\Ali\lib\voice\piper.exe",
+        PiperModelPath: @"C:\Ali\lib\voice\en_US.onnx",
+        PiperVoiceId: "en_US-test");
 
     VoiceRuntimeSettingsStore.Save(directory, settings);
     var loaded = VoiceRuntimeSettingsStore.LoadOrDefault(directory);
@@ -427,6 +435,10 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(3, loaded.SelectedInputDeviceNumber);
     Equal("Headset Mic", loaded.SelectedInputDeviceName);
     Equal(VoiceInputPreset.HeadsetMic, loaded.SelectedInputPreset);
+    Equal(nameof(InputChannelMode.Input2Right), loaded.SelectedInputChannelMode);
+    Equal(@"C:\Ali\lib\voice\whisper.exe", loaded.WhisperExecutablePath);
+    Equal(@"C:\Ali\lib\voice\en_US.onnx", loaded.PiperModelPath);
+    Equal("en_US-test", loaded.PiperVoiceId);
     Equal(3, loaded.LastSuccessfulSttDeviceNumber);
     return Task.CompletedTask;
 }
@@ -449,12 +461,42 @@ static Task TestMissingSavedMicrophoneWarnsAndFallsBack()
     return Task.CompletedTask;
 }
 
+static Task TestInputChannelCatalogSupportsScarlettInputs()
+{
+    var labels = InputChannelModeCatalog.CreateLabels(channelCount: 2);
+
+    Equal(3, labels.Count);
+    Equal(InputChannelModeCatalog.MonoSumLabel, labels[0]);
+    Equal("Input 1", labels[1]);
+    Equal("Input 2", labels[2]);
+    Equal(InputChannelMode.Input2Right, InputChannelModeCatalog.FromLabel("Input 2"));
+    Equal(1, InputChannelModeCatalog.ChannelIndex(InputChannelMode.Input2Right));
+    return Task.CompletedTask;
+}
+
 static Task TestVoiceInputLevelClassifier()
 {
     Equal(VoiceInputLevelState.Silence, VoiceInputLevelAnalyzer.Classify(rms: 0.0001, peak: 0.001));
     Equal(VoiceInputLevelState.TooQuiet, VoiceInputLevelAnalyzer.Classify(rms: 0.006, peak: 0.04));
     Equal(VoiceInputLevelState.Good, VoiceInputLevelAnalyzer.Classify(rms: 0.08, peak: 0.30));
     Equal(VoiceInputLevelState.Clipping, VoiceInputLevelAnalyzer.Classify(rms: 0.25, peak: 0.99));
+    return Task.CompletedTask;
+}
+
+static Task TestSpectrumAnalyzerEmitsLiveBars()
+{
+    var analyzer = new SpectrumAnalyzer();
+    var samples = new float[4096];
+    for (var index = 0; index < samples.Length; index++)
+    {
+        samples[index] = (float)(Math.Sin(2d * Math.PI * 440d * index / 44100d) * 0.5d);
+    }
+
+    var frame = analyzer.AddSamples(samples);
+
+    Equal(SpectrumAnalyzer.BarCount, frame.Magnitudes.Length);
+    Equal(true, frame.PeakLevel > 0.45d);
+    Equal(true, frame.Magnitudes.Any(magnitude => magnitude > 0d));
     return Task.CompletedTask;
 }
 
@@ -602,7 +644,7 @@ static async Task ThrowsInvalidOperationAsync(Func<Task> action)
 static async Task RunRealRuntimeValidationAsync()
 {
     var endpoint = new Uri(Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_ENDPOINT") ?? "http://127.0.0.1:11434/v1/");
-    var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:14b";
+    var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:8b";
     var dataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Ali",
@@ -616,8 +658,8 @@ static async Task RunRealRuntimeValidationAsync()
         Family: "Qwen",
         Size: "14B",
         Quantization: "Ollama package default",
-        ContextTokens: 4096,
-        OutputTokenLimit: 512,
+        ContextTokens: 2048,
+        OutputTokenLimit: 256,
         Temperature: 0.2,
         TopP: 0.9,
         StreamingEnabled: true,
@@ -822,7 +864,7 @@ static async Task RunRealVisionValidationAsync()
 static async Task RunRealVoiceValidationAsync()
 {
     var endpoint = new Uri(Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_ENDPOINT") ?? "http://127.0.0.1:11434/v1/");
-    var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:14b";
+    var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:8b";
     var recordSeconds = ReadIntEnvironment("ALI_REAL_VOICE_RECORD_SECONDS", 5);
     var retainDebugAudio = ReadBoolEnvironment("ALI_REAL_VOICE_RETAIN_AUDIO", false);
     var dspMode = Environment.GetEnvironmentVariable("ALI_REAL_VOICE_DSP_MODE") ?? "default";
@@ -866,8 +908,8 @@ static async Task RunRealVoiceValidationAsync()
         Family: "Qwen",
         Size: "14B",
         Quantization: "Ollama package default",
-        ContextTokens: 4096,
-        OutputTokenLimit: 512,
+        ContextTokens: 2048,
+        OutputTokenLimit: 256,
         Temperature: 0.2,
         TopP: 0.9,
         StreamingEnabled: true,
@@ -1153,7 +1195,7 @@ static async Task RunRealVoiceValidationAsync()
 
     Console.WriteLine($"VOICE_CORRECTION_METADATA_SUCCESS={metadataPassed}");
     Console.WriteLine($"VOICE_HEALTH_SUCCESS={metadataPassed}");
-    Console.WriteLine("VOICE_HEALTH_SUMMARY=Live local microphone -> STT -> qwen3:14b -> Piper -> stop speaking -> correction metadata gate completed.");
+    Console.WriteLine("VOICE_HEALTH_SUMMARY=Live local microphone -> STT -> local text model -> Piper -> stop speaking -> correction metadata gate completed.");
 
     if (!metadataPassed)
     {

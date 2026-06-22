@@ -173,13 +173,16 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <Button Content="Push to Talk" Command="{Binding StartVoiceRecordingCommand}" Margin="0,0,8,0" />
                                     <Button Content="Stop Recording" Command="{Binding StopVoiceRecordingCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Stop Speaking" Command="{Binding StopSpeakingCommand}" Margin="0" />
+                                    <Button Content="Stop Speaking" Command="{Binding StopSpeakingCommand}" Margin="0,0,8,0" />
+                                    <Button Content="Voice Settings" Command="{Binding OpenVoiceSettingsCommand}" Margin="0" />
                                 </StackPanel>
                             </DockPanel>
 
                             <Grid Margin="0,0,0,6">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="120" />
                                     <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
@@ -188,6 +191,10 @@
                                     <ComboBox ItemsSource="{Binding VoiceInputDevices}" SelectedItem="{Binding SelectedVoiceInputDevice}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Channel" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox ItemsSource="{Binding VoiceInputChannelModes}" SelectedItem="{Binding SelectedVoiceInputChannelMode}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
                                     <TextBlock Text="Output" Style="{StaticResource FieldLabel}" />
                                     <ComboBox ItemsSource="{Binding VoiceOutputDevices}" SelectedItem="{Binding SelectedVoiceOutputDevice}" />
                                 </StackPanel>

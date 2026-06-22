@@ -3,8 +3,11 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
+using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Ali.App.Wpf;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
 using Ali.Core.Runtime;
@@ -17,14 +20,20 @@ namespace Ali.App.Wpf.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
+    private const double SpectrumRenderWidth = 720d;
+    private const double SpectrumRenderHeight = 240d;
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly string _conversationId = $"conv_{Guid.NewGuid():N}";
+    private readonly double[] _spectrumAverage = new double[SpectrumAnalyzer.BarCount];
     private VoiceRuntimeSettings _voiceSettings;
     private bool _loadingVoiceSettings;
     private CancellationTokenSource? _activeResponse;
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
+    private VoiceSettingsWindow? _voiceSettingsWindow;
+    private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
+    private double _lastSpectrumPeakLevel;
     private string _composerText = string.Empty;
     private bool _isBusy;
     private bool _isRecording;
@@ -34,8 +43,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeDisplay;
     private string _runtimeEndpointText = string.Empty;
     private string _runtimeModelText = string.Empty;
-    private string _runtimeContextText = "4096";
-    private string _runtimeOutputLimitText = "512";
+    private string _runtimeContextText = "2048";
+    private string _runtimeOutputLimitText = "256";
     private string _runtimeTemperatureText = "0.2";
     private string _runtimeTopPText = string.Empty;
     private bool _runtimeEnabled;
@@ -47,16 +56,29 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _activeRuntimeStatus = "Using safe deterministic stub.";
     private string _attachmentStatus = "Screenshots are temporary by default.";
     private string _voiceStatus = "Voice idle.";
-    private string _sttStatus;
-    private string _ttsStatus;
+    private string _sttStatus = "STT status loading.";
+    private string _ttsStatus = "TTS status loading.";
     private string _lastTranscript = string.Empty;
     private string _editableTranscript = string.Empty;
     private string _selectedVoiceInputDevice = "Default microphone";
     private string _selectedVoiceOutputDevice = "Default speaker";
     private string _selectedVoiceInputPreset = VoiceInputPreset.HeadsetMic;
+    private string _selectedVoiceInputChannelMode = InputChannelModeCatalog.MonoSumLabel;
     private double _voiceInputLevelPercent;
     private string _voiceInputMeterText = "Input meter starting.";
     private string _voiceDiagnosticsText = "No voice capture yet.";
+    private PointCollection _spectrumLivePoints = CreateFlatSpectrumPoints();
+    private PointCollection _spectrumAveragePoints = CreateFlatSpectrumPoints();
+    private string _spectrumPeakText = "Peak 0% | gain 6.0x";
+    private double _spectrumDisplayGain = 6d;
+    private string _whisperExecutableText = string.Empty;
+    private string _whisperModelText = string.Empty;
+    private string _whisperArgumentsText = string.Empty;
+    private string _piperExecutableText = string.Empty;
+    private string _piperModelText = string.Empty;
+    private string _piperVoiceText = "default";
+    private string _piperArgumentsText = string.Empty;
+    private string _voiceSettingsStatusText = "Voice settings loaded.";
     private VoiceTurnMetadata? _lastVoiceMetadata;
 
     public MainWindowViewModel(AliServices services)
@@ -79,15 +101,22 @@ public sealed class MainWindowViewModel : ObservableObject
         StopVoiceRecordingCommand = new AsyncRelayCommand(StopVoiceRecordingOrTranscriptionAsync, () => IsRecording || IsTranscribing);
         SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
+        OpenVoiceSettingsCommand = new RelayCommand(_ => OpenVoiceSettings());
+        ApplyVoiceToolSettingsCommand = new RelayCommand(_ => ApplyVoiceToolSettings());
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
+        LoadSpeechToolSettings();
+        ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
         foreach (var preset in VoiceInputPreset.All)
         {
             VoiceInputPresets.Add(preset);
         }
 
         _selectedVoiceInputPreset = VoiceInputPreset.Normalize(_voiceSettings.SelectedInputPreset);
+        _selectedVoiceInputChannelMode = InputChannelModeCatalog.ToLabel(
+            InputChannelModeCatalog.FromStorageValue(_voiceSettings.SelectedInputChannelMode));
         _inputLevelMonitor.LevelAvailable += InputLevelAvailable;
+        _inputLevelMonitor.SpectrumAvailable += SpectrumAvailable;
 
         _loadingVoiceSettings = true;
         LoadVoiceDevices();
@@ -95,12 +124,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplyVoiceInputPreset(SelectedVoiceInputPreset);
         StartInputLevelMonitor();
 
-        _sttStatus = _services.SpeechToText.IsConfigured
-            ? $"STT ready: {_services.SpeechToText.ProviderName}"
-            : "STT not configured. Set ALI_WHISPER_EXE for local transcription.";
-        _ttsStatus = _services.TextToSpeech.IsConfigured
-            ? $"TTS ready: {_services.TextToSpeech.ProviderName}"
-            : "TTS not configured. Set ALI_PIPER_EXE and ALI_PIPER_MODEL for local speech.";
+        RefreshSpeechToolStatuses();
 
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
@@ -122,6 +146,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<string> VoiceOutputDevices { get; } = new();
 
     public ObservableCollection<string> VoiceInputPresets { get; } = new();
+
+    public ObservableCollection<string> VoiceInputChannelModes { get; } = new();
 
     public ICommand SendCommand { get; }
 
@@ -154,6 +180,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand SendTranscriptCommand { get; }
 
     public ICommand StopSpeakingCommand { get; }
+
+    public ICommand OpenVoiceSettingsCommand { get; }
+
+    public ICommand ApplyVoiceToolSettingsCommand { get; }
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
@@ -332,6 +362,18 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public string SelectedVoiceInputChannelMode
+    {
+        get => _selectedVoiceInputChannelMode;
+        set
+        {
+            if (SetProperty(ref _selectedVoiceInputChannelMode, value))
+            {
+                ApplyVoiceInputChannelMode(value);
+            }
+        }
+    }
+
     public double VoiceInputLevelPercent
     {
         get => _voiceInputLevelPercent;
@@ -348,6 +390,84 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _voiceDiagnosticsText;
         private set => SetProperty(ref _voiceDiagnosticsText, value);
+    }
+
+    public PointCollection SpectrumLivePoints
+    {
+        get => _spectrumLivePoints;
+        private set => SetProperty(ref _spectrumLivePoints, value);
+    }
+
+    public PointCollection SpectrumAveragePoints
+    {
+        get => _spectrumAveragePoints;
+        private set => SetProperty(ref _spectrumAveragePoints, value);
+    }
+
+    public string SpectrumPeakText
+    {
+        get => _spectrumPeakText;
+        private set => SetProperty(ref _spectrumPeakText, value);
+    }
+
+    public double SpectrumDisplayGain
+    {
+        get => _spectrumDisplayGain;
+        set
+        {
+            if (SetProperty(ref _spectrumDisplayGain, Math.Clamp(value, 1d, 18d)))
+            {
+                RefreshSpectrumPoints();
+            }
+        }
+    }
+
+    public string WhisperExecutableText
+    {
+        get => _whisperExecutableText;
+        set => SetProperty(ref _whisperExecutableText, value);
+    }
+
+    public string WhisperModelText
+    {
+        get => _whisperModelText;
+        set => SetProperty(ref _whisperModelText, value);
+    }
+
+    public string WhisperArgumentsText
+    {
+        get => _whisperArgumentsText;
+        set => SetProperty(ref _whisperArgumentsText, value);
+    }
+
+    public string PiperExecutableText
+    {
+        get => _piperExecutableText;
+        set => SetProperty(ref _piperExecutableText, value);
+    }
+
+    public string PiperModelText
+    {
+        get => _piperModelText;
+        set => SetProperty(ref _piperModelText, value);
+    }
+
+    public string PiperVoiceText
+    {
+        get => _piperVoiceText;
+        set => SetProperty(ref _piperVoiceText, value);
+    }
+
+    public string PiperArgumentsText
+    {
+        get => _piperArgumentsText;
+        set => SetProperty(ref _piperArgumentsText, value);
+    }
+
+    public string VoiceSettingsStatusText
+    {
+        get => _voiceSettingsStatusText;
+        private set => SetProperty(ref _voiceSettingsStatusText, value);
     }
 
     public bool IsRecording
@@ -1095,6 +1215,133 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private void OpenVoiceSettings()
+    {
+        if (_voiceSettingsWindow is { IsVisible: true })
+        {
+            _voiceSettingsWindow.Activate();
+            return;
+        }
+
+        _voiceSettingsWindow = new VoiceSettingsWindow
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+            DataContext = this
+        };
+        _voiceSettingsWindow.Closed += (_, _) => _voiceSettingsWindow = null;
+        _voiceSettingsWindow.Show();
+    }
+
+    private void LoadSpeechToolSettings()
+    {
+        var whisperDefaults = WhisperCliSpeechToTextOptions.FromEnvironment();
+        var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
+
+        WhisperExecutableText = PreferConfigured(_voiceSettings.WhisperExecutablePath, whisperDefaults.ExecutablePath);
+        WhisperModelText = PreferConfigured(_voiceSettings.WhisperModelPath, whisperDefaults.ModelPath);
+        WhisperArgumentsText = PreferConfigured(_voiceSettings.WhisperArgumentsTemplate, whisperDefaults.ArgumentsTemplate);
+        PiperExecutableText = PreferConfigured(_voiceSettings.PiperExecutablePath, piperDefaults.ExecutablePath);
+        PiperModelText = PreferConfigured(_voiceSettings.PiperModelPath, piperDefaults.ModelPath);
+        PiperVoiceText = PreferConfigured(_voiceSettings.PiperVoiceId, piperDefaults.VoiceId);
+        PiperArgumentsText = PreferConfigured(_voiceSettings.PiperArgumentsTemplate, piperDefaults.ArgumentsTemplate);
+    }
+
+    private void ApplyVoiceToolSettings() => ApplyVoiceToolSettings(saveSettings: true, reportStatus: true);
+
+    private void ApplyVoiceToolSettings(bool saveSettings, bool reportStatus)
+    {
+        try
+        {
+            var sttOptions = BuildWhisperOptionsFromUi();
+            var ttsOptions = BuildPiperOptionsFromUi();
+
+            LocalSpeechToolPolicy.EnsureLocalOnly(
+                "Speech-to-text",
+                sttOptions.ExecutablePath,
+                sttOptions.ModelPath,
+                sttOptions.ArgumentsTemplate);
+            LocalSpeechToolPolicy.EnsureLocalOnly(
+                "Text-to-speech",
+                ttsOptions.ExecutablePath,
+                ttsOptions.ModelPath,
+                ttsOptions.ArgumentsTemplate);
+
+            SetProcessEnvironment("ALI_WHISPER_EXE", sttOptions.ExecutablePath);
+            SetProcessEnvironment("ALI_WHISPER_MODEL", sttOptions.ModelPath);
+            SetProcessEnvironment("ALI_WHISPER_ARGS", sttOptions.ArgumentsTemplate);
+            SetProcessEnvironment("ALI_PIPER_EXE", ttsOptions.ExecutablePath);
+            SetProcessEnvironment("ALI_PIPER_MODEL", ttsOptions.ModelPath);
+            SetProcessEnvironment("ALI_PIPER_VOICE", ttsOptions.VoiceId);
+            SetProcessEnvironment("ALI_PIPER_ARGS", ttsOptions.ArgumentsTemplate);
+
+            _services.ConfigureSpeechTools(sttOptions, ttsOptions);
+            if (saveSettings)
+            {
+                SaveVoiceToolSettings();
+            }
+
+            RefreshSpeechToolStatuses();
+            if (reportStatus)
+            {
+                VoiceSettingsStatusText = "Voice tool settings applied for this Ali session.";
+            }
+        }
+        catch (Exception ex)
+        {
+            RefreshSpeechToolStatuses();
+            VoiceSettingsStatusText = reportStatus
+                ? $"Voice settings were not applied: {ex.Message}"
+                : $"Saved voice settings were not applied: {ex.Message}";
+        }
+    }
+
+    private WhisperCliSpeechToTextOptions BuildWhisperOptionsFromUi()
+    {
+        var defaults = WhisperCliSpeechToTextOptions.FromEnvironment();
+        return new WhisperCliSpeechToTextOptions(
+            NullIfWhiteSpace(WhisperExecutableText),
+            NullIfWhiteSpace(WhisperModelText),
+            PreferConfigured(WhisperArgumentsText, defaults.ArgumentsTemplate),
+            defaults.OutputTextSuffix);
+    }
+
+    private PiperCliTextToSpeechOptions BuildPiperOptionsFromUi()
+    {
+        var defaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
+        return new PiperCliTextToSpeechOptions(
+            NullIfWhiteSpace(PiperExecutableText),
+            NullIfWhiteSpace(PiperModelText),
+            PreferConfigured(PiperVoiceText, defaults.VoiceId),
+            PreferConfigured(PiperArgumentsText, defaults.ArgumentsTemplate),
+            defaults.OutputDirectory);
+    }
+
+    private void SaveVoiceToolSettings()
+    {
+        _voiceSettings = _voiceSettings with
+        {
+            WhisperExecutablePath = NullIfWhiteSpace(WhisperExecutableText),
+            WhisperModelPath = NullIfWhiteSpace(WhisperModelText),
+            WhisperArgumentsTemplate = NullIfWhiteSpace(WhisperArgumentsText),
+            PiperExecutablePath = NullIfWhiteSpace(PiperExecutableText),
+            PiperModelPath = NullIfWhiteSpace(PiperModelText),
+            PiperVoiceId = NullIfWhiteSpace(PiperVoiceText),
+            PiperArgumentsTemplate = NullIfWhiteSpace(PiperArgumentsText)
+        };
+
+        VoiceRuntimeSettingsStore.Save(_services.DataRoot, _voiceSettings);
+    }
+
+    private void RefreshSpeechToolStatuses()
+    {
+        SttStatus = _services.SpeechToText.IsConfigured
+            ? $"STT ready: {_services.SpeechToText.ProviderName}"
+            : "STT not configured. Set the local Whisper executable.";
+        TtsStatus = _services.TextToSpeech.IsConfigured
+            ? $"TTS ready: {_services.TextToSpeech.ProviderName} ({_services.TextToSpeech.VoiceId})"
+            : "TTS not configured. Set the local Piper executable and voice model.";
+    }
+
     private static void DeleteVoiceAudioIfTemporary(VoiceAudioInput audioInput)
     {
         if (!audioInput.RetainAudio)
@@ -1260,6 +1507,7 @@ public sealed class MainWindowViewModel : ObservableObject
             && TryReadDeviceNumber(selectedDevice, out var deviceNumber))
         {
             recorder.InputDeviceNumber = deviceNumber;
+            RefreshVoiceInputChannelModes();
             SaveVoiceSettings(selectedInputDeviceNumber: deviceNumber, selectedInputDeviceName: CurrentInputDeviceName());
             StartInputLevelMonitor();
         }
@@ -1285,6 +1533,45 @@ public sealed class MainWindowViewModel : ObservableObject
         SaveVoiceSettings(selectedInputPreset: presetName);
     }
 
+    private void ApplyVoiceInputChannelMode(string selectedMode)
+    {
+        var channelMode = InputChannelModeCatalog.FromLabel(selectedMode);
+        if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
+        {
+            recorder.ChannelMode = channelMode;
+        }
+
+        _inputLevelMonitor.ChannelMode = channelMode;
+        SaveVoiceSettings(selectedInputChannelMode: channelMode.ToString());
+        StartInputLevelMonitor();
+    }
+
+    private void RefreshVoiceInputChannelModes()
+    {
+        var preferredMode = _loadingVoiceSettings
+            ? InputChannelModeCatalog.FromStorageValue(_voiceSettings.SelectedInputChannelMode)
+            : InputChannelModeCatalog.FromLabel(SelectedVoiceInputChannelMode);
+        var labels = InputChannelModeCatalog.CreateLabels(CurrentInputDeviceChannelCount());
+
+        VoiceInputChannelModes.Clear();
+        foreach (var label in labels)
+        {
+            VoiceInputChannelModes.Add(label);
+        }
+
+        var preferredLabel = InputChannelModeCatalog.ToLabel(preferredMode);
+        var selectedLabel = VoiceInputChannelModes.Contains(preferredLabel)
+            ? preferredLabel
+            : InputChannelModeCatalog.MonoSumLabel;
+        if (SelectedVoiceInputChannelMode == selectedLabel)
+        {
+            ApplyVoiceInputChannelMode(selectedLabel);
+            return;
+        }
+
+        SelectedVoiceInputChannelMode = selectedLabel;
+    }
+
     private void InputLevelAvailable(object? sender, VoiceInputLevelSnapshot snapshot)
     {
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
@@ -1302,6 +1589,45 @@ public sealed class MainWindowViewModel : ObservableObject
         VoiceInputLevelPercent = snapshot.LevelPercent;
         VoiceInputMeterText = $"{snapshot.Summary} Peak {snapshot.Peak:P0}, RMS {snapshot.Rms:P1}.";
         VoiceDiagnosticsText = $"{snapshot.DeviceName} | {snapshot.SampleRate} Hz | {snapshot.Channels} ch | {snapshot.State}";
+    }
+
+    private void SpectrumAvailable(object? sender, SpectrumFrame frame)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            ApplySpectrumFrame(frame);
+            return;
+        }
+
+        _ = dispatcher.BeginInvoke(() => ApplySpectrumFrame(frame));
+    }
+
+    private void ApplySpectrumFrame(SpectrumFrame frame)
+    {
+        if (frame.Magnitudes.Length == 0)
+        {
+            return;
+        }
+
+        _lastSpectrumMagnitudes = frame.Magnitudes.ToArray();
+        for (var index = 0; index < Math.Min(_spectrumAverage.Length, frame.Magnitudes.Length); index++)
+        {
+            _spectrumAverage[index] = _spectrumAverage[index] <= 0d
+                ? frame.Magnitudes[index]
+                : (_spectrumAverage[index] * 0.84d) + (frame.Magnitudes[index] * 0.16d);
+        }
+
+        _lastSpectrumPeakLevel = frame.PeakLevel;
+        SpectrumPeakText = $"Peak {frame.PeakLevel:P0} | gain {SpectrumDisplayGain:0.0}x";
+        RefreshSpectrumPoints();
+    }
+
+    private void RefreshSpectrumPoints()
+    {
+        SpectrumLivePoints = CreateSpectrumPoints(_lastSpectrumMagnitudes, SpectrumDisplayGain);
+        SpectrumAveragePoints = CreateSpectrumPoints(_spectrumAverage, SpectrumDisplayGain);
+        SpectrumPeakText = $"Peak {_lastSpectrumPeakLevel:P0} | gain {SpectrumDisplayGain:0.0}x";
     }
 
     private void StartInputLevelMonitor()
@@ -1329,6 +1655,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
         {
             recorder.LevelAvailable += InputLevelAvailable;
+            recorder.SpectrumAvailable += SpectrumAvailable;
         }
     }
 
@@ -1337,6 +1664,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
         {
             recorder.LevelAvailable -= InputLevelAvailable;
+            recorder.SpectrumAvailable -= SpectrumAvailable;
         }
     }
 
@@ -1376,7 +1704,8 @@ public sealed class MainWindowViewModel : ObservableObject
         string? lastSuccessfulSttDeviceName = null,
         int? lastSuccessfulTtsDeviceNumber = null,
         string? lastSuccessfulTtsDeviceName = null,
-        string? selectedInputPreset = null)
+        string? selectedInputPreset = null,
+        string? selectedInputChannelMode = null)
     {
         if (_loadingVoiceSettings)
         {
@@ -1393,7 +1722,8 @@ public sealed class MainWindowViewModel : ObservableObject
             LastSuccessfulSttDeviceName = lastSuccessfulSttDeviceName ?? _voiceSettings.LastSuccessfulSttDeviceName,
             LastSuccessfulTtsDeviceNumber = lastSuccessfulTtsDeviceNumber ?? _voiceSettings.LastSuccessfulTtsDeviceNumber,
             LastSuccessfulTtsDeviceName = lastSuccessfulTtsDeviceName ?? _voiceSettings.LastSuccessfulTtsDeviceName,
-            SelectedInputPreset = VoiceInputPreset.Normalize(selectedInputPreset ?? _voiceSettings.SelectedInputPreset)
+            SelectedInputPreset = VoiceInputPreset.Normalize(selectedInputPreset ?? _voiceSettings.SelectedInputPreset),
+            SelectedInputChannelMode = selectedInputChannelMode ?? _voiceSettings.SelectedInputChannelMode
         };
 
         VoiceRuntimeSettingsStore.Save(_services.DataRoot, _voiceSettings);
@@ -1405,6 +1735,11 @@ public sealed class MainWindowViewModel : ObservableObject
     private int CurrentOutputDeviceNumber() =>
         TryReadDeviceNumber(SelectedVoiceOutputDevice, out var deviceNumber) ? deviceNumber : -1;
 
+    private int CurrentInputDeviceChannelCount() =>
+        TryReadDeviceNumber(SelectedVoiceInputDevice, out var deviceNumber)
+            ? NAudioVoiceRecorder.GetInputDeviceChannelCount(deviceNumber)
+            : 1;
+
     private string CurrentInputDeviceName() => ReadDeviceName(SelectedVoiceInputDevice);
 
     private string CurrentOutputDeviceName() => ReadDeviceName(SelectedVoiceOutputDevice);
@@ -1414,6 +1749,38 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private string CurrentTextToSpeechModel() =>
         _services.TextToSpeech is PiperCliTextToSpeechProvider piper ? piper.ModelPath : string.Empty;
+
+    private static PointCollection CreateFlatSpectrumPoints() =>
+        CreateSpectrumPoints(new double[SpectrumAnalyzer.BarCount], 1d);
+
+    private static PointCollection CreateSpectrumPoints(IReadOnlyList<double> magnitudes, double displayGain)
+    {
+        var points = new PointCollection();
+        if (magnitudes.Count == 0)
+        {
+            return points;
+        }
+
+        var denominator = Math.Max(1, magnitudes.Count - 1);
+        for (var index = 0; index < magnitudes.Count; index++)
+        {
+            var x = index * (SpectrumRenderWidth / denominator);
+            var level = Math.Clamp(magnitudes[index] * displayGain, 0d, 1d);
+            var y = SpectrumRenderHeight - (level * (SpectrumRenderHeight - 8d));
+            points.Add(new System.Windows.Point(x, y));
+        }
+
+        return points;
+    }
+
+    private static string PreferConfigured(string? configured, string? fallback) =>
+        string.IsNullOrWhiteSpace(configured) ? fallback ?? string.Empty : configured.Trim();
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static void SetProcessEnvironment(string variableName, string? value) =>
+        Environment.SetEnvironmentVariable(variableName, NullIfWhiteSpace(value), EnvironmentVariableTarget.Process);
 
     private static string ReadDeviceName(string selectedDevice)
     {

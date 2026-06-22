@@ -45,9 +45,9 @@ public sealed class AliServices
 
     public IVoiceRecorder VoiceRecorder { get; }
 
-    public ISpeechToTextProvider SpeechToText { get; }
+    public ISpeechToTextProvider SpeechToText { get; private set; }
 
-    public ITextToSpeechProvider TextToSpeech { get; }
+    public ITextToSpeechProvider TextToSpeech { get; private set; }
 
     public ISpeechPlayer SpeechPlayer { get; }
 
@@ -64,6 +64,14 @@ public sealed class AliServices
             : null;
 
         RuntimeController.ConfigureCandidate(candidateRuntime);
+    }
+
+    public void ConfigureSpeechTools(
+        WhisperCliSpeechToTextOptions speechToTextOptions,
+        PiperCliTextToSpeechOptions textToSpeechOptions)
+    {
+        SpeechToText = new WhisperCliSpeechToTextProvider(speechToTextOptions);
+        TextToSpeech = new PiperCliTextToSpeechProvider(textToSpeechOptions);
     }
 
     public static AliServices CreateForDesktop()

@@ -7,7 +7,7 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
 {
     private const int SampleRate = 44100;
     private readonly object _sync = new();
-    private readonly InputChannelMode _channelMode;
+    private readonly SpectrumAnalyzer _spectrumAnalyzer = new();
     private WaveInEvent? _capture;
     private WaveFileWriter? _writer;
     private VoiceSampleProcessor? _processor;
@@ -21,14 +21,18 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
     {
         InputDeviceNumber = inputDeviceNumber;
         ProcessorSettings = settings ?? new VoiceProcessorSettings();
-        _channelMode = channelMode;
+        ChannelMode = channelMode;
     }
 
     public event EventHandler<VoiceInputLevelSnapshot>? LevelAvailable;
 
+    public event EventHandler<SpectrumFrame>? SpectrumAvailable;
+
     public int InputDeviceNumber { get; set; }
 
     public VoiceProcessorSettings ProcessorSettings { get; set; }
+
+    public InputChannelMode ChannelMode { get; set; }
 
     public bool IsRecording
     {
@@ -51,6 +55,16 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         }
 
         return devices;
+    }
+
+    public static int GetInputDeviceChannelCount(int deviceNumber)
+    {
+        if (deviceNumber < 0 || deviceNumber >= WaveInEvent.DeviceCount)
+        {
+            return 1;
+        }
+
+        return Math.Max(1, WaveInEvent.GetCapabilities(deviceNumber).Channels);
     }
 
     public Task StartAsync(string outputDirectory, CancellationToken cancellationToken)
@@ -118,7 +132,7 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
     private WaveInEvent StartCapture(int deviceNumber)
     {
         Exception? firstException = null;
-        foreach (var channelCount in new[] { 2, 1 })
+        foreach (var channelCount in BuildCaptureChannelCandidates(deviceNumber, ChannelMode))
         {
             var capture = CreateCapture(deviceNumber, channelCount);
             try
@@ -169,7 +183,7 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             return;
         }
 
-        var samples = ConvertToMonoSamples(e.Buffer.AsSpan(0, e.BytesRecorded), format, _channelMode);
+        var samples = ConvertToMonoSamples(e.Buffer.AsSpan(0, e.BytesRecorded), format, ChannelMode);
         if (samples.Length == 0)
         {
             return;
@@ -183,6 +197,7 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
                 GetInputDeviceName(InputDeviceNumber),
                 format.SampleRate,
                 format.Channels));
+        SpectrumAvailable?.Invoke(this, _spectrumAnalyzer.AddSamples(samples));
 
         var processed = processor.Process(samples);
         var bytes = ConvertFloatSamplesToPcm16(processed);
@@ -254,46 +269,58 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
 
     private static float PickFloatChannel(ReadOnlySpan<byte> buffer, int frame, int channels, InputChannelMode channelMode)
     {
-        if (channelMode == InputChannelMode.Input1Left || channels == 1)
+        var selectedChannel = InputChannelModeCatalog.ChannelIndex(channelMode);
+        if (selectedChannel is null)
         {
-            return BitConverter.ToSingle(buffer.Slice(frame * channels * sizeof(float), sizeof(float)));
+            var sum = 0f;
+            for (var channel = 0; channel < channels; channel++)
+            {
+                sum += BitConverter.ToSingle(buffer.Slice((frame * channels + channel) * sizeof(float), sizeof(float)));
+            }
+
+            return sum / channels;
         }
 
-        if (channelMode == InputChannelMode.Input2Right)
-        {
-            var channel = Math.Min(1, channels - 1);
-            return BitConverter.ToSingle(buffer.Slice((frame * channels + channel) * sizeof(float), sizeof(float)));
-        }
-
-        var sum = 0f;
-        for (var channel = 0; channel < channels; channel++)
-        {
-            sum += BitConverter.ToSingle(buffer.Slice((frame * channels + channel) * sizeof(float), sizeof(float)));
-        }
-
-        return sum / channels;
+        var channelIndex = Math.Clamp(selectedChannel.Value, 0, channels - 1);
+        return BitConverter.ToSingle(buffer.Slice((frame * channels + channelIndex) * sizeof(float), sizeof(float)));
     }
 
     private static float PickPcm16Channel(ReadOnlySpan<byte> buffer, int frame, int channels, InputChannelMode channelMode)
     {
-        if (channelMode == InputChannelMode.Input1Left || channels == 1)
+        var selectedChannel = InputChannelModeCatalog.ChannelIndex(channelMode);
+        if (selectedChannel is null)
         {
-            return BitConverter.ToInt16(buffer.Slice(frame * channels * sizeof(short), sizeof(short))) / 32768f;
+            var sum = 0f;
+            for (var channel = 0; channel < channels; channel++)
+            {
+                sum += BitConverter.ToInt16(buffer.Slice((frame * channels + channel) * sizeof(short), sizeof(short))) / 32768f;
+            }
+
+            return sum / channels;
         }
 
-        if (channelMode == InputChannelMode.Input2Right)
-        {
-            var channel = Math.Min(1, channels - 1);
-            return BitConverter.ToInt16(buffer.Slice((frame * channels + channel) * sizeof(short), sizeof(short))) / 32768f;
-        }
+        var channelIndex = Math.Clamp(selectedChannel.Value, 0, channels - 1);
+        return BitConverter.ToInt16(buffer.Slice((frame * channels + channelIndex) * sizeof(short), sizeof(short))) / 32768f;
+    }
 
-        var sum = 0f;
-        for (var channel = 0; channel < channels; channel++)
+    private static IReadOnlyList<int> BuildCaptureChannelCandidates(int deviceNumber, InputChannelMode channelMode)
+    {
+        var deviceChannels = deviceNumber >= 0 && deviceNumber < WaveInEvent.DeviceCount
+            ? WaveInEvent.GetCapabilities(deviceNumber).Channels
+            : 2;
+        var requiredChannels = InputChannelModeCatalog.RequiredChannelCount(channelMode);
+        var candidates = new[]
         {
-            sum += BitConverter.ToInt16(buffer.Slice((frame * channels + channel) * sizeof(short), sizeof(short))) / 32768f;
-        }
+            Math.Clamp(deviceChannels, requiredChannels, InputChannelModeCatalog.MaximumSelectableInputs),
+            requiredChannels,
+            2,
+            1
+        };
 
-        return sum / channels;
+        return candidates
+            .Where(channelCount => channelCount > 0)
+            .Distinct()
+            .ToArray();
     }
 
     private static byte[] ConvertFloatSamplesToPcm16(ReadOnlySpan<float> samples)
