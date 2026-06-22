@@ -64,9 +64,8 @@ Current implementation:
 
 Remaining work:
 
-- Keep the NAudio microphone picker wired to settings persistence.
+- Complete live guarded certification after mic tuning.
 - Add full playback-device enumeration; speech currently uses Windows default output.
-- Add a live input level meter.
 - Tune DSP defaults after live testing.
 
 ## Environment Variable Speech Configuration

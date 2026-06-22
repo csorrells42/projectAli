@@ -37,7 +37,13 @@ public sealed record VoiceTurnMetadata(
     string? SpeechToTextMode,
     string? TextToSpeechProvider,
     string? TextToSpeechVoice,
-    bool RawAudioRetained);
+    bool RawAudioRetained,
+    int? InputDeviceNumber = null,
+    string? InputDeviceName = null,
+    string? InputPreset = null,
+    string? SpeechToTextModel = null,
+    string? TextToSpeechModel = null,
+    bool SuspiciousOrNoSpeech = false);
 
 public interface IVoiceRecorder
 {

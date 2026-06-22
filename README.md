@@ -19,6 +19,8 @@ Current status: Phase 0 / Phase 1C bootstrap.
 - Mark image attachments as retained or temporary.
 - Push-to-talk voice controls in the WPF chat surface.
 - Temporary local WAV recording through NAudio with selectable input device support.
+- Live input level meter with silence, too-quiet, usable, and clipping states.
+- Persisted microphone/speaker selection and simple voice input presets.
 - Local-only Faster-Whisper STT wrapper with no-speech confidence filtering.
 - Editable transcript review before sending a voice prompt.
 - Local-only Piper TTS wrapper using copied `lib\voice` resources.
@@ -151,6 +153,14 @@ $env:ALI_PIPER_ARGS = "--model ""{model}"" --output_file ""{output}"""
 If those tools are not configured, Ali shows that honestly in the voice status area and skips local STT/TTS rather than pretending.
 
 Voice status note: the local mic -> STT -> qwen3:14b -> Piper -> stop-speaking -> correction-metadata chain has been proven mechanically. Guarded voice-command reliability still needs microphone path tuning before it is considered field-certified.
+
+Voice settings are stored in:
+
+```text
+%LOCALAPPDATA%\Ali\BootstrapData\voice-settings.json
+```
+
+Input presets are intentionally simple: `Raw`, `Quiet Room`, `Noisy Room`, `Broadcast Mic / Close Mic`, and `Headset Mic`. The meter should move when the selected microphone receives speech, drop in quiet rooms, warn when the signal is too quiet, and warn if input clips.
 
 ## KISS Rules
 

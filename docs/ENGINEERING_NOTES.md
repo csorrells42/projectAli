@@ -60,6 +60,7 @@ docs
 - WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
 - Voice contracts: recorder, STT provider, TTS provider, speech player
 - Local voice adapters: NAudio WAV record/playback, Faster-Whisper CLI STT wrapper, Piper CLI TTS wrapper
+- Voice input tuning: persisted device selection, live NAudio level monitor, simple DSP presets, capture diagnostics
 - Voice safety: risky spoken commands are blocked in Phase 1C before they can be sent as action requests
 - Spoken response cleaner: removes URLs, markdown clutter, code blocks, stack traces, metadata, and citation markers
 - Correction reports now carry optional voice transcript/provider metadata without retaining raw audio
@@ -114,6 +115,14 @@ lib\voice\piper
 ```
 
 The wrapper script `tools\voice\local_whisper_stt.py` uses Faster-Whisper locally and writes both transcript text and JSON segment metadata. Segments with high no-speech probability or weak average log probability are rejected so suspicious audio cannot become a command.
+
+Voice settings persist here:
+
+```text
+%LOCALAPPDATA%\Ali\BootstrapData\voice-settings.json
+```
+
+The WPF input meter classifies selected microphone input as silence, too quiet, usable, or clipping. The same classifier is used for recorded WAV diagnostics so live capture and retained debug clips speak the same language.
 
 ## Runtime Settings
 
@@ -247,6 +256,8 @@ Manual integration status:
 Real microphone recording: implemented through NAudio and VoiceWorkbench-derived DSP
 Real Faster-Whisper transcription: implemented as local CLI wrapper with no-speech guard
 Real Piper speech: implemented as local CLI wrapper using copied lib\voice resources
+Input level meter: implemented
+Persisted mic/preset selection: implemented
 Cloud STT/TTS: intentionally blocked
 Wake word: not implemented
 Barge-in: not implemented
@@ -258,5 +269,8 @@ Live gate status:
 ```text
 Mechanical chain with no guard: passed once, but transcript was suspicious high-no-speech output.
 Guarded chain: correctly rejected the suspicious transcript.
-Remaining blocker: tune/select the real microphone path so guarded STT accepts deliberate speech.
+Mic tuning slice: input meter, persisted mic selection, presets, diagnostics, and stronger transcript guard are implemented.
+Live certification attempt on Focusrite path: too quiet or fake no-speech transcript, rejected.
+Live certification attempt on Insta360 path: usable level but wrong transcript, rejected because it did not address Ali.
+Remaining blocker: select/tune the real microphone path so guarded STT accepts deliberate speech.
 ```

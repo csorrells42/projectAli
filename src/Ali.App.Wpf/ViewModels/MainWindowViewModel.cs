@@ -18,7 +18,10 @@ namespace Ali.App.Wpf.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly AliServices _services;
+    private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly string _conversationId = $"conv_{Guid.NewGuid():N}";
+    private VoiceRuntimeSettings _voiceSettings;
+    private bool _loadingVoiceSettings;
     private CancellationTokenSource? _activeResponse;
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
@@ -50,6 +53,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _editableTranscript = string.Empty;
     private string _selectedVoiceInputDevice = "Default microphone";
     private string _selectedVoiceOutputDevice = "Default speaker";
+    private string _selectedVoiceInputPreset = VoiceInputPreset.HeadsetMic;
+    private double _voiceInputLevelPercent;
+    private string _voiceInputMeterText = "Input meter starting.";
+    private string _voiceDiagnosticsText = "No voice capture yet.";
     private VoiceTurnMetadata? _lastVoiceMetadata;
 
     public MainWindowViewModel(AliServices services)
@@ -73,7 +80,21 @@ public sealed class MainWindowViewModel : ObservableObject
         SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
 
+        _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
+        foreach (var preset in VoiceInputPreset.All)
+        {
+            VoiceInputPresets.Add(preset);
+        }
+
+        _selectedVoiceInputPreset = VoiceInputPreset.Normalize(_voiceSettings.SelectedInputPreset);
+        _inputLevelMonitor.LevelAvailable += InputLevelAvailable;
+
+        _loadingVoiceSettings = true;
         LoadVoiceDevices();
+        _loadingVoiceSettings = false;
+        ApplyVoiceInputPreset(SelectedVoiceInputPreset);
+        StartInputLevelMonitor();
+
         _sttStatus = _services.SpeechToText.IsConfigured
             ? $"STT ready: {_services.SpeechToText.ProviderName}"
             : "STT not configured. Set ALI_WHISPER_EXE for local transcription.";
@@ -99,6 +120,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<string> VoiceInputDevices { get; } = new();
 
     public ObservableCollection<string> VoiceOutputDevices { get; } = new();
+
+    public ObservableCollection<string> VoiceInputPresets { get; } = new();
 
     public ICommand SendCommand { get; }
 
@@ -294,6 +317,37 @@ public sealed class MainWindowViewModel : ObservableObject
                 ApplyVoiceOutputDevice(value);
             }
         }
+    }
+
+    public string SelectedVoiceInputPreset
+    {
+        get => _selectedVoiceInputPreset;
+        set
+        {
+            var normalized = VoiceInputPreset.Normalize(value);
+            if (SetProperty(ref _selectedVoiceInputPreset, normalized))
+            {
+                ApplyVoiceInputPreset(normalized);
+            }
+        }
+    }
+
+    public double VoiceInputLevelPercent
+    {
+        get => _voiceInputLevelPercent;
+        private set => SetProperty(ref _voiceInputLevelPercent, value);
+    }
+
+    public string VoiceInputMeterText
+    {
+        get => _voiceInputMeterText;
+        private set => SetProperty(ref _voiceInputMeterText, value);
+    }
+
+    public string VoiceDiagnosticsText
+    {
+        get => _voiceDiagnosticsText;
+        private set => SetProperty(ref _voiceDiagnosticsText, value);
     }
 
     public bool IsRecording
@@ -784,6 +838,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
+            StopInputLevelMonitor();
+            SubscribeRecorderLevels();
+            ApplyVoiceInputPreset(SelectedVoiceInputPreset);
             await _services.VoiceRecorder.StartAsync(directory, _activeVoiceInput.Token).ConfigureAwait(true);
             IsRecording = true;
             VoiceStatus = $"Recording from {SelectedVoiceInputDevice}...";
@@ -793,9 +850,11 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            UnsubscribeRecorderLevels();
             _services.VoiceRecorder.Cancel();
             IsRecording = false;
             VoiceStatus = $"Recording could not start: {ex.Message}";
+            StartInputLevelMonitor();
         }
     }
 
@@ -819,9 +878,12 @@ public sealed class MainWindowViewModel : ObservableObject
             audioInput = await _services.VoiceRecorder.StopAsync(_activeVoiceInput?.Token ?? CancellationToken.None).ConfigureAwait(true);
             IsRecording = false;
             VoiceStatus = "Recording stopped.";
+            UnsubscribeRecorderLevels();
+            UpdateCaptureDiagnostics(audioInput);
         }
         catch (OperationCanceledException)
         {
+            UnsubscribeRecorderLevels();
             VoiceStatus = "Voice input canceled.";
             SttStatus = "Recording canceled.";
             IsRecording = false;
@@ -832,10 +894,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
             _activeVoiceInput?.Dispose();
             _activeVoiceInput = null;
+            StartInputLevelMonitor();
             return;
         }
         catch (Exception ex)
         {
+            UnsubscribeRecorderLevels();
             VoiceStatus = "Voice recording did not stop cleanly.";
             SttStatus = ex.Message;
             IsRecording = false;
@@ -846,6 +910,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             _activeVoiceInput?.Dispose();
             _activeVoiceInput = null;
+            StartInputLevelMonitor();
             return;
         }
 
@@ -863,6 +928,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 audioInput,
                 _activeVoiceInput?.Token ?? CancellationToken.None).ConfigureAwait(true);
 
+            var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript.Text, requireAssistantName: true);
+            if (!transcriptGuard.Accepted)
+            {
+                throw new InvalidOperationException(transcriptGuard.Message);
+            }
+
+            SaveLastSuccessfulSttDevice();
             LastTranscript = transcript.Text;
             EditableTranscript = transcript.Text;
             _lastVoiceMetadata = new VoiceTurnMetadata(
@@ -872,7 +944,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 transcript.Mode,
                 _services.TextToSpeech.ProviderName,
                 _services.TextToSpeech.VoiceId,
-                audioInput.RetainAudio);
+                audioInput.RetainAudio,
+                CurrentInputDeviceNumber(),
+                CurrentInputDeviceName(),
+                SelectedVoiceInputPreset,
+                CurrentSpeechToTextModel(),
+                CurrentTextToSpeechModel(),
+                SuspiciousOrNoSpeech: false);
 
             VoiceStatus = "Transcript ready to review.";
             SttStatus = $"Transcript created by {transcript.ProviderName}.";
@@ -884,7 +962,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            VoiceStatus = "Voice input did not produce a transcript.";
+            VoiceStatus = "I couldn't hear that clearly. Try again or check the microphone. I did not run a command.";
             SttStatus = ex.Message;
         }
         finally
@@ -893,6 +971,7 @@ public sealed class MainWindowViewModel : ObservableObject
             DeleteVoiceAudioIfTemporary(audioInput);
             _activeVoiceInput?.Dispose();
             _activeVoiceInput = null;
+            StartInputLevelMonitor();
         }
     }
 
@@ -901,6 +980,14 @@ public sealed class MainWindowViewModel : ObservableObject
         var transcript = EditableTranscript.Trim();
         if (string.IsNullOrWhiteSpace(transcript) || IsBusy)
         {
+            return;
+        }
+
+        var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript, requireAssistantName: true);
+        if (!transcriptGuard.Accepted)
+        {
+            VoiceStatus = transcriptGuard.Message;
+            StatusText = VoiceStatus;
             return;
         }
 
@@ -922,7 +1009,12 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             Transcript = transcript,
             TextToSpeechProvider = _services.TextToSpeech.ProviderName,
-            TextToSpeechVoice = _services.TextToSpeech.VoiceId
+            TextToSpeechVoice = _services.TextToSpeech.VoiceId,
+            InputDeviceNumber = CurrentInputDeviceNumber(),
+            InputDeviceName = CurrentInputDeviceName(),
+            InputPreset = SelectedVoiceInputPreset,
+            SpeechToTextModel = CurrentSpeechToTextModel(),
+            TextToSpeechModel = CurrentTextToSpeechModel()
         };
 
         VoiceStatus = "Voice transcript sent to Ali.";
@@ -969,6 +1061,7 @@ public sealed class MainWindowViewModel : ObservableObject
             await _services.SpeechPlayer.PlayAsync(speech.AudioPath, _activeSpeech.Token).ConfigureAwait(true);
             TtsStatus = "Speech complete.";
             VoiceStatus = "Voice loop complete.";
+            SaveLastSuccessfulTtsDevice();
         }
         catch (OperationCanceledException)
         {
@@ -1131,7 +1224,14 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
 
-        SelectedVoiceInputDevice = VoiceInputDevices[0];
+        var inputSelection = VoiceDeviceSelection.ResolveInput(_voiceSettings, inputDevices);
+        SelectedVoiceInputDevice = VoiceInputDevices.FirstOrDefault(
+            device => device.StartsWith($"{inputSelection.DeviceNumber}:", StringComparison.Ordinal))
+            ?? VoiceInputDevices[0];
+        if (!string.IsNullOrWhiteSpace(inputSelection.Warning))
+        {
+            VoiceStatus = inputSelection.Warning;
+        }
 
         VoiceOutputDevices.Clear();
         foreach (var device in NAudioWaveSpeechPlayer.GetOutputDevices())
@@ -1144,7 +1244,14 @@ public sealed class MainWindowViewModel : ObservableObject
             VoiceOutputDevices.Add("-1: Default playback device");
         }
 
-        SelectedVoiceOutputDevice = VoiceOutputDevices[0];
+        var outputSelection = VoiceDeviceSelection.ResolveOutput(_voiceSettings, NAudioWaveSpeechPlayer.GetOutputDevices());
+        SelectedVoiceOutputDevice = VoiceOutputDevices.FirstOrDefault(
+            device => device.StartsWith($"{outputSelection.DeviceNumber}:", StringComparison.Ordinal))
+            ?? VoiceOutputDevices[0];
+        if (!string.IsNullOrWhiteSpace(outputSelection.Warning))
+        {
+            VoiceStatus = outputSelection.Warning;
+        }
     }
 
     private void ApplyVoiceInputDevice(string selectedDevice)
@@ -1153,6 +1260,8 @@ public sealed class MainWindowViewModel : ObservableObject
             && TryReadDeviceNumber(selectedDevice, out var deviceNumber))
         {
             recorder.InputDeviceNumber = deviceNumber;
+            SaveVoiceSettings(selectedInputDeviceNumber: deviceNumber, selectedInputDeviceName: CurrentInputDeviceName());
+            StartInputLevelMonitor();
         }
     }
 
@@ -1162,7 +1271,156 @@ public sealed class MainWindowViewModel : ObservableObject
             && TryReadDeviceNumber(selectedDevice, out var deviceNumber))
         {
             player.OutputDeviceNumber = deviceNumber;
+            SaveVoiceSettings(selectedOutputDeviceNumber: deviceNumber, selectedOutputDeviceName: CurrentOutputDeviceName());
         }
+    }
+
+    private void ApplyVoiceInputPreset(string presetName)
+    {
+        if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
+        {
+            recorder.ProcessorSettings = VoiceInputPreset.CreateSettings(presetName);
+        }
+
+        SaveVoiceSettings(selectedInputPreset: presetName);
+    }
+
+    private void InputLevelAvailable(object? sender, VoiceInputLevelSnapshot snapshot)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            ApplyInputLevelSnapshot(snapshot);
+            return;
+        }
+
+        _ = dispatcher.BeginInvoke(() => ApplyInputLevelSnapshot(snapshot));
+    }
+
+    private void ApplyInputLevelSnapshot(VoiceInputLevelSnapshot snapshot)
+    {
+        VoiceInputLevelPercent = snapshot.LevelPercent;
+        VoiceInputMeterText = $"{snapshot.Summary} Peak {snapshot.Peak:P0}, RMS {snapshot.Rms:P1}.";
+        VoiceDiagnosticsText = $"{snapshot.DeviceName} | {snapshot.SampleRate} Hz | {snapshot.Channels} ch | {snapshot.State}";
+    }
+
+    private void StartInputLevelMonitor()
+    {
+        if (IsRecording || !TryReadDeviceNumber(SelectedVoiceInputDevice, out var deviceNumber))
+        {
+            return;
+        }
+
+        try
+        {
+            _inputLevelMonitor.Start(deviceNumber, CurrentInputDeviceName());
+        }
+        catch (Exception ex)
+        {
+            VoiceInputLevelPercent = 0;
+            VoiceInputMeterText = $"Input meter unavailable: {ex.Message}";
+        }
+    }
+
+    private void StopInputLevelMonitor() => _inputLevelMonitor.Stop();
+
+    private void SubscribeRecorderLevels()
+    {
+        if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
+        {
+            recorder.LevelAvailable += InputLevelAvailable;
+        }
+    }
+
+    private void UnsubscribeRecorderLevels()
+    {
+        if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
+        {
+            recorder.LevelAvailable -= InputLevelAvailable;
+        }
+    }
+
+    private void UpdateCaptureDiagnostics(VoiceAudioInput audioInput)
+    {
+        try
+        {
+            var diagnostics = VoiceAudioFileAnalyzer.AnalyzeWaveAudio(
+                audioInput.FilePath,
+                CurrentInputDeviceNumber(),
+                CurrentInputDeviceName());
+            VoiceDiagnosticsText = diagnostics.Summary;
+            ApplyInputLevelSnapshot(diagnostics.Level);
+        }
+        catch (Exception ex)
+        {
+            VoiceDiagnosticsText = $"Capture diagnostics unavailable: {ex.Message}";
+        }
+    }
+
+    private void SaveLastSuccessfulSttDevice() =>
+        SaveVoiceSettings(
+            lastSuccessfulSttDeviceNumber: CurrentInputDeviceNumber(),
+            lastSuccessfulSttDeviceName: CurrentInputDeviceName());
+
+    private void SaveLastSuccessfulTtsDevice() =>
+        SaveVoiceSettings(
+            lastSuccessfulTtsDeviceNumber: CurrentOutputDeviceNumber(),
+            lastSuccessfulTtsDeviceName: CurrentOutputDeviceName());
+
+    private void SaveVoiceSettings(
+        int? selectedInputDeviceNumber = null,
+        string? selectedInputDeviceName = null,
+        int? selectedOutputDeviceNumber = null,
+        string? selectedOutputDeviceName = null,
+        int? lastSuccessfulSttDeviceNumber = null,
+        string? lastSuccessfulSttDeviceName = null,
+        int? lastSuccessfulTtsDeviceNumber = null,
+        string? lastSuccessfulTtsDeviceName = null,
+        string? selectedInputPreset = null)
+    {
+        if (_loadingVoiceSettings)
+        {
+            return;
+        }
+
+        _voiceSettings = _voiceSettings with
+        {
+            SelectedInputDeviceNumber = selectedInputDeviceNumber ?? _voiceSettings.SelectedInputDeviceNumber,
+            SelectedInputDeviceName = selectedInputDeviceName ?? _voiceSettings.SelectedInputDeviceName,
+            SelectedOutputDeviceNumber = selectedOutputDeviceNumber ?? _voiceSettings.SelectedOutputDeviceNumber,
+            SelectedOutputDeviceName = selectedOutputDeviceName ?? _voiceSettings.SelectedOutputDeviceName,
+            LastSuccessfulSttDeviceNumber = lastSuccessfulSttDeviceNumber ?? _voiceSettings.LastSuccessfulSttDeviceNumber,
+            LastSuccessfulSttDeviceName = lastSuccessfulSttDeviceName ?? _voiceSettings.LastSuccessfulSttDeviceName,
+            LastSuccessfulTtsDeviceNumber = lastSuccessfulTtsDeviceNumber ?? _voiceSettings.LastSuccessfulTtsDeviceNumber,
+            LastSuccessfulTtsDeviceName = lastSuccessfulTtsDeviceName ?? _voiceSettings.LastSuccessfulTtsDeviceName,
+            SelectedInputPreset = VoiceInputPreset.Normalize(selectedInputPreset ?? _voiceSettings.SelectedInputPreset)
+        };
+
+        VoiceRuntimeSettingsStore.Save(_services.DataRoot, _voiceSettings);
+    }
+
+    private int CurrentInputDeviceNumber() =>
+        TryReadDeviceNumber(SelectedVoiceInputDevice, out var deviceNumber) ? deviceNumber : 0;
+
+    private int CurrentOutputDeviceNumber() =>
+        TryReadDeviceNumber(SelectedVoiceOutputDevice, out var deviceNumber) ? deviceNumber : -1;
+
+    private string CurrentInputDeviceName() => ReadDeviceName(SelectedVoiceInputDevice);
+
+    private string CurrentOutputDeviceName() => ReadDeviceName(SelectedVoiceOutputDevice);
+
+    private string CurrentSpeechToTextModel() =>
+        _services.SpeechToText is WhisperCliSpeechToTextProvider whisper ? whisper.ModelPath : string.Empty;
+
+    private string CurrentTextToSpeechModel() =>
+        _services.TextToSpeech is PiperCliTextToSpeechProvider piper ? piper.ModelPath : string.Empty;
+
+    private static string ReadDeviceName(string selectedDevice)
+    {
+        var separatorIndex = selectedDevice.IndexOf(':', StringComparison.Ordinal);
+        return separatorIndex >= 0 && separatorIndex + 1 < selectedDevice.Length
+            ? selectedDevice[(separatorIndex + 1)..].Trim()
+            : selectedDevice.Trim();
     }
 
     private static bool TryReadDeviceNumber(string selectedDevice, out int deviceNumber)

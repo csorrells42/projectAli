@@ -76,7 +76,13 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
             SpeechToTextMode: voiceMetadata?.SpeechToTextMode,
             TextToSpeechProvider: voiceMetadata?.TextToSpeechProvider,
             TextToSpeechVoice: voiceMetadata?.TextToSpeechVoice,
-            RawAudioRetained: voiceMetadata?.RawAudioRetained ?? false);
+            RawAudioRetained: voiceMetadata?.RawAudioRetained ?? false,
+            VoiceInputDeviceNumber: voiceMetadata?.InputDeviceNumber,
+            VoiceInputDeviceName: voiceMetadata?.InputDeviceName,
+            VoiceInputPreset: voiceMetadata?.InputPreset,
+            SpeechToTextModel: voiceMetadata?.SpeechToTextModel,
+            TextToSpeechModel: voiceMetadata?.TextToSpeechModel,
+            SuspiciousOrNoSpeech: voiceMetadata?.SuspiciousOrNoSpeech ?? false);
 
         await store.SaveAsync(report, cancellationToken).ConfigureAwait(false);
         return report;

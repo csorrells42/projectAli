@@ -53,6 +53,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local TTS fake success path", TestLocalTtsFakeSuccessPath),
     ("speech player stop cancels playback", TestSpeechPlayerStopCancelsPlayback),
     ("spoken response cleaner strips clutter", TestSpokenResponseCleanerStripsClutter),
+    ("voice settings persist microphone and preset", TestVoiceSettingsPersistMicrophoneAndPreset),
+    ("missing saved microphone warns and falls back", TestMissingSavedMicrophoneWarnsAndFallsBack),
+    ("voice input level classifier detects silence good and clipping", TestVoiceInputLevelClassifier),
+    ("speech transcript guard rejects suspicious text", TestSpeechTranscriptGuardRejectsSuspiciousText),
     ("voice risky command requires visible confirmation", TestVoiceRiskyCommandRequiresVisibleConfirmation),
     ("voice origin correction queue metadata", TestVoiceOriginCorrectionQueueMetadata)
 };
@@ -403,6 +407,68 @@ static Task TestSpokenResponseCleanerStripsClutter()
     return Task.CompletedTask;
 }
 
+static Task TestVoiceSettingsPersistMicrophoneAndPreset()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var settings = new VoiceRuntimeSettings(
+        SelectedInputDeviceNumber: 3,
+        SelectedInputDeviceName: "Headset Mic",
+        SelectedOutputDeviceNumber: -1,
+        SelectedOutputDeviceName: "Default playback device",
+        LastSuccessfulSttDeviceNumber: 3,
+        LastSuccessfulSttDeviceName: "Headset Mic",
+        LastSuccessfulTtsDeviceNumber: -1,
+        LastSuccessfulTtsDeviceName: "Default playback device",
+        SelectedInputPreset: VoiceInputPreset.HeadsetMic);
+
+    VoiceRuntimeSettingsStore.Save(directory, settings);
+    var loaded = VoiceRuntimeSettingsStore.LoadOrDefault(directory);
+
+    Equal(3, loaded.SelectedInputDeviceNumber);
+    Equal("Headset Mic", loaded.SelectedInputDeviceName);
+    Equal(VoiceInputPreset.HeadsetMic, loaded.SelectedInputPreset);
+    Equal(3, loaded.LastSuccessfulSttDeviceNumber);
+    return Task.CompletedTask;
+}
+
+static Task TestMissingSavedMicrophoneWarnsAndFallsBack()
+{
+    var settings = new VoiceRuntimeSettings(
+        SelectedInputDeviceNumber: 7,
+        SelectedInputDeviceName: "Missing Mic");
+    var devices = new[]
+    {
+        new AudioInputDevice(1, "Available Mic")
+    };
+
+    var resolved = VoiceDeviceSelection.ResolveInput(settings, devices);
+
+    Equal(1, resolved.DeviceNumber);
+    Equal(false, resolved.RestoredSavedDevice);
+    Contains("Missing Mic", resolved.Warning ?? string.Empty);
+    return Task.CompletedTask;
+}
+
+static Task TestVoiceInputLevelClassifier()
+{
+    Equal(VoiceInputLevelState.Silence, VoiceInputLevelAnalyzer.Classify(rms: 0.0001, peak: 0.001));
+    Equal(VoiceInputLevelState.TooQuiet, VoiceInputLevelAnalyzer.Classify(rms: 0.006, peak: 0.04));
+    Equal(VoiceInputLevelState.Good, VoiceInputLevelAnalyzer.Classify(rms: 0.08, peak: 0.30));
+    Equal(VoiceInputLevelState.Clipping, VoiceInputLevelAnalyzer.Classify(rms: 0.25, peak: 0.99));
+    return Task.CompletedTask;
+}
+
+static Task TestSpeechTranscriptGuardRejectsSuspiciousText()
+{
+    Equal(false, SpeechTranscriptGuard.Evaluate("").Accepted);
+    Equal(false, SpeechTranscriptGuard.Evaluate("a").Accepted);
+    Equal(false, SpeechTranscriptGuard.Evaluate("you you you you").Accepted);
+    Equal(true, SpeechTranscriptGuard.Evaluate("Ali what model are you using").Accepted);
+    Equal(false, SpeechTranscriptGuard.Evaluate("what model are you using", requireAssistantName: true).Accepted);
+    Equal(true, SpeechTranscriptGuard.Evaluate("Ali what model are you using", requireAssistantName: true).Accepted);
+    return Task.CompletedTask;
+}
+
 static Task TestVoiceRiskyCommandRequiresVisibleConfirmation()
 {
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("delete my reminder for tomorrow"));
@@ -425,7 +491,13 @@ static async Task TestVoiceOriginCorrectionQueueMetadata()
         SpeechToTextMode: "unit-test",
         TextToSpeechProvider: "Fake local TTS",
         TextToSpeechVoice: "fake-voice",
-        RawAudioRetained: false);
+        RawAudioRetained: false,
+        InputDeviceNumber: 3,
+        InputDeviceName: "Headset Mic",
+        InputPreset: VoiceInputPreset.HeadsetMic,
+        SpeechToTextModel: "small.en",
+        TextToSpeechModel: "en_US-hfc_female-medium.onnx",
+        SuspiciousOrNoSpeech: false);
 
     var report = await queue.FlagIncorrectAsync(
         conversationId: "conv_voice",
@@ -449,6 +521,12 @@ static async Task TestVoiceOriginCorrectionQueueMetadata()
     Equal("Fake local TTS", stored.TextToSpeechProvider);
     Equal("fake-voice", stored.TextToSpeechVoice);
     Equal(false, stored.RawAudioRetained);
+    Equal(3, stored.VoiceInputDeviceNumber);
+    Equal("Headset Mic", stored.VoiceInputDeviceName);
+    Equal(VoiceInputPreset.HeadsetMic, stored.VoiceInputPreset);
+    Equal("small.en", stored.SpeechToTextModel);
+    Equal("en_US-hfc_female-medium.onnx", stored.TextToSpeechModel);
+    Equal(false, stored.SuspiciousOrNoSpeech);
 }
 
 static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model, bool supportsVision = false) =>
@@ -750,7 +828,8 @@ static async Task RunRealVoiceValidationAsync()
     var dspMode = Environment.GetEnvironmentVariable("ALI_REAL_VOICE_DSP_MODE") ?? "default";
     var dspBypassed = dspMode.Equals("bypass", StringComparison.OrdinalIgnoreCase)
         || dspMode.Equals("raw", StringComparison.OrdinalIgnoreCase);
-    var gainDb = ReadDoubleEnvironment("ALI_REAL_VOICE_GAIN_DB", dspBypassed ? 24d : 2d);
+    var voicePreset = VoiceInputPreset.Normalize(Environment.GetEnvironmentVariable("ALI_REAL_VOICE_PRESET"));
+    var gainDb = ReadNullableDoubleEnvironment("ALI_REAL_VOICE_GAIN_DB");
     var dataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Ali",
@@ -768,7 +847,8 @@ static async Task RunRealVoiceValidationAsync()
     Console.WriteLine($"VOICE_TTS_VOICE={tts.VoiceId}");
     Console.WriteLine($"VOICE_TTS_CONFIGURED={tts.IsConfigured}");
     Console.WriteLine($"VOICE_DSP_MODE={(dspBypassed ? "bypass" : "default")}");
-    Console.WriteLine($"VOICE_GAIN_DB={gainDb.ToString(CultureInfo.InvariantCulture)}");
+    Console.WriteLine($"VOICE_INPUT_PRESET={voicePreset}");
+    Console.WriteLine($"VOICE_GAIN_DB={(gainDb?.ToString(CultureInfo.InvariantCulture) ?? "preset")}");
 
     if (!stt.IsConfigured || !tts.IsConfigured)
     {
@@ -856,7 +936,6 @@ static async Task RunRealVoiceValidationAsync()
     Console.WriteLine($"VOICE_RECORD_SECONDS={recordSeconds}");
     Console.WriteLine("VOICE_RECORD_PROMPT=Speak now for the live Ali voice gate.");
 
-    VoiceAudioInput audioInput;
     var recorderSettings = dspBypassed
         ? new VoiceProcessorSettings(
             HighPassEnabled: false,
@@ -866,9 +945,15 @@ static async Task RunRealVoiceValidationAsync()
             CompressorEnabled: false,
             DeEsserEnabled: false,
             DePopperEnabled: false,
-            MakeupGainDb: gainDb,
+            MakeupGainDb: gainDb ?? 24d,
             LimiterEnabled: true)
-        : new VoiceProcessorSettings(MakeupGainDb: gainDb);
+        : VoiceInputPreset.CreateSettings(voicePreset);
+    if (gainDb is not null)
+    {
+        recorderSettings = recorderSettings with { MakeupGainDb = gainDb.Value };
+    }
+
+    VoiceAudioInput audioInput;
     var recorder = new NAudioVoiceRecorder(selectedInputDeviceNumber, recorderSettings);
     try
     {
@@ -890,10 +975,17 @@ static async Task RunRealVoiceValidationAsync()
     Console.WriteLine($"VOICE_AUDIO_PATH={audioInput.FilePath}");
     Console.WriteLine($"VOICE_AUDIO_BYTES={new FileInfo(audioInput.FilePath).Length}");
     Console.WriteLine($"VOICE_RAW_AUDIO_RETAINED={audioInput.RetainAudio}");
-    var audioStats = AnalyzeWaveAudio(audioInput.FilePath);
+    var selectedInputDeviceName = inputDevices.FirstOrDefault(device => device.DeviceNumber == selectedInputDeviceNumber)?.Name
+        ?? $"Device {selectedInputDeviceNumber}";
+    var audioStats = VoiceAudioFileAnalyzer.AnalyzeWaveAudio(
+        audioInput.FilePath,
+        selectedInputDeviceNumber,
+        selectedInputDeviceName);
     Console.WriteLine($"VOICE_AUDIO_DURATION_SECONDS={audioStats.DurationSeconds:N2}");
-    Console.WriteLine($"VOICE_AUDIO_RMS={audioStats.Rms}");
-    Console.WriteLine($"VOICE_AUDIO_PEAK={audioStats.Peak}");
+    Console.WriteLine($"VOICE_AUDIO_RMS={audioStats.RmsPcm}");
+    Console.WriteLine($"VOICE_AUDIO_PEAK={audioStats.PeakPcm}");
+    Console.WriteLine($"VOICE_AUDIO_STATE={audioStats.Level.State}");
+    Console.WriteLine($"VOICE_AUDIO_SUMMARY={audioStats.Summary}");
 
     SpeechTranscript transcript;
     try
@@ -917,10 +1009,12 @@ static async Task RunRealVoiceValidationAsync()
     Console.WriteLine($"VOICE_TRANSCRIPT_LENGTH={transcript.Text.Length}");
     Console.WriteLine($"VOICE_TRANSCRIPT={transcript.Text.ReplaceLineEndings(" ").Trim()}");
 
-    if (string.IsNullOrWhiteSpace(transcript.Text))
+    var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript.Text, requireAssistantName: true);
+    Console.WriteLine($"VOICE_TRANSCRIPT_GUARD_ACCEPTED={transcriptGuard.Accepted}");
+    if (!transcriptGuard.Accepted)
     {
         Console.WriteLine("VOICE_HEALTH_SUCCESS=False");
-        Console.WriteLine("VOICE_HEALTH_SUMMARY=Local STT returned an empty transcript.");
+        Console.WriteLine($"VOICE_HEALTH_SUMMARY={transcriptGuard.Message}");
         Environment.ExitCode = 8;
         return;
     }
@@ -954,7 +1048,13 @@ static async Task RunRealVoiceValidationAsync()
         transcript.Mode,
         tts.ProviderName,
         tts.VoiceId,
-        audioInput.RetainAudio);
+        audioInput.RetainAudio,
+        selectedInputDeviceNumber,
+        selectedInputDeviceName,
+        voicePreset,
+        stt.ModelPath,
+        tts.ModelPath,
+        SuspiciousOrNoSpeech: false);
 
     SpeechSynthesisResult speech;
     try
@@ -1030,6 +1130,11 @@ static async Task RunRealVoiceValidationAsync()
     Console.WriteLine($"VOICE_CORRECTION_TTS={stored?.TextToSpeechProvider}");
     Console.WriteLine($"VOICE_CORRECTION_TTS_VOICE={stored?.TextToSpeechVoice}");
     Console.WriteLine($"VOICE_CORRECTION_RAW_AUDIO_RETAINED={stored?.RawAudioRetained}");
+    Console.WriteLine($"VOICE_CORRECTION_INPUT_DEVICE={stored?.VoiceInputDeviceNumber}:{stored?.VoiceInputDeviceName}");
+    Console.WriteLine($"VOICE_CORRECTION_INPUT_PRESET={stored?.VoiceInputPreset}");
+    Console.WriteLine($"VOICE_CORRECTION_STT_MODEL={stored?.SpeechToTextModel}");
+    Console.WriteLine($"VOICE_CORRECTION_TTS_MODEL={stored?.TextToSpeechModel}");
+    Console.WriteLine($"VOICE_CORRECTION_SUSPICIOUS_OR_NO_SPEECH={stored?.SuspiciousOrNoSpeech}");
 
     var metadataPassed = stored is not null
         && stored.InputOrigin == VoiceInputOrigin.Voice
@@ -1038,7 +1143,13 @@ static async Task RunRealVoiceValidationAsync()
         && stored.SpeechToTextMode == transcript.Mode
         && stored.TextToSpeechProvider == tts.ProviderName
         && stored.TextToSpeechVoice == tts.VoiceId
-        && stored.RawAudioRetained == audioInput.RetainAudio;
+        && stored.RawAudioRetained == audioInput.RetainAudio
+        && stored.VoiceInputDeviceNumber == selectedInputDeviceNumber
+        && stored.VoiceInputDeviceName == selectedInputDeviceName
+        && stored.VoiceInputPreset == voicePreset
+        && stored.SpeechToTextModel == stt.ModelPath
+        && stored.TextToSpeechModel == tts.ModelPath
+        && stored.SuspiciousOrNoSpeech == false;
 
     Console.WriteLine($"VOICE_CORRECTION_METADATA_SUCCESS={metadataPassed}");
     Console.WriteLine($"VOICE_HEALTH_SUCCESS={metadataPassed}");
@@ -1100,85 +1211,14 @@ static int ReadIntEnvironment(string name, int defaultValue) =>
 static bool ReadBoolEnvironment(string name, bool defaultValue) =>
     bool.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : defaultValue;
 
-static double ReadDoubleEnvironment(string name, double defaultValue) =>
+static double? ReadNullableDoubleEnvironment(string name) =>
     double.TryParse(
         Environment.GetEnvironmentVariable(name),
         NumberStyles.Float,
         CultureInfo.InvariantCulture,
         out var value)
         ? value
-        : defaultValue;
-
-static WaveAudioStats AnalyzeWaveAudio(string filePath)
-{
-    using var stream = File.OpenRead(filePath);
-    using var reader = new BinaryReader(stream);
-
-    var riff = new string(reader.ReadChars(4));
-    _ = reader.ReadInt32();
-    var wave = new string(reader.ReadChars(4));
-    if (riff != "RIFF" || wave != "WAVE")
-    {
-        throw new InvalidOperationException("Recorded audio is not a WAV file.");
-    }
-
-    short channels = 0;
-    var sampleRate = 0;
-    short bitsPerSample = 0;
-    byte[]? data = null;
-
-    while (stream.Position < stream.Length)
-    {
-        var chunkId = new string(reader.ReadChars(4));
-        var chunkSize = reader.ReadInt32();
-        if (chunkId == "fmt ")
-        {
-            _ = reader.ReadInt16();
-            channels = reader.ReadInt16();
-            sampleRate = reader.ReadInt32();
-            _ = reader.ReadInt32();
-            _ = reader.ReadInt16();
-            bitsPerSample = reader.ReadInt16();
-            if (chunkSize > 16)
-            {
-                reader.ReadBytes(chunkSize - 16);
-            }
-        }
-        else if (chunkId == "data")
-        {
-            data = reader.ReadBytes(chunkSize);
-        }
-        else
-        {
-            reader.ReadBytes(chunkSize);
-        }
-
-        if (chunkSize % 2 == 1 && stream.Position < stream.Length)
-        {
-            reader.ReadByte();
-        }
-    }
-
-    if (data is null || bitsPerSample != 16 || channels <= 0 || sampleRate <= 0)
-    {
-        throw new InvalidOperationException("Recorded WAV must be 16-bit PCM audio.");
-    }
-
-    long sumSquares = 0;
-    var peak = 0;
-    var sampleCount = data.Length / 2;
-    for (var index = 0; index + 1 < data.Length; index += 2)
-    {
-        var sample = BitConverter.ToInt16(data, index);
-        var abs = Math.Abs((int)sample);
-        peak = Math.Max(peak, abs);
-        sumSquares += (long)sample * sample;
-    }
-
-    var rms = sampleCount == 0 ? 0 : (int)Math.Sqrt(sumSquares / (double)sampleCount);
-    var duration = sampleCount / (double)(sampleRate * channels);
-    return new WaveAudioStats(duration, rms, peak);
-}
+        : null;
 
 static void DeleteIfTemporary(string filePath, bool retain)
 {
@@ -1199,8 +1239,6 @@ static void DeleteIfTemporary(string filePath, bool retain)
         // Live gate cleanup should not hide the validation result.
     }
 }
-
-internal sealed record WaveAudioStats(double DurationSeconds, int Rms, int Peak);
 
 internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
 {

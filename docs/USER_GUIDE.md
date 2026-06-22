@@ -71,6 +71,31 @@ Installed local proof resources: 26 en-US Piper voices and Faster-Whisper caches
 
 If local STT or TTS is not configured, Ali says so in the voice status area. She does not use cloud speech and does not pretend a transcript or spoken response succeeded.
 
+The voice panel now includes:
+
+- Microphone picker
+- Output picker
+- Input preset picker
+- Live input meter
+- Capture diagnostics
+
+Meter states:
+
+- `No speech signal detected`: selected mic is silent, muted, or not receiving signal.
+- `Input is too quiet`: Ali hears something, but STT may not be reliable.
+- `Input level looks usable`: good candidate for live certification.
+- `Input is clipping`: lower gain or choose a calmer preset.
+
+Input presets:
+
+- `Raw`: minimal processing.
+- `Quiet Room`: light cleanup and moderate gain.
+- `Noisy Room`: stronger gate/noise suppression.
+- `Broadcast Mic / Close Mic`: close microphone shaping.
+- `Headset Mic`: practical boosted default for headset-style mics.
+
+Voice settings persist in `%LOCALAPPDATA%\Ali\BootstrapData\voice-settings.json`. If a saved mic disappears, Ali shows a warning and falls back visibly instead of silently pretending the same mic is still active.
+
 Current voice certification status: the local wiring from mic to STT to qwen3:14b to Piper to Stop Speaking to correction metadata has been proven mechanically. The guarded STT pass is still blocked on trustworthy microphone capture/tuning, so voice-command reliability is not yet certified.
 
 Voice can ask ordinary chat questions. Voice cannot yet run commands, change models, edit calendars, install things, delete memories, or do destructive actions. Those spoken requests are blocked in this phase and require visible typed confirmation later.

@@ -62,7 +62,13 @@ public sealed record CorrectionReport(
     string? SpeechToTextMode = null,
     string? TextToSpeechProvider = null,
     string? TextToSpeechVoice = null,
-    bool RawAudioRetained = false);
+    bool RawAudioRetained = false,
+    int? VoiceInputDeviceNumber = null,
+    string? VoiceInputDeviceName = null,
+    string? VoiceInputPreset = null,
+    string? SpeechToTextModel = null,
+    string? TextToSpeechModel = null,
+    bool SuspiciousOrNoSpeech = false);
 
 public interface ICorrectionQueueStore
 {

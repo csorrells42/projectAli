@@ -7,7 +7,6 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
 {
     private const int SampleRate = 44100;
     private readonly object _sync = new();
-    private readonly VoiceProcessorSettings _settings;
     private readonly InputChannelMode _channelMode;
     private WaveInEvent? _capture;
     private WaveFileWriter? _writer;
@@ -21,11 +20,15 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         InputChannelMode channelMode = InputChannelMode.MonoSum)
     {
         InputDeviceNumber = inputDeviceNumber;
-        _settings = settings ?? new VoiceProcessorSettings();
+        ProcessorSettings = settings ?? new VoiceProcessorSettings();
         _channelMode = channelMode;
     }
 
+    public event EventHandler<VoiceInputLevelSnapshot>? LevelAvailable;
+
     public int InputDeviceNumber { get; set; }
+
+    public VoiceProcessorSettings ProcessorSettings { get; set; }
 
     public bool IsRecording
     {
@@ -63,7 +66,7 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             Directory.CreateDirectory(outputDirectory);
             _currentFilePath = Path.Combine(outputDirectory, $"voice_{Guid.NewGuid():N}.wav");
             _startedAt = DateTimeOffset.UtcNow;
-            _processor = new VoiceSampleProcessor(_settings);
+            _processor = new VoiceSampleProcessor(ProcessorSettings);
             _writer = new WaveFileWriter(_currentFilePath, new WaveFormat(SampleRate, 16, 1));
             _capture = StartCapture(InputDeviceNumber);
         }
@@ -171,6 +174,15 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         {
             return;
         }
+
+        LevelAvailable?.Invoke(
+            this,
+            VoiceInputLevelAnalyzer.Analyze(
+                samples,
+                InputDeviceNumber,
+                GetInputDeviceName(InputDeviceNumber),
+                format.SampleRate,
+                format.Channels));
 
         var processed = processor.Process(samples);
         var bytes = ConvertFloatSamplesToPcm16(processed);
@@ -315,4 +327,8 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             // Temporary audio cleanup is best-effort.
         }
     }
+
+    private static string GetInputDeviceName(int deviceNumber) =>
+        GetInputDevices().FirstOrDefault(device => device.DeviceNumber == deviceNumber)?.Name
+        ?? $"Device {deviceNumber}";
 }

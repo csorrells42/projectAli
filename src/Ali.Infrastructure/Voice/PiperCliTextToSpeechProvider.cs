@@ -25,6 +25,8 @@ public sealed class PiperCliTextToSpeechProvider(PiperCliTextToSpeechOptions opt
 
     public string VoiceId => options.VoiceId;
 
+    public string ModelPath => options.ModelPath ?? string.Empty;
+
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(options.ExecutablePath)
         && !string.IsNullOrWhiteSpace(options.ModelPath)

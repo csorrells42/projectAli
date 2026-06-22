@@ -24,6 +24,8 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
 
     public string Mode => "local-cli";
 
+    public string ModelPath => options.ModelPath ?? string.Empty;
+
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(options.ExecutablePath)
         && !LocalSpeechToolPolicy.ContainsCloudReference(
