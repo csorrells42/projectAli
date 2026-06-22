@@ -39,6 +39,9 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
             ModelPackage: modelProfile.PackageId,
             Quantization: modelProfile.Quantization,
             ContextTokens: modelProfile.ContextTokens,
+            OutputTokenLimit: modelProfile.OutputTokenLimit,
+            Temperature: modelProfile.Temperature,
+            StreamingEnabled: modelProfile.StreamingEnabled,
             AnswerEvidenceStatus: answerEvidenceStatus,
             UserNote: userNote);
 

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Ali.Core.Evidence;
 using Ali.Core.Models;
 using Ali.Core.Runtime;
@@ -9,7 +10,10 @@ namespace Ali.Infrastructure.Runtime;
 
 public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
     private readonly HttpClient _httpClient;
     private readonly OpenAiCompatibleRuntimeOptions _options;
     private readonly EndpointValidationResult _endpointValidation;
@@ -121,7 +125,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             }
 
             var nonStreamingText = await SendNonStreamingPromptAsync(
-                BuildProbeRequest("Reply with exactly OK."),
+                BuildProbeRequest("Reply with exactly OK. /no_think"),
                 cancellationToken).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(nonStreamingText))
@@ -205,7 +209,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private async Task<bool> CheckStreamingPromptAsync(CancellationToken cancellationToken)
     {
         await foreach (var token in StreamChatAsync(
-                           BuildProbeRequest("Reply with exactly OK."),
+                           BuildProbeRequest("Reply with exactly OK. /no_think"),
                            cancellationToken).ConfigureAwait(false))
         {
             if (!string.IsNullOrWhiteSpace(token.Text))

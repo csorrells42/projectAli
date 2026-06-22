@@ -74,6 +74,14 @@ Ali only activates the configured runtime after the health check succeeds. `Reve
 
 Reference: https://docs.ollama.com/api/openai-compatibility
 
+Current first proof model:
+
+```text
+qwen3:14b
+```
+
+This proves Ali's local text runtime path. It is not the final Ali model decision.
+
 ## KISS Rules
 
 - Keep Ali local-first.

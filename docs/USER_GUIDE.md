@@ -34,6 +34,8 @@ Ali refuses public/cloud runtime endpoints in local-only mode.
 
 Use `Revert to Stub` any time you want to return to the deterministic local test runtime.
 
+The current first proof model is `qwen3:14b`. It proves the local text path works; it is not the final Ali model selection.
+
 ## Important Truth Rule
 
 Ali must not claim a model, command, build, test, reminder, calendar event, or file change succeeded unless there is evidence.

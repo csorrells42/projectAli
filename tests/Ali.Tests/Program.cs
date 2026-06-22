@@ -7,6 +7,12 @@ using Ali.Core.Truthfulness;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Storage;
 
+if (args.Contains("--real-runtime", StringComparer.OrdinalIgnoreCase))
+{
+    await RunRealRuntimeValidationAsync();
+    return;
+}
+
 var tests = new List<(string Name, Func<Task> Run)>
 {
     ("truthfulness reports unknown without receipt", TestTruthfulnessUnknownWithoutReceipt),
@@ -251,6 +257,9 @@ static async Task TestCorrectionQueueStoresRuntimeSnapshot()
     Equal(profile.RuntimeEndpoint, reports[0].RuntimeEndpoint);
     Equal(profile.PackageId, reports[0].ModelPackage);
     Equal(profile.ContextTokens, reports[0].ContextTokens);
+    Equal(profile.OutputTokenLimit, reports[0].OutputTokenLimit);
+    Equal(profile.Temperature, reports[0].Temperature);
+    Equal(profile.StreamingEnabled, reports[0].StreamingEnabled);
 }
 
 static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model) =>
@@ -293,6 +302,143 @@ static void Contains(string expectedFragment, string actual)
     {
         throw new InvalidOperationException($"Expected '{actual}' to contain '{expectedFragment}'.");
     }
+}
+
+static async Task RunRealRuntimeValidationAsync()
+{
+    var endpoint = new Uri(Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_ENDPOINT") ?? "http://127.0.0.1:11434/v1/");
+    var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:14b";
+    var dataRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Ali",
+        "BootstrapData");
+
+    var options = new OpenAiCompatibleRuntimeOptions(
+        Enabled: true,
+        Endpoint: endpoint,
+        Model: model,
+        DisplayName: $"Proof model {model}",
+        Family: "Qwen",
+        Size: "14B",
+        Quantization: "Ollama package default",
+        ContextTokens: 4096,
+        OutputTokenLimit: 256,
+        Temperature: 0.2,
+        TopP: 0.9,
+        StreamingEnabled: true,
+        SupportsVision: false,
+        SupportsToolCalls: false,
+        AllowPrivateLanEndpoint: false);
+
+    RuntimeSettingsStore.Save(dataRoot, options);
+
+    var fallback = new DevelopmentLocalModelRuntime();
+    var candidate = new OpenAiCompatibleLocalModelRuntime(new HttpClient(), options);
+    var runtime = new SafeActivatingLocalRuntime(fallback, candidate);
+
+    var health = await runtime.CheckCandidateAsync(CancellationToken.None);
+    Console.WriteLine($"HEALTH_SUCCESS={health.Succeeded}");
+    Console.WriteLine($"HEALTH_SUMMARY={health.Summary}");
+    Console.WriteLine($"HEALTH_ENDPOINT={health.Endpoint}");
+    Console.WriteLine($"HEALTH_MODEL={health.ModelPackageId}");
+    Console.WriteLine($"HEALTH_ELAPSED_MS={health.Elapsed.TotalMilliseconds:N0}");
+    Console.WriteLine($"HEALTH_STREAMING={health.StreamingSupported}");
+
+    if (!health.Succeeded)
+    {
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    Console.WriteLine($"ACTIVE_BEFORE_ACTIVATE={runtime.ActiveProfile.PackageId}");
+    var activated = runtime.ActivateLastHealthChecked();
+    Console.WriteLine($"ACTIVATED={activated}");
+    Console.WriteLine($"ACTIVE_AFTER_ACTIVATE={runtime.ActiveProfile.PackageId}");
+
+    var prompt = "What model are you using? Answer in one short sentence.";
+    var answer = await StreamToStringAsync(runtime, prompt, CancellationToken.None);
+    Console.WriteLine($"PROMPT={prompt}");
+    Console.WriteLine($"ANSWER_LENGTH={answer.Length}");
+    Console.WriteLine($"ANSWER={answer.ReplaceLineEndings(" ").Trim()}");
+
+    var cancelResult = await ValidateCancellationAfterFirstTokenAsync(runtime);
+    Console.WriteLine($"CANCEL_AFTER_FIRST_TOKEN={cancelResult}");
+
+    var correctionStore = new FileCorrectionQueueStore(dataRoot);
+    var queue = new CorrectionQueueService(correctionStore);
+    var report = await queue.FlagIncorrectAsync(
+        conversationId: "real_runtime_validation",
+        userMessageId: "real_user_model_question",
+        assistantMessageId: "real_assistant_model_answer",
+        question: prompt,
+        answer: answer,
+        modelProfile: runtime.ActiveProfile,
+        answerEvidenceStatus: EvidenceStatus.Unverified,
+        category: CorrectionCategory.Other,
+        userNote: "Real local runtime heartbeat correction queue validation.",
+        cancellationToken: CancellationToken.None);
+
+    var reports = await correctionStore.ListAsync(CancellationToken.None);
+    var stored = reports.FirstOrDefault(item => item.Id == report.Id);
+    Console.WriteLine($"CORRECTION_STORED={stored is not null}");
+    Console.WriteLine($"CORRECTION_ID={report.Id}");
+    Console.WriteLine($"CORRECTION_MODEL={stored?.ModelPackage}");
+    Console.WriteLine($"CORRECTION_ENDPOINT={stored?.RuntimeEndpoint}");
+    Console.WriteLine($"CORRECTION_CONTEXT={stored?.ContextTokens}");
+    Console.WriteLine($"CORRECTION_OUTPUT_LIMIT={stored?.OutputTokenLimit}");
+    Console.WriteLine($"CORRECTION_TEMPERATURE={stored?.Temperature}");
+    Console.WriteLine($"CORRECTION_STREAMING={stored?.StreamingEnabled}");
+}
+
+static async Task<string> StreamToStringAsync(
+    ILocalModelRuntime runtime,
+    string prompt,
+    CancellationToken cancellationToken)
+{
+    var chunks = new List<string>();
+
+    await foreach (var token in runtime.StreamChatAsync(
+                       new ChatRequest(
+                           ConversationId: "real_runtime_validation",
+                           UserMessageId: $"msg_{Guid.NewGuid():N}",
+                           UserText: prompt,
+                           History: Array.Empty<ChatMessage>()),
+                       cancellationToken))
+    {
+        chunks.Add(token.Text);
+    }
+
+    return string.Concat(chunks);
+}
+
+static async Task<bool> ValidateCancellationAfterFirstTokenAsync(ILocalModelRuntime runtime)
+{
+    using var cancellation = new CancellationTokenSource();
+    var sawToken = false;
+
+    try
+    {
+        await foreach (var token in runtime.StreamChatAsync(
+                           new ChatRequest(
+                               ConversationId: "real_runtime_validation",
+                               UserMessageId: $"msg_{Guid.NewGuid():N}",
+                               UserText: "Count slowly from one to twenty, one number per line.",
+                               History: Array.Empty<ChatMessage>()),
+                           cancellation.Token))
+        {
+            if (!string.IsNullOrEmpty(token.Text))
+            {
+                sawToken = true;
+                cancellation.Cancel();
+            }
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        return sawToken;
+    }
+
+    return sawToken && cancellation.IsCancellationRequested;
 }
 
 internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler

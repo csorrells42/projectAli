@@ -12,6 +12,8 @@ public sealed record ModelProfile(
     string Quantization,
     int ContextTokens,
     int OutputTokenLimit,
+    double? Temperature,
+    bool? StreamingEnabled,
     bool SupportsVision,
     bool SupportsToolCalls,
     bool IsLastKnownGood)
@@ -29,6 +31,8 @@ public sealed record ModelProfile(
             Quantization: "Q4",
             ContextTokens: 4096,
             OutputTokenLimit: 512,
+            Temperature: null,
+            StreamingEnabled: null,
             SupportsVision: false,
             SupportsToolCalls: false,
             IsLastKnownGood: false);

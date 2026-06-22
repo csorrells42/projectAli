@@ -32,6 +32,8 @@ public sealed record OpenAiCompatibleRuntimeOptions(
             Quantization: Quantization,
             ContextTokens: ContextTokens,
             OutputTokenLimit: OutputTokenLimit,
+            Temperature: Temperature,
+            StreamingEnabled: StreamingEnabled,
             SupportsVision: SupportsVision,
             SupportsToolCalls: SupportsToolCalls,
             IsLastKnownGood: isLastKnownGood);

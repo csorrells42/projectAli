@@ -112,3 +112,36 @@ The local runtime health check verifies:
 - Latency, endpoint, model, context, output limit, temperature, and streaming support are recorded in the result.
 
 Failure leaves the active runtime unchanged.
+
+## First Real Local Heartbeat
+
+Date: 2026-06-22
+
+The first real local model validation used:
+
+```text
+Runtime: Ollama
+Endpoint: http://127.0.0.1:11434/v1/
+Model/package ID: qwen3:14b
+Installed package size: 14.8B
+Installed quantization: Q4_K_M
+Context: 4096
+Max output: 256
+Temperature: 0.2
+Top-p: 0.9
+Streaming: enabled
+```
+
+This is the first proof model only. It is not the final Ali model decision.
+
+Validation result:
+
+```text
+Health check: passed
+Activation before explicit request: no
+Explicit activation: passed
+First prompt: What model are you using? Answer in one short sentence.
+Streamed answer: I am using the Qwen3 model.
+Stop/cancel: passed after first token
+Correction queue runtime snapshot: stored
+```
