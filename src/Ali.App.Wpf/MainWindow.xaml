@@ -234,10 +234,16 @@
                                     <Button Content="Flag as incorrect"
                                             Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}"
+                                            Height="28"
+                                            MinHeight="28"
+                                            Margin="0"
+                                            Padding="9,0"
+                                            FontSize="12"
                                             Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
                                     <TextBlock Text="Flagged for correction"
-                                               Margin="12,11,0,0"
+                                               Margin="8,6,0,0"
                                                Foreground="#FBBF24"
+                                               FontSize="12"
                                                Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
                                 </StackPanel>
                             </StackPanel>
