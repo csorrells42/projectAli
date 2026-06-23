@@ -130,3 +130,30 @@ Revisit:
 - Tune VAD only after microphone gain/device selection is stable.
 - Evaluate newer local ASR options such as NVIDIA Parakeet/Canary/Nemotron Speech when they are practical for Windows/local packaging.
 - Keep the final choice swappable.
+
+## Smart App Control Dev Signing
+
+Status: active temporary bridge
+
+Current implementation:
+
+- Smart App Control blocked unsigned local build assemblies such as `Ali.Infrastructure.dll` and `NAudio.Wasapi.dll`.
+- A local current-user test code-signing certificate was created for development output signing.
+- Debug/test binaries and the `%LOCALAPPDATA%\Ali\DevRun` copy can be signed after builds so Ali can launch during development.
+
+Reason:
+
+- Windows policy can block loose unsigned DLLs before Ali has a chance to show a friendly error.
+- Local dev signing keeps the Phase 1 cockpit usable without disabling Smart App Control.
+
+Replace with:
+
+- Proper installer-managed code signing.
+- A repeatable post-build/dev-run signing step if local unsigned debug builds remain blocked.
+- Clear user documentation explaining install, repair, signing/trust, and Smart App Control behavior.
+
+Do not forget:
+
+- Do not treat the local test certificate as production security.
+- Future builds may overwrite signed binaries and need re-signing until the installer/signing path exists.
+- Installer/repair should be the long-term answer, not manual certificate work.
