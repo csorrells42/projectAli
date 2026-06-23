@@ -10,6 +10,8 @@ namespace Ali.Infrastructure.Runtime;
 
 public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 {
+    private const int HealthProbeAttempts = 3;
+    private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -124,7 +126,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 return FailureHealth(started, modelsResult.Summary, streamingSupported);
             }
 
-            var nonStreamingText = await SendNonStreamingPromptAsync(
+            var nonStreamingText = await SendNonStreamingProbeWithRetryAsync(
                 BuildProbeRequest("Reply with exactly OK. /no_think"),
                 cancellationToken).ConfigureAwait(false);
 
@@ -135,7 +137,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
             if (_options.StreamingEnabled)
             {
-                streamingSupported = await CheckStreamingPromptAsync(cancellationToken).ConfigureAwait(false);
+                streamingSupported = await CheckStreamingPromptWithRetryAsync(cancellationToken).ConfigureAwait(false);
                 if (!streamingSupported)
                 {
                     return FailureHealth(started, "Tiny streaming prompt returned no content.", streamingSupported);
@@ -218,6 +220,25 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         return OpenAiStreamParser.ExtractMessageContent(body) ?? string.Empty;
     }
 
+    private async Task<string> SendNonStreamingProbeWithRetryAsync(ChatRequest request, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= HealthProbeAttempts; attempt++)
+        {
+            var text = await SendNonStreamingPromptAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+
+            if (attempt < HealthProbeAttempts)
+            {
+                await Task.Delay(HealthProbeRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return string.Empty;
+    }
+
     private async Task<bool> CheckStreamingPromptAsync(CancellationToken cancellationToken)
     {
         await foreach (var token in StreamChatAsync(
@@ -227,6 +248,24 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             if (!string.IsNullOrWhiteSpace(token.Text))
             {
                 return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> CheckStreamingPromptWithRetryAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= HealthProbeAttempts; attempt++)
+        {
+            if (await CheckStreamingPromptAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            if (attempt < HealthProbeAttempts)
+            {
+                await Task.Delay(HealthProbeRetryDelay, cancellationToken).ConfigureAwait(false);
             }
         }
 

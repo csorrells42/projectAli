@@ -39,6 +39,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("runtime settings save and load", TestRuntimeSettingsSaveAndLoad),
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
+    ("health check retries empty non-streaming probe", TestHealthCheckRetriesEmptyNonStreamingProbe),
     ("vision health check sends image content", TestVisionHealthCheckSendsImageContent),
     ("OpenAI stream parser extracts content delta", TestOpenAiStreamParserExtractsContentDelta),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
@@ -236,6 +237,18 @@ static async Task TestSuccessfulHealthCheckCanActivateRuntime()
     Equal(true, controller.ActivateLastHealthChecked());
     Equal(options.Model, controller.ActiveProfile.PackageId);
     Equal(options.Endpoint.ToString(), controller.ActiveProfile.RuntimeEndpoint);
+}
+
+static async Task TestHealthCheckRetriesEmptyNonStreamingProbe()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var handler = new FlakyHealthProbeHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+
+    var health = await runtime.CheckHealthAsync(CancellationToken.None);
+
+    Equal(true, health.Succeeded);
+    Equal(2, handler.NonStreamingPromptCount);
 }
 
 static async Task TestVisionHealthCheckSendsImageContent()
@@ -1130,6 +1143,7 @@ static async Task RunRealVoiceValidationAsync()
     var endpoint = new Uri(Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_ENDPOINT") ?? "http://127.0.0.1:11434/v1/");
     var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:8b";
     var recordSeconds = ReadIntEnvironment("ALI_REAL_VOICE_RECORD_SECONDS", 5);
+    var countdownSeconds = ReadIntEnvironment("ALI_REAL_VOICE_COUNTDOWN_SECONDS", 0);
     var retainDebugAudio = ReadBoolEnvironment("ALI_REAL_VOICE_RETAIN_AUDIO", false);
     var dspMode = Environment.GetEnvironmentVariable("ALI_REAL_VOICE_DSP_MODE") ?? "default";
     var dspBypassed = dspMode.Equals("bypass", StringComparison.OrdinalIgnoreCase)
@@ -1244,6 +1258,7 @@ static async Task RunRealVoiceValidationAsync()
         "SessionAudio",
         DateTimeOffset.Now.ToString("yyyyMMdd"));
     Console.WriteLine($"VOICE_RECORD_SECONDS={recordSeconds}");
+    Console.WriteLine($"VOICE_RECORD_COUNTDOWN_SECONDS={countdownSeconds}");
     Console.WriteLine("VOICE_RECORD_PROMPT=Speak now for the live Ali voice gate.");
 
     var recorderSettings = dspBypassed
@@ -1270,6 +1285,7 @@ static async Task RunRealVoiceValidationAsync()
     };
     try
     {
+        await RunVoiceCountdownAsync(countdownSeconds);
         await recorder.StartAsync(audioDirectory, CancellationToken.None);
         await Task.Delay(TimeSpan.FromSeconds(recordSeconds));
         audioInput = await recorder.StopAsync(CancellationToken.None);
@@ -1534,6 +1550,34 @@ static async Task<bool> ValidateStopSpeakingAsync(ITextToSpeechProvider tts, int
     }
 }
 
+static async Task RunVoiceCountdownAsync(int countdownSeconds)
+{
+    for (var remaining = countdownSeconds; remaining > 0; remaining--)
+    {
+        Console.WriteLine($"VOICE_RECORD_COUNTDOWN={remaining}");
+        TryBeep(880, 140);
+        await Task.Delay(1000);
+    }
+
+    if (countdownSeconds > 0)
+    {
+        Console.WriteLine("VOICE_RECORD_COUNTDOWN=recording");
+        TryBeep(1200, 260);
+    }
+}
+
+static void TryBeep(int frequency, int duration)
+{
+    try
+    {
+        Console.Beep(frequency, duration);
+    }
+    catch
+    {
+        // Countdown beeps are convenience only; live certification must still run without speakers.
+    }
+}
+
 static int ReadIntEnvironment(string name, int defaultValue) =>
     int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : defaultValue;
 
@@ -1617,6 +1661,57 @@ internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
         }
 
         return JsonResponse("""{"choices":[{"message":{"content":"OK"}}]}""");
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) =>
+        new(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+}
+
+internal sealed class FlakyHealthProbeHandler(string model) : HttpMessageHandler
+{
+    public int NonStreamingPromptCount { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+
+        if (path.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonResponse($$"""{"data":[{"id":"{{model}}"}]}""");
+        }
+
+        if (!path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("not found")
+            };
+        }
+
+        var body = request.Content is null
+            ? string.Empty
+            : await request.Content.ReadAsStringAsync(cancellationToken);
+
+        if (body.Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n" +
+                    "data: [DONE]\n\n")
+            };
+        }
+
+        NonStreamingPromptCount++;
+        return NonStreamingPromptCount == 1
+            ? JsonResponse("""{"choices":[{"message":{"content":""}}]}""")
+            : JsonResponse("""{"choices":[{"message":{"content":"OK"}}]}""");
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>
