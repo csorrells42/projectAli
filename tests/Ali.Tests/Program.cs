@@ -51,6 +51,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local STT fake success path", TestLocalSttFakeSuccessPath),
     ("local STT fake failure path", TestLocalSttFakeFailurePath),
     ("local TTS fake success path", TestLocalTtsFakeSuccessPath),
+    ("voice transcript routing keeps dictation in composer when voice mode off", TestVoiceTranscriptRoutingKeepsDictationInComposerWhenVoiceModeOff),
+    ("voice transcript routing auto sends only when voice mode on", TestVoiceTranscriptRoutingAutoSendsOnlyWhenVoiceModeOn),
     ("speech player stop cancels playback", TestSpeechPlayerStopCancelsPlayback),
     ("spoken response cleaner strips clutter", TestSpokenResponseCleanerStripsClutter),
     ("voice settings persist microphone and preset", TestVoiceSettingsPersistMicrophoneAndPreset),
@@ -60,9 +62,13 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("voice calibration evaluator keeps action gated", TestVoiceCalibrationEvaluatorKeepsActionGated),
     ("voice audio normalizer raises quiet audio", TestVoiceAudioNormalizerRaisesQuietAudio),
     ("voice input level classifier detects silence good and clipping", TestVoiceInputLevelClassifier),
+    ("voice capture safety rejects bad audio levels", TestVoiceCaptureSafetyRejectsBadAudioLevels),
     ("spectrum analyzer emits live bars", TestSpectrumAnalyzerEmitsLiveBars),
     ("speech transcript guard rejects suspicious text", TestSpeechTranscriptGuardRejectsSuspiciousText),
     ("voice risky command requires visible confirmation", TestVoiceRiskyCommandRequiresVisibleConfirmation),
+    ("local STT missing model path produces explicit error", TestLocalSttMissingModelPathProducesExplicitError),
+    ("local TTS missing voice model produces explicit error", TestLocalTtsMissingVoiceModelProducesExplicitError),
+    ("local TTS voice mismatch is rejected", TestLocalTtsVoiceMismatchIsRejected),
     ("voice origin correction queue metadata", TestVoiceOriginCorrectionQueueMetadata)
 };
 
@@ -376,6 +382,26 @@ static async Task TestLocalTtsFakeSuccessPath()
     Equal(false, result.RetainAudio);
 }
 
+static Task TestVoiceTranscriptRoutingKeepsDictationInComposerWhenVoiceModeOff()
+{
+    var decision = VoiceTranscriptRouting.Decide(voiceModeEnabled: false);
+
+    Equal(true, decision.PlaceTranscriptInComposer);
+    Equal(false, decision.SendAutomatically);
+    Contains("composer", decision.Description);
+    return Task.CompletedTask;
+}
+
+static Task TestVoiceTranscriptRoutingAutoSendsOnlyWhenVoiceModeOn()
+{
+    var decision = VoiceTranscriptRouting.Decide(voiceModeEnabled: true);
+
+    Equal(false, decision.PlaceTranscriptInComposer);
+    Equal(true, decision.SendAutomatically);
+    Contains("hands-free", decision.Description);
+    return Task.CompletedTask;
+}
+
 static async Task TestSpeechPlayerStopCancelsPlayback()
 {
     var player = new FakeSpeechPlayer();
@@ -577,6 +603,23 @@ static Task TestVoiceInputLevelClassifier()
     return Task.CompletedTask;
 }
 
+static Task TestVoiceCaptureSafetyRejectsBadAudioLevels()
+{
+    var silence = CreateCaptureDiagnostics(rms: 0.0001, peak: 0.001);
+    var tooQuiet = CreateCaptureDiagnostics(rms: 0.006, peak: 0.04);
+    var good = CreateCaptureDiagnostics(rms: 0.08, peak: 0.30);
+    var clipping = CreateCaptureDiagnostics(rms: 0.25, peak: 0.99);
+
+    Equal(false, VoiceCaptureSafetyGate.Evaluate(silence).Accepted);
+    Equal(VoiceCaptureSafetyGate.Silence, VoiceCaptureSafetyGate.Evaluate(silence).Reason);
+    Equal(false, VoiceCaptureSafetyGate.Evaluate(tooQuiet).Accepted);
+    Equal(VoiceCaptureSafetyGate.TooQuiet, VoiceCaptureSafetyGate.Evaluate(tooQuiet).Reason);
+    Equal(true, VoiceCaptureSafetyGate.Evaluate(good).Accepted);
+    Equal(false, VoiceCaptureSafetyGate.Evaluate(clipping).Accepted);
+    Equal(VoiceCaptureSafetyGate.Clipping, VoiceCaptureSafetyGate.Evaluate(clipping).Reason);
+    return Task.CompletedTask;
+}
+
 static Task TestSpectrumAnalyzerEmitsLiveBars()
 {
     var analyzer = new SpectrumAnalyzer();
@@ -596,11 +639,20 @@ static Task TestSpectrumAnalyzerEmitsLiveBars()
 
 static Task TestSpeechTranscriptGuardRejectsSuspiciousText()
 {
-    Equal(false, SpeechTranscriptGuard.Evaluate("").Accepted);
-    Equal(false, SpeechTranscriptGuard.Evaluate("a").Accepted);
-    Equal(false, SpeechTranscriptGuard.Evaluate("you you you you").Accepted);
+    var empty = SpeechTranscriptGuard.Evaluate("");
+    var tooShort = SpeechTranscriptGuard.Evaluate("a");
+    var repeated = SpeechTranscriptGuard.Evaluate("you you you you");
+    var missingName = SpeechTranscriptGuard.Evaluate("what model are you using", requireAssistantName: true);
+
+    Equal(false, empty.Accepted);
+    Equal(SpeechTranscriptGuard.EmptyReason, empty.Reason);
+    Equal(false, tooShort.Accepted);
+    Equal(SpeechTranscriptGuard.TooShortReason, tooShort.Reason);
+    Equal(false, repeated.Accepted);
+    Equal(SpeechTranscriptGuard.RepeatedTextReason, repeated.Reason);
     Equal(true, SpeechTranscriptGuard.Evaluate("Ali what model are you using").Accepted);
-    Equal(false, SpeechTranscriptGuard.Evaluate("what model are you using", requireAssistantName: true).Accepted);
+    Equal(false, missingName.Accepted);
+    Equal(SpeechTranscriptGuard.MissingAssistantNameReason, missingName.Reason);
     Equal(true, SpeechTranscriptGuard.Evaluate("Ali what model are you using", requireAssistantName: true).Accepted);
     return Task.CompletedTask;
 }
@@ -610,8 +662,77 @@ static Task TestVoiceRiskyCommandRequiresVisibleConfirmation()
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("delete my reminder for tomorrow"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("run this PowerShell command"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("switch to the 32b model"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("send an email to Chris"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("rename this folder"));
     Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("what is the capital of Alabama"));
     return Task.CompletedTask;
+}
+
+static async Task TestLocalSttMissingModelPathProducesExplicitError()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var fakeExe = Path.Combine(directory, "python.exe");
+    var audioPath = Path.Combine(directory, "voice.wav");
+    await File.WriteAllTextAsync(fakeExe, "not really python");
+    await File.WriteAllBytesAsync(audioPath, [0, 1, 2, 3]);
+
+    var provider = new WhisperCliSpeechToTextProvider(new WhisperCliSpeechToTextOptions(
+        fakeExe,
+        Path.Combine(directory, "missing-whisper-root"),
+        "\"wrapper.py\" --audio \"{audio}\" --model-root \"{model}\" --output-base \"{outputBase}\"",
+        ".txt"));
+
+    Equal(false, provider.IsConfigured);
+    var ex = await ThrowsAsync<FileNotFoundException>(() => provider.TranscribeAsync(
+        new VoiceAudioInput(audioPath, "audio/wav", RetainAudio: false, DateTimeOffset.UtcNow),
+        CancellationToken.None));
+    Contains("Local STT model path was not found", ex.Message);
+}
+
+static async Task TestLocalTtsMissingVoiceModelProducesExplicitError()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var fakeExe = Path.Combine(directory, "python.exe");
+    await File.WriteAllTextAsync(fakeExe, "not really python");
+
+    var provider = new PiperCliTextToSpeechProvider(new PiperCliTextToSpeechOptions(
+        fakeExe,
+        Path.Combine(directory, "missing-voice.onnx"),
+        "missing-voice",
+        "\"wrapper.py\" --model \"{model}\" --output \"{output}\"",
+        directory));
+
+    Equal(false, provider.IsConfigured);
+    var ex = await ThrowsAsync<FileNotFoundException>(() => provider.SynthesizeAsync(
+        "hello",
+        new VoiceSettings("missing-voice", Rate: 1.0, RetainAudio: false),
+        CancellationToken.None));
+    Contains("Local TTS voice model was not found", ex.Message);
+}
+
+static async Task TestLocalTtsVoiceMismatchIsRejected()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var fakeExe = Path.Combine(directory, "python.exe");
+    var fakeModel = Path.Combine(directory, "en_US-hfc_female-medium.onnx");
+    await File.WriteAllTextAsync(fakeExe, "not really python");
+    await File.WriteAllTextAsync(fakeModel, "not really a voice model");
+
+    var provider = new PiperCliTextToSpeechProvider(new PiperCliTextToSpeechOptions(
+        fakeExe,
+        fakeModel,
+        "en_US-hfc_female-medium",
+        "\"wrapper.py\" --model \"{model}\" --output \"{output}\"",
+        directory));
+
+    var ex = await ThrowsAsync<InvalidOperationException>(() => provider.SynthesizeAsync(
+        "hello",
+        new VoiceSettings("en_US-amy-low", Rate: 1.0, RetainAudio: false),
+        CancellationToken.None));
+    Contains("does not match configured Piper voice", ex.Message);
 }
 
 static async Task TestVoiceOriginCorrectionQueueMetadata()
@@ -636,7 +757,11 @@ static async Task TestVoiceOriginCorrectionQueueMetadata()
         NormalizeBeforeStt: true,
         SpeechToTextModel: "small.en",
         TextToSpeechModel: "en_US-hfc_female-medium.onnx",
-        SuspiciousOrNoSpeech: false);
+        SuspiciousOrNoSpeech: false,
+        RejectionReason: null,
+        InputPeak: 0.25,
+        InputRms: 0.08,
+        InputLevelState: VoiceInputLevelState.Good.ToString());
 
     var report = await queue.FlagIncorrectAsync(
         conversationId: "conv_voice",
@@ -669,6 +794,30 @@ static async Task TestVoiceOriginCorrectionQueueMetadata()
     Equal("small.en", stored.SpeechToTextModel);
     Equal("en_US-hfc_female-medium.onnx", stored.TextToSpeechModel);
     Equal(false, stored.SuspiciousOrNoSpeech);
+    Equal(null, stored.VoiceRejectionReason);
+    Equal(0.25, stored.VoiceInputPeak);
+    Equal(0.08, stored.VoiceInputRms);
+    Equal(VoiceInputLevelState.Good.ToString(), stored.VoiceInputLevelState);
+}
+
+static VoiceCaptureDiagnostics CreateCaptureDiagnostics(double rms, double peak)
+{
+    var level = VoiceInputLevelAnalyzer.CreateSnapshot(
+        deviceNumber: 2,
+        deviceName: "Scarlett 2i2",
+        sampleRate: 44100,
+        channels: 1,
+        rms,
+        peak);
+
+    return new VoiceCaptureDiagnostics(
+        "voice.wav",
+        DurationSeconds: 1.0,
+        SampleRate: 44100,
+        Channels: 1,
+        RmsPcm: (int)(rms * short.MaxValue),
+        PeakPcm: (int)(peak * short.MaxValue),
+        level);
 }
 
 static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model, bool supportsVision = false) =>
@@ -739,6 +888,21 @@ static async Task ThrowsInvalidOperationAsync(Func<Task> action)
     }
 
     throw new InvalidOperationException("Expected InvalidOperationException was not thrown.");
+}
+
+static async Task<TException> ThrowsAsync<TException>(Func<Task> action)
+    where TException : Exception
+{
+    try
+    {
+        await action();
+    }
+    catch (TException ex)
+    {
+        return ex;
+    }
+
+    throw new InvalidOperationException($"Expected {typeof(TException).Name} was not thrown.");
 }
 
 static async Task RunRealRuntimeValidationAsync()

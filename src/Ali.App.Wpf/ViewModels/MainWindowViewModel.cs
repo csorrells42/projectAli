@@ -41,6 +41,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private VoiceSettingsWindow? _voiceSettingsWindow;
     private bool _voiceMonitorRequested;
     private VoiceDiagnosticSample? _lastDiagnosticSample;
+    private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
     private VoiceCalibrationResult? _lastCalibrationResult;
     private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
     private double[] _renderedSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
@@ -1317,6 +1318,23 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsTranscribing = true;
             SttStatus = "Transcribing locally...";
+            var captureDiagnostics = UpdateCaptureDiagnostics(audioInput) ?? _lastCaptureDiagnostics;
+            if (captureDiagnostics is not null)
+            {
+                var captureGate = VoiceCaptureSafetyGate.Evaluate(captureDiagnostics);
+                if (!captureGate.Accepted)
+                {
+                    _lastVoiceMetadata = CreateVoiceMetadata(
+                        transcript: null,
+                        audioInput,
+                        suspiciousOrNoSpeech: true,
+                        rejectionReason: captureGate.Reason);
+                    VoiceStatus = captureGate.Message;
+                    SttStatus = $"Voice capture rejected: {captureGate.Reason}. No transcript was sent.";
+                    return;
+                }
+            }
+
             if (NormalizeBeforeStt)
             {
                 var normalization = VoiceAudioNormalizer.NormalizePcm16WaveInPlace(audioInput.FilePath);
@@ -1334,36 +1352,32 @@ public sealed class MainWindowViewModel : ObservableObject
             var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript.Text, requireAssistantName: true);
             if (!transcriptGuard.Accepted)
             {
-                throw new InvalidOperationException(transcriptGuard.Message);
+                _lastVoiceMetadata = CreateVoiceMetadata(
+                    transcript.Text,
+                    audioInput,
+                    suspiciousOrNoSpeech: true,
+                    rejectionReason: transcriptGuard.Reason);
+                VoiceStatus = transcriptGuard.Message;
+                SttStatus = $"Transcript rejected: {transcriptGuard.Reason}. No transcript was sent.";
+                return;
             }
 
             SaveLastSuccessfulSttDevice();
             LastTranscript = transcript.Text;
             EditableTranscript = transcript.Text;
-            if (!AutoSendVoiceTranscripts)
+            var routing = VoiceTranscriptRouting.Decide(AutoSendVoiceTranscripts);
+            if (routing.PlaceTranscriptInComposer)
             {
                 ComposerText = transcript.Text;
             }
 
-            _lastVoiceMetadata = new VoiceTurnMetadata(
-                VoiceInputOrigin.Voice,
+            _lastVoiceMetadata = CreateVoiceMetadata(
                 transcript.Text,
-                transcript.ProviderName,
-                transcript.Mode,
-                _services.TextToSpeech.ProviderName,
-                _services.TextToSpeech.VoiceId,
-                audioInput.RetainAudio,
-                CurrentInputDeviceNumber(),
-                CurrentInputDeviceName(),
-                InputChannelModeCatalog.ToLabel(CurrentInputChannelMode()),
-                SelectedVoiceInputPreset,
-                ExtraInputGainDb,
-                NormalizeBeforeStt,
-                CurrentSpeechToTextModel(),
-                CurrentTextToSpeechModel(),
-                SuspiciousOrNoSpeech: false);
+                audioInput,
+                suspiciousOrNoSpeech: false,
+                rejectionReason: null);
 
-            shouldAutoSend = AutoSendVoiceTranscripts;
+            shouldAutoSend = routing.SendAutomatically;
             VoiceStatus = shouldAutoSend
                 ? "Transcript accepted; sending to Ali."
                 : "Transcript placed in the chat bar.";
@@ -1377,6 +1391,11 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             UpdateLastSttDebugText();
+            _lastVoiceMetadata = CreateVoiceMetadata(
+                transcript: null,
+                audioInput,
+                suspiciousOrNoSpeech: true,
+                rejectionReason: "STT failure");
             VoiceStatus = "I couldn't hear that clearly. Try again or check the microphone. I did not run a command.";
             SttStatus = ex.Message;
         }
@@ -1406,6 +1425,11 @@ public sealed class MainWindowViewModel : ObservableObject
         var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript, requireAssistantName: true);
         if (!transcriptGuard.Accepted)
         {
+            _lastVoiceMetadata = CreateVoiceMetadata(
+                transcript,
+                audioInput: null,
+                suspiciousOrNoSpeech: true,
+                rejectionReason: transcriptGuard.Reason);
             VoiceStatus = transcriptGuard.Message;
             StatusText = VoiceStatus;
             return;
@@ -1413,19 +1437,21 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (VoiceCommandSafety.RequiresVisibleConfirmation(transcript))
         {
+            _lastVoiceMetadata = CreateVoiceMetadata(
+                transcript,
+                audioInput: null,
+                suspiciousOrNoSpeech: true,
+                rejectionReason: "risky command");
             VoiceStatus = VoiceCommandSafety.BlockedPhaseOneCMessage();
             StatusText = VoiceStatus;
             return;
         }
 
-        var voiceMetadata = (_lastVoiceMetadata ?? new VoiceTurnMetadata(
-            VoiceInputOrigin.Voice,
+        var voiceMetadata = CreateVoiceMetadata(
             transcript,
-            _services.SpeechToText.ProviderName,
-            _services.SpeechToText.Mode,
-            _services.TextToSpeech.ProviderName,
-            _services.TextToSpeech.VoiceId,
-            RawAudioRetained: false)) with
+            audioInput: null,
+            suspiciousOrNoSpeech: false,
+            rejectionReason: null) with
         {
             Transcript = transcript,
             TextToSpeechProvider = _services.TextToSpeech.ProviderName,
@@ -1437,7 +1463,8 @@ public sealed class MainWindowViewModel : ObservableObject
             ExtraInputGainDb = ExtraInputGainDb,
             NormalizeBeforeStt = NormalizeBeforeStt,
             SpeechToTextModel = CurrentSpeechToTextModel(),
-            TextToSpeechModel = CurrentTextToSpeechModel()
+            TextToSpeechModel = CurrentTextToSpeechModel(),
+            RawAudioRetained = _lastVoiceMetadata?.RawAudioRetained ?? false
         };
 
         VoiceStatus = "Voice transcript sent to Ali.";
@@ -1479,7 +1506,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             TtsStatus = "Synthesizing local speech...";
             var settings = new VoiceSettings(
-                voiceMetadata?.TextToSpeechVoice ?? _services.TextToSpeech.VoiceId,
+                _services.TextToSpeech.VoiceId,
                 Rate: 1.0,
                 RetainAudio: false);
 
@@ -2568,7 +2595,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private void UpdateCaptureDiagnostics(VoiceAudioInput audioInput)
+    private VoiceCaptureDiagnostics? UpdateCaptureDiagnostics(VoiceAudioInput audioInput)
     {
         try
         {
@@ -2576,12 +2603,15 @@ public sealed class MainWindowViewModel : ObservableObject
                 audioInput.FilePath,
                 CurrentInputDeviceNumber(),
                 CurrentInputDeviceName());
+            _lastCaptureDiagnostics = diagnostics;
             VoiceDiagnosticsText = diagnostics.Summary;
             ApplyInputLevelSnapshot(diagnostics.Level);
+            return diagnostics;
         }
         catch (Exception ex)
         {
             VoiceDiagnosticsText = $"Capture diagnostics unavailable: {ex.Message}";
+            return null;
         }
     }
 
@@ -2660,6 +2690,36 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private string CurrentTextToSpeechModel() =>
         _services.TextToSpeech is PiperCliTextToSpeechProvider piper ? piper.ModelPath : string.Empty;
+
+    private VoiceTurnMetadata CreateVoiceMetadata(
+        string? transcript,
+        VoiceAudioInput? audioInput,
+        bool suspiciousOrNoSpeech,
+        string? rejectionReason)
+    {
+        var level = _lastCaptureDiagnostics?.Level;
+        return new VoiceTurnMetadata(
+            VoiceInputOrigin.Voice,
+            transcript,
+            _services.SpeechToText.ProviderName,
+            _services.SpeechToText.Mode,
+            _services.TextToSpeech.ProviderName,
+            _services.TextToSpeech.VoiceId,
+            audioInput?.RetainAudio ?? false,
+            CurrentInputDeviceNumber(),
+            CurrentInputDeviceName(),
+            InputChannelModeCatalog.ToLabel(CurrentInputChannelMode()),
+            SelectedVoiceInputPreset,
+            ExtraInputGainDb,
+            NormalizeBeforeStt,
+            CurrentSpeechToTextModel(),
+            CurrentTextToSpeechModel(),
+            suspiciousOrNoSpeech,
+            rejectionReason,
+            level?.Peak,
+            level?.Rms,
+            level?.State.ToString());
+    }
 
     private static PointCollection CreateFlatSpectrumPoints() =>
         CreateSpectrumPoints(new double[SpectrumAnalyzer.BarCount]);

@@ -41,6 +41,8 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
 
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(options.ExecutablePath)
+        && File.Exists(options.ExecutablePath)
+        && (!ArgumentsTemplateRequiresModelPath() || LocalPathExists(options.ModelPath))
         && !LocalSpeechToolPolicy.ContainsCloudReference(
             options.ExecutablePath,
             options.ModelPath,
@@ -60,6 +62,21 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
         {
             throw new InvalidOperationException(
                 "Local STT is not configured. Set ALI_WHISPER_EXE and, if needed, ALI_WHISPER_MODEL.");
+        }
+
+        if (!File.Exists(options.ExecutablePath))
+        {
+            throw new FileNotFoundException("Local STT executable was not found.", options.ExecutablePath);
+        }
+
+        if (ArgumentsTemplateRequiresModelPath() && string.IsNullOrWhiteSpace(options.ModelPath))
+        {
+            throw new InvalidOperationException("Local STT model path is required by the configured Whisper arguments.");
+        }
+
+        if (ArgumentsTemplateRequiresModelPath() && !LocalPathExists(options.ModelPath))
+        {
+            throw new FileNotFoundException("Local STT model path was not found.", options.ModelPath);
         }
 
         if (!File.Exists(audioInput.FilePath))
@@ -180,6 +197,12 @@ public sealed class WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions
             .Replace("{audio}", audioPath, StringComparison.OrdinalIgnoreCase)
             .Replace("{outputBase}", outputBase, StringComparison.OrdinalIgnoreCase)
             .Replace("{model}", modelPath ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+    private bool ArgumentsTemplateRequiresModelPath() =>
+        options.ArgumentsTemplate.Contains("{model}", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LocalPathExists(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path));
 
     private static void KillProcess(Process process)
     {

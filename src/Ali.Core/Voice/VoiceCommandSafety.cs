@@ -16,6 +16,8 @@ public static partial class VoiceCommandSafety
             || ExecutionCommandRegex().IsMatch(normalized)
             || InstallCommandRegex().IsMatch(normalized)
             || CalendarWriteRegex().IsMatch(normalized)
+            || EmailWriteRegex().IsMatch(normalized)
+            || FileWriteRegex().IsMatch(normalized)
             || MemoryDeleteRegex().IsMatch(normalized)
             || ModelSwitchRegex().IsMatch(normalized);
     }
@@ -34,6 +36,12 @@ public static partial class VoiceCommandSafety
 
     [GeneratedRegex(@"\b(add|create|move|modify|change|delete|cancel)\b.*\b(calendar|appointment|meeting|reminder)\b", RegexOptions.IgnoreCase)]
     private static partial Regex CalendarWriteRegex();
+
+    [GeneratedRegex(@"\b(send|delete|remove|modify|change|draft|reply|forward)\b.*\b(email|mail|message)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex EmailWriteRegex();
+
+    [GeneratedRegex(@"\b(copy|move|rename|edit|modify|change|write|save)\b.*\b(file|folder|directory)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex FileWriteRegex();
 
     [GeneratedRegex(@"\b(delete|forget|remove|change|modify)\b.*\b(memory|memories|remembered)\b", RegexOptions.IgnoreCase)]
     private static partial Regex MemoryDeleteRegex();

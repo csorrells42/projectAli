@@ -85,7 +85,11 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
             VoiceNormalizeBeforeStt: voiceMetadata?.NormalizeBeforeStt ?? false,
             SpeechToTextModel: voiceMetadata?.SpeechToTextModel,
             TextToSpeechModel: voiceMetadata?.TextToSpeechModel,
-            SuspiciousOrNoSpeech: voiceMetadata?.SuspiciousOrNoSpeech ?? false);
+            SuspiciousOrNoSpeech: voiceMetadata?.SuspiciousOrNoSpeech ?? false,
+            VoiceRejectionReason: voiceMetadata?.RejectionReason,
+            VoiceInputPeak: voiceMetadata?.InputPeak,
+            VoiceInputRms: voiceMetadata?.InputRms,
+            VoiceInputLevelState: voiceMetadata?.InputLevelState);
 
         await store.SaveAsync(report, cancellationToken).ConfigureAwait(false);
         return report;

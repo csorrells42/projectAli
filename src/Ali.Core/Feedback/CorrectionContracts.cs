@@ -71,7 +71,11 @@ public sealed record CorrectionReport(
     bool VoiceNormalizeBeforeStt = false,
     string? SpeechToTextModel = null,
     string? TextToSpeechModel = null,
-    bool SuspiciousOrNoSpeech = false);
+    bool SuspiciousOrNoSpeech = false,
+    string? VoiceRejectionReason = null,
+    double? VoiceInputPeak = null,
+    double? VoiceInputRms = null,
+    string? VoiceInputLevelState = null);
 
 public interface ICorrectionQueueStore
 {
