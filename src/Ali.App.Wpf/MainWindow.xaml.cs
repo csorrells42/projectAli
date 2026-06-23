@@ -8,6 +8,7 @@ public partial class MainWindow : Window
 {
     public MainWindow(MainWindowViewModel viewModel)
     {
+        NativeTitleBarTheme.ApplyDarkTitleBar(this);
         InitializeComponent();
         DataContext = viewModel;
         viewModel.Messages.CollectionChanged += (_, _) =>

@@ -6,6 +6,7 @@ public partial class VoiceSettingsWindow : Window
 {
     public VoiceSettingsWindow()
     {
+        NativeTitleBarTheme.ApplyDarkTitleBar(this);
         InitializeComponent();
     }
 }
