@@ -122,39 +122,39 @@ public sealed class MainWindowViewModel : ObservableObject
         ResourceMeters.Add(GpuMeter);
         ResourceMeters.Add(VramMeter);
 
-        SendCommand = new AsyncRelayCommand(SendAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ComposerText));
-        StopCommand = new RelayCommand(_ => Stop(), _ => IsBusy);
-        NewChatCommand = new RelayCommand(_ => StartNewChat());
-        EraseHistoryCommand = new RelayCommand(_ => EraseHistory());
-        EraseConversationCommand = new RelayCommand(EraseConversation);
-        RenameConversationCommand = new RelayCommand(RenameConversation);
-        CommitConversationRenameCommand = new RelayCommand(CommitConversationRename);
-        FlagIncorrectCommand = new RelayCommand(FlagIncorrect);
-        SaveRuntimeSettingsCommand = new RelayCommand(_ => SaveRuntimeSettings());
-        CheckRuntimeCommand = new AsyncRelayCommand(CheckRuntimeAsync, () => !IsBusy);
-        RefreshRuntimeModelsCommand = new AsyncRelayCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
-        ActivateRuntimeCommand = new RelayCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
-        RevertToStubCommand = new RelayCommand(_ => RevertToStub(), _ => !IsBusy);
-        RevertToLastKnownGoodCommand = new RelayCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
-        PasteImageCommand = new AsyncRelayCommand(AddClipboardImageAsync);
-        RemoveAttachmentCommand = new RelayCommand(RemoveAttachment);
-        ToggleVoiceRecordingCommand = new AsyncRelayCommand(ToggleVoiceRecordingAsync, () => !IsBusy || IsRecording || IsTranscribing);
-        ToggleVoiceModeCommand = new RelayCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
-        SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !AutoSendVoiceTranscripts && !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
-        StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
-        OpenSettingsCommand = new AsyncRelayCommand(OpenSettingsAsync);
-        PlayPiperSampleCommand = new AsyncRelayCommand(PlayPiperSampleAsync, () => !IsSpeaking);
-        RefreshCorrectionsCommand = new AsyncRelayCommand(RefreshCorrectionsAsync);
-        MarkCorrectionReviewedCommand = new AsyncRelayCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
-        MarkCorrectionUnresolvedCommand = new AsyncRelayCommand(MarkSelectedCorrectionUnresolvedAsync, () => SelectedCorrectionReviewItem is not null);
-        ExportSelectedCorrectionCommand = new AsyncRelayCommand(ExportSelectedCorrectionAsync, () => SelectedCorrectionReviewItem is not null);
-        ExportAllCorrectionsCommand = new AsyncRelayCommand(ExportAllCorrectionsAsync);
-        RefreshMemoryRemindersCommand = new RelayCommand(_ => RefreshMemoryReminders());
-        DeleteSelectedMemoryCommand = new RelayCommand(_ => DeleteSelectedMemory(), _ => SelectedMemoryEntry is not null);
-        ClearMemoriesCommand = new RelayCommand(_ => ClearMemories());
-        CancelSelectedReminderCommand = new RelayCommand(_ => SetSelectedReminderStatus(ReminderStatus.Cancelled), _ => SelectedReminderEntry is not null);
-        CompleteSelectedReminderCommand = new RelayCommand(_ => SetSelectedReminderStatus(ReminderStatus.Completed), _ => SelectedReminderEntry is not null);
-        ClearRemindersCommand = new RelayCommand(_ => ClearReminders());
+        SendCommand = CreateAsyncCommand(SendAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ComposerText));
+        StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
+        NewChatCommand = CreateCommand(_ => StartNewChat());
+        EraseHistoryCommand = CreateCommand(_ => EraseHistory());
+        EraseConversationCommand = CreateCommand(EraseConversation);
+        RenameConversationCommand = CreateCommand(RenameConversation);
+        CommitConversationRenameCommand = CreateCommand(CommitConversationRename);
+        FlagIncorrectCommand = CreateCommand(FlagIncorrect);
+        SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
+        CheckRuntimeCommand = CreateAsyncCommand(CheckRuntimeAsync, () => !IsBusy);
+        RefreshRuntimeModelsCommand = CreateAsyncCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
+        ActivateRuntimeCommand = CreateCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
+        RevertToStubCommand = CreateCommand(_ => RevertToStub(), _ => !IsBusy);
+        RevertToLastKnownGoodCommand = CreateCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
+        PasteImageCommand = CreateAsyncCommand(AddClipboardImageAsync);
+        RemoveAttachmentCommand = CreateCommand(RemoveAttachment);
+        ToggleVoiceRecordingCommand = CreateAsyncCommand(ToggleVoiceRecordingAsync, () => !IsBusy || IsRecording || IsTranscribing);
+        ToggleVoiceModeCommand = CreateCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
+        SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !AutoSendVoiceTranscripts && !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
+        StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
+        OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
+        PlayPiperSampleCommand = CreateAsyncCommand(PlayPiperSampleAsync, () => !IsSpeaking);
+        RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
+        MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
+        MarkCorrectionUnresolvedCommand = CreateAsyncCommand(MarkSelectedCorrectionUnresolvedAsync, () => SelectedCorrectionReviewItem is not null);
+        ExportSelectedCorrectionCommand = CreateAsyncCommand(ExportSelectedCorrectionAsync, () => SelectedCorrectionReviewItem is not null);
+        ExportAllCorrectionsCommand = CreateAsyncCommand(ExportAllCorrectionsAsync);
+        RefreshMemoryRemindersCommand = CreateCommand(_ => RefreshMemoryReminders());
+        DeleteSelectedMemoryCommand = CreateCommand(_ => DeleteSelectedMemory(), _ => SelectedMemoryEntry is not null);
+        ClearMemoriesCommand = CreateCommand(_ => ClearMemories());
+        CancelSelectedReminderCommand = CreateCommand(_ => SetSelectedReminderStatus(ReminderStatus.Cancelled), _ => SelectedReminderEntry is not null);
+        CompleteSelectedReminderCommand = CreateCommand(_ => SetSelectedReminderStatus(ReminderStatus.Completed), _ => SelectedReminderEntry is not null);
+        ClearRemindersCommand = CreateCommand(_ => ClearReminders());
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
@@ -194,6 +194,27 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshConversationHistory();
         RefreshMemoryReminders();
         StatusText = "New chat ready. Saved chats are available in the sidebar.";
+    }
+
+    private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
+        new(execute, canExecute, HandleCommandException);
+
+    private RelayCommand CreateCommand(Action<object?> execute, Predicate<object?>? canExecute = null) =>
+        new(execute, canExecute, HandleCommandException);
+
+    private void HandleCommandException(Exception ex)
+    {
+        ReportApplicationFailure("Command", ex);
+    }
+
+    public void ReportApplicationFailure(string context, Exception ex)
+    {
+        var message = $"{ex.GetType().Name}: {ex.Message}";
+        StatusText = $"{context} failed safely: {message}";
+        if (_settingsWindow is not null)
+        {
+            VoiceSettingsStatusText = $"{context} failed safely: {message}";
+        }
     }
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
@@ -2256,13 +2277,22 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task OpenSettingsAsync()
     {
-        OpenSettingsWindow();
-        _voiceMonitorRequested = true;
-        RefreshVoiceSettingsChoices();
-        StartInputLevelMonitor();
-        await RefreshCorrectionsAsync().ConfigureAwait(true);
-        RefreshMemoryReminders();
-        await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
+        try
+        {
+            OpenSettingsWindow();
+            _voiceMonitorRequested = true;
+            RefreshVoiceSettingsChoices();
+            StartInputLevelMonitor();
+            await RefreshCorrectionsAsync().ConfigureAwait(true);
+            RefreshMemoryReminders();
+            await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _voiceMonitorRequested = false;
+            StopInputLevelMonitor();
+            HandleCommandException(ex);
+        }
     }
 
     private void OpenSettingsWindow()
@@ -2295,8 +2325,24 @@ public sealed class MainWindowViewModel : ObservableObject
         _loadingVoiceSettings = true;
         try
         {
-            LoadVoiceDevices();
-            RefreshVoiceInputChannelModes();
+            try
+            {
+                LoadVoiceDevices();
+                RefreshVoiceInputChannelModes();
+            }
+            catch (Exception ex)
+            {
+                VoiceInputDevices.Clear();
+                VoiceInputDevices.Add("0: Default microphone");
+                SelectedVoiceInputDevice = VoiceInputDevices[0];
+                VoiceOutputDevices.Clear();
+                VoiceOutputDevices.Add("-1: Default playback device");
+                SelectedVoiceOutputDevice = VoiceOutputDevices[0];
+                VoiceInputChannelModes.Clear();
+                VoiceInputChannelModes.Add(InputChannelModeCatalog.MonoSumLabel);
+                SelectedVoiceInputChannelMode = InputChannelModeCatalog.MonoSumLabel;
+                VoiceSettingsStatusText = $"Voice devices unavailable: {ex.Message}";
+            }
         }
         finally
         {
@@ -2304,17 +2350,27 @@ public sealed class MainWindowViewModel : ObservableObject
             _suppressInputMonitorRestart = false;
         }
 
-        LoadPiperVoiceChoices();
-        var selectedPiperVoice = FindPiperVoiceLabelForModel(PiperModelText)
-            ?? PiperVoiceChoices.FirstOrDefault()
-            ?? string.Empty;
-        if (!string.Equals(SelectedPiperVoiceChoice, selectedPiperVoice, StringComparison.Ordinal))
+        try
         {
-            SelectedPiperVoiceChoice = selectedPiperVoice;
+            LoadPiperVoiceChoices();
+            var selectedPiperVoice = FindPiperVoiceLabelForModel(PiperModelText)
+                ?? PiperVoiceChoices.FirstOrDefault()
+                ?? string.Empty;
+            if (!string.Equals(SelectedPiperVoiceChoice, selectedPiperVoice, StringComparison.Ordinal))
+            {
+                SelectedPiperVoiceChoice = selectedPiperVoice;
+            }
+            else
+            {
+                OnPropertyChanged(nameof(SelectedPiperVoiceChoice));
+            }
         }
-        else
+        catch (Exception ex)
         {
-            OnPropertyChanged(nameof(SelectedPiperVoiceChoice));
+            _piperVoiceChoices.Clear();
+            PiperVoiceChoices.Clear();
+            SelectedPiperVoiceChoice = string.Empty;
+            VoiceSettingsStatusText = $"Piper voice list unavailable: {ex.Message}";
         }
 
         RefreshSpeechToolStatuses();
@@ -2946,7 +3002,17 @@ public sealed class MainWindowViewModel : ObservableObject
     private void LoadVoiceDevices()
     {
         VoiceInputDevices.Clear();
-        var inputDevices = NAudioVoiceRecorder.GetInputDevices();
+        IReadOnlyList<AudioInputDevice> inputDevices;
+        try
+        {
+            inputDevices = NAudioVoiceRecorder.GetInputDevices();
+        }
+        catch (Exception ex)
+        {
+            inputDevices = Array.Empty<AudioInputDevice>();
+            VoiceStatus = $"Input device list unavailable: {ex.Message}";
+        }
+
         if (inputDevices.Count == 0)
         {
             VoiceInputDevices.Add("0: Default microphone");
@@ -2969,7 +3035,18 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         VoiceOutputDevices.Clear();
-        foreach (var device in NAudioWaveSpeechPlayer.GetOutputDevices())
+        IReadOnlyList<AudioOutputDevice> outputDevices;
+        try
+        {
+            outputDevices = NAudioWaveSpeechPlayer.GetOutputDevices();
+        }
+        catch (Exception ex)
+        {
+            outputDevices = new[] { new AudioOutputDevice(-1, "Default playback device") };
+            VoiceStatus = $"Output device list unavailable: {ex.Message}";
+        }
+
+        foreach (var device in outputDevices)
         {
             VoiceOutputDevices.Add($"{device.DeviceNumber}: {device.Name}");
         }
@@ -2979,7 +3056,7 @@ public sealed class MainWindowViewModel : ObservableObject
             VoiceOutputDevices.Add("-1: Default playback device");
         }
 
-        var outputSelection = VoiceDeviceSelection.ResolveOutput(_voiceSettings, NAudioWaveSpeechPlayer.GetOutputDevices());
+        var outputSelection = VoiceDeviceSelection.ResolveOutput(_voiceSettings, outputDevices);
         SelectedVoiceOutputDevice = VoiceOutputDevices.FirstOrDefault(
             device => device.StartsWith($"{outputSelection.DeviceNumber}:", StringComparison.Ordinal))
             ?? VoiceOutputDevices[0];
