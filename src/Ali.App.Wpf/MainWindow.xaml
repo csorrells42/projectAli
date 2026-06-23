@@ -71,10 +71,15 @@
                             Command="{Binding NewChatCommand}"
                             HorizontalContentAlignment="Left"
                             Margin="0,0,0,8" />
-                    <TextBox MinHeight="30"
-                             Text="Search chats"
-                             Foreground="{StaticResource SubtleTextBrush}"
-                             Margin="0,0,0,12" />
+                    <Border Background="{StaticResource InputBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="8,6"
+                            Margin="0,0,0,12">
+                        <TextBlock Text="Search chats (coming later)"
+                                   Foreground="{StaticResource SubtleTextBrush}" />
+                    </Border>
 
                     <TextBlock Text="Recents" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold" Margin="0,4,0,6" />
                     <ListBox ItemsSource="{Binding ConversationHistory}"
