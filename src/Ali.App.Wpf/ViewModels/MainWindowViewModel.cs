@@ -29,6 +29,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly VoiceDiagnosticSampleService _sampleService;
     private string _conversationId = $"conv_{Guid.NewGuid():N}";
+    private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
     private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
@@ -114,6 +115,10 @@ public sealed class MainWindowViewModel : ObservableObject
         SendCommand = new AsyncRelayCommand(SendAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = new RelayCommand(_ => Stop(), _ => IsBusy);
         NewChatCommand = new RelayCommand(_ => StartNewChat());
+        EraseHistoryCommand = new RelayCommand(_ => EraseHistory());
+        EraseConversationCommand = new RelayCommand(EraseConversation);
+        RenameConversationCommand = new RelayCommand(RenameConversation);
+        CommitConversationRenameCommand = new RelayCommand(CommitConversationRename);
         FlagIncorrectCommand = new RelayCommand(FlagIncorrect);
         LoadRuntimeSettingsCommand = new RelayCommand(_ => LoadRuntimeSettings());
         SaveRuntimeSettingsCommand = new RelayCommand(_ => SaveRuntimeSettings());
@@ -176,14 +181,15 @@ public sealed class MainWindowViewModel : ObservableObject
             text: "Ali bootstrap ready. I can prove the WPF chat loop, cancellation, and correction queue. A real local model runtime must pass a health check and be activated before I answer through it.",
             createdAt: DateTimeOffset.UtcNow,
             evidenceStatus: EvidenceStatus.Verified));
-        ConversationHistory.Add("Current chat");
+        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(_conversationId, "Current chat");
+        ConversationHistory.Add(_activeConversationHistoryItem);
     }
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
 
     public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
 
-    public ObservableCollection<string> ConversationHistory { get; } = new();
+    public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
 
     public ObservableCollection<string> VoiceInputDevices { get; } = new();
 
@@ -208,6 +214,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand StopCommand { get; }
 
     public ICommand NewChatCommand { get; }
+
+    public ICommand EraseHistoryCommand { get; }
+
+    public ICommand EraseConversationCommand { get; }
+
+    public ICommand RenameConversationCommand { get; }
+
+    public ICommand CommitConversationRenameCommand { get; }
 
     public ICommand FlagIncorrectCommand { get; }
 
@@ -768,6 +782,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         IsBusy = true;
         StatusText = "Streaming local response...";
+        EnsureActiveConversationHistoryItem();
 
         var userMessageId = $"msg_user_{Guid.NewGuid():N}";
         var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
@@ -842,6 +857,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private void StartNewChat()
     {
         _conversationId = $"conv_{Guid.NewGuid():N}";
+        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(
+            _conversationId,
+            $"Chat {DateTime.Now:h:mm tt}");
+        ConversationHistory.Insert(0, _activeConversationHistoryItem);
         Messages.Clear();
         Attachments.Clear();
         ComposerText = string.Empty;
@@ -849,7 +868,81 @@ public sealed class MainWindowViewModel : ObservableObject
         LastTranscript = string.Empty;
         StatusText = "New chat ready.";
         VoiceStatus = "Voice idle.";
-        ConversationHistory.Insert(0, $"Chat {DateTime.Now:h:mm tt}");
+    }
+
+    private void EnsureActiveConversationHistoryItem()
+    {
+        if (_activeConversationHistoryItem is not null)
+        {
+            return;
+        }
+
+        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(_conversationId, "Current chat");
+        ConversationHistory.Insert(0, _activeConversationHistoryItem);
+    }
+
+    private void EraseHistory()
+    {
+        Stop();
+        StopSpeaking();
+        _activeVoiceInput?.Cancel();
+        ClearTemporaryAttachments();
+        Attachments.Clear();
+        Messages.Clear();
+        ConversationHistory.Clear();
+        _conversationId = $"conv_{Guid.NewGuid():N}";
+        _activeConversationHistoryItem = null;
+        ComposerText = string.Empty;
+        EditableTranscript = string.Empty;
+        LastTranscript = string.Empty;
+        StatusText = "Conversation history erased for this session.";
+        VoiceStatus = "Voice idle.";
+        AttachmentStatus = "Screenshots are temporary by default.";
+    }
+
+    private void EraseConversation(object? parameter)
+    {
+        if (parameter is not ConversationHistoryItemViewModel item)
+        {
+            return;
+        }
+
+        ConversationHistory.Remove(item);
+        if (_activeConversationHistoryItem != item)
+        {
+            StatusText = $"Erased chat: {item.Title}";
+            return;
+        }
+
+        Stop();
+        StopSpeaking();
+        ClearTemporaryAttachments();
+        Attachments.Clear();
+        Messages.Clear();
+        _conversationId = $"conv_{Guid.NewGuid():N}";
+        _activeConversationHistoryItem = null;
+        ComposerText = string.Empty;
+        EditableTranscript = string.Empty;
+        LastTranscript = string.Empty;
+        StatusText = $"Erased current chat: {item.Title}";
+        VoiceStatus = "Voice idle.";
+        AttachmentStatus = "Screenshots are temporary by default.";
+    }
+
+    private static void RenameConversation(object? parameter)
+    {
+        if (parameter is ConversationHistoryItemViewModel item)
+        {
+            item.BeginRename();
+        }
+    }
+
+    private static void CommitConversationRename(object? parameter)
+    {
+        if (parameter is ConversationHistoryItemViewModel item)
+        {
+            item.CommitRename();
+        }
     }
 
     private async Task ToggleVoiceRecordingAsync()

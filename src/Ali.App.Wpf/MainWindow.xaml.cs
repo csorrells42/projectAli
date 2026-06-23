@@ -43,4 +43,23 @@ public partial class MainWindow : Window
             await sendViewModel.SendAsync().ConfigureAwait(true);
         }
     }
+
+    private void HistoryMenuButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { ContextMenu: { } menu } button)
+        {
+            return;
+        }
+
+        menu.DataContext = button.DataContext;
+        menu.PlacementTarget = button;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void RuntimeSettingsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        RuntimeSettingsPopup.IsOpen = !RuntimeSettingsPopup.IsOpen;
+        e.Handled = true;
+    }
 }
