@@ -10,6 +10,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        viewModel.Messages.CollectionChanged += (_, _) =>
+            Dispatcher.BeginInvoke(new Action(() => MessagesScrollViewer.ScrollToEnd()));
     }
 
     private async void ComposerTextBox_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)

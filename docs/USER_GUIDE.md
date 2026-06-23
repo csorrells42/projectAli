@@ -71,13 +71,18 @@ Installed local proof resources: 26 en-US Piper voices and Faster-Whisper caches
 
 If local STT or TTS is not configured, Ali says so in the voice status area. She does not use cloud speech and does not pretend a transcript or spoken response succeeded.
 
-The voice panel now includes:
+The voice settings popup includes:
 
 - Microphone picker
-- Output picker
-- Input preset picker
+- Channel picker
+- Gain control
 - Live input meter
 - Capture diagnostics
+- Piper voice picker and sample playback
+
+The main chat surface is chat-first: conversation list on the left, conversation content in the center, and one bottom composer for typed text, image attachment, mic dictation, hands-free voice mode, stop response, and send.
+
+The composer mic records local speech and places the accepted transcript into the chat bar. It does not send until Enter or Send is pressed. The voice mode button toggles hands-free behavior, where accepted transcripts are sent automatically. Risky command transcripts still require visible confirmation and are blocked in this phase.
 
 Meter states:
 

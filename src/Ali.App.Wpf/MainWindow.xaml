@@ -10,304 +10,288 @@
         MinHeight="640"
         Width="1320"
         MinWidth="1080"
-        Background="#F4F6F8"
+        Background="#0B0B0D"
         FontFamily="Segoe UI">
     <Window.Resources>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B0B0D" />
+        <SolidColorBrush x:Key="SidebarBrush" Color="#121214" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#18181B" />
+        <SolidColorBrush x:Key="PanelAltBrush" Color="#202024" />
+        <SolidColorBrush x:Key="InputBrush" Color="#0F0F11" />
+        <SolidColorBrush x:Key="BorderBrushDark" Color="#323236" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#00BEE6" />
         <Style TargetType="Button">
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="Margin" Value="0,4,0,0" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#2A2A2E" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="8,5" />
             <Setter Property="Margin" Value="0,2,0,8" />
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
         </Style>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="#4B5563" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
             <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
     </Window.Resources>
 
-    <Grid>
+    <Grid Background="{StaticResource AppBackgroundBrush}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="292" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Background="#111827" Padding="16">
+        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" Padding="14">
             <DockPanel LastChildFill="True">
                 <StackPanel DockPanel.Dock="Top">
-                    <TextBlock Text="Ali" FontSize="28" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Local assistant" Foreground="#A7B0BE" Margin="0,2,0,20" />
+                    <TextBlock Text="Ali" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                    <TextBlock Text="Local assistant" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,14" />
 
-                    <Button Content="Chat" HorizontalContentAlignment="Left" />
-                    <Button Content="Sources &amp; Topics" HorizontalContentAlignment="Left" />
-                    <Button Content="Memories" HorizontalContentAlignment="Left" />
-                    <Button Content="Reminders" HorizontalContentAlignment="Left" />
-                    <Button Content="Calendar" HorizontalContentAlignment="Left" />
-                    <Button Content="Images" HorizontalContentAlignment="Left" />
-                    <Button Content="Settings" HorizontalContentAlignment="Left" />
-                    <Button Content="Feedback" HorizontalContentAlignment="Left" />
+                    <Button Content="New chat"
+                            Command="{Binding NewChatCommand}"
+                            HorizontalContentAlignment="Left"
+                            Margin="0,0,0,8" />
+                    <TextBox MinHeight="30"
+                             Text="Search chats"
+                             Foreground="{StaticResource SubtleTextBrush}"
+                             Margin="0,0,0,12" />
+
+                    <TextBlock Text="Recents" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold" Margin="0,4,0,6" />
+                    <ListBox ItemsSource="{Binding ConversationHistory}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Foreground="{StaticResource TextBrush}"
+                             MaxHeight="260" />
                 </StackPanel>
 
-                <Border DockPanel.Dock="Bottom" Background="#1F2937" CornerRadius="8" Padding="10">
-                    <StackPanel>
-                        <TextBlock Text="Runtime" Foreground="#9CA3AF" FontSize="12" />
-                        <TextBlock Text="{Binding RuntimeDisplay}" Foreground="White" TextWrapping="Wrap" />
+                <Expander DockPanel.Dock="Bottom"
+                          IsExpanded="False"
+                          Foreground="{StaticResource TextBrush}"
+                          Background="{StaticResource PanelBrush}"
+                          BorderBrush="{StaticResource BorderBrushDark}">
+                    <Expander.Header>
+                        <StackPanel>
+                            <TextBlock Text="Runtime" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding RuntimeDisplay}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Margin="0,10,0,0">
+                        <TextBlock Text="{Binding ActiveRuntimeStatus}" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" Margin="0,0,0,8" />
+
+                        <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <DockPanel Margin="0,0,0,4">
+                            <TextBlock Text="Installed model" Style="{StaticResource FieldLabel}" />
+                            <Button DockPanel.Dock="Right"
+                                    Content="Refresh"
+                                    Command="{Binding RefreshRuntimeModelsCommand}"
+                                    Padding="8,5"
+                                    Margin="8,0,0,0" />
+                        </DockPanel>
+                        <ComboBox ItemsSource="{Binding RuntimeModelChoices}"
+                                  SelectedItem="{Binding SelectedRuntimeModelChoice}"
+                                  Margin="0,2,0,8" />
+                        <TextBlock Text="{Binding RuntimeSelectionStatusText}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   Margin="0,0,0,8" />
+
+                        <TextBlock Text="Quantization" Style="{StaticResource FieldLabel}" />
+                        <ComboBox ItemsSource="{Binding RuntimeQuantizationChoices}"
+                                  SelectedItem="{Binding RuntimeQuantizationText}"
+                                  Margin="0,2,0,8" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Context" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding RuntimeContextChoices}"
+                                          SelectedItem="{Binding RuntimeContextText}"
+                                          Margin="0,2,0,8" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Output" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding RuntimeOutputLimitChoices}"
+                                          SelectedItem="{Binding RuntimeOutputLimitText}"
+                                          Margin="0,2,0,8" />
+                            </StackPanel>
+                        </Grid>
+
+                        <UniformGrid Columns="2">
+                            <Button Content="Save" Command="{Binding SaveRuntimeSettingsCommand}" Margin="0,0,5,6" />
+                            <Button Content="Check" Command="{Binding CheckRuntimeCommand}" Margin="5,0,0,6" />
+                            <Button Content="Activate"
+                                    Command="{Binding ActivateRuntimeCommand}"
+                                    IsEnabled="{Binding CanActivateRuntime}"
+                                    Margin="0,0,5,6" />
+                            <Button Content="Stub" Command="{Binding RevertToStubCommand}" Margin="5,0,0,6" />
+                        </UniformGrid>
                     </StackPanel>
-                </Border>
+                </Expander>
             </DockPanel>
         </Border>
 
-        <Grid Grid.Column="1" Margin="24">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="360" />
-            </Grid.ColumnDefinitions>
+        <Grid Grid.Column="1" Margin="30,18,30,18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <DockPanel Grid.Row="0" Grid.Column="0" Margin="0,0,16,16">
+            <DockPanel Grid.Row="0" Margin="0,0,0,10">
+                <Button DockPanel.Dock="Right"
+                        Content="Voice Settings"
+                        Command="{Binding OpenVoiceSettingsCommand}"
+                        Margin="10,0,0,0" />
                 <StackPanel>
-                    <TextBlock Text="Chat" FontSize="26" FontWeight="SemiBold" Foreground="#111827" />
-                    <TextBlock Text="{Binding StatusText}" Foreground="#4B5563" TextWrapping="Wrap" />
+                    <TextBlock Text="Ali" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                    <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
                 </StackPanel>
             </DockPanel>
 
-            <Border Grid.Row="1" Grid.Column="0" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Margin="0,0,16,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18">
-                    <ItemsControl ItemsSource="{Binding Messages}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
-                                <Border Padding="14"
-                                        Margin="0,0,0,12"
-                                        CornerRadius="8"
-                                        BorderThickness="1"
-                                        BorderBrush="#DDE2EA">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Background" Value="#F9FAFB" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding RoleName}" Value="User">
-                                                    <Setter Property="Background" Value="#EAF2FF" />
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding RoleName}" Value="Assistant">
-                                                    <Setter Property="Background" Value="#FFFFFF" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <StackPanel>
-                                        <DockPanel Margin="0,0,0,6">
-                                            <TextBlock Text="{Binding RoleName}" FontWeight="SemiBold" Foreground="#111827" />
-                                            <TextBlock DockPanel.Dock="Right"
-                                                       Text="{Binding EvidenceStatus}"
-                                                       Foreground="#6B7280"
-                                                       FontSize="12" />
-                                        </DockPanel>
+            <ScrollViewer x:Name="MessagesScrollViewer"
+                          Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          Padding="0,8,0,8">
+                <ItemsControl ItemsSource="{Binding Messages}" MaxWidth="840" HorizontalAlignment="Center">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
+                            <StackPanel Margin="0,0,0,18">
+                                <DockPanel Margin="0,0,0,6">
+                                    <TextBlock Text="{Binding RoleName}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding EvidenceStatus}"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               FontSize="12" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource TextBrush}" FontSize="15" LineHeight="22" />
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <Button Content="Flag as incorrect"
+                                            Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}"
+                                            Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <TextBlock Text="Flagged for correction"
+                                               Margin="12,11,0,0"
+                                               Foreground="#FBBF24"
+                                               Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
 
-                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="#111827" />
-
-                                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                            <Button Content="Flag as incorrect"
-                                                    Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}"
-                                                    Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                            <TextBlock Text="Flagged for correction"
-                                                       Margin="12,11,0,0"
-                                                       Foreground="#B45309"
-                                                       Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Border>
-
-            <Border Grid.Row="2" Grid.Column="0" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,16,16,0">
-                <StackPanel>
-                    <DockPanel Margin="0,0,0,8">
-                        <TextBlock Text="{Binding AttachmentStatus}" Foreground="#4B5563" VerticalAlignment="Center" />
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <Button Content="Paste Image" Command="{Binding PasteImageCommand}" Margin="0,0,8,0" />
-                            <Button Content="Capture Screen" Command="{Binding CaptureScreenCommand}" Margin="0" />
-                        </StackPanel>
-                    </DockPanel>
-
-                    <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:ImageAttachmentViewModel}">
-                                <Border BorderBrush="#DDE2EA" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,8,8" Width="150">
-                                    <StackPanel>
-                                        <Image Source="{Binding FilePath}" Height="74" Stretch="Uniform" />
-                                        <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="#4B5563" Margin="0,6,0,0" />
-                                        <CheckBox Content="Retain" IsChecked="{Binding RetainAfterSession}" Margin="0,4,0,0" />
-                                        <Button Content="Remove"
-                                                Command="{Binding DataContext.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding}" />
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <Border BorderBrush="#DDE2EA" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,10">
-                        <StackPanel>
-                            <DockPanel Margin="0,0,0,8">
+            <StackPanel Grid.Row="2" MaxWidth="840" HorizontalAlignment="Center">
+                <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ImageAttachmentViewModel}">
+                            <Border Background="{StaticResource PanelAltBrush}" BorderBrush="{StaticResource BorderBrushDark}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,8,8" Width="150">
                                 <StackPanel>
-                                    <TextBlock Text="Voice" FontWeight="SemiBold" Foreground="#111827" />
-                                    <TextBlock Text="{Binding VoiceStatus}" Foreground="#4B5563" TextWrapping="Wrap" />
+                                    <Image Source="{Binding FilePath}" Height="74" Stretch="Uniform" />
+                                    <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{StaticResource MutedTextBrush}" Margin="0,6,0,0" />
+                                    <CheckBox Content="Retain" IsChecked="{Binding RetainAfterSession}" Margin="0,4,0,0" />
+                                    <Button Content="Remove"
+                                            Command="{Binding DataContext.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
                                 </StackPanel>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Button Content="Push to Talk" Command="{Binding StartVoiceRecordingCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Stop Recording" Command="{Binding StopVoiceRecordingCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Stop Speaking" Command="{Binding StopSpeakingCommand}" Margin="0,0,8,0" />
-                                    <Button Content="Voice Settings" Command="{Binding OpenVoiceSettingsCommand}" Margin="0" />
-                                </StackPanel>
-                            </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
-                            <TextBlock Text="{Binding SttStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" />
-                            <TextBlock Text="{Binding TtsStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,6" />
-
-                            <TextBlock Text="Transcript" Style="{StaticResource FieldLabel}" />
-                            <TextBox MinHeight="34"
-                                     MaxHeight="82"
-                                     VerticalScrollBarVisibility="Auto"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     Text="{Binding EditableTranscript, UpdateSourceTrigger=PropertyChanged}" />
-                            <DockPanel>
-                                <TextBlock Text="{Binding LastTranscript}" Foreground="#6B7280" TextWrapping="Wrap" />
-                                <Button DockPanel.Dock="Right"
-                                        Content="Send Transcript"
-                                        Command="{Binding SendTranscriptCommand}"
-                                        Margin="8,0,0,0" />
-                            </DockPanel>
-                        </StackPanel>
-                    </Border>
-
+                <Border Background="{StaticResource PanelAltBrush}" BorderBrush="{StaticResource BorderBrushDark}" BorderThickness="1" CornerRadius="24" Padding="10">
                     <Grid>
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
+                        <Button Grid.Column="0"
+                                Content="+ Image"
+                                Command="{Binding PasteImageCommand}"
+                                ToolTip="Attach an image from the clipboard"
+                                Margin="0,0,8,0" />
+
                         <TextBox x:Name="ComposerTextBox"
-                                 MinHeight="46"
+                                 Grid.Column="1"
+                                 MinHeight="42"
                                  MaxHeight="150"
                                  VerticalScrollBarVisibility="Auto"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  BorderThickness="0"
+                                 Background="Transparent"
                                  FontSize="15"
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="ComposerTextBox_OnKeyDown" />
 
-                        <Button Grid.Column="1"
-                                Content="Stop"
-                                Margin="12,0,0,0"
-                                Command="{Binding StopCommand}" />
-
                         <Button Grid.Column="2"
+                                Content="{Binding MicButtonText}"
+                                Command="{Binding ToggleVoiceRecordingCommand}"
+                                ToolTip="Record speech into the chat bar"
+                                Margin="8,0,0,0" />
+                        <Button Grid.Column="3"
+                                Content="{Binding VoiceModeButtonText}"
+                                Command="{Binding ToggleVoiceModeCommand}"
+                                ToolTip="Toggle hands-free voice mode"
+                                Margin="8,0,0,0" />
+                        <Button Grid.Column="4"
+                                Content="Stop"
+                                Command="{Binding StopCommand}"
+                                ToolTip="Stop the current response"
+                                Margin="8,0,0,0" />
+                        <Button Grid.Column="5"
                                 Content="Send"
-                                Margin="8,0,0,0"
-                                Command="{Binding SendCommand}" />
+                                Command="{Binding SendCommand}"
+                                ToolTip="Send chat"
+                                Margin="8,0,0,0" />
                     </Grid>
-                </StackPanel>
-            </Border>
+                </Border>
 
-            <Border Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="16">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock Text="Runtime Settings" FontSize="20" FontWeight="SemiBold" Foreground="#111827" />
-                        <TextBlock Text="{Binding ActiveRuntimeStatus}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,4,0,10" />
-
-                        <CheckBox Content="Enable local OpenAI-compatible runtime"
-                                  IsChecked="{Binding RuntimeEnabled}"
-                                  Margin="0,0,0,8" />
-
-                        <TextBlock Text="Runtime endpoint" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}" />
-
-                        <TextBlock Text="Model/package ID" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding RuntimeModelText, UpdateSourceTrigger=PropertyChanged}" />
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Context size" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding RuntimeContextText, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Max output" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding RuntimeOutputLimitText, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Temperature" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding RuntimeTemperatureText, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Top-p" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding RuntimeTopPText, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                        </Grid>
-
-                        <CheckBox Content="Streaming enabled"
-                                  IsChecked="{Binding RuntimeStreamingEnabled}"
-                                  Margin="0,0,0,4" />
-
-                        <CheckBox Content="Model supports images"
-                                  IsChecked="{Binding RuntimeVisionEnabled}"
-                                  Margin="0,0,0,12" />
-
-                        <TextBlock Text="Settings file" Style="{StaticResource FieldLabel}" />
-                        <TextBlock Text="{Binding RuntimeSettingsPath}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="12" Margin="0,2,0,10" />
-
-                        <UniformGrid Columns="2" Margin="0,4,0,0">
-                            <Button Content="Load settings" Command="{Binding LoadRuntimeSettingsCommand}" Margin="0,0,6,6" />
-                            <Button Content="Save settings" Command="{Binding SaveRuntimeSettingsCommand}" Margin="6,0,0,6" />
-                            <Button Content="Check Runtime" Command="{Binding CheckRuntimeCommand}" Margin="0,0,6,6" />
-                            <Button Content="Activate Runtime"
-                                    Command="{Binding ActivateRuntimeCommand}"
-                                    IsEnabled="{Binding CanActivateRuntime}"
-                                    Margin="6,0,0,6" />
-                            <Button Content="Revert to Stub" Command="{Binding RevertToStubCommand}" Margin="0,0,6,6" />
-                            <Button Content="Last Known Good"
-                                    Command="{Binding RevertToLastKnownGoodCommand}"
-                                    IsEnabled="{Binding CanRevertToLastKnownGood}"
-                                    Margin="6,0,0,6" />
-                        </UniformGrid>
-
-                        <TextBlock Text="Last health check" FontWeight="SemiBold" Foreground="#111827" Margin="0,14,0,4" />
-                        <TextBlock Text="{Binding RuntimeHealthResult}" TextWrapping="Wrap" Foreground="#4B5563" />
-                    </StackPanel>
-                </ScrollViewer>
-            </Border>
+                <Grid Margin="6,8,6,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding AttachmentStatus}" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Grid.Column="1" Text="{Binding VoiceStatus}" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" TextWrapping="Wrap" TextAlignment="Right" />
+                </Grid>
+            </StackPanel>
         </Grid>
     </Grid>
 </Window>

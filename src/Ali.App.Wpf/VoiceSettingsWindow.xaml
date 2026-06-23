@@ -6,28 +6,46 @@
         Width="860"
         MinHeight="560"
         MinWidth="760"
-        Background="#F4F6F8"
+        Background="#0B0B0D"
         FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner">
     <Window.Resources>
+        <SolidColorBrush x:Key="InputBrush" Color="#0F0F11" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
         <Style TargetType="Button">
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="Margin" Value="0,4,0,0" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#2A2A2E" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="MinHeight" Value="32" />
             <Setter Property="Padding" Value="8,5" />
             <Setter Property="Margin" Value="0,2,0,8" />
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         </Style>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="#4B5563" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
             <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
     </Window.Resources>
 
-    <Grid Margin="18">
+    <Grid Margin="18" Background="#0B0B0D">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -35,8 +53,8 @@
 
         <DockPanel Margin="0,0,0,14">
             <StackPanel>
-                <TextBlock Text="Voice Settings" FontSize="24" FontWeight="SemiBold" Foreground="#111827" />
-                <TextBlock Text="{Binding VoiceStatus}" Foreground="#4B5563" TextWrapping="Wrap" />
+                <TextBlock Text="Voice Settings" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                <TextBlock Text="{Binding VoiceStatus}" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
             </StackPanel>
         </DockPanel>
 
@@ -47,8 +65,8 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Border Background="#101821"
-                    BorderBrush="#26323D"
+            <Border Background="#18181B"
+                    BorderBrush="#323236"
                     BorderThickness="1"
                     Padding="16,10">
                 <Grid>
@@ -73,7 +91,7 @@
 
                     <TextBlock Grid.Column="2"
                                Text="Channel"
-                               Foreground="#B8C7D9"
+                               Foreground="#D0D5DD"
                                VerticalAlignment="Center"
                                Margin="14,0,8,0" />
                     <ComboBox Grid.Column="3"
@@ -83,7 +101,7 @@
 
                     <TextBlock Grid.Column="4"
                                Text="Gain"
-                               Foreground="#B8C7D9"
+                               Foreground="#D0D5DD"
                                VerticalAlignment="Center"
                                Margin="14,0,8,0" />
                     <Slider Grid.Column="5"
@@ -101,8 +119,8 @@
             </Border>
 
             <Border Grid.Row="1"
-                    Background="#101821"
-                    BorderBrush="#334F5D6B"
+                    Background="#18181B"
+                    BorderBrush="#323236"
                     BorderThickness="1"
                     Padding="14"
                     Margin="0,12,0,12">
@@ -124,19 +142,19 @@
                         <Ellipse Width="14"
                                  Height="14"
                                  Fill="#42D77D"
-                                 Stroke="#B8C7D9"
+                                 Stroke="#D0D5DD"
                                  StrokeThickness="1"
                                  VerticalAlignment="Center"
                                  Margin="0,0,8,0" />
                         <TextBlock Text="DSP active"
-                                   Foreground="#B8C7D9"
+                                   Foreground="#D0D5DD"
                                    VerticalAlignment="Center" />
                     </StackPanel>
 
                     <Border Grid.Row="2"
                             MinHeight="130"
                             Background="#05070A"
-                            BorderBrush="#334F5D6B"
+                            BorderBrush="#323236"
                             BorderThickness="1"
                             Margin="0,0,0,10">
                         <Viewbox Stretch="Fill">
@@ -154,16 +172,16 @@
 
                     <TextBlock Grid.Row="3"
                                Text="Processed signal being monitored"
-                               Foreground="#B8C7D9"
+                               Foreground="#D0D5DD"
                                TextWrapping="Wrap"
                                Margin="0,0,0,10" />
                     <StackPanel Grid.Row="4">
                         <TextBlock Text="{Binding VoiceInputMeterText}"
-                                   Foreground="#B8C7D9"
+                                   Foreground="#D0D5DD"
                                    TextWrapping="Wrap"
                                    FontSize="12" />
                         <TextBlock Text="{Binding VoiceDiagnosticsText}"
-                                   Foreground="#88AFC4"
+                                   Foreground="#9DA4AE"
                                    TextWrapping="Wrap"
                                    FontSize="12"
                                    Margin="0,6,0,0" />
@@ -172,8 +190,8 @@
             </Border>
 
             <Border Grid.Row="2"
-                    Background="#101821"
-                    BorderBrush="#334F5D6B"
+                    Background="#18181B"
+                    BorderBrush="#323236"
                     BorderThickness="1"
                     Padding="14"
                     Margin="0,0,0,12">
@@ -202,11 +220,11 @@
                             Margin="12,0,12,0" />
                     <StackPanel Grid.Column="3" VerticalAlignment="Center">
                         <TextBlock Text="{Binding TtsStatus}"
-                                   Foreground="#B8C7D9"
+                                   Foreground="#D0D5DD"
                                    TextWrapping="Wrap"
                                    FontSize="12" />
                         <TextBlock Text="{Binding VoiceSettingsStatusText}"
-                                   Foreground="#88AFC4"
+                                   Foreground="#9DA4AE"
                                    TextWrapping="Wrap"
                                    FontSize="12"
                                    Margin="0,3,0,0" />

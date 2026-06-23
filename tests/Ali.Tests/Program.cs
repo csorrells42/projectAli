@@ -429,6 +429,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
         ExtraInputGainDb: 6,
         NormalizeBeforeStt: true,
         RetainDebugAudio: true,
+        AutoSendVoiceTranscripts: true,
         WhisperExecutablePath: @"C:\Ali\lib\voice\whisper.exe",
         WhisperModelPath: @"C:\Ali\lib\voice\faster-whisper",
         PiperExecutablePath: @"C:\Ali\lib\voice\piper.exe",
@@ -445,6 +446,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(6d, loaded.ExtraInputGainDb);
     Equal(true, loaded.NormalizeBeforeStt);
     Equal(true, loaded.RetainDebugAudio);
+    Equal(true, loaded.AutoSendVoiceTranscripts);
     Equal(@"C:\Ali\lib\voice\whisper.exe", loaded.WhisperExecutablePath);
     Equal(@"C:\Ali\lib\voice\en_US.onnx", loaded.PiperModelPath);
     Equal("en_US-test", loaded.PiperVoiceId);

@@ -3,6 +3,8 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -26,8 +28,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly VoiceDiagnosticSampleService _sampleService;
-    private readonly string _conversationId = $"conv_{Guid.NewGuid():N}";
+    private string _conversationId = $"conv_{Guid.NewGuid():N}";
     private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
     private bool _loadingVoiceSettings;
     private bool _loadingSpeechToolSettings;
@@ -58,6 +61,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeOutputLimitText = "256";
     private string _runtimeTemperatureText = "0.2";
     private string _runtimeTopPText = string.Empty;
+    private string _runtimeQuantizationText = "Installed package default";
+    private string _selectedRuntimeModelChoice = string.Empty;
+    private string _runtimeSelectionStatusText = "Runtime model list has not been refreshed yet.";
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
     private bool _runtimeVisionEnabled;
@@ -96,6 +102,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _extraInputGainDb;
     private bool _normalizeBeforeStt;
     private bool _retainDebugAudio;
+    private bool _autoSendVoiceTranscripts;
     private VoiceTurnMetadata? _lastVoiceMetadata;
 
     public MainWindowViewModel(AliServices services)
@@ -105,10 +112,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SendCommand = new AsyncRelayCommand(SendAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = new RelayCommand(_ => Stop(), _ => IsBusy);
+        NewChatCommand = new RelayCommand(_ => StartNewChat());
         FlagIncorrectCommand = new RelayCommand(FlagIncorrect);
         LoadRuntimeSettingsCommand = new RelayCommand(_ => LoadRuntimeSettings());
         SaveRuntimeSettingsCommand = new RelayCommand(_ => SaveRuntimeSettings());
         CheckRuntimeCommand = new AsyncRelayCommand(CheckRuntimeAsync, () => !IsBusy);
+        RefreshRuntimeModelsCommand = new AsyncRelayCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
         ActivateRuntimeCommand = new RelayCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
         RevertToStubCommand = new RelayCommand(_ => RevertToStub(), _ => !IsBusy);
         RevertToLastKnownGoodCommand = new RelayCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
@@ -117,7 +126,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RemoveAttachmentCommand = new RelayCommand(RemoveAttachment);
         StartVoiceRecordingCommand = new AsyncRelayCommand(StartVoiceRecordingAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         StopVoiceRecordingCommand = new AsyncRelayCommand(StopVoiceRecordingOrTranscriptionAsync, () => IsRecording || IsTranscribing);
-        SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
+        ToggleVoiceRecordingCommand = new AsyncRelayCommand(ToggleVoiceRecordingAsync, () => !IsBusy || IsRecording || IsTranscribing);
+        ToggleVoiceModeCommand = new RelayCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
+        SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !AutoSendVoiceTranscripts && !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenVoiceSettingsCommand = new RelayCommand(_ => OpenVoiceSettings());
         ApplyVoiceToolSettingsCommand = new RelayCommand(_ => ApplyVoiceToolSettings());
@@ -131,6 +142,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
         _normalizeBeforeStt = _voiceSettings.NormalizeBeforeStt;
         _retainDebugAudio = _voiceSettings.RetainDebugAudio;
+        _autoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
         LoadSpeechToolSettings();
         ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
         foreach (var preset in VoiceInputPreset.All)
@@ -163,11 +175,14 @@ public sealed class MainWindowViewModel : ObservableObject
             text: "Ali bootstrap ready. I can prove the WPF chat loop, cancellation, and correction queue. A real local model runtime must pass a health check and be activated before I answer through it.",
             createdAt: DateTimeOffset.UtcNow,
             evidenceStatus: EvidenceStatus.Verified));
+        ConversationHistory.Add("Current chat");
     }
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
 
     public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
+
+    public ObservableCollection<string> ConversationHistory { get; } = new();
 
     public ObservableCollection<string> VoiceInputDevices { get; } = new();
 
@@ -179,9 +194,19 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> PiperVoiceChoices { get; } = new();
 
+    public ObservableCollection<string> RuntimeModelChoices { get; } = new();
+
+    public ObservableCollection<string> RuntimeQuantizationChoices { get; } = new();
+
+    public ObservableCollection<string> RuntimeContextChoices { get; } = new();
+
+    public ObservableCollection<string> RuntimeOutputLimitChoices { get; } = new();
+
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
+
+    public ICommand NewChatCommand { get; }
 
     public ICommand FlagIncorrectCommand { get; }
 
@@ -190,6 +215,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand SaveRuntimeSettingsCommand { get; }
 
     public ICommand CheckRuntimeCommand { get; }
+
+    public ICommand RefreshRuntimeModelsCommand { get; }
 
     public ICommand ActivateRuntimeCommand { get; }
 
@@ -206,6 +233,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand StartVoiceRecordingCommand { get; }
 
     public ICommand StopVoiceRecordingCommand { get; }
+
+    public ICommand ToggleVoiceRecordingCommand { get; }
+
+    public ICommand ToggleVoiceModeCommand { get; }
 
     public ICommand SendTranscriptCommand { get; }
 
@@ -227,6 +258,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
+    public string MicButtonText => IsRecording ? "Stop Mic" : IsTranscribing ? "Transcribing" : "Mic";
+
+    public string VoiceModeButtonText => AutoSendVoiceTranscripts ? "Hands Free On" : "Voice Mode";
+
     public string RuntimeDisplay
     {
         get => _runtimeDisplay;
@@ -243,6 +278,24 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _runtimeModelText;
         set => SetProperty(ref _runtimeModelText, value);
+    }
+
+    public string SelectedRuntimeModelChoice
+    {
+        get => _selectedRuntimeModelChoice;
+        set
+        {
+            if (SetProperty(ref _selectedRuntimeModelChoice, value))
+            {
+                ApplySelectedRuntimeModelChoice(value, resetToSmallest: true);
+            }
+        }
+    }
+
+    public string RuntimeQuantizationText
+    {
+        get => _runtimeQuantizationText;
+        set => SetProperty(ref _runtimeQuantizationText, value);
     }
 
     public string RuntimeContextText
@@ -267,6 +320,12 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _runtimeTopPText;
         set => SetProperty(ref _runtimeTopPText, value);
+    }
+
+    public string RuntimeSelectionStatusText
+    {
+        get => _runtimeSelectionStatusText;
+        private set => SetProperty(ref _runtimeSelectionStatusText, value);
     }
 
     public bool RuntimeEnabled
@@ -488,6 +547,26 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool AutoSendVoiceTranscripts
+    {
+        get => _autoSendVoiceTranscripts;
+        set
+        {
+            if (SetProperty(ref _autoSendVoiceTranscripts, value))
+            {
+                OnPropertyChanged(nameof(ManualTranscriptReviewEnabled));
+                OnPropertyChanged(nameof(ManualTranscriptReviewOpacity));
+                OnPropertyChanged(nameof(VoiceModeButtonText));
+                SaveVoiceSettings(autoSendVoiceTranscripts: value);
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public bool ManualTranscriptReviewEnabled => !AutoSendVoiceTranscripts;
+
+    public double ManualTranscriptReviewOpacity => AutoSendVoiceTranscripts ? 0.45d : 1d;
+
     public PointCollection SpectrumLivePoints
     {
         get => _spectrumLivePoints;
@@ -579,6 +658,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isRecording, value))
             {
+                OnPropertyChanged(nameof(MicButtonText));
                 RaiseCommandStates();
             }
         }
@@ -591,6 +671,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isTranscribing, value))
             {
+                OnPropertyChanged(nameof(MicButtonText));
                 RaiseCommandStates();
             }
         }
@@ -757,6 +838,30 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void Stop() => _activeResponse?.Cancel();
 
+    private void StartNewChat()
+    {
+        _conversationId = $"conv_{Guid.NewGuid():N}";
+        Messages.Clear();
+        Attachments.Clear();
+        ComposerText = string.Empty;
+        EditableTranscript = string.Empty;
+        LastTranscript = string.Empty;
+        StatusText = "New chat ready.";
+        VoiceStatus = "Voice idle.";
+        ConversationHistory.Insert(0, $"Chat {DateTime.Now:h:mm tt}");
+    }
+
+    private async Task ToggleVoiceRecordingAsync()
+    {
+        if (IsRecording || IsTranscribing)
+        {
+            await StopVoiceRecordingOrTranscriptionAsync().ConfigureAwait(true);
+            return;
+        }
+
+        await StartVoiceRecordingAsync().ConfigureAwait(true);
+    }
+
     private void LoadRuntimeSettings()
     {
         var options = _services.LoadRuntimeSettings();
@@ -783,6 +888,61 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusText = $"Runtime settings were not saved: {ex.Message}";
+        }
+    }
+
+    private async Task RefreshRuntimeModelsAsync()
+    {
+        if (!Uri.TryCreate(RuntimeEndpointText.Trim(), UriKind.Absolute, out var endpoint))
+        {
+            RuntimeSelectionStatusText = "Runtime endpoint must be an absolute URL before refreshing models.";
+            return;
+        }
+
+        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false);
+        if (!endpointPolicy.IsAllowed)
+        {
+            RuntimeSelectionStatusText = endpointPolicy.Reason;
+            return;
+        }
+
+        IsBusy = true;
+        StatusText = "Refreshing installed local models...";
+        try
+        {
+            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, CancellationToken.None).ConfigureAwait(true);
+            if (installedChoices.Count == 0)
+            {
+                RuntimeSelectionStatusText = "No installed models were listed by the local runtime endpoint.";
+                StatusText = RuntimeSelectionStatusText;
+                return;
+            }
+
+            var currentModel = RuntimeModelText;
+            var currentQuantization = RuntimeQuantizationText;
+            var currentContext = RuntimeContextText;
+            var currentOutputLimit = RuntimeOutputLimitText;
+            LoadRuntimeModelChoices(installedChoices, currentModel);
+
+            var selectedLabel = FindRuntimeModelLabel(currentModel) ?? RuntimeModelChoices.FirstOrDefault() ?? string.Empty;
+            SelectRuntimeModelChoice(
+                selectedLabel,
+                preferredQuantization: currentQuantization,
+                preferredContext: currentContext,
+                preferredOutputLimit: currentOutputLimit,
+                resetToSmallest: string.IsNullOrWhiteSpace(currentModel));
+
+            RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed local model(s).";
+            StatusText = RuntimeSelectionStatusText;
+        }
+        catch (Exception ex)
+        {
+            RuntimeSelectionStatusText = $"Installed model refresh failed: {ex.Message}";
+            StatusText = RuntimeSelectionStatusText;
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -904,42 +1064,24 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Max output tokens must be at least 1.");
         }
 
-        if (!double.TryParse(RuntimeTemperatureText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature)
-            || temperature < 0
-            || temperature > 2)
-        {
-            throw new InvalidOperationException("Temperature must be between 0 and 2.");
-        }
-
-        double? topP = null;
-        if (!string.IsNullOrWhiteSpace(RuntimeTopPText))
-        {
-            if (!double.TryParse(RuntimeTopPText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedTopP)
-                || parsedTopP <= 0
-                || parsedTopP > 1)
-            {
-                throw new InvalidOperationException("Top-p must be greater than 0 and no more than 1.");
-            }
-
-            topP = parsedTopP;
-        }
-
         var model = RuntimeModelText.Trim();
+        var selectedModel = CurrentRuntimeModelChoice();
+        var quantization = PreferConfigured(RuntimeQuantizationText, selectedModel?.DefaultQuantization ?? "Installed package default");
 
         return new OpenAiCompatibleRuntimeOptions(
-            Enabled: RuntimeEnabled,
+            Enabled: !string.IsNullOrWhiteSpace(model),
             Endpoint: endpoint,
             Model: model,
-            DisplayName: string.IsNullOrWhiteSpace(model) ? "Local OpenAI-compatible runtime" : $"Local {model}",
-            Family: "local",
-            Size: "unknown",
-            Quantization: "Q4",
+            DisplayName: selectedModel?.DisplayName ?? (string.IsNullOrWhiteSpace(model) ? "Local OpenAI-compatible runtime" : $"Local {model}"),
+            Family: selectedModel?.Family ?? "local",
+            Size: selectedModel?.Size ?? "unknown",
+            Quantization: quantization,
             ContextTokens: contextTokens,
             OutputTokenLimit: outputLimit,
-            Temperature: temperature,
-            TopP: topP,
-            StreamingEnabled: RuntimeStreamingEnabled,
-            SupportsVision: RuntimeVisionEnabled,
+            Temperature: 0.2,
+            TopP: null,
+            StreamingEnabled: selectedModel?.StreamingEnabled ?? true,
+            SupportsVision: selectedModel?.SupportsVision ?? LooksLikeVisionModel(model),
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false);
     }
@@ -1170,6 +1312,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task TranscribeAudioAsync(VoiceAudioInput audioInput)
     {
+        var shouldAutoSend = false;
         try
         {
             IsTranscribing = true;
@@ -1197,6 +1340,11 @@ public sealed class MainWindowViewModel : ObservableObject
             SaveLastSuccessfulSttDevice();
             LastTranscript = transcript.Text;
             EditableTranscript = transcript.Text;
+            if (!AutoSendVoiceTranscripts)
+            {
+                ComposerText = transcript.Text;
+            }
+
             _lastVoiceMetadata = new VoiceTurnMetadata(
                 VoiceInputOrigin.Voice,
                 transcript.Text,
@@ -1215,7 +1363,10 @@ public sealed class MainWindowViewModel : ObservableObject
                 CurrentTextToSpeechModel(),
                 SuspiciousOrNoSpeech: false);
 
-            VoiceStatus = "Transcript ready to review.";
+            shouldAutoSend = AutoSendVoiceTranscripts;
+            VoiceStatus = shouldAutoSend
+                ? "Transcript accepted; sending to Ali."
+                : "Transcript placed in the chat bar.";
             SttStatus = $"Transcript created by {transcript.ProviderName}.";
         }
         catch (OperationCanceledException)
@@ -1236,6 +1387,11 @@ public sealed class MainWindowViewModel : ObservableObject
             _activeVoiceInput?.Dispose();
             _activeVoiceInput = null;
             StartInputLevelMonitor();
+        }
+
+        if (shouldAutoSend)
+        {
+            await SendTranscriptAsync().ConfigureAwait(true);
         }
     }
 
@@ -1285,7 +1441,15 @@ public sealed class MainWindowViewModel : ObservableObject
         };
 
         VoiceStatus = "Voice transcript sent to Ali.";
-        await SendTextAsync(transcript, VoiceInputOrigin.Voice, voiceMetadata).ConfigureAwait(true);
+        try
+        {
+            await SendTextAsync(transcript, VoiceInputOrigin.Voice, voiceMetadata).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            VoiceStatus = $"Transcript was accepted, but sending failed: {ex.Message}";
+            StatusText = VoiceStatus;
+        }
     }
 
     private async Task SpeakAssistantAnswerAsync(string assistantText, VoiceTurnMetadata? voiceMetadata)
@@ -1824,16 +1988,231 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ApplyRuntimeOptions(OpenAiCompatibleRuntimeOptions options)
     {
+        var selectedModel = RuntimeModelChoice.FromOptions(options);
+        LoadRuntimeModelChoices(CreateKnownRuntimeModelChoices().Append(selectedModel), options.Model);
+
         RuntimeEnabled = options.Enabled;
         RuntimeEndpointText = options.Endpoint.ToString();
-        RuntimeModelText = options.Model;
-        RuntimeContextText = options.ContextTokens.ToString(CultureInfo.InvariantCulture);
-        RuntimeOutputLimitText = options.OutputTokenLimit.ToString(CultureInfo.InvariantCulture);
         RuntimeTemperatureText = options.Temperature.ToString(CultureInfo.InvariantCulture);
         RuntimeTopPText = options.TopP?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         RuntimeStreamingEnabled = options.StreamingEnabled;
         RuntimeVisionEnabled = options.SupportsVision;
+
+        var selectedLabel = FindRuntimeModelLabel(options.Model);
+        if (selectedLabel is null)
+        {
+            RuntimeModelText = options.Model;
+            RuntimeQuantizationText = options.Quantization;
+            RuntimeContextText = options.ContextTokens.ToString(CultureInfo.InvariantCulture);
+            RuntimeOutputLimitText = options.OutputTokenLimit.ToString(CultureInfo.InvariantCulture);
+            RuntimeSelectionStatusText = string.IsNullOrWhiteSpace(options.Model)
+                ? "Refresh installed models or choose a known model option."
+                : "Saved model is not in the local model list yet.";
+            return;
+        }
+
+        SelectRuntimeModelChoice(
+            selectedLabel,
+            preferredQuantization: options.Quantization,
+            preferredContext: options.ContextTokens.ToString(CultureInfo.InvariantCulture),
+            preferredOutputLimit: options.OutputTokenLimit.ToString(CultureInfo.InvariantCulture),
+            resetToSmallest: false);
     }
+
+    private RuntimeModelChoice? CurrentRuntimeModelChoice()
+    {
+        if (_runtimeModelChoices.TryGetValue(SelectedRuntimeModelChoice, out var selected))
+        {
+            return selected;
+        }
+
+        return _runtimeModelChoices.Values.FirstOrDefault(choice =>
+            choice.Model.Equals(RuntimeModelText, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ApplySelectedRuntimeModelChoice(string label, bool resetToSmallest)
+    {
+        SelectRuntimeModelChoice(
+            label,
+            preferredQuantization: resetToSmallest ? null : RuntimeQuantizationText,
+            preferredContext: resetToSmallest ? null : RuntimeContextText,
+            preferredOutputLimit: resetToSmallest ? null : RuntimeOutputLimitText,
+            resetToSmallest);
+    }
+
+    private void SelectRuntimeModelChoice(
+        string label,
+        string? preferredQuantization,
+        string? preferredContext,
+        string? preferredOutputLimit,
+        bool resetToSmallest)
+    {
+        if (!_runtimeModelChoices.TryGetValue(label, out var choice))
+        {
+            return;
+        }
+
+        if (!_selectedRuntimeModelChoice.Equals(label, StringComparison.Ordinal))
+        {
+            _selectedRuntimeModelChoice = label;
+            OnPropertyChanged(nameof(SelectedRuntimeModelChoice));
+        }
+
+        RuntimeModelText = choice.Model;
+        RuntimeEnabled = !string.IsNullOrWhiteSpace(choice.Model);
+        RuntimeStreamingEnabled = choice.StreamingEnabled;
+        RuntimeVisionEnabled = choice.SupportsVision;
+
+        var quantizationChoices = string.IsNullOrWhiteSpace(preferredQuantization)
+            ? choice.Quantizations
+            : choice.Quantizations.Append(preferredQuantization.Trim());
+        ReplaceChoices(RuntimeQuantizationChoices, quantizationChoices);
+        ReplaceChoices(RuntimeContextChoices, choice.ContextTokens.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        ReplaceChoices(RuntimeOutputLimitChoices, choice.OutputTokenLimits.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+
+        RuntimeQuantizationText = PickChoice(RuntimeQuantizationChoices, preferredQuantization, choice.DefaultQuantization, resetToSmallest);
+        RuntimeContextText = PickChoice(RuntimeContextChoices, preferredContext, choice.ContextTokens.FirstOrDefault().ToString(CultureInfo.InvariantCulture), resetToSmallest);
+        RuntimeOutputLimitText = PickChoice(RuntimeOutputLimitChoices, preferredOutputLimit, choice.OutputTokenLimits.FirstOrDefault().ToString(CultureInfo.InvariantCulture), resetToSmallest);
+        RuntimeSelectionStatusText = $"{choice.Source}. Vision: {(choice.SupportsVision ? "yes" : "no")}. Streaming: {(choice.StreamingEnabled ? "yes" : "unknown until health check")}.";
+    }
+
+    private void LoadRuntimeModelChoices(IEnumerable<RuntimeModelChoice> choices, string? selectedModel)
+    {
+        _runtimeModelChoices.Clear();
+        RuntimeModelChoices.Clear();
+
+        foreach (var choice in choices.Where(choice => !string.IsNullOrWhiteSpace(choice.Model)))
+        {
+            AddRuntimeModelChoice(choice);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedModel) && FindRuntimeModelLabel(selectedModel) is null)
+        {
+            AddRuntimeModelChoice(RuntimeModelChoice.FromModelId(selectedModel, "Saved runtime setting"));
+        }
+    }
+
+    private void AddRuntimeModelChoice(RuntimeModelChoice choice)
+    {
+        var label = choice.Label;
+        if (_runtimeModelChoices.ContainsKey(label))
+        {
+            return;
+        }
+
+        _runtimeModelChoices[label] = choice;
+        RuntimeModelChoices.Add(label);
+    }
+
+    private string? FindRuntimeModelLabel(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return null;
+        }
+
+        return _runtimeModelChoices.Values.FirstOrDefault(choice =>
+            choice.Model.Equals(model.Trim(), StringComparison.OrdinalIgnoreCase))?.Label;
+    }
+
+    private static void ReplaceChoices(ObservableCollection<string> target, IEnumerable<string> values)
+    {
+        target.Clear();
+        foreach (var value in values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            target.Add(value);
+        }
+    }
+
+    private static string PickChoice(
+        ObservableCollection<string> choices,
+        string? preferred,
+        string fallback,
+        bool resetToSmallest)
+    {
+        if (!resetToSmallest && !string.IsNullOrWhiteSpace(preferred))
+        {
+            var match = choices.FirstOrDefault(choice => choice.Equals(preferred.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(fallback))
+        {
+            var fallbackMatch = choices.FirstOrDefault(choice => choice.Equals(fallback.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (fallbackMatch is not null)
+            {
+                return fallbackMatch;
+            }
+        }
+
+        return choices.FirstOrDefault() ?? string.Empty;
+    }
+
+    private static async Task<IReadOnlyList<RuntimeModelChoice>> FetchInstalledRuntimeModelChoicesAsync(
+        Uri endpoint,
+        CancellationToken cancellationToken)
+    {
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(endpoint, "models"));
+        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return ParseRuntimeModelChoices(body);
+    }
+
+    private static IReadOnlyList<RuntimeModelChoice> ParseRuntimeModelChoices(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var choices = new List<RuntimeModelChoice>();
+
+        if (document.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in data.EnumerateArray())
+            {
+                var choice = RuntimeModelChoice.FromJsonModel(item);
+                if (choice is not null)
+                {
+                    choices.Add(choice);
+                }
+            }
+        }
+
+        if (document.RootElement.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in models.EnumerateArray())
+            {
+                var choice = RuntimeModelChoice.FromJsonModel(item);
+                if (choice is not null)
+                {
+                    choices.Add(choice);
+                }
+            }
+        }
+
+        return choices
+            .GroupBy(choice => choice.Model, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(choice => choice.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<RuntimeModelChoice> CreateKnownRuntimeModelChoices() =>
+    [
+        RuntimeModelChoice.FromModelId("qwen3:1.7b", "Known Qwen option"),
+        RuntimeModelChoice.FromModelId("qwen3:4b", "Known Qwen option"),
+        RuntimeModelChoice.FromModelId("qwen3:8b", "Known Qwen option"),
+        RuntimeModelChoice.FromModelId("qwen3:14b", "Known Qwen option"),
+        RuntimeModelChoice.FromModelId("qwen3:32b", "Known Qwen option"),
+        RuntimeModelChoice.FromModelId("qwen3-vl:8b", "Known vision option")
+    ];
+
+    private static bool LooksLikeVisionModel(string model) =>
+        model.Contains("vl", StringComparison.OrdinalIgnoreCase)
+        || model.Contains("vision", StringComparison.OrdinalIgnoreCase)
+        || model.Contains("visual", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatHealthResult(RuntimeHealthCheck health)
     {
@@ -1885,6 +2264,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (CheckRuntimeCommand is AsyncRelayCommand checkRuntime)
         {
             checkRuntime.RaiseCanExecuteChanged();
+        }
+
+        if (RefreshRuntimeModelsCommand is AsyncRelayCommand refreshModels)
+        {
+            refreshModels.RaiseCanExecuteChanged();
         }
 
         if (ActivateRuntimeCommand is RelayCommand activate)
@@ -2224,7 +2608,8 @@ public sealed class MainWindowViewModel : ObservableObject
         string? selectedInputChannelMode = null,
         double? extraInputGainDb = null,
         bool? normalizeBeforeStt = null,
-        bool? retainDebugAudio = null)
+        bool? retainDebugAudio = null,
+        bool? autoSendVoiceTranscripts = null)
     {
         if (_loadingVoiceSettings)
         {
@@ -2245,7 +2630,8 @@ public sealed class MainWindowViewModel : ObservableObject
             SelectedInputChannelMode = selectedInputChannelMode ?? _voiceSettings.SelectedInputChannelMode,
             ExtraInputGainDb = extraInputGainDb ?? _voiceSettings.ExtraInputGainDb,
             NormalizeBeforeStt = normalizeBeforeStt ?? _voiceSettings.NormalizeBeforeStt,
-            RetainDebugAudio = retainDebugAudio ?? _voiceSettings.RetainDebugAudio
+            RetainDebugAudio = retainDebugAudio ?? _voiceSettings.RetainDebugAudio,
+            AutoSendVoiceTranscripts = autoSendVoiceTranscripts ?? _voiceSettings.AutoSendVoiceTranscripts
         };
 
         VoiceRuntimeSettingsStore.Save(_services.DataRoot, _voiceSettings);
@@ -2501,3 +2887,213 @@ public sealed class MainWindowViewModel : ObservableObject
 }
 
 internal sealed record PiperVoiceChoice(string Label, string VoiceId, string ModelPath);
+
+internal sealed record RuntimeModelChoice(
+    string Model,
+    string DisplayName,
+    string Family,
+    string Size,
+    IReadOnlyList<string> Quantizations,
+    IReadOnlyList<int> ContextTokens,
+    IReadOnlyList<int> OutputTokenLimits,
+    bool StreamingEnabled,
+    bool SupportsVision,
+    string Source)
+{
+    public string Label => $"{DisplayName} ({Model})";
+
+    public string DefaultQuantization => Quantizations.FirstOrDefault() ?? "Installed package default";
+
+    public static RuntimeModelChoice FromOptions(OpenAiCompatibleRuntimeOptions options) =>
+        FromModelId(
+            options.Model,
+            "Saved runtime setting",
+            displayName: options.DisplayName,
+            family: options.Family,
+            size: options.Size,
+            quantization: options.Quantization,
+            streamingEnabled: options.StreamingEnabled,
+            supportsVision: options.SupportsVision,
+            contextTokens: options.ContextTokens,
+            outputTokenLimit: options.OutputTokenLimit);
+
+    public static RuntimeModelChoice? FromJsonModel(JsonElement item)
+    {
+        var model = ReadStringProperty(item, "id", "name", "model");
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return null;
+        }
+
+        JsonElement? details = TryGetProperty(item, "details", out var detailsElement) && detailsElement.ValueKind == JsonValueKind.Object
+            ? detailsElement
+            : null;
+
+        var family = details is { } modelDetails
+            ? ReadStringProperty(modelDetails, "family", "families")
+            : null;
+        var size = details is { } sizeDetails
+            ? ReadStringProperty(sizeDetails, "parameter_size", "size")
+            : null;
+        var quantization = details is { } quantDetails
+            ? ReadStringProperty(quantDetails, "quantization_level", "quantization")
+            : null;
+
+        return FromModelId(
+            model,
+            "Installed local runtime model",
+            family: family,
+            size: size,
+            quantization: quantization);
+    }
+
+    public static RuntimeModelChoice FromModelId(
+        string model,
+        string source,
+        string? displayName = null,
+        string? family = null,
+        string? size = null,
+        string? quantization = null,
+        bool streamingEnabled = true,
+        bool? supportsVision = null,
+        int? contextTokens = null,
+        int? outputTokenLimit = null)
+    {
+        var normalizedModel = model.Trim();
+        var inferredSize = string.IsNullOrWhiteSpace(size) ? InferSize(normalizedModel) : size.Trim();
+        var inferredFamily = string.IsNullOrWhiteSpace(family) ? InferFamily(normalizedModel) : family.Trim();
+        var inferredVision = supportsVision
+            ?? (normalizedModel.Contains("vl", StringComparison.OrdinalIgnoreCase)
+                || normalizedModel.Contains("vision", StringComparison.OrdinalIgnoreCase)
+                || normalizedModel.Contains("visual", StringComparison.OrdinalIgnoreCase));
+        var contextChoices = BuildContextChoices(normalizedModel, contextTokens);
+        var outputChoices = BuildOutputChoices(outputTokenLimit);
+        var quantizationChoices = new[]
+        {
+            string.IsNullOrWhiteSpace(quantization) ? "Installed package default" : quantization.Trim()
+        };
+
+        return new RuntimeModelChoice(
+            normalizedModel,
+            string.IsNullOrWhiteSpace(displayName) ? InferDisplayName(normalizedModel, inferredSize) : displayName.Trim(),
+            inferredFamily,
+            inferredSize,
+            quantizationChoices,
+            contextChoices,
+            outputChoices,
+            streamingEnabled,
+            inferredVision,
+            source);
+    }
+
+    private static IReadOnlyList<int> BuildContextChoices(string model, int? preferred)
+    {
+        var lower = model.ToLowerInvariant();
+        var values = lower.Contains("32b", StringComparison.Ordinal)
+            ? new[] { 2048, 4096 }
+            : lower.Contains("1.7b", StringComparison.Ordinal) || lower.Contains("4b", StringComparison.Ordinal)
+                ? new[] { 1024, 2048, 4096, 8192 }
+                : new[] { 2048, 4096, 8192 };
+
+        return AddPreferred(values, preferred, minimum: 512);
+    }
+
+    private static IReadOnlyList<int> BuildOutputChoices(int? preferred) =>
+        AddPreferred([128, 256, 512], preferred, minimum: 1);
+
+    private static IReadOnlyList<int> AddPreferred(IReadOnlyList<int> values, int? preferred, int minimum)
+    {
+        var set = new SortedSet<int>(values);
+        if (preferred.HasValue && preferred.Value >= minimum)
+        {
+            set.Add(preferred.Value);
+        }
+
+        return set.ToList();
+    }
+
+    private static string InferDisplayName(string model, string size)
+    {
+        var lower = model.ToLowerInvariant();
+        if (lower.Contains("qwen3-vl", StringComparison.Ordinal))
+        {
+            return $"Qwen3 VL {size}";
+        }
+
+        if (lower.Contains("qwen3", StringComparison.Ordinal))
+        {
+            return $"Qwen3 {size}";
+        }
+
+        return model;
+    }
+
+    private static string InferFamily(string model)
+    {
+        var lower = model.ToLowerInvariant();
+        if (lower.Contains("qwen", StringComparison.Ordinal))
+        {
+            return "Qwen";
+        }
+
+        return "local";
+    }
+
+    private static string InferSize(string model)
+    {
+        foreach (var size in new[] { "1.7B", "4B", "8B", "14B", "16B", "32B" })
+        {
+            if (model.Contains(size, StringComparison.OrdinalIgnoreCase))
+            {
+                return size;
+            }
+        }
+
+        return "unknown";
+    }
+
+    private static string? ReadStringProperty(JsonElement item, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (TryGetProperty(item, name, out var property))
+            {
+                if (property.ValueKind == JsonValueKind.String)
+                {
+                    return property.GetString();
+                }
+
+                if (property.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
+                {
+                    return property.ToString();
+                }
+
+                if (property.ValueKind == JsonValueKind.Array)
+                {
+                    var first = property.EnumerateArray().FirstOrDefault();
+                    if (first.ValueKind == JsonValueKind.String)
+                    {
+                        return first.GetString();
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetProperty(JsonElement item, string name, out JsonElement property)
+    {
+        foreach (var candidate in item.EnumerateObject())
+        {
+            if (candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                property = candidate.Value;
+                return true;
+            }
+        }
+
+        property = default;
+        return false;
+    }
+}

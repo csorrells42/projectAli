@@ -14,6 +14,7 @@ public sealed record VoiceRuntimeSettings(
     double ExtraInputGainDb = 6,
     bool NormalizeBeforeStt = true,
     bool RetainDebugAudio = false,
+    bool AutoSendVoiceTranscripts = false,
     string? WhisperExecutablePath = null,
     string? WhisperModelPath = null,
     string? WhisperArgumentsTemplate = null,
