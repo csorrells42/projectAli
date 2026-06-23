@@ -140,6 +140,10 @@ Current implementation:
 - Smart App Control blocked unsigned local build assemblies such as `Ali.Infrastructure.dll` and `NAudio.Wasapi.dll`.
 - A local current-user test code-signing certificate was created for development output signing.
 - Debug/test binaries and the `%LOCALAPPDATA%\Ali\DevRun` copy can be signed after builds so Ali can launch during development.
+- The approved local dev signing certificate thumbprint is `094F377BC08F776F367A46DB3E091FE6417AF92D`.
+- The certificate was trusted only in `CurrentUser\Root` for local development testing. It was not added to `LocalMachine\Root`.
+- On 2026-06-23, signed debug output launched and passed local runtime certification.
+- On 2026-06-23, refreshed signed DevRun still hit Smart App Control on `Ali.Infrastructure.dll` despite valid Authenticode signatures. Treat this as an installer/signing repair blocker, not a reason to weaken Windows security.
 
 Reason:
 
@@ -157,3 +161,4 @@ Do not forget:
 - Do not treat the local test certificate as production security.
 - Future builds may overwrite signed binaries and need re-signing until the installer/signing path exists.
 - Installer/repair should be the long-term answer, not manual certificate work.
+- Do not disable Smart App Control or broaden trust stores to work around DevRun.

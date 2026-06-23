@@ -29,13 +29,11 @@ Ali can now be pointed at a local OpenAI-compatible runtime, such as Ollama runn
 
 Ali does not silently switch. Use the Runtime Settings panel:
 
-1. Check `Enable local OpenAI-compatible runtime`.
-2. Set the endpoint, usually `http://127.0.0.1:11434/v1/`.
-3. Set the model/package ID exactly as the local runtime reports it.
-4. Keep context at `4096` for the safe first run.
-5. Click `Save settings`.
-6. Click `Check Runtime`.
-7. Click `Activate Runtime` only after the check passes.
+1. Set the endpoint, usually `http://127.0.0.1:11434/v1/`.
+2. Select the installed model/package ID exactly as the local runtime reports it.
+3. Keep conservative development settings unless deliberately testing a larger profile.
+4. Click `Check`.
+5. Click `Activate` only after the check passes.
 
 If the check fails, Ali keeps the safe bootstrap stub active and reports the failure.
 
@@ -43,9 +41,20 @@ Ali refuses public/cloud runtime endpoints in local-only mode.
 
 Use `Revert to Stub` any time you want to return to the deterministic local test runtime.
 
-The current first proof text model is `qwen3:14b`. It proves the local text path works; it is not the final Ali model selection.
+The current certified local proof model is `qwen3-vl:8b` through Ollama's OpenAI-compatible endpoint. The development profile used for the latest certification was:
 
-The current first proof vision model is `qwen3-vl:8b`. It proves the local screenshot/image path works; it is not the final Ali vision model selection.
+- Endpoint: `http://127.0.0.1:11434/v1/`
+- Model: `qwen3-vl:8b`
+- Quantization: Ollama package default / lowest Ali runtime settings
+- Context: `2048`
+- Output: `128`
+- Temperature: `0`
+- Top-p: `0.1`
+- Streaming: enabled
+
+`qwen3-vl:8b` can emit a separate Ollama reasoning stream before final answer content. Ali hides that reasoning in normal chat. If the model spends the whole low output budget on hidden reasoning, Ali reports that no visible assistant content arrived instead of exposing the reasoning text.
+
+`qwen3:14b` was removed from this development machine to keep the system responsive.
 
 ## Voice
 
@@ -101,7 +110,7 @@ Input presets:
 
 Voice settings persist in `%LOCALAPPDATA%\Ali\BootstrapData\voice-settings.json`. If a saved mic disappears, Ali shows a warning and falls back visibly instead of silently pretending the same mic is still active.
 
-Current voice certification status: the local wiring from mic to STT to qwen3:14b to Piper to Stop Speaking to correction metadata has been proven mechanically. The guarded STT pass is still blocked on trustworthy microphone capture/tuning, so voice-command reliability is not yet certified.
+Current voice certification status: live voice, microphone, Piper playback, and Stop Speaking are not certified in the current V1 runtime pass. Chris must be present for that hardware/audio certification. Logic-level safety tests exist, but that is not the same as live voice certification.
 
 Voice can ask ordinary chat questions. Voice cannot yet run commands, change models, edit calendars, install things, delete memories, or do destructive actions. Those spoken requests are blocked in this phase and require visible typed confirmation later.
 
@@ -132,7 +141,9 @@ Raw voice audio is not stored in the correction queue.
 
 ## Coming Next
 
-- Real local model endpoint setup
+- Installer-managed signing/repair so Smart App Control accepts refreshed Ali binaries without manual certificate work
+- Owner visual review
+- Live voice/mic/Piper certification with Chris present
 - Real local Whisper/Piper install picker
 - Source/search controls
 - Memory controls

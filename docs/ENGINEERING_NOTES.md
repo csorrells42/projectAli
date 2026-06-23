@@ -144,7 +144,7 @@ Environment variable alternative:
 
 ```powershell
 $env:ALI_OPENAI_BASE_URL = "http://127.0.0.1:11434/v1/"
-$env:ALI_OPENAI_MODEL = "qwen3:14b"
+$env:ALI_OPENAI_MODEL = "qwen3-vl:8b"
 ```
 
 Do not enable private LAN endpoints until pairing/authentication/encryption exists.
@@ -195,6 +195,49 @@ First prompt: What model are you using? Answer in one short sentence.
 Streamed answer: I am using the Qwen3 model.
 Stop/cancel: passed after first token
 Correction queue runtime snapshot: stored
+```
+
+## Current Low-Settings Local Runtime Certification
+
+Date: 2026-06-23
+
+The current low-settings local runtime certification used:
+
+```text
+Runtime: Ollama
+Endpoint: http://127.0.0.1:11434/v1/
+Model/package ID: qwen3-vl:8b
+Quantization: Ollama package default / lowest Ali runtime settings
+Context: 2048
+Max output: 128
+Temperature: 0
+Top-p: 0.1
+Streaming: enabled
+Vision: enabled
+```
+
+Validation result:
+
+```text
+Build: passed, 0 warnings/errors
+Console harness: passed, 74/74
+Health check: passed
+Explicit activation: passed
+Local prompt: Say exactly: Ali local runtime ready.
+Visible answer: Ali local runtime ready.
+Streaming status: observed in UI as Streaming local response
+Stop response: passed; no duplicate continuation after Stop
+Shutdown cleanup: passed; no Ali.App.Wpf process remained
+Failure visibility: passed with an unreachable loopback endpoint
+```
+
+Important implementation note:
+
+```text
+Ollama's OpenAI-compatible qwen3-vl:8b stream can emit assistant reasoning in delta.reasoning while delta.content is empty.
+Normal chat must not display delta.reasoning as the assistant answer.
+Health checks may read reasoning diagnostically to prove the streaming transport is alive.
+If a normal chat stream completes with no visible content, Ali reports an Unknown message instead of leaking hidden reasoning.
 ```
 
 ## First Real Local Vision Heartbeat
