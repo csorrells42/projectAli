@@ -14,6 +14,7 @@ public static partial class VoiceCommandSafety
         var normalized = transcript.Trim();
         return DestructiveCommandRegex().IsMatch(normalized)
             || ExecutionCommandRegex().IsMatch(normalized)
+            || ShellToolRegex().IsMatch(normalized)
             || InstallCommandRegex().IsMatch(normalized)
             || CalendarWriteRegex().IsMatch(normalized)
             || EmailWriteRegex().IsMatch(normalized)
@@ -30,6 +31,9 @@ public static partial class VoiceCommandSafety
 
     [GeneratedRegex(@"\b(run|execute|launch|start|open powershell|open command prompt|cmd|terminal)\b", RegexOptions.IgnoreCase)]
     private static partial Regex ExecutionCommandRegex();
+
+    [GeneratedRegex(@"\b(powershell|pwsh|command prompt|cmd\.exe|shell command|terminal)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ShellToolRegex();
 
     [GeneratedRegex(@"\b(install|uninstall|upgrade|download package|pull model)\b", RegexOptions.IgnoreCase)]
     private static partial Regex InstallCommandRegex();

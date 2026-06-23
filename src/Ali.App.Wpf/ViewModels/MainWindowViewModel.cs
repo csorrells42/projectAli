@@ -1476,13 +1476,16 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var voiceMetadata = CreateVoiceMetadata(
-            transcript,
-            audioInput: null,
-            suspiciousOrNoSpeech: false,
-            rejectionReason: null) with
+        var baseVoiceMetadata = _lastVoiceMetadata is { SuspiciousOrNoSpeech: false }
+            ? _lastVoiceMetadata
+            : CreateVoiceMetadata(
+                transcript,
+                audioInput: null,
+                suspiciousOrNoSpeech: false,
+                rejectionReason: null);
+        var voiceMetadata = baseVoiceMetadata with
         {
-            Transcript = transcript,
+            Transcript = baseVoiceMetadata.Transcript ?? transcript,
             TextToSpeechProvider = _services.TextToSpeech.ProviderName,
             TextToSpeechVoice = _services.TextToSpeech.VoiceId,
             InputDeviceNumber = CurrentInputDeviceNumber(),
@@ -1493,7 +1496,9 @@ public sealed class MainWindowViewModel : ObservableObject
             NormalizeBeforeStt = NormalizeBeforeStt,
             SpeechToTextModel = CurrentSpeechToTextModel(),
             TextToSpeechModel = CurrentTextToSpeechModel(),
-            RawAudioRetained = _lastVoiceMetadata?.RawAudioRetained ?? false
+            RawAudioRetained = baseVoiceMetadata.RawAudioRetained,
+            SuspiciousOrNoSpeech = false,
+            RejectionReason = null
         };
 
         VoiceStatus = "Voice transcript sent to Ali.";

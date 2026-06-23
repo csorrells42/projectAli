@@ -67,6 +67,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("spectrum analyzer emits live bars", TestSpectrumAnalyzerEmitsLiveBars),
     ("speech transcript guard rejects suspicious text", TestSpeechTranscriptGuardRejectsSuspiciousText),
     ("voice risky command requires visible confirmation", TestVoiceRiskyCommandRequiresVisibleConfirmation),
+    ("edited voice dictation preserves raw transcript metadata", TestEditedVoiceDictationPreservesRawTranscriptMetadata),
     ("local STT missing model path produces explicit error", TestLocalSttMissingModelPathProducesExplicitError),
     ("local TTS missing voice model produces explicit error", TestLocalTtsMissingVoiceModelProducesExplicitError),
     ("local TTS voice mismatch is rejected", TestLocalTtsVoiceMismatchIsRejected),
@@ -672,13 +673,71 @@ static Task TestSpeechTranscriptGuardRejectsSuspiciousText()
 
 static Task TestVoiceRiskyCommandRequiresVisibleConfirmation()
 {
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("Ali, delete all my files."));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("run command prompt"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("delete my reminder for tomorrow"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("run this PowerShell command"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("use PowerShell to inspect the folder"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("install software for me"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("modify my calendar"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("change memory about my project"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("switch to the 32b model"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("send an email to Chris"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("rename this folder"));
     Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("what is the capital of Alabama"));
     return Task.CompletedTask;
+}
+
+static async Task TestEditedVoiceDictationPreservesRawTranscriptMetadata()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var store = new FileCorrectionQueueStore(directory);
+    var queue = new CorrectionQueueService(store);
+    var profile = CreateRuntimeOptions("fake-local-model").ToModelProfile(isLastKnownGood: true);
+    var rawTranscript = "Ali right the word blueberry";
+    var editedSentText = "Ali write the word blueberry.";
+    var voice = new VoiceTurnMetadata(
+        VoiceInputOrigin.Voice,
+        Transcript: rawTranscript,
+        SpeechToTextProvider: "Fake local STT",
+        SpeechToTextMode: "unit-test",
+        TextToSpeechProvider: "Fake local TTS",
+        TextToSpeechVoice: "fake-voice",
+        RawAudioRetained: false,
+        InputDeviceNumber: 0,
+        InputDeviceName: "Focusrite input",
+        InputChannelMode: InputChannelModeCatalog.ToLabel(InputChannelMode.Input1Left),
+        InputPreset: VoiceInputPreset.HeadsetMic,
+        ExtraInputGainDb: 6,
+        NormalizeBeforeStt: true,
+        SpeechToTextModel: "small.en",
+        TextToSpeechModel: "en_US-hfc_female-medium.onnx",
+        SuspiciousOrNoSpeech: false,
+        RejectionReason: null,
+        InputPeak: 0.22,
+        InputRms: 0.07,
+        InputLevelState: VoiceInputLevelState.Good.ToString());
+
+    await queue.FlagIncorrectAsync(
+        conversationId: "conv_voice_edit",
+        userMessageId: "msg_user_voice_edit",
+        assistantMessageId: "msg_assistant_voice_edit",
+        question: editedSentText,
+        answer: "blueberry",
+        modelProfile: profile,
+        answerEvidenceStatus: EvidenceStatus.Unverified,
+        category: CorrectionCategory.Other,
+        userNote: "Edited dictation metadata check.",
+        voiceMetadata: voice,
+        cancellationToken: CancellationToken.None);
+
+    var stored = (await store.ListAsync(CancellationToken.None)).Single();
+
+    Equal(editedSentText, stored.Question);
+    Equal(rawTranscript, stored.VoiceTranscript);
+    Equal("Fake local STT", stored.SpeechToTextProvider);
+    Equal("small.en", stored.SpeechToTextModel);
+    Equal(VoiceInputOrigin.Voice, stored.InputOrigin);
 }
 
 static async Task TestLocalSttMissingModelPathProducesExplicitError()
