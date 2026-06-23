@@ -40,6 +40,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeSpeech;
     private SettingsWindow? _settingsWindow;
     private bool _voiceMonitorRequested;
+    private bool _suppressInputMonitorRestart;
     private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
     private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
     private double[] _renderedSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
@@ -128,7 +129,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ToggleVoiceModeCommand = new RelayCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
         SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !AutoSendVoiceTranscripts && !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
-        OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
+        OpenSettingsCommand = new AsyncRelayCommand(OpenSettingsAsync);
         PlayPiperSampleCommand = new AsyncRelayCommand(PlayPiperSampleAsync, () => !IsSpeaking);
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
@@ -1635,18 +1636,23 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private void OpenSettings()
+    private async Task OpenSettingsAsync()
+    {
+        OpenSettingsWindow();
+        _voiceMonitorRequested = true;
+        RefreshVoiceSettingsChoices();
+        StartInputLevelMonitor();
+        await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
+    }
+
+    private void OpenSettingsWindow()
     {
         if (_settingsWindow is { IsVisible: true })
         {
             _settingsWindow.Activate();
-            _voiceMonitorRequested = true;
-            StartInputLevelMonitor();
             return;
         }
 
-        _voiceMonitorRequested = true;
-        StartInputLevelMonitor();
         _settingsWindow = new SettingsWindow
         {
             DataContext = this
@@ -1661,6 +1667,107 @@ public sealed class MainWindowViewModel : ObservableObject
             VoiceDiagnosticsText = "Microphone monitoring is off.";
         };
         _settingsWindow.Show();
+    }
+
+    private void RefreshVoiceSettingsChoices()
+    {
+        _suppressInputMonitorRestart = true;
+        _loadingVoiceSettings = true;
+        try
+        {
+            LoadVoiceDevices();
+            RefreshVoiceInputChannelModes();
+        }
+        finally
+        {
+            _loadingVoiceSettings = false;
+            _suppressInputMonitorRestart = false;
+        }
+
+        LoadPiperVoiceChoices();
+        var selectedPiperVoice = FindPiperVoiceLabelForModel(PiperModelText)
+            ?? PiperVoiceChoices.FirstOrDefault()
+            ?? string.Empty;
+        if (!string.Equals(SelectedPiperVoiceChoice, selectedPiperVoice, StringComparison.Ordinal))
+        {
+            SelectedPiperVoiceChoice = selectedPiperVoice;
+        }
+        else
+        {
+            OnPropertyChanged(nameof(SelectedPiperVoiceChoice));
+        }
+
+        RefreshSpeechToolStatuses();
+    }
+
+    private async Task RefreshRuntimeModelChoicesForSettingsAsync()
+    {
+        var currentModel = RuntimeModelText;
+        var currentQuantization = RuntimeQuantizationText;
+        var currentContext = RuntimeContextText;
+        var currentOutputLimit = RuntimeOutputLimitText;
+
+        if (!Uri.TryCreate(RuntimeEndpointText.Trim(), UriKind.Absolute, out var endpoint))
+        {
+            EnsureRuntimeModelChoicesAvailable(currentModel);
+            RuntimeSelectionStatusText = "Runtime endpoint must be an absolute URL before refreshing models.";
+            return;
+        }
+
+        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false);
+        if (!endpointPolicy.IsAllowed)
+        {
+            EnsureRuntimeModelChoicesAvailable(currentModel);
+            RuntimeSelectionStatusText = endpointPolicy.Reason;
+            return;
+        }
+
+        try
+        {
+            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, CancellationToken.None).ConfigureAwait(true);
+            if (installedChoices.Count == 0)
+            {
+                EnsureRuntimeModelChoicesAvailable(currentModel);
+                RuntimeSelectionStatusText = "No installed models were listed by the local runtime endpoint.";
+                return;
+            }
+
+            LoadRuntimeModelChoices(installedChoices, currentModel);
+            var selectedLabel = FindRuntimeModelLabel(currentModel)
+                ?? RuntimeModelChoices.FirstOrDefault()
+                ?? string.Empty;
+            SelectRuntimeModelChoice(
+                selectedLabel,
+                preferredQuantization: currentQuantization,
+                preferredContext: currentContext,
+                preferredOutputLimit: currentOutputLimit,
+                resetToSmallest: string.IsNullOrWhiteSpace(currentModel));
+            RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed local model(s).";
+        }
+        catch (Exception ex)
+        {
+            EnsureRuntimeModelChoicesAvailable(currentModel);
+            RuntimeSelectionStatusText = $"Installed model refresh failed: {ex.Message}";
+        }
+    }
+
+    private void EnsureRuntimeModelChoicesAvailable(string? selectedModel)
+    {
+        if (RuntimeModelChoices.Count > 0)
+        {
+            return;
+        }
+
+        LoadRuntimeModelChoices(CreateKnownRuntimeModelChoices(), selectedModel);
+        var selectedLabel = FindRuntimeModelLabel(selectedModel)
+            ?? RuntimeModelChoices.FirstOrDefault()
+            ?? string.Empty;
+        SelectRuntimeModelChoice(
+            selectedLabel,
+            preferredQuantization: RuntimeQuantizationText,
+            preferredContext: RuntimeContextText,
+            preferredOutputLimit: RuntimeOutputLimitText,
+            resetToSmallest: false);
     }
 
     private void LoadSpeechToolSettings()
@@ -1932,9 +2039,13 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (!_selectedRuntimeModelChoice.Equals(label, StringComparison.Ordinal))
+        if (!string.Equals(_selectedRuntimeModelChoice, label, StringComparison.Ordinal))
         {
             _selectedRuntimeModelChoice = label;
+            OnPropertyChanged(nameof(SelectedRuntimeModelChoice));
+        }
+        else
+        {
             OnPropertyChanged(nameof(SelectedRuntimeModelChoice));
         }
 
@@ -2371,7 +2482,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void StartInputLevelMonitor()
     {
-        if (!_voiceMonitorRequested)
+        if (!_voiceMonitorRequested || _suppressInputMonitorRestart)
         {
             return;
         }

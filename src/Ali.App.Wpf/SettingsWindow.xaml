@@ -101,6 +101,7 @@
         </Style>
 
         <Style TargetType="{x:Type ComboBox}">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
             <Setter Property="MinHeight" Value="30" />
             <Setter Property="Padding" Value="8,5" />
             <Setter Property="Background" Value="{StaticResource InputBrush}" />
@@ -131,13 +132,14 @@
                                 </ToggleButton.Template>
                             </ToggleButton>
                             <ContentPresenter x:Name="ContentSite"
-                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              Content="{Binding SelectedItem, RelativeSource={RelativeSource TemplatedParent}}"
                                               ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                               ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                               HorizontalAlignment="Left"
                                               IsHitTestVisible="False"
                                               Margin="9,0,30,0"
                                               RecognizesAccessKey="True"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"
                                               VerticalAlignment="Center" />
                             <Path x:Name="DropDownArrow"
                                   Data="M 0 0 L 4 4 L 8 0 Z"
@@ -193,6 +195,7 @@
         </Style>
 
         <Style TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
             <Setter Property="Background" Value="{StaticResource PanelAltBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="Padding" Value="9,6" />
@@ -203,7 +206,7 @@
                                 Background="{TemplateBinding Background}"
                                 Padding="{TemplateBinding Padding}"
                                 SnapsToDevicePixels="True">
-                            <ContentPresenter />
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
