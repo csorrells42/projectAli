@@ -32,11 +32,20 @@ runtime-settings.json or ALI_OPENAI_* environment variables
 
 Ali only switches from the stub to the configured runtime after the health check succeeds and the user clicks `Activate Runtime`.
 
+## Program Flow Images
+
+![Ali engineering modules](assets/ali-engineering-modules.svg)
+
+![Ali local data and trust boundaries](assets/ali-local-data-boundaries.svg)
+
+![Ali runtime check flow](assets/ali-runtime-check-flow.svg)
+
 ## Current Project Shape
 
 ```text
 Ali.sln
 src/Ali.App.Wpf
+src/Ali.App.WebHelper
 src/Ali.Core
 src/Ali.Infrastructure
 tests/Ali.Tests
@@ -148,6 +157,34 @@ $env:ALI_OPENAI_MODEL = "qwen3-vl:8b"
 ```
 
 Do not enable private LAN endpoints until pairing/authentication/encryption exists.
+
+## HTML Helper Process
+
+`src/Ali.App.WebHelper` is a minimal ASP.NET helper that serves one HTML page and a basic ask endpoint:
+
+```text
+GET  /
+GET  /api/status
+POST /api/ask
+```
+
+Default binding:
+
+```text
+http://127.0.0.1:8765
+```
+
+Remote/LAN binding is explicit through `ALI_HELPER_URLS`, for example:
+
+```powershell
+$env:ALI_HELPER_URLS = "http://0.0.0.0:8765"
+```
+
+If `ALI_HELPER_TOKEN` is set, `POST /api/ask` requires the same value in the `X-Ali-Helper-Token` header. The built-in HTML page has an access-token field that stores the token only in that browser's local storage.
+
+The helper reuses `AliServices.CreateForDesktop()` and `ConversationOrchestrator`. It does not write helper chats into Ali's persisted conversation store. The browser keeps a small in-page history and sends the last few turns with each ask.
+
+On first ask, the helper loads `runtime-settings.json`, runs the local runtime health check, and activates the candidate runtime only if the check passes. If activation fails, the endpoint returns the failure; it does not silently pretend the deterministic stub is the real local model.
 
 ## Health Check Behavior
 

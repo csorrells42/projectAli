@@ -23,9 +23,17 @@ You can:
 
 The first runtime is a safe local bootstrap stub. It exists to prove the app flow and correction queue before a real local model is activated.
 
+## Program Flow
+
+![Ali user flow](assets/ali-user-flow.svg)
+
+This is the current V1 shape from a user's point of view: chat starts in the cockpit, runtime activation goes through Settings, local answers stream back into chat, and corrections/memory/reminders stay local. Voice is shown as local-only but not live-certified yet.
+
 ## Local Runtime Check
 
 Ali can now be pointed at a local OpenAI-compatible runtime, such as Ollama running on this PC.
+
+![Ali runtime check flow](assets/ali-runtime-check-flow.svg)
 
 Ali does not silently switch. Use the Runtime Settings panel:
 
@@ -55,6 +63,34 @@ The current certified local proof model is `qwen3-vl:8b` through Ollama's OpenAI
 `qwen3-vl:8b` can emit a separate Ollama reasoning stream before final answer content. Ali hides that reasoning in normal chat. If the model spends the whole low output budget on hidden reasoning, Ali reports that no visible assistant content arrived instead of exposing the reasoning text.
 
 `qwen3:14b` was removed from this development machine to keep the system responsive.
+
+## HTML Helper
+
+Ali also has a small web helper for basic ask/answer access.
+
+Default local launch:
+
+```powershell
+dotnet run --project .\src\Ali.App.WebHelper\Ali.App.WebHelper.csproj
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765/
+```
+
+For remote or LAN testing, bind deliberately and use an access token:
+
+```powershell
+$env:ALI_HELPER_URLS = "http://0.0.0.0:8765"
+$env:ALI_HELPER_TOKEN = "choose-a-local-test-token"
+dotnet run --project .\src\Ali.App.WebHelper\Ali.App.WebHelper.csproj
+```
+
+The helper serves one HTML page and one ask endpoint. It uses Ali's existing local runtime settings and tries to activate the configured local runtime on first ask. If the local runtime check fails, the helper returns the failure instead of silently using the stub as if it were the real model.
+
+The helper does not add command execution, cloud fallback, file actions, voice, or persistent remote chat history.
 
 ## Voice
 
