@@ -178,16 +178,41 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <DockPanel Grid.Row="0" Margin="0,0,0,10">
-                <Button DockPanel.Dock="Right"
-                        Content="Voice Settings"
-                        Command="{Binding OpenVoiceSettingsCommand}"
-                        Margin="10,0,0,0" />
-                <StackPanel>
-                    <TextBlock Text="Ali" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-                    <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-            </DockPanel>
+            <Border Grid.Row="0"
+                    Height="44"
+                    Margin="0,0,0,10"
+                    Padding="14,0"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrushDark}"
+                    BorderThickness="0,0,0,1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="Ali"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding StatusText}"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Margin="12,0,14,0"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="2"
+                            Content="Voice Settings"
+                            Command="{Binding OpenVoiceSettingsCommand}"
+                            Height="34"
+                            MinHeight="34"
+                            Margin="0"
+                            Padding="12,0"
+                            VerticalAlignment="Center" />
+                </Grid>
+            </Border>
 
             <ScrollViewer x:Name="MessagesScrollViewer"
                           Grid.Row="1"
