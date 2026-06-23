@@ -1,4 +1,5 @@
 using System.Text;
+using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
 using Ali.Infrastructure.Bootstrap;
@@ -29,6 +30,43 @@ app.MapGet("/api/status", (AliServices services, HelperRuntimeState state) =>
         IsUsingFallback: services.RuntimeController.IsUsingFallback,
         LastHealth: state.LastHealth?.Summary,
         ListeningOn: listenUrls));
+});
+
+app.MapGet("/api/conversations", (HttpContext httpContext, AliServices services) =>
+{
+    if (!IsAuthorized(httpContext, accessToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var result = services.Conversations.ListSummaries();
+    return Results.Ok(new ConversationListResponse(
+        result.Conversations.Take(20).Select(ConversationSummaryResponse.FromSummary).ToArray(),
+        result.Warnings));
+});
+
+app.MapGet("/api/conversations/{conversationId}", (string conversationId, HttpContext httpContext, AliServices services) =>
+{
+    if (!IsAuthorized(httpContext, accessToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var conversation = services.Conversations.Load(conversationId);
+    return conversation is null
+        ? Results.NotFound(new ErrorResponse("Conversation was not found."))
+        : Results.Ok(ConversationResponse.FromConversation(conversation));
+});
+
+app.MapPost("/api/conversations", (HttpContext httpContext) =>
+{
+    if (!IsAuthorized(httpContext, accessToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    var conversationId = $"web_{Guid.NewGuid():N}";
+    return Results.Ok(new NewConversationResponse(conversationId));
 });
 
 app.MapPost("/api/ask", async (
@@ -66,7 +104,10 @@ app.MapPost("/api/ask", async (
         : request.ConversationId;
     var userMessageId = $"web_user_{Guid.NewGuid():N}";
     var assistantMessageId = $"web_assistant_{Guid.NewGuid():N}";
-    var history = BuildHistory(request.History);
+    var existingConversation = services.Conversations.Load(conversationId);
+    var history = existingConversation is not null
+        ? BuildHistoryFromConversation(existingConversation)
+        : BuildHistory(request.History);
     var answer = new StringBuilder();
     var evidence = EvidenceStatus.Unknown;
 
@@ -87,12 +128,26 @@ app.MapPost("/api/ask", async (
     }
 
     var profile = services.RuntimeController.ActiveProfile;
+    var now = DateTimeOffset.UtcNow;
+    var saved = SaveConversationTurn(
+        services,
+        existingConversation,
+        conversationId,
+        request.Message.Trim(),
+        answer.ToString(),
+        userMessageId,
+        assistantMessageId,
+        evidence,
+        now);
+
     return Results.Ok(new AskResponse(
-        ConversationId: conversationId,
+        ConversationId: saved.ConversationId,
         Answer: answer.ToString(),
         EvidenceStatus: evidence.ToString(),
         Runtime: profile.PackageId,
-        RuntimeDisplayName: profile.DisplayName));
+        RuntimeDisplayName: profile.DisplayName,
+        Title: saved.Title,
+        UpdatedAt: saved.UpdatedAt));
 });
 
 app.Run();
@@ -135,6 +190,65 @@ static IReadOnlyList<ChatMessage> BuildHistory(IReadOnlyList<AskHistoryItem>? hi
     }
 
     return messages;
+}
+
+static IReadOnlyList<ChatMessage> BuildHistoryFromConversation(StoredConversation conversation) =>
+    conversation.Messages
+        .Where(message => message.Role is ChatRole.User or ChatRole.Assistant)
+        .OrderBy(message => message.CreatedAt)
+        .TakeLast(12)
+        .Select(message => new ChatMessage(
+            message.MessageId,
+            message.Role,
+            message.Text,
+            message.CreatedAt,
+            message.EvidenceStatus))
+        .ToArray();
+
+static StoredConversation SaveConversationTurn(
+    AliServices services,
+    StoredConversation? existingConversation,
+    string conversationId,
+    string userText,
+    string assistantText,
+    string userMessageId,
+    string assistantMessageId,
+    EvidenceStatus evidence,
+    DateTimeOffset now)
+{
+    var messages = existingConversation?.Messages.ToList() ?? new List<StoredChatMessage>();
+    messages.Add(new StoredChatMessage(
+        userMessageId,
+        conversationId,
+        ChatRole.User,
+        userText,
+        now,
+        ChatMessageOrigin.Typed,
+        EvidenceStatus.Verified));
+    messages.Add(new StoredChatMessage(
+        assistantMessageId,
+        conversationId,
+        ChatRole.Assistant,
+        assistantText,
+        now.AddMilliseconds(1),
+        ChatMessageOrigin.Typed,
+        evidence,
+        SourceUserMessageId: userMessageId,
+        SourceQuestion: userText));
+
+    var createdAt = existingConversation?.CreatedAt ?? now;
+    var title = existingConversation?.Title;
+    if (string.IsNullOrWhiteSpace(title) || string.Equals(title, "Untitled chat", StringComparison.OrdinalIgnoreCase))
+    {
+        title = ConversationTitleFactory.CreateFromFirstMessage(userText);
+    }
+
+    return services.Conversations.Save(new StoredConversation(
+        conversationId,
+        title,
+        createdAt,
+        now.AddMilliseconds(1),
+        messages));
 }
 
 internal sealed class HelperRuntimeState
@@ -213,7 +327,9 @@ internal sealed record AskResponse(
     string Answer,
     string EvidenceStatus,
     string Runtime,
-    string RuntimeDisplayName);
+    string RuntimeDisplayName,
+    string Title,
+    DateTimeOffset UpdatedAt);
 
 internal sealed record ErrorResponse(string Error);
 
@@ -224,6 +340,59 @@ internal sealed record StatusResponse(
     bool IsUsingFallback,
     string? LastHealth,
     string ListeningOn);
+
+internal sealed record NewConversationResponse(string ConversationId);
+
+internal sealed record ConversationListResponse(
+    IReadOnlyList<ConversationSummaryResponse> Conversations,
+    IReadOnlyList<string> Warnings);
+
+internal sealed record ConversationSummaryResponse(
+    string ConversationId,
+    string Title,
+    DateTimeOffset UpdatedAt,
+    int MessageCount,
+    string Preview)
+{
+    public static ConversationSummaryResponse FromSummary(StoredConversationSummary summary) =>
+        new(
+            summary.ConversationId,
+            summary.Title,
+            summary.UpdatedAt,
+            summary.MessageCount,
+            summary.Preview);
+}
+
+internal sealed record ConversationResponse(
+    string ConversationId,
+    string Title,
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<ConversationMessageResponse> Messages)
+{
+    public static ConversationResponse FromConversation(StoredConversation conversation) =>
+        new(
+            conversation.ConversationId,
+            conversation.Title,
+            conversation.UpdatedAt,
+            conversation.Messages
+                .OrderBy(message => message.CreatedAt)
+                .Select(ConversationMessageResponse.FromMessage)
+                .ToArray());
+}
+
+internal sealed record ConversationMessageResponse(
+    string Role,
+    string Text,
+    string EvidenceStatus,
+    DateTimeOffset CreatedAt)
+{
+    public static ConversationMessageResponse FromMessage(StoredChatMessage message) =>
+        new(
+            message.Role == ChatRole.Assistant ? "assistant" : "user",
+            message.Text,
+            message.EvidenceStatus.ToString(),
+            message.CreatedAt);
+}
 
 internal static class HelperPage
 {
@@ -289,11 +458,67 @@ public const string IndexHtml = """
     }
 
     main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+    }
+
+    aside {
+      border-right: 1px solid #2a3038;
+      padding: 12px;
+      overflow: auto;
+      background: #080a0d;
+    }
+
+    #chat {
       padding: 18px;
       overflow: auto;
       display: flex;
       flex-direction: column;
       gap: 12px;
+    }
+
+    #newChat {
+      width: 100%;
+      height: 42px;
+      margin-bottom: 12px;
+      border-color: #384250;
+      background: #151a22;
+    }
+
+    .history-item {
+      width: 100%;
+      display: block;
+      text-align: left;
+      border: 1px solid #2a3038;
+      background: #101419;
+      color: #eef2f7;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .history-item.active {
+      border-color: #38bdf8;
+      background: #162033;
+    }
+
+    .history-title {
+      font-weight: 700;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .history-preview {
+      margin-top: 4px;
+      color: #9aa6b2;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .msg {
@@ -364,24 +589,42 @@ public const string IndexHtml = """
       <div id="status">Checking status...</div>
     </div>
   </header>
-  <main id="chat"></main>
+  <main>
+    <aside>
+      <button id="newChat" type="button">New Chat</button>
+      <div id="history"></div>
+    </aside>
+    <section id="chat"></section>
+  </main>
   <form id="form">
     <textarea id="message" placeholder="Ask Ali..." autofocus></textarea>
     <button id="send" type="submit">Send</button>
   </form>
   <script>
     const chat = document.getElementById('chat');
+    const historyList = document.getElementById('history');
+    const newChat = document.getElementById('newChat');
     const form = document.getElementById('form');
     const message = document.getElementById('message');
     const send = document.getElementById('send');
     const status = document.getElementById('status');
     const token = document.getElementById('token');
-    const conversationId = crypto.randomUUID();
+    let conversationId = crypto.randomUUID();
     const history = [];
     token.value = localStorage.getItem('aliHelperToken') || '';
     token.addEventListener('change', () => {
       localStorage.setItem('aliHelperToken', token.value.trim());
     });
+
+    function requestHeaders(json = false) {
+      const headers = json ? { 'Content-Type': 'application/json' } : {};
+      const accessToken = token.value.trim();
+      if (accessToken) {
+        headers['X-Ali-Helper-Token'] = accessToken;
+      }
+
+      return headers;
+    }
 
     function addMessage(role, text, className) {
       const div = document.createElement('div');
@@ -394,6 +637,72 @@ public const string IndexHtml = """
         while (history.length > 12) history.shift();
       }
     }
+
+    function clearChat() {
+      chat.textContent = '';
+      history.length = 0;
+    }
+
+    async function refreshHistory() {
+      try {
+        const res = await fetch('/api/conversations', { headers: requestHeaders() });
+        const data = await res.json();
+        if (!res.ok) {
+          historyList.textContent = res.status === 401 ? 'Token required' : 'History unavailable';
+          return;
+        }
+
+        historyList.textContent = '';
+        for (const item of data.conversations || []) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = `history-item ${item.conversationId === conversationId ? 'active' : ''}`;
+          button.innerHTML = `<div class="history-title"></div><div class="history-preview"></div>`;
+          button.querySelector('.history-title').textContent = item.title || 'Untitled chat';
+          button.querySelector('.history-preview').textContent = item.preview || `${item.messageCount} message(s)`;
+          button.addEventListener('click', () => loadConversation(item.conversationId));
+          historyList.appendChild(button);
+        }
+      } catch {
+        historyList.textContent = 'History unavailable';
+      }
+    }
+
+    async function loadConversation(id) {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, { headers: requestHeaders() });
+      const data = await res.json();
+      if (!res.ok) {
+        addMessage(null, data.error || `HTTP ${res.status}`, 'error');
+        return;
+      }
+
+      conversationId = data.conversationId;
+      clearChat();
+      for (const item of data.messages || []) {
+        if (item.role === 'assistant') {
+          addMessage('assistant', item.text, 'assistant');
+        } else {
+          addMessage('user', item.text, 'user');
+        }
+      }
+
+      await refreshHistory();
+      message.focus();
+    }
+
+    newChat.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/conversations', { method: 'POST', headers: requestHeaders() });
+        const data = await res.json();
+        conversationId = data.conversationId || crypto.randomUUID();
+      } catch {
+        conversationId = crypto.randomUUID();
+      }
+
+      clearChat();
+      await refreshHistory();
+      message.focus();
+    });
 
     async function refreshStatus() {
       try {
@@ -413,22 +722,19 @@ public const string IndexHtml = """
       send.disabled = true;
       addMessage('user', text, 'user');
       try {
-        const headers = { 'Content-Type': 'application/json' };
-        const accessToken = token.value.trim();
-        if (accessToken) {
-          headers['X-Ali-Helper-Token'] = accessToken;
-        }
         const res = await fetch('/api/ask', {
           method: 'POST',
-          headers,
+          headers: requestHeaders(true),
           body: JSON.stringify({ conversationId, message: text, history })
         });
         const data = await res.json();
         if (!res.ok) {
           addMessage(null, data.error || `HTTP ${res.status}`, 'error');
         } else {
+          conversationId = data.conversationId || conversationId;
           addMessage('assistant', data.answer || '(empty response)', 'assistant');
           status.textContent = `${data.runtime} | ${data.evidenceStatus}`;
+          await refreshHistory();
         }
       } catch (error) {
         addMessage(null, error.message || 'Request failed', 'error');
@@ -446,6 +752,7 @@ public const string IndexHtml = """
     });
 
     refreshStatus();
+    refreshHistory();
   </script>
 </body>
 </html>

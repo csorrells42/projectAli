@@ -88,9 +88,11 @@ $env:ALI_HELPER_TOKEN = "choose-a-local-test-token"
 dotnet run --project .\src\Ali.App.WebHelper\Ali.App.WebHelper.csproj
 ```
 
-The helper serves one HTML page and one ask endpoint. It uses Ali's existing local runtime settings and tries to activate the configured local runtime on first ask. If the local runtime check fails, the helper returns the failure instead of silently using the stub as if it were the real model.
+The helper serves one HTML page for basic chat, recent history, and runtime error reporting. It uses Ali's existing local runtime settings and tries to activate the configured local runtime on first ask. If the local runtime check fails, the helper returns the failure instead of silently using the stub as if it were the real model.
 
-The helper does not add command execution, cloud fallback, file actions, voice, or persistent remote chat history.
+The helper lists the last 20 conversations from the current local Ali profile. This is not a personal-account or multi-user system; anyone with access to the same helper/profile can see the same helper history. If `ALI_HELPER_TOKEN` is configured, ask and history endpoints require that token.
+
+The helper does not add command execution, cloud fallback, file actions, voice, or user-isolated accounts. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 
 ## Voice
 
