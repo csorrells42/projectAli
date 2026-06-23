@@ -17,8 +17,10 @@ public partial class App : System.Windows.Application
 
         base.OnStartup(e);
 
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
         var services = AliServices.CreateForDesktop();
         var mainWindow = new MainWindow(new MainWindowViewModel(services));
+        MainWindow = mainWindow;
         mainWindow.Show();
     }
 

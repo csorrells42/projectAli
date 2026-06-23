@@ -2279,7 +2279,11 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         try
         {
-            OpenSettingsWindow();
+            if (!OpenSettingsWindow())
+            {
+                return;
+            }
+
             _voiceMonitorRequested = true;
             RefreshVoiceSettingsChoices();
             StartInputLevelMonitor();
@@ -2295,17 +2299,24 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private void OpenSettingsWindow()
+    private bool OpenSettingsWindow()
     {
-        if (_settingsWindow is { IsVisible: true })
+        if (_settingsWindow is not null)
         {
+            if (!_settingsWindow.IsVisible)
+            {
+                _settingsWindow.Show();
+            }
+
             _settingsWindow.Activate();
-            return;
+            return false;
         }
 
+        var owner = System.Windows.Application.Current?.MainWindow;
         _settingsWindow = new SettingsWindow
         {
-            DataContext = this
+            DataContext = this,
+            Owner = owner
         };
         _settingsWindow.Closed += (_, _) =>
         {
@@ -2317,6 +2328,8 @@ public sealed class MainWindowViewModel : ObservableObject
             VoiceDiagnosticsText = "Microphone monitoring is off.";
         };
         _settingsWindow.Show();
+        _settingsWindow.Activate();
+        return true;
     }
 
     private void RefreshVoiceSettingsChoices()
@@ -2887,7 +2900,8 @@ public sealed class MainWindowViewModel : ObservableObject
             ? "not checked"
             : health.StreamingSupported.Value ? "yes" : "no";
 
-        return $"{health.Summary}\nEndpoint: {health.Endpoint ?? "n/a"}\nModel: {health.ModelPackageId ?? "n/a"}\nElapsed: {health.Elapsed.TotalMilliseconds:N0} ms\nStreaming supported: {streaming}";
+        return $"{health.Summary}\nEndpoint: {health.Endpoint ?? "n/a"}\nModel: {health.ModelPackageId ?? "n/a"}\nElapsed: {health.Elapsed.TotalMilliseconds:N0} ms\nStreaming supported: {streaming}"
+            + (string.IsNullOrWhiteSpace(health.ErrorText) ? string.Empty : $"\nFailure detail: {health.ErrorText}");
     }
 
     private void UpdateLastSttDebugText()

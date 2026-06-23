@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Ali.Core.Evidence;
 using Ali.Core.Models;
 using Ali.Core.Runtime;
@@ -11,7 +12,12 @@ namespace Ali.Infrastructure.Runtime;
 public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 {
     private const int HealthProbeAttempts = 3;
+    private const int HealthProbeOutputTokenLimit = 512;
+    private const string HealthProbeExpectedResponse = "OK";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly Regex ThinkBlockRegex = new(
+        @"<think>.*?</think>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -43,21 +49,35 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             yield break;
         }
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri("chat/completions"));
+        var uri = BuildUri("chat/completions");
+        var isHealthCheck = IsHealthCheckRequest(request);
+        var payload = JsonSerializer.Serialize(
+            BuildChatPayload(request, maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null),
+            JsonOptions);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        httpRequest.Content = new StringContent(
-            JsonSerializer.Serialize(BuildChatPayload(request), JsonOptions),
-            Encoding.UTF8,
-            "application/json");
+        httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        if (isHealthCheck)
+        {
+            WriteHealthLog($"request STREAM POST {uri} payload={payload}");
+        }
 
         using var response = await _httpClient.SendAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);
+        if (isHealthCheck)
+        {
+            WriteHealthLog($"response STREAM POST {uri} status={(int)response.StatusCode}");
+        }
 
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (isHealthCheck)
+            {
+                WriteHealthLog($"response STREAM POST {uri} error={error}");
+            }
             yield return new ModelToken(
                 $"Unknown: local model runtime returned HTTP {(int)response.StatusCode}. {TrimForUser(error)}",
                 EvidenceStatus.Verified);
@@ -85,6 +105,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             var content = OpenAiStreamParser.ExtractContentDelta(line["data:".Length..]);
             if (!string.IsNullOrEmpty(content))
             {
+                if (isHealthCheck)
+                {
+                    WriteHealthLog($"response STREAM POST {uri} delta={content}");
+                }
                 yield return new ModelToken(content, EvidenceStatus.Unverified);
             }
         }
@@ -127,12 +151,16 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             }
 
             var nonStreamingText = await SendNonStreamingProbeWithRetryAsync(
-                BuildProbeRequest("Reply with exactly OK. /no_think"),
+                BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text. /no_think"),
                 cancellationToken).ConfigureAwait(false);
 
-            if (string.IsNullOrWhiteSpace(nonStreamingText))
+            var normalizedNonStreamingText = NormalizeHealthProbeText(nonStreamingText);
+            if (!IsExpectedHealthProbeResponse(normalizedNonStreamingText))
             {
-                return FailureHealth(started, "Tiny non-streaming prompt returned an empty response.", streamingSupported);
+                return FailureHealth(
+                    started,
+                    $"Tiny non-streaming prompt did not return exactly OK after thinking-text cleanup. Raw: {TrimForUser(nonStreamingText)}",
+                    streamingSupported);
             }
 
             if (_options.StreamingEnabled)
@@ -176,15 +204,19 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
         {
+            WriteHealthLog($"exception type={ex.GetType().Name} message={ex.Message}");
             return FailureHealth(started, $"Local runtime health check failed: {ex.Message}", streamingSupported);
         }
     }
 
     private async Task<ModelsCheckResult> CheckModelsEndpointAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri("models"));
+        var uri = BuildUri("models");
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        WriteHealthLog($"request GET {uri}");
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        WriteHealthLog($"response GET {uri} status={(int)response.StatusCode} body={TrimForUser(body)}");
 
         if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed)
         {
@@ -203,14 +235,27 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private async Task<string> SendNonStreamingPromptAsync(ChatRequest request, CancellationToken cancellationToken)
     {
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri("chat/completions"));
-        httpRequest.Content = new StringContent(
-            JsonSerializer.Serialize(BuildChatPayload(request, stream: false), JsonOptions),
-            Encoding.UTF8,
-            "application/json");
+        var uri = BuildUri("chat/completions");
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri);
+        var isHealthCheck = IsHealthCheckRequest(request);
+        var payload = JsonSerializer.Serialize(
+            BuildChatPayload(
+                request,
+                stream: false,
+                maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null),
+            JsonOptions);
+        httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+        if (isHealthCheck)
+        {
+            WriteHealthLog($"request POST {uri} payload={payload}");
+        }
 
         using var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (isHealthCheck)
+        {
+            WriteHealthLog($"response POST {uri} status={(int)response.StatusCode} body={body}");
+        }
 
         if (!response.IsSuccessStatusCode)
         {
@@ -241,17 +286,15 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private async Task<bool> CheckStreamingPromptAsync(CancellationToken cancellationToken)
     {
+        var builder = new StringBuilder();
         await foreach (var token in StreamChatAsync(
-                           BuildProbeRequest("Reply with exactly OK. /no_think"),
+                           BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text. /no_think"),
                            cancellationToken).ConfigureAwait(false))
         {
-            if (!string.IsNullOrWhiteSpace(token.Text))
-            {
-                return true;
-            }
+            builder.Append(token.Text);
         }
 
-        return false;
+        return IsExpectedHealthProbeResponse(NormalizeHealthProbeText(builder.ToString()));
     }
 
     private async Task<bool> CheckStreamingPromptWithRetryAsync(CancellationToken cancellationToken)
@@ -300,7 +343,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         return new Uri(new Uri(baseText), relativePath);
     }
 
-    private object BuildChatPayload(ChatRequest request, bool? stream = null)
+    private object BuildChatPayload(ChatRequest request, bool? stream = null, int? maxTokens = null)
     {
         var messages = request.History
             .Select(message => new
@@ -320,7 +363,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             model = _options.Model,
             messages,
             stream = stream ?? _options.StreamingEnabled,
-            max_tokens = _options.OutputTokenLimit,
+            max_tokens = maxTokens ?? _options.OutputTokenLimit,
             temperature = _options.Temperature,
             top_p = _options.TopP
         };
@@ -343,6 +386,50 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
         var normalized = value.ReplaceLineEndings(" ").Trim();
         return normalized.Length <= 240 ? normalized : normalized[..240] + "...";
+    }
+
+    private static string NormalizeHealthProbeText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = ThinkBlockRegex.Replace(value, string.Empty)
+            .ReplaceLineEndings("\n")
+            .Trim();
+        var doneThinkingIndex = cleaned.LastIndexOf("done thinking.", StringComparison.OrdinalIgnoreCase);
+        if (doneThinkingIndex >= 0)
+        {
+            cleaned = cleaned[(doneThinkingIndex + "done thinking.".Length)..].Trim();
+        }
+
+        return cleaned.Trim().Trim('.', '"', '\'', '`').Trim();
+    }
+
+    private static bool IsExpectedHealthProbeResponse(string value) =>
+        string.Equals(value, HealthProbeExpectedResponse, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHealthCheckRequest(ChatRequest request) =>
+        string.Equals(request.ConversationId, "health_check", StringComparison.Ordinal);
+
+    private static void WriteHealthLog(string message)
+    {
+        try
+        {
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Ali",
+                "BootstrapData");
+            Directory.CreateDirectory(root);
+            File.AppendAllText(
+                Path.Combine(root, "runtime-health.log"),
+                $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Health logging must never make the runtime path fail.
+        }
     }
 
     private RuntimeHealthCheck FailureHealth(

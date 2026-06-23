@@ -43,6 +43,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
     ("health check retries empty non-streaming probe", TestHealthCheckRetriesEmptyNonStreamingProbe),
+    ("health check accepts OK after stripped thinking text", TestHealthCheckAcceptsOkAfterStrippedThinkingText),
     ("vision health check sends image content", TestVisionHealthCheckSendsImageContent),
     ("OpenAI stream parser extracts content delta", TestOpenAiStreamParserExtractsContentDelta),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
@@ -281,6 +282,18 @@ static async Task TestHealthCheckRetriesEmptyNonStreamingProbe()
 
     Equal(true, health.Succeeded);
     Equal(2, handler.NonStreamingPromptCount);
+}
+
+static async Task TestHealthCheckAcceptsOkAfterStrippedThinkingText()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var runtime = new OpenAiCompatibleLocalModelRuntime(
+        new HttpClient(new ThinkingHealthProbeHandler(options.Model)),
+        options);
+
+    var health = await runtime.CheckHealthAsync(CancellationToken.None);
+
+    Equal(true, health.Succeeded);
 }
 
 static async Task TestVisionHealthCheckSendsImageContent()
@@ -2374,6 +2387,53 @@ internal sealed class FlakyHealthProbeHandler(string model) : HttpMessageHandler
         return NonStreamingPromptCount == 1
             ? JsonResponse("""{"choices":[{"message":{"content":""}}]}""")
             : JsonResponse("""{"choices":[{"message":{"content":"OK"}}]}""");
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) =>
+        new(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+}
+
+internal sealed class ThinkingHealthProbeHandler(string model) : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+
+        if (path.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonResponse($$"""{"data":[{"id":"{{model}}"}]}""");
+        }
+
+        if (!path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("not found")
+            };
+        }
+
+        var body = request.Content is null
+            ? string.Empty
+            : await request.Content.ReadAsStringAsync(cancellationToken);
+
+        if (body.Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"<think>checking</think>\"}}]}\n\n" +
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n" +
+                    "data: [DONE]\n\n")
+            };
+        }
+
+        return JsonResponse("""{"choices":[{"message":{"content":"<think>checking</think>\nOK"}}]}""");
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>

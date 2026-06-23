@@ -369,6 +369,15 @@
                                         Margin="5,0,5,0" />
                                 <Button Content="Stub" Command="{Binding RevertToStubCommand}" Margin="5,0,0,0" />
                             </UniformGrid>
+
+                            <Border BorderBrush="{StaticResource BorderBrushDark}"
+                                    BorderThickness="1"
+                                    Padding="10"
+                                    Margin="0,12,0,0">
+                                <TextBlock Text="{Binding RuntimeHealthResult}"
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource TextBrush}" />
+                            </Border>
                         </StackPanel>
                     </Border>
                 </ScrollViewer>
@@ -673,7 +682,7 @@
                                     <TextBlock Text="Exact user question"
                                                Foreground="{StaticResource TextBrush}"
                                                FontWeight="SemiBold" />
-                                    <TextBox Text="{Binding Question}"
+                                    <TextBox Text="{Binding Question, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
@@ -683,7 +692,7 @@
                                     <TextBlock Text="Exact assistant answer"
                                                Foreground="{StaticResource TextBrush}"
                                                FontWeight="SemiBold" />
-                                    <TextBox Text="{Binding Answer}"
+                                    <TextBox Text="{Binding Answer, Mode=OneWay}"
                                              IsReadOnly="True"
                                              AcceptsReturn="True"
                                              TextWrapping="Wrap"
