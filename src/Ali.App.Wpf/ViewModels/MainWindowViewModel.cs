@@ -34,6 +34,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeSpeech;
     private CancellationTokenSource? _activeSample;
     private VoiceSettingsWindow? _voiceSettingsWindow;
+    private bool _voiceMonitorRequested;
     private VoiceDiagnosticSample? _lastDiagnosticSample;
     private VoiceCalibrationResult? _lastCalibrationResult;
     private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
@@ -142,7 +143,9 @@ public sealed class MainWindowViewModel : ObservableObject
         LoadVoiceDevices();
         _loadingVoiceSettings = false;
         ApplyVoiceInputPreset(SelectedVoiceInputPreset);
-        StartInputLevelMonitor();
+        VoiceInputLevelPercent = 0;
+        VoiceInputMeterText = "Input meter paused.";
+        VoiceDiagnosticsText = "Open Voice Settings or start a voice action to monitor the microphone.";
 
         RefreshSpeechToolStatuses();
 
@@ -1523,15 +1526,27 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_voiceSettingsWindow is { IsVisible: true })
         {
             _voiceSettingsWindow.Activate();
+            _voiceMonitorRequested = true;
+            StartInputLevelMonitor();
             return;
         }
 
+        _voiceMonitorRequested = true;
+        StartInputLevelMonitor();
         _voiceSettingsWindow = new VoiceSettingsWindow
         {
             Owner = System.Windows.Application.Current?.MainWindow,
             DataContext = this
         };
-        _voiceSettingsWindow.Closed += (_, _) => _voiceSettingsWindow = null;
+        _voiceSettingsWindow.Closed += (_, _) =>
+        {
+            _voiceSettingsWindow = null;
+            _voiceMonitorRequested = false;
+            StopInputLevelMonitor();
+            VoiceInputLevelPercent = 0;
+            VoiceInputMeterText = "Input meter paused.";
+            VoiceDiagnosticsText = "Microphone monitoring is off.";
+        };
         _voiceSettingsWindow.Show();
     }
 
@@ -1978,6 +1993,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void StartInputLevelMonitor()
     {
+        if (!_voiceMonitorRequested)
+        {
+            return;
+        }
+
         if (IsRecording || !TryReadDeviceNumber(SelectedVoiceInputDevice, out var deviceNumber))
         {
             return;

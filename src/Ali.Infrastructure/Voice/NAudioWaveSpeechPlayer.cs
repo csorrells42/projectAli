@@ -1,13 +1,16 @@
 using Ali.Core.Voice;
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 
 namespace Ali.Infrastructure.Voice;
 
 public sealed class NAudioWaveSpeechPlayer : ISpeechPlayer, IDisposable
 {
     private readonly object _sync = new();
-    private WaveOutEvent? _output;
+    private IWavePlayer? _output;
     private WaveFileReader? _reader;
+    private IWaveProvider? _playbackProvider;
 
     public int OutputDeviceNumber { get; set; } = -1;
 
@@ -24,10 +27,19 @@ public sealed class NAudioWaveSpeechPlayer : ISpeechPlayer, IDisposable
 
     public static IReadOnlyList<AudioOutputDevice> GetOutputDevices()
     {
-        return new[]
+        var devices = new List<AudioOutputDevice>
         {
             new AudioOutputDevice(-1, "Default playback device")
         };
+
+        using var enumerator = new MMDeviceEnumerator();
+        var renderDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+        for (var deviceNumber = 0; deviceNumber < renderDevices.Count; deviceNumber++)
+        {
+            devices.Add(new AudioOutputDevice(deviceNumber, renderDevices[deviceNumber].FriendlyName));
+        }
+
+        return devices;
     }
 
     public async Task PlayAsync(string audioPath, CancellationToken cancellationToken)
@@ -43,13 +55,10 @@ public sealed class NAudioWaveSpeechPlayer : ISpeechPlayer, IDisposable
         lock (_sync)
         {
             _reader = new WaveFileReader(audioPath);
-            _output = new WaveOutEvent
-            {
-                DeviceNumber = OutputDeviceNumber,
-                DesiredLatency = 80
-            };
+            _playbackProvider = CreatePlaybackProvider(_reader);
+            _output = CreateOutputDevice(OutputDeviceNumber);
             _output.PlaybackStopped += (_, _) => completion.TrySetResult();
-            _output.Init(_reader);
+            _output.Init(_playbackProvider);
             _output.Play();
         }
 
@@ -65,10 +74,39 @@ public sealed class NAudioWaveSpeechPlayer : ISpeechPlayer, IDisposable
             _output?.Stop();
             _output?.Dispose();
             _output = null;
+            _playbackProvider = null;
             _reader?.Dispose();
             _reader = null;
         }
     }
 
     public void Dispose() => Stop();
+
+    private static IWaveProvider CreatePlaybackProvider(WaveFileReader reader)
+    {
+        if (reader.WaveFormat.Channels != 1)
+        {
+            return reader;
+        }
+
+        var stereo = new MonoToStereoSampleProvider(reader.ToSampleProvider());
+        return new SampleToWaveProvider16(stereo);
+    }
+
+    private static IWavePlayer CreateOutputDevice(int outputDeviceNumber)
+    {
+        if (outputDeviceNumber < 0)
+        {
+            return new WasapiOut(AudioClientShareMode.Shared, useEventSync: false, latency: 80);
+        }
+
+        using var enumerator = new MMDeviceEnumerator();
+        var renderDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+        if (outputDeviceNumber >= renderDevices.Count)
+        {
+            return new WasapiOut(AudioClientShareMode.Shared, useEventSync: false, latency: 80);
+        }
+
+        return new WasapiOut(renderDevices[outputDeviceNumber], AudioClientShareMode.Shared, useEventSync: false, latency: 80);
+    }
 }

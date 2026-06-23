@@ -2,8 +2,8 @@ namespace Ali.Infrastructure.Voice;
 
 public sealed class SpectrumAnalyzer
 {
-    public const int BarCount = 128;
-    private const int FftSize = 4096;
+    public const int BarCount = 64;
+    private const int FftSize = 2048;
     private const int SampleRate = 44100;
     private const double MinimumDisplayFrequency = 40d;
     private const double MaximumDisplayFrequency = 20000d;
