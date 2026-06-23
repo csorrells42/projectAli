@@ -253,7 +253,7 @@
                                                        FontSize="10"
                                                        FontWeight="SemiBold" />
                                         </DockPanel>
-                                        <ProgressBar Value="{Binding Percent}"
+                                        <ProgressBar Value="{Binding Percent, Mode=OneWay}"
                                                      Style="{StaticResource ResourceMeterProgress}" />
                                     </StackPanel>
                                 </Border>
