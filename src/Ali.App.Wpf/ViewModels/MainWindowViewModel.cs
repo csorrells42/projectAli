@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Ali.App.Wpf;
+using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
 using Ali.Core.Runtime;
@@ -30,6 +31,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private string _conversationId = $"conv_{Guid.NewGuid():N}";
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
+    private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
+    private string _conversationSearchText = string.Empty;
+    private bool _loadingConversationHistorySelection;
     private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
@@ -165,6 +169,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
+        RefreshConversationHistory();
 
         Messages.Add(new ChatMessageViewModel(
             id: $"msg_asst_{Guid.NewGuid():N}",
@@ -172,8 +177,6 @@ public sealed class MainWindowViewModel : ObservableObject
             text: "Ali bootstrap ready. I can prove the WPF chat loop, cancellation, and correction queue. A real local model runtime must pass a health check and be activated before I answer through it.",
             createdAt: DateTimeOffset.UtcNow,
             evidenceStatus: EvidenceStatus.Verified));
-        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(_conversationId, "Current chat");
-        ConversationHistory.Add(_activeConversationHistoryItem);
     }
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
@@ -183,6 +186,34 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
 
     public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
+
+    public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
+    {
+        get => _selectedConversationHistoryItem;
+        set
+        {
+            if (!SetProperty(ref _selectedConversationHistoryItem, value)
+                || value is null
+                || _loadingConversationHistorySelection)
+            {
+                return;
+            }
+
+            LoadConversation(value);
+        }
+    }
+
+    public string ConversationSearchText
+    {
+        get => _conversationSearchText;
+        set
+        {
+            if (SetProperty(ref _conversationSearchText, value))
+            {
+                RefreshConversationHistory();
+            }
+        }
+    }
 
     public ResourceMeterViewModel CpuMeter { get; } = new("CPU");
 
@@ -730,17 +761,19 @@ public sealed class MainWindowViewModel : ObservableObject
         IsBusy = true;
         StatusText = "Streaming local response...";
         EnsureActiveConversationHistoryItem();
+        ApplyFirstMessageTitleIfNeeded(text);
 
         var userMessageId = $"msg_user_{Guid.NewGuid():N}";
         var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
+        var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
+        var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
         var userMessage = new ChatMessageViewModel(
             userMessageId,
             ChatRole.User,
             text,
             DateTimeOffset.UtcNow,
-            EvidenceStatus.Verified);
-
-        var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
+            EvidenceStatus.Verified,
+            attachmentMetadata: attachmentMetadata.Count == 0 ? null : attachmentMetadata);
 
         var assistantMessage = new ChatMessageViewModel(
             assistantMessageId,
@@ -790,6 +823,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _activeResponse = null;
             IsBusy = false;
             ClearTemporaryAttachments();
+            SaveActiveConversation();
             UpdateRuntimeStatus();
         }
 
@@ -803,18 +837,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void StartNewChat()
     {
-        _conversationId = $"conv_{Guid.NewGuid():N}";
-        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(
-            _conversationId,
-            $"Chat {DateTime.Now:h:mm tt}");
-        ConversationHistory.Insert(0, _activeConversationHistoryItem);
-        Messages.Clear();
-        Attachments.Clear();
-        ComposerText = string.Empty;
-        EditableTranscript = string.Empty;
-        LastTranscript = string.Empty;
-        StatusText = "New chat ready.";
-        VoiceStatus = "Voice idle.";
+        ResetToFreshConversation("New chat ready.");
     }
 
     private void EnsureActiveConversationHistoryItem()
@@ -824,8 +847,189 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(_conversationId, "Current chat");
+        if (!string.IsNullOrWhiteSpace(ConversationSearchText))
+        {
+            ConversationSearchText = string.Empty;
+        }
+
+        var firstUserText = Messages
+            .Where(message => message.Role == ChatRole.User)
+            .Select(message => message.Text)
+            .FirstOrDefault();
+        var title = ConversationTitleFactory.CreateFromFirstMessage(firstUserText ?? ComposerText);
+        _activeConversationHistoryItem = new ConversationHistoryItemViewModel(_conversationId, title);
         ConversationHistory.Insert(0, _activeConversationHistoryItem);
+        SelectHistoryItemWithoutLoading(_activeConversationHistoryItem);
+    }
+
+    private void ResetToFreshConversation(string statusText)
+    {
+        Stop();
+        StopSpeaking();
+        _activeVoiceInput?.Cancel();
+        ClearTemporaryAttachments();
+        Attachments.Clear();
+        Messages.Clear();
+        _conversationId = $"conv_{Guid.NewGuid():N}";
+        _activeConversationHistoryItem = null;
+        SelectHistoryItemWithoutLoading(null);
+        ComposerText = string.Empty;
+        EditableTranscript = string.Empty;
+        LastTranscript = string.Empty;
+        StatusText = statusText;
+        VoiceStatus = "Voice idle.";
+        AttachmentStatus = "Screenshots are temporary by default.";
+    }
+
+    private void RefreshConversationHistory()
+    {
+        var activeId = _activeConversationHistoryItem?.Id;
+        var result = string.IsNullOrWhiteSpace(ConversationSearchText)
+            ? _services.Conversations.ListSummaries()
+            : _services.Conversations.Search(ConversationSearchText);
+
+        _loadingConversationHistorySelection = true;
+        try
+        {
+            ConversationHistory.Clear();
+            ConversationHistoryItemViewModel? activeItem = null;
+            foreach (var summary in result.Conversations)
+            {
+                var item = new ConversationHistoryItemViewModel(
+                    summary.ConversationId,
+                    summary.Title,
+                    summary.UpdatedAt,
+                    summary.Preview,
+                    summary.MessageCount);
+                ConversationHistory.Add(item);
+                if (activeId is not null && item.Id.Equals(activeId, StringComparison.OrdinalIgnoreCase))
+                {
+                    activeItem = item;
+                }
+            }
+
+            _activeConversationHistoryItem = activeItem;
+            _selectedConversationHistoryItem = activeItem;
+            OnPropertyChanged(nameof(SelectedConversationHistoryItem));
+        }
+        finally
+        {
+            _loadingConversationHistorySelection = false;
+        }
+
+        if (result.Warnings.Count > 0)
+        {
+            StatusText = $"History loaded with {result.Warnings.Count} warning(s). Corrupt history files were skipped.";
+        }
+    }
+
+    private void LoadConversation(ConversationHistoryItemViewModel item)
+    {
+        if (IsBusy)
+        {
+            StatusText = "Stop the current response before switching chats.";
+            SelectHistoryItemWithoutLoading(_activeConversationHistoryItem);
+            return;
+        }
+
+        var conversation = _services.Conversations.Load(item.Id);
+        if (conversation is null)
+        {
+            StatusText = $"Could not load saved chat: {item.Title}";
+            RefreshConversationHistory();
+            return;
+        }
+
+        StopSpeaking();
+        ClearTemporaryAttachments();
+        Attachments.Clear();
+        Messages.Clear();
+        foreach (var message in conversation.Messages.OrderBy(message => message.CreatedAt))
+        {
+            Messages.Add(ChatMessageViewModel.FromStoredMessage(message));
+        }
+
+        _conversationId = conversation.ConversationId;
+        _activeConversationHistoryItem = item;
+        ComposerText = string.Empty;
+        EditableTranscript = string.Empty;
+        LastTranscript = string.Empty;
+        VoiceStatus = "Voice idle.";
+        AttachmentStatus = "Screenshots are temporary by default.";
+        StatusText = $"Loaded saved chat: {conversation.Title}";
+    }
+
+    private void SaveActiveConversation()
+    {
+        if (_activeConversationHistoryItem is null || !Messages.Any(message => message.Role == ChatRole.User))
+        {
+            return;
+        }
+
+        var conversation = BuildStoredConversation(_activeConversationHistoryItem);
+        _services.Conversations.Save(conversation);
+        RefreshConversationHistory();
+    }
+
+    private void ApplyFirstMessageTitleIfNeeded(string text)
+    {
+        if (_activeConversationHistoryItem is null || Messages.Any(message => message.Role == ChatRole.User))
+        {
+            return;
+        }
+
+        _activeConversationHistoryItem.SetTitle(ConversationTitleFactory.CreateFromFirstMessage(text));
+    }
+
+    private StoredConversation BuildStoredConversation(ConversationHistoryItemViewModel historyItem)
+    {
+        var messages = Messages
+            .Where(ShouldPersistMessage)
+            .Select(message => message.ToStoredMessage(_conversationId))
+            .ToList();
+        var now = DateTimeOffset.UtcNow;
+        var firstUserText = messages
+            .Where(message => message.Role == ChatRole.User)
+            .Select(message => message.Text)
+            .FirstOrDefault();
+        var title = historyItem.Title.Equals("Current chat", StringComparison.OrdinalIgnoreCase)
+            ? ConversationTitleFactory.CreateFromFirstMessage(firstUserText ?? historyItem.Title)
+            : historyItem.Title;
+        historyItem.SetTitle(title);
+
+        return new StoredConversation(
+            _conversationId,
+            title,
+            messages.FirstOrDefault()?.CreatedAt ?? now,
+            now,
+            messages);
+    }
+
+    private static bool ShouldPersistMessage(ChatMessageViewModel message) =>
+        !string.IsNullOrWhiteSpace(message.Text)
+        && !message.Text.StartsWith("Ali bootstrap ready.", StringComparison.Ordinal);
+
+    private static StoredAttachmentMetadata ToStoredAttachmentMetadata(ImageAttachmentViewModel attachment) =>
+        new(
+            attachment.Id,
+            AttachmentKind.Image,
+            attachment.FileName,
+            attachment.ContentType,
+            attachment.RetainAfterSession,
+            attachment.CreatedAt);
+
+    private void SelectHistoryItemWithoutLoading(ConversationHistoryItemViewModel? item)
+    {
+        _loadingConversationHistorySelection = true;
+        try
+        {
+            _selectedConversationHistoryItem = item;
+            OnPropertyChanged(nameof(SelectedConversationHistoryItem));
+        }
+        finally
+        {
+            _loadingConversationHistorySelection = false;
+        }
     }
 
     private void RefreshResourceMeters()
@@ -839,21 +1043,28 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void EraseHistory()
     {
+        var result = System.Windows.MessageBox.Show(
+            "Erase saved chat history on this computer? This removes saved conversations and recent chat entries. It does not remove local models, settings, voice resources, correction reports, memories, reminders, or the app itself.",
+            "Erase saved chat history",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
         Stop();
         StopSpeaking();
         _activeVoiceInput?.Cancel();
         ClearTemporaryAttachments();
-        Attachments.Clear();
-        Messages.Clear();
+        var erase = _services.Conversations.EraseAll();
         ConversationHistory.Clear();
-        _conversationId = $"conv_{Guid.NewGuid():N}";
-        _activeConversationHistoryItem = null;
-        ComposerText = string.Empty;
-        EditableTranscript = string.Empty;
-        LastTranscript = string.Empty;
-        StatusText = "Conversation history erased for this session.";
-        VoiceStatus = "Voice idle.";
-        AttachmentStatus = "Screenshots are temporary by default.";
+        ResetToFreshConversation(
+            erase.Warnings.Count == 0
+                ? $"Erased {erase.DeletedConversationCount} saved chat(s). Corrections, settings, local models, and voice resources were not erased."
+                : $"Erased {erase.DeletedConversationCount} saved chat(s) with warnings. Corrections, settings, local models, and voice resources were not erased.");
     }
 
     private void EraseConversation(object? parameter)
@@ -863,26 +1074,26 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        ConversationHistory.Remove(item);
-        if (_activeConversationHistoryItem != item)
+        var result = System.Windows.MessageBox.Show(
+            $"Erase saved chat \"{item.Title}\" from this computer? This does not remove settings, local models, voice resources, correction reports, memories, reminders, or the app itself.",
+            "Erase saved chat",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+
+        if (result != MessageBoxResult.Yes)
         {
-            StatusText = $"Erased chat: {item.Title}";
             return;
         }
 
-        Stop();
-        StopSpeaking();
-        ClearTemporaryAttachments();
-        Attachments.Clear();
-        Messages.Clear();
-        _conversationId = $"conv_{Guid.NewGuid():N}";
-        _activeConversationHistoryItem = null;
-        ComposerText = string.Empty;
-        EditableTranscript = string.Empty;
-        LastTranscript = string.Empty;
-        StatusText = $"Erased current chat: {item.Title}";
-        VoiceStatus = "Voice idle.";
-        AttachmentStatus = "Screenshots are temporary by default.";
+        _services.Conversations.Delete(item.Id);
+        if (_activeConversationHistoryItem?.Id == item.Id)
+        {
+            ResetToFreshConversation($"Erased current chat: {item.Title}");
+        }
+
+        RefreshConversationHistory();
+        StatusText = $"Erased chat: {item.Title}";
     }
 
     private static void RenameConversation(object? parameter)
@@ -893,12 +1104,22 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private static void CommitConversationRename(object? parameter)
+    private void CommitConversationRename(object? parameter)
     {
-        if (parameter is ConversationHistoryItemViewModel item)
+        if (parameter is not ConversationHistoryItemViewModel item)
         {
-            item.CommitRename();
+            return;
         }
+
+        item.CommitRename();
+        _services.Conversations.Rename(item.Id, item.Title);
+        if (_activeConversationHistoryItem?.Id == item.Id)
+        {
+            _activeConversationHistoryItem.SetTitle(item.Title);
+        }
+
+        RefreshConversationHistory();
+        StatusText = $"Renamed chat: {item.Title}";
     }
 
     private async Task ToggleVoiceRecordingAsync()
@@ -1088,7 +1309,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 voiceMetadata: message.SourceVoiceMetadata,
                 cancellationToken: CancellationToken.None).ConfigureAwait(true);
 
-            message.IsFlaggedForCorrection = true;
+            message.MarkCorrection(report.Id);
+            SaveActiveConversation();
             StatusText = $"Flagged for correction: {report.Id}";
         }
         catch (Exception ex)

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
 using Ali.Core.Models;
@@ -45,6 +46,17 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
     ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
+    ("conversation store saves and reloads messages", TestConversationStoreSavesAndReloadsMessages),
+    ("conversation store lists recents newest first", TestConversationStoreListsRecentsNewestFirst),
+    ("conversation search finds title and message text", TestConversationSearchFindsTitleAndMessageText),
+    ("conversation search does not mutate storage", TestConversationSearchDoesNotMutateStorage),
+    ("conversation delete removes one saved chat", TestConversationDeleteRemovesOneSavedChat),
+    ("conversation erase preserves settings and resources", TestConversationErasePreservesSettingsAndResources),
+    ("conversation rename handles blank and duplicate titles", TestConversationRenameHandlesBlankAndDuplicateTitles),
+    ("conversation missing index rebuilds from files", TestConversationMissingIndexRebuildsFromFiles),
+    ("conversation corrupt file does not crash listing", TestConversationCorruptFileDoesNotCrashListing),
+    ("conversation attachment raw data is not persisted", TestConversationAttachmentRawDataIsNotPersisted),
+    ("conversation title comes from first message", TestConversationTitleComesFromFirstMessage),
     ("voice audio input is temporary by default", TestVoiceAudioInputIsTemporaryByDefault),
     ("voice transcript becomes user chat text", TestVoiceTranscriptBecomesUserChatText),
     ("speech tool policy refuses cloud STT endpoint", TestSpeechPolicyRefusesCloudSttEndpoint),
@@ -330,6 +342,211 @@ static async Task TestCorrectionQueueStoresRuntimeSnapshot()
     Equal(profile.OutputTokenLimit, reports[0].OutputTokenLimit);
     Equal(profile.Temperature, reports[0].Temperature);
     Equal(profile.StreamingEnabled, reports[0].StreamingEnabled);
+}
+
+static Task TestConversationStoreSavesAndReloadsMessages()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    var conversation = CreateStoredConversation("conv_reload", "Factory Safe", "How safe are you?", "I need receipts.");
+
+    store.Save(conversation);
+    var loaded = store.Load("conv_reload");
+
+    NotNull(loaded, "Conversation should reload from disk.");
+    Equal("Factory Safe", loaded!.Title);
+    Equal(2, loaded.Messages.Count);
+    Equal("How safe are you?", loaded.Messages[0].Text);
+    Equal(ChatRole.Assistant, loaded.Messages[1].Role);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationStoreListsRecentsNewestFirst()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    var older = CreateStoredConversation("conv_old", "Old", "old question", "old answer", DateTimeOffset.UtcNow.AddMinutes(-10));
+    var newer = CreateStoredConversation("conv_new", "New", "new question", "new answer", DateTimeOffset.UtcNow);
+
+    store.Save(older);
+    store.Save(newer);
+
+    var recents = store.ListSummaries().Conversations;
+
+    Equal("conv_new", recents[0].ConversationId);
+    Equal("conv_old", recents[1].ConversationId);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationSearchFindsTitleAndMessageText()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_title", "Scarlett Setup", "audio setup", "answer"));
+    store.Save(CreateStoredConversation("conv_body", "Different Title", "Find the hidden microphone clue", "answer"));
+
+    var titleResults = store.Search("scarlett").Conversations;
+    var bodyResults = store.Search("hidden microphone").Conversations;
+    var emptyResults = store.Search(string.Empty).Conversations;
+
+    Equal(1, titleResults.Count);
+    Equal("conv_title", titleResults[0].ConversationId);
+    Equal(1, bodyResults.Count);
+    Equal("conv_body", bodyResults[0].ConversationId);
+    Equal(2, emptyResults.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationSearchDoesNotMutateStorage()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_search", "Stable", "search me", "answer"));
+    var before = File.ReadAllText(store.IndexPath);
+
+    _ = store.Search("search");
+    var after = File.ReadAllText(store.IndexPath);
+
+    Equal(before, after);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationDeleteRemovesOneSavedChat()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_keep", "Keep", "keep", "answer"));
+    store.Save(CreateStoredConversation("conv_delete", "Delete", "delete", "answer"));
+
+    Equal(true, store.Delete("conv_delete"));
+    Equal(null, store.Load("conv_delete"));
+    NotNull(store.Load("conv_keep"), "Other conversations should remain.");
+    Equal(1, store.ListSummaries().Conversations.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationErasePreservesSettingsAndResources()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_one", "One", "question", "answer"));
+    var settingsPath = Path.Combine(directory, "BootstrapData", "runtime-settings.json");
+    var voiceResourcePath = Path.Combine(directory, "lib", "voice", "README.md");
+    Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+    Directory.CreateDirectory(Path.GetDirectoryName(voiceResourcePath)!);
+    File.WriteAllText(settingsPath, "settings stay");
+    File.WriteAllText(voiceResourcePath, "voice resources stay");
+
+    var result = store.EraseAll();
+
+    Equal(1, result.DeletedConversationCount);
+    Equal(true, File.Exists(settingsPath));
+    Equal(true, File.Exists(voiceResourcePath));
+    Equal(0, store.ListSummaries().Conversations.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationRenameHandlesBlankAndDuplicateTitles()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_one", "One", "question one", "answer"));
+    store.Save(CreateStoredConversation("conv_two", "Two", "question two", "answer"));
+
+    var blankRename = store.Rename("conv_one", "   ");
+    var duplicateRename = store.Rename("conv_two", "Untitled chat");
+
+    NotNull(blankRename, "Blank rename should return a safe title.");
+    NotNull(duplicateRename, "Duplicate rename should remain safe because ids are stable.");
+    Equal("Untitled chat", blankRename!.Title);
+    Equal("Untitled chat", duplicateRename!.Title);
+    Equal(2, store.ListSummaries().Conversations.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationMissingIndexRebuildsFromFiles()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_rebuild", "Rebuild", "question", "answer"));
+    File.Delete(store.IndexPath);
+
+    var rebuilt = new FileConversationStore(directory).ListSummaries();
+
+    Equal(1, rebuilt.Conversations.Count);
+    Equal("conv_rebuild", rebuilt.Conversations[0].ConversationId);
+    Equal(true, File.Exists(store.IndexPath));
+    return Task.CompletedTask;
+}
+
+static Task TestConversationCorruptFileDoesNotCrashListing()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_good", "Good", "question", "answer"));
+    File.WriteAllText(Path.Combine(store.ConversationsDirectory, "conv_bad.json"), "{ definitely not json");
+    File.Delete(store.IndexPath);
+
+    var listed = store.ListSummaries();
+
+    Equal(1, listed.Conversations.Count);
+    Equal("conv_good", listed.Conversations[0].ConversationId);
+    Equal(true, listed.Warnings.Count > 0);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationAttachmentRawDataIsNotPersisted()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    var createdAt = DateTimeOffset.UtcNow;
+    var user = new StoredChatMessage(
+        "msg_user",
+        "conv_image",
+        ChatRole.User,
+        "Please read this screenshot.",
+        createdAt,
+        ChatMessageOrigin.Image,
+        EvidenceStatus.Verified,
+        new[]
+        {
+            new StoredAttachmentMetadata(
+                "att_1",
+                AttachmentKind.Image,
+                "screen.png",
+                "image/png",
+                RetainAfterSession: false,
+                createdAt)
+        });
+    var assistant = new StoredChatMessage(
+        "msg_assistant",
+        "conv_image",
+        ChatRole.Assistant,
+        "I can only report what I can verify.",
+        createdAt.AddSeconds(1),
+        ChatMessageOrigin.Typed,
+        EvidenceStatus.Unknown,
+        SourceAttachmentCount: 1,
+        SourceUserMessageId: "msg_user",
+        SourceQuestion: user.Text);
+
+    store.Save(new StoredConversation("conv_image", "Image", createdAt, createdAt.AddSeconds(1), new[] { user, assistant }));
+    var savedJson = File.ReadAllText(Path.Combine(store.ConversationsDirectory, "conv_image.json"));
+
+    Contains("screen.png", savedJson);
+    Equal(false, savedJson.Contains("base64Data", StringComparison.OrdinalIgnoreCase));
+    Equal(false, savedJson.Contains("RAW_IMAGE_BYTES", StringComparison.OrdinalIgnoreCase));
+    return Task.CompletedTask;
+}
+
+static Task TestConversationTitleComesFromFirstMessage()
+{
+    var title = ConversationTitleFactory.CreateFromFirstMessage(
+        "  Please help me debug this local WPF settings dropdown because it stopped populating after the refactor.  ");
+
+    Contains("Please help me debug", title);
+    Equal(true, title.Length <= 64);
+    return Task.CompletedTask;
 }
 
 static Task TestVoiceAudioInputIsTemporaryByDefault()
@@ -890,6 +1107,49 @@ static VoiceCaptureDiagnostics CreateCaptureDiagnostics(double rms, double peak)
         RmsPcm: (int)(rms * short.MaxValue),
         PeakPcm: (int)(peak * short.MaxValue),
         level);
+}
+
+static string NewTestDirectory() =>
+    Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+
+static StoredConversation CreateStoredConversation(
+    string conversationId,
+    string title,
+    string question,
+    string answer,
+    DateTimeOffset? updatedAt = null)
+{
+    var createdAt = (updatedAt ?? DateTimeOffset.UtcNow).AddSeconds(-2);
+    var userMessageId = $"{conversationId}_user";
+    var assistantMessageId = $"{conversationId}_assistant";
+    var messages = new[]
+    {
+        new StoredChatMessage(
+            userMessageId,
+            conversationId,
+            ChatRole.User,
+            question,
+            createdAt,
+            ChatMessageOrigin.Typed,
+            EvidenceStatus.Verified),
+        new StoredChatMessage(
+            assistantMessageId,
+            conversationId,
+            ChatRole.Assistant,
+            answer,
+            createdAt.AddSeconds(1),
+            ChatMessageOrigin.Typed,
+            EvidenceStatus.Unknown,
+            SourceUserMessageId: userMessageId,
+            SourceQuestion: question)
+    };
+
+    return new StoredConversation(
+        conversationId,
+        title,
+        createdAt,
+        updatedAt ?? createdAt.AddSeconds(1),
+        messages);
 }
 
 static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model, bool supportsVision = false) =>

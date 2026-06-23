@@ -114,21 +114,17 @@
                             Command="{Binding NewChatCommand}"
                             HorizontalContentAlignment="Left"
                             Margin="0,0,0,8" />
-                    <Border Background="{StaticResource InputBrush}"
-                            BorderBrush="{StaticResource BorderBrushDark}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8,6"
-                            Margin="0,0,0,12">
-                        <TextBlock Text="Search chats (coming later)"
-                                   Foreground="{StaticResource SubtleTextBrush}" />
-                    </Border>
+                    <TextBox Text="{Binding ConversationSearchText, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Search saved local chat titles and message text"
+                             Margin="0,0,0,12"
+                             MinHeight="32" />
 
                     <TextBlock Text="Recents" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold" Margin="0,4,0,6" />
                 </StackPanel>
 
                 <ListBox Grid.Row="1"
                          ItemsSource="{Binding ConversationHistory}"
+                         SelectedItem="{Binding SelectedConversationHistoryItem, Mode=TwoWay}"
                          Background="Transparent"
                          BorderThickness="0"
                          Foreground="{StaticResource TextBrush}"
@@ -147,11 +143,17 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
-                                    <TextBlock Text="{Binding Title}"
-                                               Foreground="{StaticResource TextBrush}"
-                                               TextTrimming="CharacterEllipsis"
-                                               VerticalAlignment="Center"
-                                               Visibility="{Binding IsViewing, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <StackPanel Visibility="{Binding IsViewing, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding Title}"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Preview}"
+                                                   Foreground="{StaticResource SubtleTextBrush}"
+                                                   FontSize="11"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,2,0,0" />
+                                    </StackPanel>
                                     <DockPanel Visibility="{Binding IsRenaming, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <Button DockPanel.Dock="Right"
                                                 Content="OK"
@@ -197,7 +199,7 @@
                         Margin="0"
                         BorderBrush="#7F1D1D"
                         Background="#2A1517"
-                        ToolTip="Clear the visible chat, current-session history, transcript text, and temporary attachments." />
+                        ToolTip="Erase saved local conversations and recent chat entries after confirmation." />
             </Grid>
         </Border>
 
