@@ -42,190 +42,127 @@
 
         <TabControl Grid.Row="1">
             <TabItem Header="Microphone">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <Grid Margin="14">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
+                <Grid Background="#05070A">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
+                    <Border Background="#101821"
+                            BorderBrush="#26323D"
+                            BorderThickness="0,0,0,1"
+                            Padding="16,10">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="112" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Input device" Style="{StaticResource FieldLabel}" />
-                                <ComboBox ItemsSource="{Binding VoiceInputDevices}"
-                                          SelectedItem="{Binding SelectedVoiceInputDevice}"
-                                          MinHeight="32" />
-                            </StackPanel>
+                            <TextBlock Text="Mic"
+                                       Foreground="#F8FAFC"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0" />
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{Binding VoiceInputDevices}"
+                                      SelectedItem="{Binding SelectedVoiceInputDevice}"
+                                      Height="30" />
 
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Input channel" Style="{StaticResource FieldLabel}" />
-                                <ComboBox ItemsSource="{Binding VoiceInputChannelModes}"
-                                          SelectedItem="{Binding SelectedVoiceInputChannelMode}"
-                                          MinHeight="32" />
-                            </StackPanel>
+                            <TextBlock Grid.Column="2"
+                                       Text="Channel"
+                                       Foreground="#B8C7D9"
+                                       VerticalAlignment="Center"
+                                       Margin="14,0,8,0" />
+                            <ComboBox Grid.Column="3"
+                                      ItemsSource="{Binding VoiceInputChannelModes}"
+                                      SelectedItem="{Binding SelectedVoiceInputChannelMode}"
+                                      Height="30" />
 
-                            <StackPanel Grid.Column="4">
-                                <TextBlock Text="Input preset" Style="{StaticResource FieldLabel}" />
-                                <ComboBox ItemsSource="{Binding VoiceInputPresets}"
-                                          SelectedItem="{Binding SelectedVoiceInputPreset}"
-                                          MinHeight="32" />
-                            </StackPanel>
+                            <TextBlock Grid.Column="4"
+                                       Text="Gain"
+                                       Foreground="#B8C7D9"
+                                       VerticalAlignment="Center"
+                                       Margin="14,0,8,0" />
+                            <Slider Grid.Column="5"
+                                    Minimum="1"
+                                    Maximum="24"
+                                    Value="{Binding SpectrumDisplayGain, UpdateSourceTrigger=PropertyChanged}"
+                                    VerticalAlignment="Center" />
+
+                            <TextBlock Grid.Column="6"
+                                       Text="{Binding SpectrumPeakText}"
+                                       Foreground="#F8FAFC"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0" />
                         </Grid>
+                    </Border>
 
-                        <Grid Grid.Row="1" Margin="0,12,0,12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="220" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="Output device" Style="{StaticResource FieldLabel}" />
-                                <ComboBox ItemsSource="{Binding VoiceOutputDevices}"
-                                          SelectedItem="{Binding SelectedVoiceOutputDevice}"
-                                          MinHeight="32" />
+                    <Border Grid.Row="1"
+                            Background="#101821"
+                            BorderBrush="#334F5D6B"
+                            BorderThickness="1"
+                            Padding="14"
+                            Margin="14"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Width="390">
+                        <StackPanel>
+                            <TextBlock Text="Audio Confidence"
+                                       Foreground="#F8FAFC"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,8" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Ellipse Width="14"
+                                         Height="14"
+                                         Fill="#42D77D"
+                                         Stroke="#B8C7D9"
+                                         StrokeThickness="1"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,8,0" />
+                                <TextBlock Text="DSP active"
+                                           Foreground="#B8C7D9"
+                                           VerticalAlignment="Center" />
                             </StackPanel>
 
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Spectrum gain" Style="{StaticResource FieldLabel}" />
-                                <Slider Minimum="1"
-                                        Maximum="18"
-                                        TickFrequency="1"
-                                        IsSnapToTickEnabled="False"
-                                        Value="{Binding SpectrumDisplayGain, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-                        </Grid>
-
-                        <Border Grid.Row="2" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="220" />
-                                    <ColumnDefinition Width="12" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="12" />
-                                    <ColumnDefinition Width="220" />
-                                </Grid.ColumnDefinitions>
-
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Extra input gain" Style="{StaticResource FieldLabel}" />
-                                    <Slider Minimum="-12"
-                                            Maximum="24"
-                                            TickFrequency="1"
-                                            IsSnapToTickEnabled="True"
-                                            Value="{Binding ExtraInputGainDb, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Text="{Binding ExtraInputGainDb, StringFormat={}{0:+0.#;-0.#;0} dB}"
-                                               Foreground="#4B5563"
-                                               FontSize="12" />
-                                </StackPanel>
-
-                                <StackPanel Grid.Column="2">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Button Content="Record 5 Second Sample"
-                                                Command="{Binding RecordVoiceSampleCommand}"
-                                                Margin="0,0,8,0" />
-                                        <Button Content="Play Last Sample"
-                                                Command="{Binding PlayVoiceSampleCommand}"
-                                                Margin="0,0,8,0" />
-                                        <Button Content="Delete Sample"
-                                                Command="{Binding DeleteVoiceSampleCommand}"
-                                                Margin="0" />
-                                    </StackPanel>
-                                    <Button Content="Run Calibration"
-                                            Command="{Binding CalibrateVoiceCommand}"
-                                            HorizontalAlignment="Left"
-                                            Margin="0,8,0,0" />
-                                    <TextBlock Text="{Binding VoiceSampleStatus}"
-                                               Foreground="#4B5563"
-                                               TextWrapping="Wrap"
-                                               FontSize="12"
-                                               Margin="0,8,0,0" />
-                                </StackPanel>
-
-                                <StackPanel Grid.Column="4">
-                                    <CheckBox Content="Normalize before STT"
-                                              IsChecked="{Binding NormalizeBeforeStt}"
-                                              Margin="0,4,0,8" />
-                                    <CheckBox Content="Retain debug audio"
-                                              IsChecked="{Binding RetainDebugAudio}"
-                                              Margin="0,0,0,8" />
-                                    <TextBlock Text="{Binding VoiceCalibrationStatus}"
-                                               Foreground="#4B5563"
-                                               TextWrapping="Wrap"
-                                               FontSize="12" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-
-                        <Border Grid.Row="3"
-                                Background="#07121E"
-                                BorderBrush="#182C3E"
-                                BorderThickness="1"
-                                CornerRadius="8"
-                                Padding="12">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-
-                                <DockPanel Margin="0,0,0,8">
-                                    <TextBlock Text="{Binding SpectrumPeakText}"
-                                               Foreground="#C8E6F0"
-                                               FontSize="12" />
-                                    <TextBlock DockPanel.Dock="Right"
-                                               Text="{Binding VoiceInputMeterText}"
-                                               Foreground="#C8E6F0"
-                                               FontSize="12"
-                                               TextWrapping="Wrap" />
-                                </DockPanel>
-
-                                <Viewbox Grid.Row="1" Stretch="Fill">
-                                    <Canvas Width="720" Height="240" ClipToBounds="True">
-                                        <Line X1="0" Y1="60" X2="720" Y2="60" Stroke="#173044" StrokeThickness="1" />
-                                        <Line X1="0" Y1="120" X2="720" Y2="120" Stroke="#173044" StrokeThickness="1" />
-                                        <Line X1="0" Y1="180" X2="720" Y2="180" Stroke="#173044" StrokeThickness="1" />
-                                        <Line X1="120" Y1="0" X2="120" Y2="240" Stroke="#102537" StrokeThickness="1" />
-                                        <Line X1="240" Y1="0" X2="240" Y2="240" Stroke="#102537" StrokeThickness="1" />
-                                        <Line X1="360" Y1="0" X2="360" Y2="240" Stroke="#102537" StrokeThickness="1" />
-                                        <Line X1="480" Y1="0" X2="480" Y2="240" Stroke="#102537" StrokeThickness="1" />
-                                        <Line X1="600" Y1="0" X2="600" Y2="240" Stroke="#102537" StrokeThickness="1" />
-                                        <Polyline Points="{Binding SpectrumAveragePoints}"
-                                                  Stroke="#D7B220"
-                                                  StrokeThickness="2"
-                                                  StrokeLineJoin="Round" />
+                            <Border Height="130"
+                                    Background="#05070A"
+                                    BorderBrush="#334F5D6B"
+                                    BorderThickness="1"
+                                    Margin="0,0,0,10">
+                                <Viewbox Stretch="Fill">
+                                    <Canvas Width="720"
+                                            Height="130"
+                                            ClipToBounds="True"
+                                            SnapsToDevicePixels="True">
                                         <Polyline Points="{Binding SpectrumLivePoints}"
                                                   Stroke="#00BEE6"
                                                   StrokeThickness="2.5"
                                                   StrokeLineJoin="Round" />
                                     </Canvas>
                                 </Viewbox>
+                            </Border>
 
-                                <StackPanel Grid.Row="2" Margin="0,8,0,0">
-                                    <ProgressBar Minimum="0"
-                                                 Maximum="100"
-                                                 Height="12"
-                                                 Value="{Binding VoiceInputLevelPercent, Mode=OneWay}" />
-                                    <TextBlock Text="{Binding VoiceDiagnosticsText}"
-                                               Foreground="#88AFC4"
-                                               TextWrapping="Wrap"
-                                               FontSize="12"
-                                               Margin="0,6,0,0" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </Grid>
-                </ScrollViewer>
+                            <TextBlock Text="Processed signal being monitored"
+                                       Foreground="#B8C7D9"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,10" />
+                            <TextBlock Text="{Binding VoiceInputMeterText}"
+                                       Foreground="#B8C7D9"
+                                       TextWrapping="Wrap"
+                                       FontSize="12" />
+                            <TextBlock Text="{Binding VoiceDiagnosticsText}"
+                                       Foreground="#88AFC4"
+                                       TextWrapping="Wrap"
+                                       FontSize="12"
+                                       Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </TabItem>
 
             <TabItem Header="Speech Tools">

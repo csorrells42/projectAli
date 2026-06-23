@@ -4,15 +4,15 @@ public static class InputChannelModeCatalog
 {
     public const int MaximumSelectableInputs = 8;
     public const string HighestEnergyLabel = "Auto strongest";
-    public const string MonoSumLabel = "Mono fold-down";
+    public const string MonoSumLabel = "Sum L+R";
 
     public static IReadOnlyList<string> CreateLabels(int channelCount)
     {
-        var labels = new List<string> { HighestEnergyLabel, MonoSumLabel };
+        var labels = new List<string> { MonoSumLabel };
         var selectableCount = Math.Clamp(channelCount, 1, MaximumSelectableInputs);
         for (var channel = 1; channel <= selectableCount; channel++)
         {
-            labels.Add($"Input {channel}");
+            labels.Add(InputLabel(channel));
         }
 
         return labels;
@@ -23,8 +23,8 @@ public static class InputChannelModeCatalog
         {
             InputChannelMode.HighestEnergy => HighestEnergyLabel,
             InputChannelMode.MonoSum => MonoSumLabel,
-            InputChannelMode.Input1Left => "Input 1",
-            InputChannelMode.Input2Right => "Input 2",
+            InputChannelMode.Input1Left => "Input 1 L",
+            InputChannelMode.Input2Right => "Input 2 R",
             InputChannelMode.Input3 => "Input 3",
             InputChannelMode.Input4 => "Input 4",
             InputChannelMode.Input5 => "Input 5",
@@ -43,8 +43,14 @@ public static class InputChannelModeCatalog
             "mono fold-down" => InputChannelMode.MonoSum,
             "mono folddown" => InputChannelMode.MonoSum,
             "mono sum" => InputChannelMode.MonoSum,
+            "sum l+r" => InputChannelMode.MonoSum,
+            "sum lr" => InputChannelMode.MonoSum,
             "input 1" => InputChannelMode.Input1Left,
+            "input 1 l" => InputChannelMode.Input1Left,
+            "input 1 left" => InputChannelMode.Input1Left,
             "input 2" => InputChannelMode.Input2Right,
+            "input 2 r" => InputChannelMode.Input2Right,
+            "input 2 right" => InputChannelMode.Input2Right,
             "input 3" => InputChannelMode.Input3,
             "input 4" => InputChannelMode.Input4,
             "input 5" => InputChannelMode.Input5,
@@ -85,4 +91,12 @@ public static class InputChannelModeCatalog
         string.IsNullOrWhiteSpace(value)
             ? string.Empty
             : value.Trim().ToLowerInvariant();
+
+    private static string InputLabel(int channel) =>
+        channel switch
+        {
+            1 => "Input 1 L",
+            2 => "Input 2 R",
+            _ => $"Input {channel}"
+        };
 }

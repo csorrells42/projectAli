@@ -10,7 +10,7 @@ public sealed record VoiceRuntimeSettings(
     int? LastSuccessfulTtsDeviceNumber = null,
     string? LastSuccessfulTtsDeviceName = null,
     string SelectedInputPreset = VoiceInputPreset.HeadsetMic,
-    string SelectedInputChannelMode = nameof(InputChannelMode.HighestEnergy),
+    string SelectedInputChannelMode = nameof(InputChannelMode.MonoSum),
     double ExtraInputGainDb = 6,
     bool NormalizeBeforeStt = true,
     bool RetainDebugAudio = false,

@@ -8,6 +8,7 @@ public sealed class NAudioInputLevelMonitor : IDisposable
     private readonly object _sync = new();
     private readonly SpectrumAnalyzer _spectrumAnalyzer = new();
     private WaveInEvent? _capture;
+    private VoiceSampleProcessor? _processor;
     private int _deviceNumber;
     private string _deviceName = "microphone";
 
@@ -16,6 +17,8 @@ public sealed class NAudioInputLevelMonitor : IDisposable
     public event EventHandler<SpectrumFrame>? SpectrumAvailable;
 
     public InputChannelMode ChannelMode { get; set; } = InputChannelMode.MonoSum;
+
+    public VoiceProcessorSettings ProcessorSettings { get; set; } = new();
 
     public bool IsMonitoring
     {
@@ -35,6 +38,7 @@ public sealed class NAudioInputLevelMonitor : IDisposable
         {
             _deviceNumber = deviceNumber;
             _deviceName = string.IsNullOrWhiteSpace(deviceName) ? $"Device {deviceNumber}" : deviceName;
+            _processor = new VoiceSampleProcessor(ProcessorSettings);
             _capture = StartCapture(deviceNumber);
         }
     }
@@ -53,6 +57,7 @@ public sealed class NAudioInputLevelMonitor : IDisposable
             _capture.StopRecording();
             _capture.Dispose();
             _capture = null;
+            _processor = null;
         }
     }
 
@@ -87,7 +92,7 @@ public sealed class NAudioInputLevelMonitor : IDisposable
         {
             DeviceNumber = deviceNumber,
             WaveFormat = new WaveFormat(SampleRate, 16, channelCount),
-            BufferMilliseconds = 50
+            BufferMilliseconds = 15
         };
         capture.DataAvailable += CaptureDataAvailable;
         capture.RecordingStopped += CaptureRecordingStopped;
@@ -100,12 +105,14 @@ public sealed class NAudioInputLevelMonitor : IDisposable
         int deviceNumber;
         string deviceName;
         InputChannelMode channelMode;
+        VoiceSampleProcessor? processor;
         lock (_sync)
         {
             format = _capture?.WaveFormat;
             deviceNumber = _deviceNumber;
             deviceName = _deviceName;
             channelMode = ChannelMode;
+            processor = _processor;
         }
 
         if (format is null || e.BytesRecorded == 0)
@@ -119,14 +126,16 @@ public sealed class NAudioInputLevelMonitor : IDisposable
             return;
         }
 
+        var processedSamples = processor?.Process(samples) ?? samples;
+
         var snapshot = VoiceInputLevelAnalyzer.Analyze(
-            samples,
+            processedSamples,
             deviceNumber,
             deviceName,
             format.SampleRate,
             format.Channels);
         LevelAvailable?.Invoke(this, snapshot);
-        SpectrumAvailable?.Invoke(this, _spectrumAnalyzer.AddSamples(samples));
+        SpectrumAvailable?.Invoke(this, _spectrumAnalyzer.AddSamples(processedSamples));
     }
 
     private void CaptureRecordingStopped(object? sender, StoppedEventArgs e)

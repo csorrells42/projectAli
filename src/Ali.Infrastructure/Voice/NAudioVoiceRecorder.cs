@@ -189,17 +189,17 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             return;
         }
 
+        var processed = processor.Process(samples);
         LevelAvailable?.Invoke(
             this,
             VoiceInputLevelAnalyzer.Analyze(
-                samples,
+                processed,
                 InputDeviceNumber,
                 GetInputDeviceName(InputDeviceNumber),
                 format.SampleRate,
                 format.Channels));
-        SpectrumAvailable?.Invoke(this, _spectrumAnalyzer.AddSamples(samples));
+        SpectrumAvailable?.Invoke(this, _spectrumAnalyzer.AddSamples(processed));
 
-        var processed = processor.Process(samples);
         var bytes = ConvertFloatSamplesToPcm16(processed);
 
         lock (_sync)

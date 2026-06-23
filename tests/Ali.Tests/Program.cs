@@ -474,13 +474,12 @@ static Task TestInputChannelCatalogSupportsScarlettInputs()
 {
     var labels = InputChannelModeCatalog.CreateLabels(channelCount: 2);
 
-    Equal(4, labels.Count);
-    Equal(InputChannelModeCatalog.HighestEnergyLabel, labels[0]);
-    Equal(InputChannelModeCatalog.MonoSumLabel, labels[1]);
-    Equal("Input 1", labels[2]);
-    Equal("Input 2", labels[3]);
+    Equal(3, labels.Count);
+    Equal(InputChannelModeCatalog.MonoSumLabel, labels[0]);
+    Equal("Input 1 L", labels[1]);
+    Equal("Input 2 R", labels[2]);
     Equal(InputChannelMode.HighestEnergy, InputChannelModeCatalog.FromLabel("Auto strongest"));
-    Equal(InputChannelMode.Input2Right, InputChannelModeCatalog.FromLabel("Input 2"));
+    Equal(InputChannelMode.Input2Right, InputChannelModeCatalog.FromLabel("Input 2 R"));
     Equal(1, InputChannelModeCatalog.ChannelIndex(InputChannelMode.Input2Right));
     return Task.CompletedTask;
 }
@@ -510,7 +509,7 @@ static async Task TestDiagnosticSampleServiceRecordsPlaysAndDeletes()
     Equal(true, recorder.Started);
     Equal(true, File.Exists(sample.AudioInput.FilePath));
     Equal("Scarlett 2i2", sample.InputDeviceName);
-    Equal("Input 2", sample.InputChannelLabel);
+    Equal("Input 2 R", sample.InputChannelLabel);
     Equal(6d, sample.ExtraGainDb);
 
     await service.PlaySampleAsync(sample, CancellationToken.None);

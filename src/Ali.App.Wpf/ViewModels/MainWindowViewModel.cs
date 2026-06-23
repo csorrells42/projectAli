@@ -21,12 +21,12 @@ namespace Ali.App.Wpf.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private const double SpectrumRenderWidth = 720d;
-    private const double SpectrumRenderHeight = 240d;
+    private const double SpectrumRenderHeight = 130d;
+    private const double SpectrumRenderInset = 12d;
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly VoiceDiagnosticSampleService _sampleService;
     private readonly string _conversationId = $"conv_{Guid.NewGuid():N}";
-    private readonly double[] _spectrumAverage = new double[SpectrumAnalyzer.BarCount];
     private VoiceRuntimeSettings _voiceSettings;
     private bool _loadingVoiceSettings;
     private CancellationTokenSource? _activeResponse;
@@ -38,6 +38,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private VoiceDiagnosticSample? _lastDiagnosticSample;
     private VoiceCalibrationResult? _lastCalibrationResult;
     private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
+    private double[] _renderedSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
+    private double _spectrumVisualCeiling = 0.25d;
     private double _lastSpectrumPeakLevel;
     private string _composerText = string.Empty;
     private bool _isBusy;
@@ -70,7 +72,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _selectedVoiceInputDevice = "Default microphone";
     private string _selectedVoiceOutputDevice = "Default speaker";
     private string _selectedVoiceInputPreset = VoiceInputPreset.HeadsetMic;
-    private string _selectedVoiceInputChannelMode = InputChannelModeCatalog.HighestEnergyLabel;
+    private string _selectedVoiceInputChannelMode = InputChannelModeCatalog.MonoSumLabel;
     private double _voiceInputLevelPercent;
     private string _voiceInputMeterText = "Input meter starting.";
     private string _voiceDiagnosticsText = "No voice capture yet.";
@@ -78,8 +80,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _voiceCalibrationStatus = $"Calibration phrase: \"{VoiceCalibrationEvaluator.CalibrationPrompt}\"";
     private string _lastSttDebugText = "No STT debug invocation yet.";
     private PointCollection _spectrumLivePoints = CreateFlatSpectrumPoints();
-    private PointCollection _spectrumAveragePoints = CreateFlatSpectrumPoints();
-    private string _spectrumPeakText = "Peak 0% | gain 6.0x";
+    private string _spectrumPeakText = "Peak 0%";
     private double _spectrumDisplayGain = 6d;
     private string _whisperExecutableText = string.Empty;
     private string _whisperModelText = string.Empty;
@@ -485,12 +486,6 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _spectrumLivePoints, value);
     }
 
-    public PointCollection SpectrumAveragePoints
-    {
-        get => _spectrumAveragePoints;
-        private set => SetProperty(ref _spectrumAveragePoints, value);
-    }
-
     public string SpectrumPeakText
     {
         get => _spectrumPeakText;
@@ -502,7 +497,7 @@ public sealed class MainWindowViewModel : ObservableObject
         get => _spectrumDisplayGain;
         set
         {
-            if (SetProperty(ref _spectrumDisplayGain, Math.Clamp(value, 1d, 18d)))
+            if (SetProperty(ref _spectrumDisplayGain, Math.Clamp(value, 1d, 24d)))
             {
                 RefreshSpectrumPoints();
             }
@@ -1880,11 +1875,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ApplyVoiceInputPreset(string presetName)
     {
+        var settings = BuildCurrentProcessorSettings(presetName);
         if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
         {
-            recorder.ProcessorSettings = BuildCurrentProcessorSettings(presetName);
+            recorder.ProcessorSettings = settings;
         }
 
+        _inputLevelMonitor.ProcessorSettings = settings;
         SaveVoiceSettings(selectedInputPreset: presetName);
     }
 
@@ -1923,7 +1920,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var preferredLabel = InputChannelModeCatalog.ToLabel(preferredMode);
         var selectedLabel = VoiceInputChannelModes.Contains(preferredLabel)
             ? preferredLabel
-            : InputChannelModeCatalog.HighestEnergyLabel;
+            : InputChannelModeCatalog.MonoSumLabel;
         if (SelectedVoiceInputChannelMode == selectedLabel)
         {
             ApplyVoiceInputChannelMode(selectedLabel);
@@ -1972,23 +1969,27 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _lastSpectrumMagnitudes = frame.Magnitudes.ToArray();
-        for (var index = 0; index < Math.Min(_spectrumAverage.Length, frame.Magnitudes.Length); index++)
+        EnsureSpectrumRenderBuffers(frame.Magnitudes.Length);
+        var frameCeiling = Math.Max(0.08d, frame.Magnitudes.Select(ShapeSpectrumMagnitude).DefaultIfEmpty(0.08d).Max());
+        _spectrumVisualCeiling = frameCeiling > _spectrumVisualCeiling
+            ? Ease(_spectrumVisualCeiling, frameCeiling, 0.10d)
+            : Ease(_spectrumVisualCeiling, frameCeiling, 0.025d);
+
+        for (var index = 0; index < frame.Magnitudes.Length; index++)
         {
-            _spectrumAverage[index] = _spectrumAverage[index] <= 0d
-                ? frame.Magnitudes[index]
-                : (_spectrumAverage[index] * 0.84d) + (frame.Magnitudes[index] * 0.16d);
+            var visualMagnitude = NormalizeSpectrumForDisplay(ShapeSpectrumMagnitude(frame.Magnitudes[index]));
+            _renderedSpectrumMagnitudes[index] = Ease(_renderedSpectrumMagnitudes[index], visualMagnitude, 0.14d);
         }
 
         _lastSpectrumPeakLevel = frame.PeakLevel;
-        SpectrumPeakText = $"Peak {frame.PeakLevel:P0} | gain {SpectrumDisplayGain:0.0}x";
+        SpectrumPeakText = $"Peak {frame.PeakLevel:P0}";
         RefreshSpectrumPoints();
     }
 
     private void RefreshSpectrumPoints()
     {
-        SpectrumLivePoints = CreateSpectrumPoints(_lastSpectrumMagnitudes, SpectrumDisplayGain);
-        SpectrumAveragePoints = CreateSpectrumPoints(_spectrumAverage, SpectrumDisplayGain);
-        SpectrumPeakText = $"Peak {_lastSpectrumPeakLevel:P0} | gain {SpectrumDisplayGain:0.0}x";
+        SpectrumLivePoints = SmoothSpectrumPoints(CreateSpectrumPoints(_renderedSpectrumMagnitudes));
+        SpectrumPeakText = $"Peak {_lastSpectrumPeakLevel:P0}";
     }
 
     private void StartInputLevelMonitor()
@@ -2126,9 +2127,9 @@ public sealed class MainWindowViewModel : ObservableObject
         _services.TextToSpeech is PiperCliTextToSpeechProvider piper ? piper.ModelPath : string.Empty;
 
     private static PointCollection CreateFlatSpectrumPoints() =>
-        CreateSpectrumPoints(new double[SpectrumAnalyzer.BarCount], 1d);
+        CreateSpectrumPoints(new double[SpectrumAnalyzer.BarCount]);
 
-    private static PointCollection CreateSpectrumPoints(IReadOnlyList<double> magnitudes, double displayGain)
+    private static PointCollection CreateSpectrumPoints(IReadOnlyList<double> magnitudes)
     {
         var points = new PointCollection();
         if (magnitudes.Count == 0)
@@ -2140,12 +2141,79 @@ public sealed class MainWindowViewModel : ObservableObject
         for (var index = 0; index < magnitudes.Count; index++)
         {
             var x = index * (SpectrumRenderWidth / denominator);
-            var level = Math.Clamp(magnitudes[index] * displayGain, 0d, 1d);
-            var y = SpectrumRenderHeight - (level * (SpectrumRenderHeight - 8d));
+            var level = Math.Clamp(magnitudes[index], 0d, 1d);
+            var graphBottom = Math.Max(SpectrumRenderInset + 1d, SpectrumRenderHeight - SpectrumRenderInset);
+            var usableHeight = graphBottom - SpectrumRenderInset;
+            var y = graphBottom - (usableHeight * level);
             points.Add(new System.Windows.Point(x, y));
         }
 
         return points;
+    }
+
+    private void EnsureSpectrumRenderBuffers(int length)
+    {
+        if (_renderedSpectrumMagnitudes.Length == length)
+        {
+            return;
+        }
+
+        _renderedSpectrumMagnitudes = new double[length];
+    }
+
+    private static double ShapeSpectrumMagnitude(double magnitude)
+    {
+        var lifted = Math.Max(0d, magnitude - 0.01d);
+        return Math.Clamp(Math.Pow(lifted, 0.9d), 0d, 1d);
+    }
+
+    private double NormalizeSpectrumForDisplay(double magnitude) =>
+        Math.Clamp(
+            magnitude / Math.Max(0.08d, _spectrumVisualCeiling) * 0.78d * SpectrumDisplayGain / 6d,
+            0d,
+            0.92d);
+
+    private static double Ease(double current, double target, double amount) =>
+        current + ((target - current) * amount);
+
+    private static PointCollection SmoothSpectrumPoints(PointCollection source)
+    {
+        if (source.Count < 4)
+        {
+            return source;
+        }
+
+        var smoothed = new PointCollection(source.Count * 2);
+        smoothed.Add(source[0]);
+
+        for (var index = 1; index < source.Count - 2; index++)
+        {
+            var p0 = source[index - 1];
+            var p1 = source[index];
+            var p2 = source[index + 1];
+            var p3 = source[index + 2];
+
+            smoothed.Add(p1);
+            smoothed.Add(CatmullRom(p0, p1, p2, p3, 0.5d));
+        }
+
+        smoothed.Add(source[^2]);
+        smoothed.Add(source[^1]);
+        return smoothed;
+    }
+
+    private static System.Windows.Point CatmullRom(
+        System.Windows.Point p0,
+        System.Windows.Point p1,
+        System.Windows.Point p2,
+        System.Windows.Point p3,
+        double t)
+    {
+        var t2 = t * t;
+        var t3 = t2 * t;
+        var x = 0.5d * ((2d * p1.X) + ((-p0.X + p2.X) * t) + ((2d * p0.X - 5d * p1.X + 4d * p2.X - p3.X) * t2) + ((-p0.X + 3d * p1.X - 3d * p2.X + p3.X) * t3));
+        var y = 0.5d * ((2d * p1.Y) + ((-p0.Y + p2.Y) * t) + ((2d * p0.Y - 5d * p1.Y + 4d * p2.Y - p3.Y) * t2) + ((-p0.Y + 3d * p1.Y - 3d * p2.Y + p3.Y) * t3));
+        return new System.Windows.Point(x, y);
     }
 
     private static string PreferConfigured(string? configured, string? fallback) =>
