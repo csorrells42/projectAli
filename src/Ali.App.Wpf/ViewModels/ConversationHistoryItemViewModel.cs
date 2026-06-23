@@ -13,6 +13,7 @@ public sealed class ConversationHistoryItemViewModel(
     private DateTimeOffset _updatedAt = updatedAt ?? DateTimeOffset.UtcNow;
     private string _preview = preview;
     private int _messageCount = messageCount;
+    private bool _isActive;
 
     public string Id { get; } = id;
 
@@ -41,6 +42,12 @@ public sealed class ConversationHistoryItemViewModel(
     }
 
     public bool IsViewing => !IsRenaming;
+
+    public bool IsActive
+    {
+        get => _isActive;
+        private set => SetProperty(ref _isActive, value);
+    }
 
     public DateTimeOffset UpdatedAt
     {
@@ -91,4 +98,6 @@ public sealed class ConversationHistoryItemViewModel(
         Preview = preview;
         MessageCount = messageCount;
     }
+
+    public void SetActive(bool isActive) => IsActive = isActive;
 }

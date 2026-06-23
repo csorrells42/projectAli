@@ -51,9 +51,15 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("correction queue can mark reviewed and unresolved", TestCorrectionQueueCanMarkReviewedAndUnresolved),
     ("correction queue exports one and all", TestCorrectionQueueExportsOneAndAll),
     ("correction queue survives deleted conversation reference", TestCorrectionQueueSurvivesDeletedConversationReference),
+    ("conversation launch keeps fresh chat separate from recents", TestConversationLaunchKeepsFreshChatSeparateFromRecents),
+    ("conversation new chat does not overwrite old chat", TestConversationNewChatDoesNotOverwriteOldChat),
     ("conversation store saves and reloads messages", TestConversationStoreSavesAndReloadsMessages),
+    ("conversation selection restores ordered messages", TestConversationSelectionRestoresOrderedMessages),
+    ("conversation reopened chat can be continued", TestConversationReopenedChatCanBeContinued),
+    ("conversation recents persist across store restart", TestConversationRecentsPersistAcrossStoreRestart),
     ("conversation store lists recents newest first", TestConversationStoreListsRecentsNewestFirst),
     ("conversation search finds title and message text", TestConversationSearchFindsTitleAndMessageText),
+    ("conversation search result opens correct chat", TestConversationSearchResultOpensCorrectChat),
     ("conversation search does not mutate storage", TestConversationSearchDoesNotMutateStorage),
     ("conversation delete removes one saved chat", TestConversationDeleteRemovesOneSavedChat),
     ("conversation erase preserves settings and resources", TestConversationErasePreservesSettingsAndResources),
@@ -414,6 +420,40 @@ static async Task TestCorrectionQueueSurvivesDeletedConversationReference()
     Equal("What command ran?", listed[0].Question);
 }
 
+static Task TestConversationLaunchKeepsFreshChatSeparateFromRecents()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_yesterday", "Yesterday", "old question", "old answer"));
+
+    var fresh = ConversationSessionFactory.StartFresh();
+    var recents = store.ListSummaries().Conversations;
+
+    Equal(false, fresh.LoadedFromStorage);
+    Equal(0, fresh.Messages.Count);
+    Equal(1, recents.Count);
+    Equal("conv_yesterday", recents[0].ConversationId);
+    Equal(null, store.Load(fresh.ConversationId));
+    return Task.CompletedTask;
+}
+
+static Task TestConversationNewChatDoesNotOverwriteOldChat()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_old", "Old", "old question", "old answer"));
+
+    var newChat = ConversationSessionFactory.StartFresh();
+    Equal(1, store.ListSummaries().Conversations.Count);
+    store.Save(CreateStoredConversation(newChat.ConversationId, "New", "new question", "new answer"));
+
+    var recents = store.ListSummaries().Conversations;
+    Equal(2, recents.Count);
+    NotNull(store.Load("conv_old"), "New chat must not overwrite the old chat.");
+    NotNull(store.Load(newChat.ConversationId), "New chat should save under its own id.");
+    return Task.CompletedTask;
+}
+
 static Task TestConversationStoreSavesAndReloadsMessages()
 {
     var directory = NewTestDirectory();
@@ -428,6 +468,62 @@ static Task TestConversationStoreSavesAndReloadsMessages()
     Equal(2, loaded.Messages.Count);
     Equal("How safe are you?", loaded.Messages[0].Text);
     Equal(ChatRole.Assistant, loaded.Messages[1].Role);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationSelectionRestoresOrderedMessages()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    var now = DateTimeOffset.UtcNow;
+    var late = new StoredChatMessage("msg_late", "conv_order", ChatRole.Assistant, "second", now.AddMinutes(2), ChatMessageOrigin.Typed, EvidenceStatus.Unknown);
+    var early = new StoredChatMessage("msg_early", "conv_order", ChatRole.User, "first", now, ChatMessageOrigin.Typed, EvidenceStatus.Verified);
+    store.Save(new StoredConversation("conv_order", "Order", now, now.AddMinutes(2), new[] { late, early }));
+
+    var loaded = store.Load("conv_order");
+    NotNull(loaded, "Saved conversation should load.");
+    var session = ConversationSessionFactory.Reopen(loaded!);
+
+    Equal(true, session.LoadedFromStorage);
+    Equal("first", session.Messages[0].Text);
+    Equal("second", session.Messages[1].Text);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationReopenedChatCanBeContinued()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    var original = CreateStoredConversation("conv_continue", "Continue", "first question", "first answer");
+    store.Save(original);
+
+    var reopened = store.Load("conv_continue");
+    NotNull(reopened, "Conversation should reopen.");
+    var messages = reopened!.Messages.ToList();
+    var now = DateTimeOffset.UtcNow;
+    messages.Add(new StoredChatMessage("msg_user_2", "conv_continue", ChatRole.User, "second question", now, ChatMessageOrigin.Typed, EvidenceStatus.Verified));
+    messages.Add(new StoredChatMessage("msg_asst_2", "conv_continue", ChatRole.Assistant, "second answer", now.AddSeconds(1), ChatMessageOrigin.Typed, EvidenceStatus.Unknown, SourceUserMessageId: "msg_user_2", SourceQuestion: "second question"));
+    store.Save(reopened with { UpdatedAt = now.AddSeconds(1), Messages = messages });
+
+    var continued = store.Load("conv_continue");
+    NotNull(continued, "Continued conversation should reload.");
+    Equal(4, continued!.Messages.Count);
+    Equal("second question", continued.Messages[2].Text);
+    Equal("second answer", continued.Messages[3].Text);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationRecentsPersistAcrossStoreRestart()
+{
+    var directory = NewTestDirectory();
+    var firstStore = new FileConversationStore(directory);
+    firstStore.Save(CreateStoredConversation("conv_restart", "Restart", "question", "answer"));
+
+    var secondStore = new FileConversationStore(directory);
+    var recents = secondStore.ListSummaries().Conversations;
+
+    Equal(1, recents.Count);
+    Equal("conv_restart", recents[0].ConversationId);
     return Task.CompletedTask;
 }
 
@@ -464,6 +560,22 @@ static Task TestConversationSearchFindsTitleAndMessageText()
     Equal(1, bodyResults.Count);
     Equal("conv_body", bodyResults[0].ConversationId);
     Equal(2, emptyResults.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestConversationSearchResultOpensCorrectChat()
+{
+    var directory = NewTestDirectory();
+    var store = new FileConversationStore(directory);
+    store.Save(CreateStoredConversation("conv_focusrite", "Audio", "Focusrite mic test", "answer"));
+    store.Save(CreateStoredConversation("conv_other", "Other", "different topic", "answer"));
+
+    var result = store.Search("Focusrite").Conversations.Single();
+    var loaded = store.Load(result.ConversationId);
+
+    NotNull(loaded, "Search result should load the matching conversation.");
+    Equal("conv_focusrite", loaded!.ConversationId);
+    Equal("Focusrite mic test", loaded.Messages[0].Text);
     return Task.CompletedTask;
 }
 

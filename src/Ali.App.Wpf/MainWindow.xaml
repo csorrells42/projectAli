@@ -131,12 +131,22 @@
                          Margin="0,0,0,10">
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:ConversationHistoryItemViewModel}">
-                            <Border Background="{StaticResource PanelBrush}"
-                                    BorderBrush="{StaticResource BorderBrushDark}"
-                                    BorderThickness="1"
+                            <Border BorderThickness="1"
                                     CornerRadius="8"
                                     Padding="8,5"
                                     Margin="0,0,0,6">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                                <Setter Property="Background" Value="#202C33" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />

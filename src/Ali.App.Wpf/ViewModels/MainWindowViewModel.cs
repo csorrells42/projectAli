@@ -33,7 +33,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _reminderTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly HashSet<string> _shownDueReminderIds = new(StringComparer.OrdinalIgnoreCase);
-    private string _conversationId = $"conv_{Guid.NewGuid():N}";
+    private string _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
     private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
     private string _conversationSearchText = string.Empty;
@@ -193,13 +193,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _reminderTimer.Start();
         RefreshConversationHistory();
         RefreshMemoryReminders();
-
-        Messages.Add(new ChatMessageViewModel(
-            id: $"msg_asst_{Guid.NewGuid():N}",
-            role: ChatRole.Assistant,
-            text: "Ali bootstrap ready. I can prove the WPF chat loop, cancellation, and correction queue. A real local model runtime must pass a health check and be activated before I answer through it.",
-            createdAt: DateTimeOffset.UtcNow,
-            evidenceStatus: EvidenceStatus.Verified));
+        StatusText = "New chat ready. Saved chats are available in the sidebar.";
     }
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
@@ -974,7 +968,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
-        _conversationId = $"conv_{Guid.NewGuid():N}";
+        _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
         _activeConversationHistoryItem = null;
         SelectHistoryItemWithoutLoading(null);
         ComposerText = string.Empty;
@@ -1012,8 +1006,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 }
             }
 
-            _activeConversationHistoryItem = activeItem;
+            if (activeItem is not null || string.IsNullOrWhiteSpace(ConversationSearchText))
+            {
+                _activeConversationHistoryItem = activeItem;
+            }
+
             _selectedConversationHistoryItem = activeItem;
+            UpdateActiveHistoryVisuals();
             OnPropertyChanged(nameof(SelectedConversationHistoryItem));
         }
         finally
@@ -1048,13 +1047,15 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
-        foreach (var message in conversation.Messages.OrderBy(message => message.CreatedAt))
+        var session = ConversationSessionFactory.Reopen(conversation);
+        foreach (var message in session.Messages)
         {
             Messages.Add(ChatMessageViewModel.FromStoredMessage(message));
         }
 
-        _conversationId = conversation.ConversationId;
+        _conversationId = session.ConversationId;
         _activeConversationHistoryItem = item;
+        UpdateActiveHistoryVisuals();
         ComposerText = string.Empty;
         EditableTranscript = string.Empty;
         LastTranscript = string.Empty;
@@ -1303,11 +1304,21 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             _selectedConversationHistoryItem = item;
+            UpdateActiveHistoryVisuals();
             OnPropertyChanged(nameof(SelectedConversationHistoryItem));
         }
         finally
         {
             _loadingConversationHistorySelection = false;
+        }
+    }
+
+    private void UpdateActiveHistoryVisuals()
+    {
+        var activeId = _activeConversationHistoryItem?.Id;
+        foreach (var item in ConversationHistory)
+        {
+            item.SetActive(activeId is not null && item.Id.Equals(activeId, StringComparison.OrdinalIgnoreCase));
         }
     }
 
