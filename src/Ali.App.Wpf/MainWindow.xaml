@@ -53,6 +53,15 @@
             <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
             <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
+        <Style x:Key="ComposerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="MinWidth" Value="42" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Margin" Value="4,0" />
+            <Setter Property="Background" Value="#2F2F32" />
+            <Setter Property="BorderBrush" Value="#3B3B40" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -212,7 +221,13 @@
                 </ItemsControl>
             </ScrollViewer>
 
-            <StackPanel Grid.Row="2" MaxWidth="840" HorizontalAlignment="Center">
+            <Grid Grid.Row="2" HorizontalAlignment="Stretch" VerticalAlignment="Bottom">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
                 <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -235,7 +250,13 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Border Background="{StaticResource PanelAltBrush}" BorderBrush="{StaticResource BorderBrushDark}" BorderThickness="1" CornerRadius="24" Padding="10">
+                <Border Grid.Row="1"
+                        Background="#242426"
+                        BorderBrush="#38383D"
+                        BorderThickness="1"
+                        CornerRadius="26"
+                        Padding="8"
+                        HorizontalAlignment="Stretch">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
@@ -247,21 +268,24 @@
                         </Grid.ColumnDefinitions>
 
                         <Button Grid.Column="0"
-                                Content="+ Image"
+                                Content="+"
                                 Command="{Binding PasteImageCommand}"
                                 ToolTip="Attach an image from the clipboard"
-                                Margin="0,0,8,0" />
+                                Style="{StaticResource ComposerButton}" />
 
                         <TextBox x:Name="ComposerTextBox"
                                  Grid.Column="1"
-                                 MinHeight="42"
+                                 MinHeight="44"
                                  MaxHeight="150"
                                  VerticalScrollBarVisibility="Auto"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  BorderThickness="0"
                                  Background="Transparent"
+                                 Margin="6,0"
+                                 Padding="8,10"
                                  FontSize="15"
+                                 VerticalContentAlignment="Center"
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="ComposerTextBox_OnKeyDown" />
 
@@ -269,26 +293,27 @@
                                 Content="{Binding MicButtonText}"
                                 Command="{Binding ToggleVoiceRecordingCommand}"
                                 ToolTip="Record speech into the chat bar"
-                                Margin="8,0,0,0" />
+                                Style="{StaticResource ComposerButton}" />
                         <Button Grid.Column="3"
                                 Content="{Binding VoiceModeButtonText}"
                                 Command="{Binding ToggleVoiceModeCommand}"
                                 ToolTip="Toggle hands-free voice mode"
-                                Margin="8,0,0,0" />
+                                Style="{StaticResource ComposerButton}"
+                                MinWidth="96" />
                         <Button Grid.Column="4"
                                 Content="Stop"
                                 Command="{Binding StopCommand}"
                                 ToolTip="Stop the current response"
-                                Margin="8,0,0,0" />
+                                Style="{StaticResource ComposerButton}" />
                         <Button Grid.Column="5"
                                 Content="Send"
                                 Command="{Binding SendCommand}"
                                 ToolTip="Send chat"
-                                Margin="8,0,0,0" />
+                                Style="{StaticResource ComposerButton}" />
                     </Grid>
                 </Border>
 
-                <Grid Margin="6,8,6,0">
+                <Grid Grid.Row="2" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
@@ -296,7 +321,7 @@
                     <TextBlock Text="{Binding AttachmentStatus}" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" TextWrapping="Wrap" />
                     <TextBlock Grid.Column="1" Text="{Binding VoiceStatus}" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" TextWrapping="Wrap" TextAlignment="Right" />
                 </Grid>
-            </StackPanel>
+            </Grid>
         </Grid>
     </Grid>
 </Window>
