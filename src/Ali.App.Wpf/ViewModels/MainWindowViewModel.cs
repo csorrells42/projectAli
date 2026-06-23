@@ -1626,13 +1626,15 @@ public sealed class MainWindowViewModel : ObservableObject
         var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
         LoadPiperVoiceChoices();
 
-        WhisperExecutableText = PreferConfigured(_voiceSettings.WhisperExecutablePath, whisperDefaults.ExecutablePath);
-        WhisperModelText = PreferConfigured(_voiceSettings.WhisperModelPath, whisperDefaults.ModelPath);
+        WhisperExecutableText = ToPortablePath(PreferConfigured(_voiceSettings.WhisperExecutablePath, whisperDefaults.ExecutablePath)) ?? string.Empty;
+        WhisperModelText = ToPortablePath(PreferConfigured(_voiceSettings.WhisperModelPath, whisperDefaults.ModelPath)) ?? string.Empty;
         WhisperArgumentsText = PreferConfigured(_voiceSettings.WhisperArgumentsTemplate, whisperDefaults.ArgumentsTemplate);
-        PiperExecutableText = PreferConfigured(
+        PiperExecutableText = ToPortablePath(PreferConfigured(
             _voiceSettings.PiperExecutablePath,
-            PreferConfigured(piperDefaults.ExecutablePath, FindLocalPiperExecutable()));
-        PiperModelText = PreferConfigured(_voiceSettings.PiperModelPath, PreferConfigured(piperDefaults.ModelPath, PreferredPiperModelPath()));
+            PreferConfigured(FindLocalPiperExecutable(), piperDefaults.ExecutablePath))) ?? string.Empty;
+        PiperModelText = ToPortablePath(PreferConfigured(
+            _voiceSettings.PiperModelPath,
+            PreferConfigured(PreferredPiperModelPath(), piperDefaults.ModelPath))) ?? string.Empty;
         PiperVoiceText = PreferConfigured(_voiceSettings.PiperVoiceId, piperDefaults.VoiceId);
         PiperArgumentsText = PreferConfigured(_voiceSettings.PiperArgumentsTemplate, piperDefaults.ArgumentsTemplate);
         SelectedPiperVoiceChoice = FindPiperVoiceLabelForModel(PiperModelText) ?? PiperVoiceChoices.FirstOrDefault() ?? string.Empty;
@@ -1693,8 +1695,8 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var defaults = WhisperCliSpeechToTextOptions.FromEnvironment();
         return new WhisperCliSpeechToTextOptions(
-            NullIfWhiteSpace(WhisperExecutableText),
-            NullIfWhiteSpace(WhisperModelText),
+            ResolvePortablePath(WhisperExecutableText),
+            ResolvePortablePath(WhisperModelText),
             PreferConfigured(WhisperArgumentsText, defaults.ArgumentsTemplate),
             defaults.OutputTextSuffix);
     }
@@ -1703,8 +1705,8 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var defaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
         return new PiperCliTextToSpeechOptions(
-            NullIfWhiteSpace(PiperExecutableText),
-            NullIfWhiteSpace(PiperModelText),
+            ResolvePortablePath(PiperExecutableText),
+            ResolvePortablePath(PiperModelText),
             PreferConfigured(PiperVoiceText, defaults.VoiceId),
             PreferConfigured(PiperArgumentsText, defaults.ArgumentsTemplate),
             defaults.OutputDirectory);
@@ -1725,7 +1727,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var voiceId = Path.GetFileNameWithoutExtension(modelPath);
             var label = FormatPiperVoiceLabel(voiceId);
-            _piperVoiceChoices[label] = new PiperVoiceChoice(label, voiceId, modelPath);
+            _piperVoiceChoices[label] = new PiperVoiceChoice(label, voiceId, ToPortablePath(modelPath) ?? modelPath);
             PiperVoiceChoices.Add(label);
         }
     }
@@ -1753,9 +1755,14 @@ public sealed class MainWindowViewModel : ObservableObject
             return null;
         }
 
-        var normalized = Path.GetFullPath(modelPath);
+        var normalized = ResolvePortablePath(modelPath);
+        if (normalized is null)
+        {
+            return null;
+        }
+
         return _piperVoiceChoices.Values.FirstOrDefault(choice =>
-            string.Equals(Path.GetFullPath(choice.ModelPath), normalized, StringComparison.OrdinalIgnoreCase))?.Label;
+            string.Equals(ResolvePortablePath(choice.ModelPath), normalized, StringComparison.OrdinalIgnoreCase))?.Label;
     }
 
     private string? PreferredPiperModelPath()
@@ -1770,11 +1777,11 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         _voiceSettings = _voiceSettings with
         {
-            WhisperExecutablePath = NullIfWhiteSpace(WhisperExecutableText),
-            WhisperModelPath = NullIfWhiteSpace(WhisperModelText),
+            WhisperExecutablePath = ToPortablePath(WhisperExecutableText),
+            WhisperModelPath = ToPortablePath(WhisperModelText),
             WhisperArgumentsTemplate = NullIfWhiteSpace(WhisperArgumentsText),
-            PiperExecutablePath = NullIfWhiteSpace(PiperExecutableText),
-            PiperModelPath = NullIfWhiteSpace(PiperModelText),
+            PiperExecutablePath = ToPortablePath(PiperExecutableText),
+            PiperModelPath = ToPortablePath(PiperModelText),
             PiperVoiceId = NullIfWhiteSpace(PiperVoiceText),
             PiperArgumentsTemplate = NullIfWhiteSpace(PiperArgumentsText)
         };
@@ -2367,31 +2374,79 @@ public sealed class MainWindowViewModel : ObservableObject
     private static void SetProcessEnvironment(string variableName, string? value) =>
         Environment.SetEnvironmentVariable(variableName, NullIfWhiteSpace(value), EnvironmentVariableTarget.Process);
 
+    private static string AppBaseDirectory => Path.GetFullPath(AppContext.BaseDirectory);
+
+    private static string? ResolvePortablePath(string? value)
+    {
+        var trimmed = NullIfWhiteSpace(value);
+        if (trimmed is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(Path.IsPathRooted(trimmed)
+                ? trimmed
+                : Path.Combine(AppBaseDirectory, trimmed));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return trimmed;
+        }
+    }
+
+    private static string? ToPortablePath(string? value)
+    {
+        var fullPath = ResolvePortablePath(value);
+        if (fullPath is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var relativePath = Path.GetRelativePath(AppBaseDirectory, fullPath);
+            return string.IsNullOrWhiteSpace(relativePath) ? fullPath : relativePath;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return fullPath;
+        }
+    }
+
     private static string? FindLocalPiperExecutable()
     {
-        var root = FindWorkspaceRoot();
-        var candidate = root is null
+        var voiceRoot = FindLocalVoiceResourceDirectory();
+        var candidate = voiceRoot is null
             ? null
-            : Path.Combine(root, "lib", "voice", "python-venv", "Scripts", "piper.exe");
+            : Path.Combine(voiceRoot, "python-venv", "Scripts", "piper.exe");
 
-        return File.Exists(candidate) ? candidate : null;
+        return File.Exists(candidate) ? ToPortablePath(candidate) : null;
     }
 
     private static string? FindLocalPiperVoiceDirectory()
     {
-        var root = FindWorkspaceRoot();
-        var candidate = root is null ? null : Path.Combine(root, "lib", "voice", "piper");
+        var voiceRoot = FindLocalVoiceResourceDirectory();
+        var candidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "piper");
         return Directory.Exists(candidate) ? candidate : null;
     }
 
-    private static string? FindWorkspaceRoot()
+    private static string? FindLocalVoiceResourceDirectory()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        var executableLocalVoiceRoot = Path.Combine(AppBaseDirectory, "lib", "voice");
+        if (Directory.Exists(executableLocalVoiceRoot))
+        {
+            return executableLocalVoiceRoot;
+        }
+
+        var directory = new DirectoryInfo(AppBaseDirectory);
         while (directory is not null)
         {
-            if (Directory.Exists(Path.Combine(directory.FullName, "lib", "voice")))
+            var candidate = Path.Combine(directory.FullName, "lib", "voice");
+            if (Directory.Exists(candidate))
             {
-                return directory.FullName;
+                return candidate;
             }
 
             directory = directory.Parent;
