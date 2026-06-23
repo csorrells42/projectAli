@@ -99,8 +99,14 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" Padding="14">
-            <DockPanel LastChildFill="True">
-                <StackPanel DockPanel.Dock="Top">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
                     <TextBlock Text="Ali" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
                     <TextBlock Text="Local assistant" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,14" />
 
@@ -119,77 +125,80 @@
                     </Border>
 
                     <TextBlock Text="Recents" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold" Margin="0,4,0,6" />
-                    <ListBox ItemsSource="{Binding ConversationHistory}"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             Foreground="{StaticResource TextBrush}"
-                             MaxHeight="420">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:ConversationHistoryItemViewModel}">
-                                <Border Background="{StaticResource PanelBrush}"
-                                        BorderBrush="{StaticResource BorderBrushDark}"
-                                        BorderThickness="1"
-                                        CornerRadius="8"
-                                        Padding="8,5"
-                                        Margin="0,0,0,6">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <TextBlock Text="{Binding Title}"
-                                                   Foreground="{StaticResource TextBrush}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   VerticalAlignment="Center"
-                                                   Visibility="{Binding IsViewing, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                        <DockPanel Visibility="{Binding IsRenaming, Converter={StaticResource BoolToVisibilityConverter}}">
-                                            <Button DockPanel.Dock="Right"
-                                                    Content="OK"
-                                                    Command="{Binding DataContext.CommitConversationRenameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}"
-                                                    Height="26"
-                                                    MinHeight="26"
-                                                    Padding="8,0"
-                                                    Margin="6,0,0,0" />
-                                            <TextBox Text="{Binding DraftTitle, UpdateSourceTrigger=PropertyChanged}"
-                                                     MinHeight="26"
-                                                     Margin="0"
-                                                     Padding="6,3" />
-                                        </DockPanel>
-
-                                        <Button Grid.Column="1"
-                                                Content="..."
-                                                Style="{StaticResource SidebarActionButton}"
-                                                Click="HistoryMenuButton_OnClick"
-                                                Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                ToolTip="Chat actions">
-                                            <Button.ContextMenu>
-                                                <ContextMenu>
-                                                    <MenuItem Header="Rename"
-                                                              Command="{Binding PlacementTarget.Tag.RenameConversationCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                    <MenuItem Header="Erase chat"
-                                                              Command="{Binding PlacementTarget.Tag.EraseConversationCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                                </ContextMenu>
-                                            </Button.ContextMenu>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-
-                    <Button Content="Erase History"
-                            Command="{Binding EraseHistoryCommand}"
-                            HorizontalContentAlignment="Center"
-                            Margin="0,8,0,0"
-                            BorderBrush="#7F1D1D"
-                            Background="#2A1517"
-                            ToolTip="Clear the visible chat, current-session history, transcript text, and temporary attachments." />
                 </StackPanel>
-            </DockPanel>
+
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding ConversationHistory}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Foreground="{StaticResource TextBrush}"
+                         Margin="0,0,0,10">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ConversationHistoryItemViewModel}">
+                            <Border Background="{StaticResource PanelBrush}"
+                                    BorderBrush="{StaticResource BorderBrushDark}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="8,5"
+                                    Margin="0,0,0,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Text="{Binding Title}"
+                                               Foreground="{StaticResource TextBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center"
+                                               Visibility="{Binding IsViewing, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <DockPanel Visibility="{Binding IsRenaming, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <Button DockPanel.Dock="Right"
+                                                Content="OK"
+                                                Command="{Binding DataContext.CommitConversationRenameCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Height="26"
+                                                MinHeight="26"
+                                                Padding="8,0"
+                                                Margin="6,0,0,0" />
+                                        <TextBox Text="{Binding DraftTitle, UpdateSourceTrigger=PropertyChanged}"
+                                                 MinHeight="26"
+                                                 Margin="0"
+                                                 Padding="6,3" />
+                                    </DockPanel>
+
+                                    <Button Grid.Column="1"
+                                            Content="..."
+                                            Style="{StaticResource SidebarActionButton}"
+                                            Click="HistoryMenuButton_OnClick"
+                                            Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            ToolTip="Chat actions">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Rename"
+                                                          Command="{Binding PlacementTarget.Tag.RenameConversationCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                <MenuItem Header="Erase chat"
+                                                          Command="{Binding PlacementTarget.Tag.EraseConversationCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <Button Grid.Row="2"
+                        Content="Erase History"
+                        Command="{Binding EraseHistoryCommand}"
+                        HorizontalContentAlignment="Center"
+                        Margin="0"
+                        BorderBrush="#7F1D1D"
+                        Background="#2A1517"
+                        ToolTip="Clear the visible chat, current-session history, transcript text, and temporary attachments." />
+            </Grid>
         </Border>
 
         <Grid Grid.Column="1" Margin="30,18,30,18">
