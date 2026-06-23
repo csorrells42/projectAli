@@ -45,7 +45,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <Border Background="#101821"
@@ -214,59 +213,6 @@
                     </StackPanel>
                 </Grid>
             </Border>
-
-            <Expander Grid.Row="3"
-                      Header="Advanced local tool paths"
-                      Foreground="#B8C7D9"
-                      Background="#101821"
-                      BorderBrush="#334F5D6B">
-                <Grid Margin="12">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <TextBlock Text="{Binding SttStatus}"
-                               Foreground="#B8C7D9"
-                               TextWrapping="Wrap"
-                               FontSize="12" />
-
-                    <Grid Grid.Row="1" Margin="0,8,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="Whisper executable" Foreground="#B8C7D9" FontSize="12" />
-                            <TextBox Text="{Binding WhisperExecutableText, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Text="Piper executable" Foreground="#B8C7D9" FontSize="12" />
-                            <TextBox Text="{Binding PiperExecutableText, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Whisper model" Foreground="#B8C7D9" FontSize="12" />
-                            <TextBox Text="{Binding WhisperModelText, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Text="Piper model" Foreground="#B8C7D9" FontSize="12" />
-                            <TextBox Text="{Binding PiperModelText, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
-                    </Grid>
-
-                    <DockPanel Grid.Row="2" Margin="0,8,0,0">
-                        <TextBlock Text="{Binding LastSttDebugText}"
-                                   Foreground="#88AFC4"
-                                   TextWrapping="Wrap"
-                                   FontSize="12" />
-                        <Button DockPanel.Dock="Right"
-                                Content="Apply Advanced"
-                                Command="{Binding ApplyVoiceToolSettingsCommand}"
-                                MinWidth="130"
-                                Margin="12,0,0,0" />
-                    </DockPanel>
-                </Grid>
-            </Expander>
         </Grid>
     </Grid>
 </Window>
