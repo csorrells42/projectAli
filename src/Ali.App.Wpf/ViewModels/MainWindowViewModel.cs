@@ -27,8 +27,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly VoiceDiagnosticSampleService _sampleService;
     private readonly string _conversationId = $"conv_{Guid.NewGuid():N}";
+    private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
     private bool _loadingVoiceSettings;
+    private bool _loadingSpeechToolSettings;
     private CancellationTokenSource? _activeResponse;
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
@@ -88,6 +90,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _piperExecutableText = string.Empty;
     private string _piperModelText = string.Empty;
     private string _piperVoiceText = "default";
+    private string _selectedPiperVoiceChoice = string.Empty;
     private string _piperArgumentsText = string.Empty;
     private string _voiceSettingsStatusText = "Voice settings loaded.";
     private double _extraInputGainDb;
@@ -118,6 +121,7 @@ public sealed class MainWindowViewModel : ObservableObject
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenVoiceSettingsCommand = new RelayCommand(_ => OpenVoiceSettings());
         ApplyVoiceToolSettingsCommand = new RelayCommand(_ => ApplyVoiceToolSettings());
+        PlayPiperSampleCommand = new AsyncRelayCommand(PlayPiperSampleAsync, () => !IsSpeaking);
         RecordVoiceSampleCommand = new AsyncRelayCommand(RecordVoiceSampleAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !IsRecordingSample && !IsCalibrating);
         PlayVoiceSampleCommand = new AsyncRelayCommand(PlayVoiceSampleAsync, () => _lastDiagnosticSample is not null && !IsSpeaking);
         DeleteVoiceSampleCommand = new RelayCommand(_ => DeleteVoiceSample(), _ => _lastDiagnosticSample is not null);
@@ -173,6 +177,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> VoiceInputChannelModes { get; } = new();
 
+    public ObservableCollection<string> PiperVoiceChoices { get; } = new();
+
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
@@ -208,6 +214,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenVoiceSettingsCommand { get; }
 
     public ICommand ApplyVoiceToolSettingsCommand { get; }
+
+    public ICommand PlayPiperSampleCommand { get; }
 
     public ICommand RecordVoiceSampleCommand { get; }
 
@@ -538,6 +546,18 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _piperVoiceText;
         set => SetProperty(ref _piperVoiceText, value);
+    }
+
+    public string SelectedPiperVoiceChoice
+    {
+        get => _selectedPiperVoiceChoice;
+        set
+        {
+            if (SetProperty(ref _selectedPiperVoiceChoice, value))
+            {
+                ApplySelectedPiperVoiceChoice(value, applySettings: !_loadingSpeechToolSettings);
+            }
+        }
     }
 
     public string PiperArgumentsText
@@ -1342,6 +1362,60 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task PlayPiperSampleAsync()
+    {
+        if (IsSpeaking)
+        {
+            return;
+        }
+
+        ApplyVoiceToolSettings(saveSettings: true, reportStatus: false);
+        if (!_services.TextToSpeech.IsConfigured)
+        {
+            TtsStatus = "Piper is not configured yet.";
+            return;
+        }
+
+        _activeSpeech?.Cancel();
+        _services.SpeechPlayer.Stop();
+        _activeSpeech?.Dispose();
+        _activeSpeech = new CancellationTokenSource();
+
+        SpeechSynthesisResult? speech = null;
+        IsSpeaking = true;
+        try
+        {
+            TtsStatus = $"Testing {PiperVoiceText}...";
+            speech = await _services.TextToSpeech.SynthesizeAsync(
+                "Hello, I am Ali. This is what my selected voice sounds like.",
+                new VoiceSettings(PiperVoiceText, Rate: 1.0, RetainAudio: false),
+                _activeSpeech.Token).ConfigureAwait(true);
+
+            await _services.SpeechPlayer.PlayAsync(speech.AudioPath, _activeSpeech.Token).ConfigureAwait(true);
+            TtsStatus = $"Voice sample complete: {PiperVoiceText}.";
+            SaveLastSuccessfulTtsDevice();
+        }
+        catch (OperationCanceledException)
+        {
+            TtsStatus = "Voice sample stopped.";
+        }
+        catch (Exception ex)
+        {
+            TtsStatus = $"Voice sample failed: {ex.Message}";
+        }
+        finally
+        {
+            IsSpeaking = false;
+            if (speech is not null && !speech.RetainAudio && File.Exists(speech.AudioPath))
+            {
+                TryDeleteFile(speech.AudioPath);
+            }
+
+            _activeSpeech?.Dispose();
+            _activeSpeech = null;
+        }
+    }
+
     private async Task RecordVoiceSampleAsync()
     {
         if (IsRecordingSample || IsCalibrating || IsRecording || IsTranscribing)
@@ -1547,16 +1621,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void LoadSpeechToolSettings()
     {
+        _loadingSpeechToolSettings = true;
         var whisperDefaults = WhisperCliSpeechToTextOptions.FromEnvironment();
         var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
+        LoadPiperVoiceChoices();
 
         WhisperExecutableText = PreferConfigured(_voiceSettings.WhisperExecutablePath, whisperDefaults.ExecutablePath);
         WhisperModelText = PreferConfigured(_voiceSettings.WhisperModelPath, whisperDefaults.ModelPath);
         WhisperArgumentsText = PreferConfigured(_voiceSettings.WhisperArgumentsTemplate, whisperDefaults.ArgumentsTemplate);
-        PiperExecutableText = PreferConfigured(_voiceSettings.PiperExecutablePath, piperDefaults.ExecutablePath);
-        PiperModelText = PreferConfigured(_voiceSettings.PiperModelPath, piperDefaults.ModelPath);
+        PiperExecutableText = PreferConfigured(
+            _voiceSettings.PiperExecutablePath,
+            PreferConfigured(piperDefaults.ExecutablePath, FindLocalPiperExecutable()));
+        PiperModelText = PreferConfigured(_voiceSettings.PiperModelPath, PreferConfigured(piperDefaults.ModelPath, PreferredPiperModelPath()));
         PiperVoiceText = PreferConfigured(_voiceSettings.PiperVoiceId, piperDefaults.VoiceId);
         PiperArgumentsText = PreferConfigured(_voiceSettings.PiperArgumentsTemplate, piperDefaults.ArgumentsTemplate);
+        SelectedPiperVoiceChoice = FindPiperVoiceLabelForModel(PiperModelText) ?? PiperVoiceChoices.FirstOrDefault() ?? string.Empty;
+        ApplySelectedPiperVoiceChoice(SelectedPiperVoiceChoice, applySettings: false);
+        _loadingSpeechToolSettings = false;
     }
 
     private void ApplyVoiceToolSettings() => ApplyVoiceToolSettings(saveSettings: true, reportStatus: true);
@@ -1627,6 +1708,62 @@ public sealed class MainWindowViewModel : ObservableObject
             PreferConfigured(PiperVoiceText, defaults.VoiceId),
             PreferConfigured(PiperArgumentsText, defaults.ArgumentsTemplate),
             defaults.OutputDirectory);
+    }
+
+    private void LoadPiperVoiceChoices()
+    {
+        _piperVoiceChoices.Clear();
+        PiperVoiceChoices.Clear();
+
+        var voiceDirectory = FindLocalPiperVoiceDirectory();
+        if (voiceDirectory is null)
+        {
+            return;
+        }
+
+        foreach (var modelPath in Directory.EnumerateFiles(voiceDirectory, "en_US-*.onnx").OrderBy(Path.GetFileName))
+        {
+            var voiceId = Path.GetFileNameWithoutExtension(modelPath);
+            var label = FormatPiperVoiceLabel(voiceId);
+            _piperVoiceChoices[label] = new PiperVoiceChoice(label, voiceId, modelPath);
+            PiperVoiceChoices.Add(label);
+        }
+    }
+
+    private void ApplySelectedPiperVoiceChoice(string label, bool applySettings)
+    {
+        if (!_piperVoiceChoices.TryGetValue(label, out var choice))
+        {
+            return;
+        }
+
+        PiperVoiceText = choice.VoiceId;
+        PiperModelText = choice.ModelPath;
+        if (applySettings)
+        {
+            ApplyVoiceToolSettings(saveSettings: true, reportStatus: false);
+            VoiceSettingsStatusText = $"Ali voice set to {choice.Label}.";
+        }
+    }
+
+    private string? FindPiperVoiceLabelForModel(string? modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            return null;
+        }
+
+        var normalized = Path.GetFullPath(modelPath);
+        return _piperVoiceChoices.Values.FirstOrDefault(choice =>
+            string.Equals(Path.GetFullPath(choice.ModelPath), normalized, StringComparison.OrdinalIgnoreCase))?.Label;
+    }
+
+    private string? PreferredPiperModelPath()
+    {
+        var preferred = _piperVoiceChoices.Values.FirstOrDefault(choice =>
+            choice.VoiceId.Equals("en_US-hfc_female-medium", StringComparison.OrdinalIgnoreCase));
+        preferred ??= _piperVoiceChoices.Values.FirstOrDefault();
+        return preferred?.ModelPath;
     }
 
     private void SaveVoiceToolSettings()
@@ -1776,6 +1913,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (StopSpeakingCommand is RelayCommand stopSpeaking)
         {
             stopSpeaking.RaiseCanExecuteChanged();
+        }
+
+        if (PlayPiperSampleCommand is AsyncRelayCommand playPiperSample)
+        {
+            playPiperSample.RaiseCanExecuteChanged();
         }
 
         if (RecordVoiceSampleCommand is AsyncRelayCommand recordSample)
@@ -2225,6 +2367,64 @@ public sealed class MainWindowViewModel : ObservableObject
     private static void SetProcessEnvironment(string variableName, string? value) =>
         Environment.SetEnvironmentVariable(variableName, NullIfWhiteSpace(value), EnvironmentVariableTarget.Process);
 
+    private static string? FindLocalPiperExecutable()
+    {
+        var root = FindWorkspaceRoot();
+        var candidate = root is null
+            ? null
+            : Path.Combine(root, "lib", "voice", "python-venv", "Scripts", "piper.exe");
+
+        return File.Exists(candidate) ? candidate : null;
+    }
+
+    private static string? FindLocalPiperVoiceDirectory()
+    {
+        var root = FindWorkspaceRoot();
+        var candidate = root is null ? null : Path.Combine(root, "lib", "voice", "piper");
+        return Directory.Exists(candidate) ? candidate : null;
+    }
+
+    private static string? FindWorkspaceRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "lib", "voice")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    private static string FormatPiperVoiceLabel(string voiceId)
+    {
+        var name = voiceId.StartsWith("en_US-", StringComparison.OrdinalIgnoreCase)
+            ? voiceId["en_US-".Length..]
+            : voiceId;
+        var parts = name.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return voiceId;
+        }
+
+        var quality = parts[^1];
+        var baseName = string.Join(" ", parts[..^1]).Replace('_', ' ');
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = quality;
+            quality = string.Empty;
+        }
+
+        var label = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(baseName);
+        return string.IsNullOrWhiteSpace(quality)
+            ? label
+            : $"{label} ({quality})";
+    }
+
     private static string ReadDeviceName(string selectedDevice)
     {
         var separatorIndex = selectedDevice.IndexOf(':', StringComparison.Ordinal);
@@ -2244,3 +2444,5 @@ public sealed class MainWindowViewModel : ObservableObject
         return int.TryParse(numberText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceNumber);
     }
 }
+
+internal sealed record PiperVoiceChoice(string Label, string VoiceId, string ModelPath);

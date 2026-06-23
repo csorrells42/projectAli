@@ -40,242 +40,233 @@
             </StackPanel>
         </DockPanel>
 
-        <TabControl Grid.Row="1">
-            <TabItem Header="Microphone">
-                <Grid Background="#05070A">
+        <Grid Grid.Row="1" Background="#05070A">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Background="#101821"
+                    BorderBrush="#26323D"
+                    BorderThickness="1"
+                    Padding="16,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="140" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="Mic"
+                               Foreground="#F8FAFC"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0" />
+                    <ComboBox Grid.Column="1"
+                              ItemsSource="{Binding VoiceInputDevices}"
+                              SelectedItem="{Binding SelectedVoiceInputDevice}"
+                              Height="30" />
+
+                    <TextBlock Grid.Column="2"
+                               Text="Channel"
+                               Foreground="#B8C7D9"
+                               VerticalAlignment="Center"
+                               Margin="14,0,8,0" />
+                    <ComboBox Grid.Column="3"
+                              ItemsSource="{Binding VoiceInputChannelModes}"
+                              SelectedItem="{Binding SelectedVoiceInputChannelMode}"
+                              Height="30" />
+
+                    <TextBlock Grid.Column="4"
+                               Text="Gain"
+                               Foreground="#B8C7D9"
+                               VerticalAlignment="Center"
+                               Margin="14,0,8,0" />
+                    <Slider Grid.Column="5"
+                            Minimum="1"
+                            Maximum="24"
+                            Value="{Binding SpectrumDisplayGain, UpdateSourceTrigger=PropertyChanged}"
+                            VerticalAlignment="Center" />
+
+                    <TextBlock Grid.Column="6"
+                               Text="{Binding SpectrumPeakText}"
+                               Foreground="#F8FAFC"
+                               VerticalAlignment="Center"
+                               Margin="10,0,0,0" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Background="#101821"
+                    BorderBrush="#334F5D6B"
+                    BorderThickness="1"
+                    Padding="14"
+                    Margin="0,12,0,12">
+                <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Border Background="#101821"
-                            BorderBrush="#26323D"
-                            BorderThickness="0,0,0,1"
-                            Padding="16,10">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="220" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="112" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="140" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                    <TextBlock Text="Audio Confidence"
+                               Foreground="#F8FAFC"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,8" />
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Ellipse Width="14"
+                                 Height="14"
+                                 Fill="#42D77D"
+                                 Stroke="#B8C7D9"
+                                 StrokeThickness="1"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,8,0" />
+                        <TextBlock Text="DSP active"
+                                   Foreground="#B8C7D9"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
 
-                            <TextBlock Text="Mic"
-                                       Foreground="#F8FAFC"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,8,0" />
-                            <ComboBox Grid.Column="1"
-                                      ItemsSource="{Binding VoiceInputDevices}"
-                                      SelectedItem="{Binding SelectedVoiceInputDevice}"
-                                      Height="30" />
-
-                            <TextBlock Grid.Column="2"
-                                       Text="Channel"
-                                       Foreground="#B8C7D9"
-                                       VerticalAlignment="Center"
-                                       Margin="14,0,8,0" />
-                            <ComboBox Grid.Column="3"
-                                      ItemsSource="{Binding VoiceInputChannelModes}"
-                                      SelectedItem="{Binding SelectedVoiceInputChannelMode}"
-                                      Height="30" />
-
-                            <TextBlock Grid.Column="4"
-                                       Text="Gain"
-                                       Foreground="#B8C7D9"
-                                       VerticalAlignment="Center"
-                                       Margin="14,0,8,0" />
-                            <Slider Grid.Column="5"
-                                    Minimum="1"
-                                    Maximum="24"
-                                    Value="{Binding SpectrumDisplayGain, UpdateSourceTrigger=PropertyChanged}"
-                                    VerticalAlignment="Center" />
-
-                            <TextBlock Grid.Column="6"
-                                       Text="{Binding SpectrumPeakText}"
-                                       Foreground="#F8FAFC"
-                                       VerticalAlignment="Center"
-                                       Margin="10,0,0,0" />
-                        </Grid>
-                    </Border>
-
-                    <Border Grid.Row="1"
-                            Background="#101821"
+                    <Border Grid.Row="2"
+                            MinHeight="130"
+                            Background="#05070A"
                             BorderBrush="#334F5D6B"
                             BorderThickness="1"
-                            Padding="14"
-                            Margin="14">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Text="Audio Confidence"
-                                       Foreground="#F8FAFC"
-                                       FontSize="18"
-                                       FontWeight="SemiBold"
-                                       Margin="0,0,0,8" />
-                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-                                <Ellipse Width="14"
-                                         Height="14"
-                                         Fill="#42D77D"
-                                         Stroke="#B8C7D9"
-                                         StrokeThickness="1"
-                                         VerticalAlignment="Center"
-                                         Margin="0,0,8,0" />
-                                <TextBlock Text="DSP active"
-                                           Foreground="#B8C7D9"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-
-                            <Border Grid.Row="2"
-                                    MinHeight="130"
-                                    Background="#05070A"
-                                    BorderBrush="#334F5D6B"
-                                    BorderThickness="1"
-                                    Margin="0,0,0,10">
-                                <Viewbox Stretch="Fill">
-                                    <Canvas Width="720"
-                                            Height="130"
-                                            ClipToBounds="True"
-                                            SnapsToDevicePixels="True">
-                                        <Polyline Points="{Binding SpectrumLivePoints}"
-                                                  Stroke="#00BEE6"
-                                                  StrokeThickness="2.5"
-                                                  StrokeLineJoin="Round" />
-                                    </Canvas>
-                                </Viewbox>
-                            </Border>
-
-                            <TextBlock Grid.Row="3"
-                                       Text="Processed signal being monitored"
-                                       Foreground="#B8C7D9"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,10" />
-                            <StackPanel Grid.Row="4">
-                                <TextBlock Text="{Binding VoiceInputMeterText}"
-                                           Foreground="#B8C7D9"
-                                           TextWrapping="Wrap"
-                                           FontSize="12" />
-                                <TextBlock Text="{Binding VoiceDiagnosticsText}"
-                                           Foreground="#88AFC4"
-                                           TextWrapping="Wrap"
-                                           FontSize="12"
-                                           Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Grid>
+                            Margin="0,0,0,10">
+                        <Viewbox Stretch="Fill">
+                            <Canvas Width="720"
+                                    Height="130"
+                                    ClipToBounds="True"
+                                    SnapsToDevicePixels="True">
+                                <Polyline Points="{Binding SpectrumLivePoints}"
+                                          Stroke="#00BEE6"
+                                          StrokeThickness="2.5"
+                                          StrokeLineJoin="Round" />
+                            </Canvas>
+                        </Viewbox>
                     </Border>
+
+                    <TextBlock Grid.Row="3"
+                               Text="Processed signal being monitored"
+                               Foreground="#B8C7D9"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,10" />
+                    <StackPanel Grid.Row="4">
+                        <TextBlock Text="{Binding VoiceInputMeterText}"
+                                   Foreground="#B8C7D9"
+                                   TextWrapping="Wrap"
+                                   FontSize="12" />
+                        <TextBlock Text="{Binding VoiceDiagnosticsText}"
+                                   Foreground="#88AFC4"
+                                   TextWrapping="Wrap"
+                                   FontSize="12"
+                                   Margin="0,6,0,0" />
+                    </StackPanel>
                 </Grid>
-            </TabItem>
+            </Border>
 
-            <TabItem Header="Speech Tools">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <Grid Margin="14">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
+            <Border Grid.Row="2"
+                    Background="#101821"
+                    BorderBrush="#334F5D6B"
+                    BorderThickness="1"
+                    Padding="14"
+                    Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="260" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                        <Border Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="14">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                    <TextBlock Text="Ali voice"
+                               Foreground="#F8FAFC"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="0,0,12,0" />
+                    <ComboBox Grid.Column="1"
+                              ItemsSource="{Binding PiperVoiceChoices}"
+                              SelectedItem="{Binding SelectedPiperVoiceChoice}"
+                              Height="30" />
+                    <Button Grid.Column="2"
+                            Content="Hear Sample"
+                            Command="{Binding PlayPiperSampleCommand}"
+                            MinWidth="112"
+                            Margin="12,0,12,0" />
+                    <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding TtsStatus}"
+                                   Foreground="#B8C7D9"
+                                   TextWrapping="Wrap"
+                                   FontSize="12" />
+                        <TextBlock Text="{Binding VoiceSettingsStatusText}"
+                                   Foreground="#88AFC4"
+                                   TextWrapping="Wrap"
+                                   FontSize="12"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-                                <TextBlock Text="Whisper" FontSize="18" FontWeight="SemiBold" Foreground="#111827" />
+            <Expander Grid.Row="3"
+                      Header="Advanced local tool paths"
+                      Foreground="#B8C7D9"
+                      Background="#101821"
+                      BorderBrush="#334F5D6B">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
 
-                                <Grid Grid.Row="1" Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Executable" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Text="{Binding WhisperExecutableText, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Model" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Text="{Binding WhisperModelText, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                </Grid>
+                    <TextBlock Text="{Binding SttStatus}"
+                               Foreground="#B8C7D9"
+                               TextWrapping="Wrap"
+                               FontSize="12" />
 
-                                <StackPanel Grid.Row="2">
-                                    <TextBlock Text="Arguments" Style="{StaticResource FieldLabel}" />
-                                    <TextBox Text="{Binding WhisperArgumentsText, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Text="{Binding SttStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
+                    <Grid Grid.Row="1" Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
 
-                        <Border Grid.Row="1" Background="White" BorderBrush="#D6DAE0" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,12,0,0">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Whisper executable" Foreground="#B8C7D9" FontSize="12" />
+                            <TextBox Text="{Binding WhisperExecutableText, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="Piper executable" Foreground="#B8C7D9" FontSize="12" />
+                            <TextBox Text="{Binding PiperExecutableText, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
 
-                                <TextBlock Text="Piper" FontSize="18" FontWeight="SemiBold" Foreground="#111827" />
-
-                                <Grid Grid.Row="1" Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Executable" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Text="{Binding PiperExecutableText, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Model" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Text="{Binding PiperModelText, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                </Grid>
-
-                                <Grid Grid.Row="2">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="220" />
-                                        <ColumnDefinition Width="12" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="Voice ID" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Text="{Binding PiperVoiceText, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Arguments" Style="{StaticResource FieldLabel}" />
-                                        <TextBox Text="{Binding PiperArgumentsText, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
-                                </Grid>
-                            </Grid>
-                        </Border>
-
-                        <DockPanel Grid.Row="2" Margin="0,12,0,0">
-                            <StackPanel>
-                                <TextBlock Text="{Binding TtsStatus}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" />
-                                <TextBlock Text="{Binding VoiceSettingsStatusText}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0" />
-                                <TextBlock Text="{Binding LastSttDebugText}" Foreground="#4B5563" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0" />
-                            </StackPanel>
-                            <Button DockPanel.Dock="Right"
-                                    Content="Apply"
-                                    Command="{Binding ApplyVoiceToolSettingsCommand}"
-                                    MinWidth="120"
-                                    Margin="12,0,0,0" />
-                        </DockPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Whisper model" Foreground="#B8C7D9" FontSize="12" />
+                            <TextBox Text="{Binding WhisperModelText, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="Piper model" Foreground="#B8C7D9" FontSize="12" />
+                            <TextBox Text="{Binding PiperModelText, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
                     </Grid>
-                </ScrollViewer>
-            </TabItem>
-        </TabControl>
+
+                    <DockPanel Grid.Row="2" Margin="0,8,0,0">
+                        <TextBlock Text="{Binding LastSttDebugText}"
+                                   Foreground="#88AFC4"
+                                   TextWrapping="Wrap"
+                                   FontSize="12" />
+                        <Button DockPanel.Dock="Right"
+                                Content="Apply Advanced"
+                                Command="{Binding ApplyVoiceToolSettingsCommand}"
+                                MinWidth="130"
+                                Margin="12,0,0,0" />
+                    </DockPanel>
+                </Grid>
+            </Expander>
+        </Grid>
     </Grid>
 </Window>
