@@ -57,9 +57,4 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void RuntimeSettingsButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        RuntimeSettingsPopup.IsOpen = !RuntimeSettingsPopup.IsOpen;
-        e.Handled = true;
-    }
 }

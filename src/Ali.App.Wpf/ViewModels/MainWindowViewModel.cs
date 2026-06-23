@@ -175,7 +175,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplyVoiceInputPreset(SelectedVoiceInputPreset);
         VoiceInputLevelPercent = 0;
         VoiceInputMeterText = "Input meter paused.";
-        VoiceDiagnosticsText = "Open Voice Settings or start a voice action to monitor the microphone.";
+        VoiceDiagnosticsText = "Open Settings or start a voice action to monitor the microphone.";
 
         RefreshSpeechToolStatuses();
 
