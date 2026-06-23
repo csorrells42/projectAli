@@ -1,6 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -28,7 +26,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private const double SpectrumRenderInset = 12d;
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
-    private readonly VoiceDiagnosticSampleService _sampleService;
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private string _conversationId = $"conv_{Guid.NewGuid():N}";
@@ -41,12 +38,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeResponse;
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
-    private CancellationTokenSource? _activeSample;
-    private VoiceSettingsWindow? _voiceSettingsWindow;
+    private SettingsWindow? _settingsWindow;
     private bool _voiceMonitorRequested;
-    private VoiceDiagnosticSample? _lastDiagnosticSample;
     private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
-    private VoiceCalibrationResult? _lastCalibrationResult;
     private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
     private double[] _renderedSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
     private double _spectrumVisualCeiling = 0.25d;
@@ -56,8 +50,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isRecording;
     private bool _isTranscribing;
     private bool _isSpeaking;
-    private bool _isRecordingSample;
-    private bool _isCalibrating;
     private string _statusText = "Ready. Local runtime is not configured yet.";
     private string _runtimeDisplay;
     private string _runtimeEndpointText = string.Empty;
@@ -89,8 +81,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _voiceInputLevelPercent;
     private string _voiceInputMeterText = "Input meter starting.";
     private string _voiceDiagnosticsText = "No voice capture yet.";
-    private string _voiceSampleStatus = "No diagnostic sample recorded.";
-    private string _voiceCalibrationStatus = $"Calibration phrase: \"{VoiceCalibrationEvaluator.CalibrationPrompt}\"";
     private string _lastSttDebugText = "No STT debug invocation yet.";
     private PointCollection _spectrumLivePoints = CreateFlatSpectrumPoints();
     private string _spectrumPeakText = "Peak 0%";
@@ -113,7 +103,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(AliServices services)
     {
         _services = services;
-        _sampleService = new VoiceDiagnosticSampleService(_services.VoiceRecorder, _services.SpeechPlayer);
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);
         ResourceMeters.Add(GpuMeter);
@@ -127,7 +116,6 @@ public sealed class MainWindowViewModel : ObservableObject
         RenameConversationCommand = new RelayCommand(RenameConversation);
         CommitConversationRenameCommand = new RelayCommand(CommitConversationRename);
         FlagIncorrectCommand = new RelayCommand(FlagIncorrect);
-        LoadRuntimeSettingsCommand = new RelayCommand(_ => LoadRuntimeSettings());
         SaveRuntimeSettingsCommand = new RelayCommand(_ => SaveRuntimeSettings());
         CheckRuntimeCommand = new AsyncRelayCommand(CheckRuntimeAsync, () => !IsBusy);
         RefreshRuntimeModelsCommand = new AsyncRelayCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
@@ -135,21 +123,13 @@ public sealed class MainWindowViewModel : ObservableObject
         RevertToStubCommand = new RelayCommand(_ => RevertToStub(), _ => !IsBusy);
         RevertToLastKnownGoodCommand = new RelayCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
         PasteImageCommand = new AsyncRelayCommand(AddClipboardImageAsync);
-        CaptureScreenCommand = new AsyncRelayCommand(CaptureFullScreenAsync);
         RemoveAttachmentCommand = new RelayCommand(RemoveAttachment);
-        StartVoiceRecordingCommand = new AsyncRelayCommand(StartVoiceRecordingAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
-        StopVoiceRecordingCommand = new AsyncRelayCommand(StopVoiceRecordingOrTranscriptionAsync, () => IsRecording || IsTranscribing);
         ToggleVoiceRecordingCommand = new AsyncRelayCommand(ToggleVoiceRecordingAsync, () => !IsBusy || IsRecording || IsTranscribing);
         ToggleVoiceModeCommand = new RelayCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
         SendTranscriptCommand = new AsyncRelayCommand(SendTranscriptAsync, () => !AutoSendVoiceTranscripts && !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
-        OpenVoiceSettingsCommand = new RelayCommand(_ => OpenVoiceSettings());
-        ApplyVoiceToolSettingsCommand = new RelayCommand(_ => ApplyVoiceToolSettings());
+        OpenSettingsCommand = new RelayCommand(_ => OpenSettings());
         PlayPiperSampleCommand = new AsyncRelayCommand(PlayPiperSampleAsync, () => !IsSpeaking);
-        RecordVoiceSampleCommand = new AsyncRelayCommand(RecordVoiceSampleAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !IsRecordingSample && !IsCalibrating);
-        PlayVoiceSampleCommand = new AsyncRelayCommand(PlayVoiceSampleAsync, () => _lastDiagnosticSample is not null && !IsSpeaking);
-        DeleteVoiceSampleCommand = new RelayCommand(_ => DeleteVoiceSample(), _ => _lastDiagnosticSample is not null);
-        CalibrateVoiceCommand = new AsyncRelayCommand(CalibrateVoiceAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !IsRecordingSample && !IsCalibrating);
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
@@ -245,8 +225,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand FlagIncorrectCommand { get; }
 
-    public ICommand LoadRuntimeSettingsCommand { get; }
-
     public ICommand SaveRuntimeSettingsCommand { get; }
 
     public ICommand CheckRuntimeCommand { get; }
@@ -261,13 +239,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand PasteImageCommand { get; }
 
-    public ICommand CaptureScreenCommand { get; }
-
     public ICommand RemoveAttachmentCommand { get; }
-
-    public ICommand StartVoiceRecordingCommand { get; }
-
-    public ICommand StopVoiceRecordingCommand { get; }
 
     public ICommand ToggleVoiceRecordingCommand { get; }
 
@@ -277,19 +249,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand StopSpeakingCommand { get; }
 
-    public ICommand OpenVoiceSettingsCommand { get; }
-
-    public ICommand ApplyVoiceToolSettingsCommand { get; }
+    public ICommand OpenSettingsCommand { get; }
 
     public ICommand PlayPiperSampleCommand { get; }
-
-    public ICommand RecordVoiceSampleCommand { get; }
-
-    public ICommand PlayVoiceSampleCommand { get; }
-
-    public ICommand DeleteVoiceSampleCommand { get; }
-
-    public ICommand CalibrateVoiceCommand { get; }
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
@@ -526,18 +488,6 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _voiceDiagnosticsText, value);
     }
 
-    public string VoiceSampleStatus
-    {
-        get => _voiceSampleStatus;
-        private set => SetProperty(ref _voiceSampleStatus, value);
-    }
-
-    public string VoiceCalibrationStatus
-    {
-        get => _voiceCalibrationStatus;
-        private set => SetProperty(ref _voiceCalibrationStatus, value);
-    }
-
     public string LastSttDebugText
     {
         get => _lastSttDebugText;
@@ -718,30 +668,6 @@ public sealed class MainWindowViewModel : ObservableObject
         private set
         {
             if (SetProperty(ref _isSpeaking, value))
-            {
-                RaiseCommandStates();
-            }
-        }
-    }
-
-    public bool IsRecordingSample
-    {
-        get => _isRecordingSample;
-        private set
-        {
-            if (SetProperty(ref _isRecordingSample, value))
-            {
-                RaiseCommandStates();
-            }
-        }
-    }
-
-    public bool IsCalibrating
-    {
-        get => _isCalibrating;
-        private set
-        {
-            if (SetProperty(ref _isCalibrating, value))
             {
                 RaiseCommandStates();
             }
@@ -1227,26 +1153,6 @@ public sealed class MainWindowViewModel : ObservableObject
         await AddBitmapSourceAsync(image, "clipboard").ConfigureAwait(true);
     }
 
-    private async Task CaptureFullScreenAsync()
-    {
-        var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds;
-        if (bounds is null)
-        {
-            AttachmentStatus = "No primary screen was available.";
-            return;
-        }
-
-        using var bitmap = new Bitmap(bounds.Value.Width, bounds.Value.Height);
-        using (var graphics = Graphics.FromImage(bitmap))
-        {
-            graphics.CopyFromScreen(bounds.Value.Left, bounds.Value.Top, 0, 0, bounds.Value.Size);
-        }
-
-        await using var stream = new MemoryStream();
-        bitmap.Save(stream, ImageFormat.Png);
-        await AddPngBytesAsync(stream.ToArray(), "full-screen").ConfigureAwait(true);
-    }
-
     private async Task AddBitmapSourceAsync(BitmapSource bitmapSource, string sourceName)
     {
         var encoder = new PngBitmapEncoder();
@@ -1729,185 +1635,11 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task RecordVoiceSampleAsync()
+    private void OpenSettings()
     {
-        if (IsRecordingSample || IsCalibrating || IsRecording || IsTranscribing)
+        if (_settingsWindow is { IsVisible: true })
         {
-            return;
-        }
-
-        StopSpeaking();
-        _sampleService.DeleteSample(_lastDiagnosticSample);
-        _lastDiagnosticSample = null;
-        VoiceSampleStatus = "Recording 5 second diagnostic sample...";
-        _activeSample?.Dispose();
-        _activeSample = new CancellationTokenSource();
-        IsRecordingSample = true;
-
-        try
-        {
-            var sample = await RecordDiagnosticSampleAsync(_activeSample.Token).ConfigureAwait(true);
-            _lastDiagnosticSample = sample;
-            ApplyInputLevelSnapshot(sample.Diagnostics.Level);
-            VoiceSampleStatus = FormatSampleStatus(sample);
-        }
-        catch (OperationCanceledException)
-        {
-            VoiceSampleStatus = "Diagnostic sample canceled.";
-        }
-        catch (Exception ex)
-        {
-            VoiceSampleStatus = $"Diagnostic sample failed: {ex.Message}";
-        }
-        finally
-        {
-            IsRecordingSample = false;
-            _activeSample?.Dispose();
-            _activeSample = null;
-            RaiseCommandStates();
-        }
-    }
-
-    private async Task PlayVoiceSampleAsync()
-    {
-        if (_lastDiagnosticSample is null)
-        {
-            VoiceSampleStatus = "No diagnostic sample is available.";
-            return;
-        }
-
-        if (!File.Exists(_lastDiagnosticSample.AudioInput.FilePath))
-        {
-            VoiceSampleStatus = "Diagnostic sample file is no longer available.";
-            _lastDiagnosticSample = null;
-            RaiseCommandStates();
-            return;
-        }
-
-        StopSpeaking();
-        _activeSpeech?.Dispose();
-        _activeSpeech = new CancellationTokenSource();
-        IsSpeaking = true;
-        try
-        {
-            VoiceSampleStatus = "Playing diagnostic sample...";
-            await _sampleService.PlaySampleAsync(_lastDiagnosticSample, _activeSpeech.Token).ConfigureAwait(true);
-            VoiceSampleStatus = "Diagnostic sample playback complete.";
-        }
-        catch (OperationCanceledException)
-        {
-            VoiceSampleStatus = "Diagnostic sample playback stopped.";
-        }
-        catch (Exception ex)
-        {
-            VoiceSampleStatus = $"Diagnostic sample playback failed: {ex.Message}";
-        }
-        finally
-        {
-            IsSpeaking = false;
-            _activeSpeech?.Dispose();
-            _activeSpeech = null;
-        }
-    }
-
-    private void DeleteVoiceSample()
-    {
-        _sampleService.DeleteSample(_lastDiagnosticSample, force: true);
-        _lastDiagnosticSample = null;
-        VoiceSampleStatus = "Diagnostic sample deleted.";
-        RaiseCommandStates();
-    }
-
-    private async Task CalibrateVoiceAsync()
-    {
-        if (IsRecordingSample || IsCalibrating || IsRecording || IsTranscribing)
-        {
-            return;
-        }
-
-        StopSpeaking();
-        _sampleService.DeleteSample(_lastDiagnosticSample);
-        _lastDiagnosticSample = null;
-        _lastCalibrationResult = null;
-        VoiceCalibrationStatus = $"Say: \"{VoiceCalibrationEvaluator.CalibrationPrompt}\"";
-        _activeSample?.Dispose();
-        _activeSample = new CancellationTokenSource();
-        IsCalibrating = true;
-
-        try
-        {
-            var sample = await RecordDiagnosticSampleAsync(_activeSample.Token).ConfigureAwait(true);
-            _lastDiagnosticSample = sample;
-            ApplyInputLevelSnapshot(sample.Diagnostics.Level);
-
-            SttStatus = "Transcribing calibration locally...";
-            var transcript = await _services.SpeechToText.TranscribeAsync(sample.AudioInput, _activeSample.Token).ConfigureAwait(true);
-            UpdateLastSttDebugText();
-            var guard = SpeechTranscriptGuard.Evaluate(transcript.Text, requireAssistantName: true);
-            _lastCalibrationResult = VoiceCalibrationEvaluator.Evaluate(sample, transcript, guard);
-            LastTranscript = transcript.Text;
-            EditableTranscript = transcript.Text;
-            VoiceCalibrationStatus = FormatCalibrationStatus(_lastCalibrationResult);
-            SttStatus = guard.Accepted
-                ? "Calibration transcript accepted. No assistant action was run."
-                : "Calibration transcript rejected. No assistant action was run.";
-        }
-        catch (OperationCanceledException)
-        {
-            VoiceCalibrationStatus = "Calibration canceled.";
-            SttStatus = "Calibration canceled.";
-        }
-        catch (Exception ex)
-        {
-            UpdateLastSttDebugText();
-            VoiceCalibrationStatus = $"Calibration failed: {ex.Message}";
-            SttStatus = "Calibration failed. No assistant action was run.";
-        }
-        finally
-        {
-            IsCalibrating = false;
-            _activeSample?.Dispose();
-            _activeSample = null;
-            RaiseCommandStates();
-        }
-    }
-
-    private async Task<VoiceDiagnosticSample> RecordDiagnosticSampleAsync(CancellationToken cancellationToken)
-    {
-        var directory = Path.Combine(
-            _services.DataRoot,
-            "DiagnosticSamples",
-            DateTimeOffset.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture));
-
-        try
-        {
-            StopInputLevelMonitor();
-            SubscribeRecorderLevels();
-            ApplyVoiceInputPreset(SelectedVoiceInputPreset);
-            return await _sampleService.RecordSampleAsync(
-                directory,
-                TimeSpan.FromSeconds(5),
-                CurrentInputDeviceNumber(),
-                CurrentInputDeviceName(),
-                CurrentInputChannelMode(),
-                SelectedVoiceInputPreset,
-                ExtraInputGainDb,
-                NormalizeBeforeStt,
-                RetainDebugAudio,
-                cancellationToken).ConfigureAwait(true);
-        }
-        finally
-        {
-            UnsubscribeRecorderLevels();
-            StartInputLevelMonitor();
-        }
-    }
-
-    private void OpenVoiceSettings()
-    {
-        if (_voiceSettingsWindow is { IsVisible: true })
-        {
-            _voiceSettingsWindow.Activate();
+            _settingsWindow.Activate();
             _voiceMonitorRequested = true;
             StartInputLevelMonitor();
             return;
@@ -1915,21 +1647,20 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _voiceMonitorRequested = true;
         StartInputLevelMonitor();
-        _voiceSettingsWindow = new VoiceSettingsWindow
+        _settingsWindow = new SettingsWindow
         {
-            Owner = System.Windows.Application.Current?.MainWindow,
             DataContext = this
         };
-        _voiceSettingsWindow.Closed += (_, _) =>
+        _settingsWindow.Closed += (_, _) =>
         {
-            _voiceSettingsWindow = null;
+            _settingsWindow = null;
             _voiceMonitorRequested = false;
             StopInputLevelMonitor();
             VoiceInputLevelPercent = 0;
             VoiceInputMeterText = "Input meter paused.";
             VoiceDiagnosticsText = "Microphone monitoring is off.";
         };
-        _voiceSettingsWindow.Show();
+        _settingsWindow.Show();
     }
 
     private void LoadSpeechToolSettings()
@@ -2372,12 +2103,6 @@ public sealed class MainWindowViewModel : ObservableObject
         return $"{health.Summary}\nEndpoint: {health.Endpoint ?? "n/a"}\nModel: {health.ModelPackageId ?? "n/a"}\nElapsed: {health.Elapsed.TotalMilliseconds:N0} ms\nStreaming supported: {streaming}";
     }
 
-    private static string FormatSampleStatus(VoiceDiagnosticSample sample) =>
-        $"Sample ready: {sample.Diagnostics.DurationSeconds:0.0}s | {sample.InputDeviceName} | {sample.InputChannelLabel} | {sample.InputPreset} | peak {sample.Diagnostics.Level.Peak:P0}, RMS {sample.Diagnostics.Level.Rms:P1}, {sample.Diagnostics.Level.State} | gain {sample.ExtraGainDb:+0.#;-0.#;0} dB | normalize {(sample.NormalizeBeforeStt ? "on" : "off")} | retained {sample.RetainDebugAudio}";
-
-    private static string FormatCalibrationStatus(VoiceCalibrationResult result) =>
-        $"Calibration {(result.Accepted ? "accepted" : "rejected")}: \"{result.Transcript}\" | {result.Sample.InputDeviceName} | {result.Sample.InputChannelLabel} | peak {result.Sample.Diagnostics.Level.Peak:P0}, RMS {result.Sample.Diagnostics.Level.Rms:P1}, clipping {(result.Clipping ? "yes" : "no")}, too quiet {(result.TooQuiet ? "yes" : "no")} | no assistant action run";
-
     private void UpdateLastSttDebugText()
     {
         if (_services.SpeechToText is not WhisperCliSpeechToTextProvider { LastDebugInfo: { } debug })
@@ -2435,16 +2160,6 @@ public sealed class MainWindowViewModel : ObservableObject
             revertLastKnownGood.RaiseCanExecuteChanged();
         }
 
-        if (StartVoiceRecordingCommand is AsyncRelayCommand startVoice)
-        {
-            startVoice.RaiseCanExecuteChanged();
-        }
-
-        if (StopVoiceRecordingCommand is AsyncRelayCommand stopVoice)
-        {
-            stopVoice.RaiseCanExecuteChanged();
-        }
-
         if (SendTranscriptCommand is AsyncRelayCommand sendTranscript)
         {
             sendTranscript.RaiseCanExecuteChanged();
@@ -2458,26 +2173,6 @@ public sealed class MainWindowViewModel : ObservableObject
         if (PlayPiperSampleCommand is AsyncRelayCommand playPiperSample)
         {
             playPiperSample.RaiseCanExecuteChanged();
-        }
-
-        if (RecordVoiceSampleCommand is AsyncRelayCommand recordSample)
-        {
-            recordSample.RaiseCanExecuteChanged();
-        }
-
-        if (PlayVoiceSampleCommand is AsyncRelayCommand playSample)
-        {
-            playSample.RaiseCanExecuteChanged();
-        }
-
-        if (DeleteVoiceSampleCommand is RelayCommand deleteSample)
-        {
-            deleteSample.RaiseCanExecuteChanged();
-        }
-
-        if (CalibrateVoiceCommand is AsyncRelayCommand calibrateVoice)
-        {
-            calibrateVoice.RaiseCanExecuteChanged();
         }
     }
 

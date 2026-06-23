@@ -7,15 +7,39 @@ namespace Ali.App.Wpf.ViewModels;
 internal sealed class SystemResourceMonitor
 {
     private CpuTimes? _previousCpuTimes;
-    private readonly GpuCounterReader? _gpuCounters = GpuCounterReader.TryCreate();
+    private GpuCounterReader? _gpuCounters;
+    private Task<GpuCounterReader?>? _gpuCounterLoadTask;
 
     public SystemResourceSnapshot Sample()
     {
+        var gpuCounters = GetGpuCounters();
         return new SystemResourceSnapshot(
             CpuPercent: SampleCpuPercent(),
             RamPercent: SampleRamPercent(),
-            GpuPercent: _gpuCounters?.SampleGpuPercent(),
-            VramPercent: _gpuCounters?.SampleVramPercent());
+            GpuPercent: gpuCounters?.SampleGpuPercent(),
+            VramPercent: gpuCounters?.SampleVramPercent());
+    }
+
+    private GpuCounterReader? GetGpuCounters()
+    {
+        if (_gpuCounters is not null)
+        {
+            return _gpuCounters;
+        }
+
+        if (_gpuCounterLoadTask is null)
+        {
+            _gpuCounterLoadTask = Task.Run(GpuCounterReader.TryCreate);
+            return null;
+        }
+
+        if (!_gpuCounterLoadTask.IsCompletedSuccessfully)
+        {
+            return null;
+        }
+
+        _gpuCounters = _gpuCounterLoadTask.Result;
+        return _gpuCounters;
     }
 
     private double? SampleCpuPercent()

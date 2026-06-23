@@ -270,7 +270,7 @@
                     </ItemsControl>
                     <Button Grid.Column="3"
                             Content="Settings"
-                            Command="{Binding OpenVoiceSettingsCommand}"
+                            Command="{Binding OpenSettingsCommand}"
                             Height="34"
                             MinHeight="34"
                             Margin="0"
