@@ -82,6 +82,14 @@
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="Padding" Value="10,6" />
         </Style>
+        <Style x:Key="ResourceMeterProgress" TargetType="ProgressBar">
+            <Setter Property="Height" Value="4" />
+            <Setter Property="Minimum" Value="0" />
+            <Setter Property="Maximum" Value="100" />
+            <Setter Property="Foreground" Value="#22C55E" />
+            <Setter Property="Background" Value="#303136" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
@@ -204,6 +212,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Text="Ali"
@@ -217,7 +226,41 @@
                                Margin="12,0,14,0"
                                TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center" />
-                    <Button Grid.Column="2"
+                    <ItemsControl Grid.Column="2"
+                                  ItemsSource="{Binding ResourceMeters}"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,8,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ResourceMeterViewModel}">
+                                <Border Width="58"
+                                        Margin="0,0,6,0"
+                                        ToolTip="{Binding ToolTip}">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="False">
+                                            <TextBlock Text="{Binding Label}"
+                                                       DockPanel.Dock="Left"
+                                                       Foreground="{StaticResource SubtleTextBrush}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding DisplayText}"
+                                                       DockPanel.Dock="Right"
+                                                       Foreground="{StaticResource TextBrush}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold" />
+                                        </DockPanel>
+                                        <ProgressBar Value="{Binding Percent}"
+                                                     Style="{StaticResource ResourceMeterProgress}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Grid.Column="3"
                             x:Name="RuntimeSettingsButton"
                             Content="Runtime"
                             Click="RuntimeSettingsButton_OnClick"
@@ -228,7 +271,7 @@
                             ToolTip="{Binding RuntimeDisplay}"
                             VerticalAlignment="Center" />
                     <Popup x:Name="RuntimeSettingsPopup"
-                           Grid.Column="2"
+                           Grid.Column="3"
                            PlacementTarget="{Binding ElementName=RuntimeSettingsButton}"
                            Placement="Bottom"
                            AllowsTransparency="True"
@@ -312,7 +355,7 @@
                             </StackPanel>
                         </Border>
                     </Popup>
-                    <Button Grid.Column="3"
+                    <Button Grid.Column="4"
                             Content="Voice Settings"
                             Command="{Binding OpenVoiceSettingsCommand}"
                             Height="34"

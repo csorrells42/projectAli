@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Ali.App.Wpf;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
@@ -28,6 +29,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly VoiceDiagnosticSampleService _sampleService;
+    private readonly SystemResourceMonitor _resourceMonitor = new();
+    private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private string _conversationId = $"conv_{Guid.NewGuid():N}";
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
     private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
@@ -111,6 +114,10 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         _services = services;
         _sampleService = new VoiceDiagnosticSampleService(_services.VoiceRecorder, _services.SpeechPlayer);
+        ResourceMeters.Add(CpuMeter);
+        ResourceMeters.Add(RamMeter);
+        ResourceMeters.Add(GpuMeter);
+        ResourceMeters.Add(VramMeter);
 
         SendCommand = new AsyncRelayCommand(SendAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = new RelayCommand(_ => Stop(), _ => IsBusy);
@@ -174,6 +181,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
+        _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
+        RefreshResourceMeters();
+        _resourceMeterTimer.Start();
 
         Messages.Add(new ChatMessageViewModel(
             id: $"msg_asst_{Guid.NewGuid():N}",
@@ -190,6 +200,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
 
     public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
+
+    public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
+
+    public ResourceMeterViewModel CpuMeter { get; } = new("CPU");
+
+    public ResourceMeterViewModel RamMeter { get; } = new("RAM");
+
+    public ResourceMeterViewModel GpuMeter { get; } = new("GPU");
+
+    public ResourceMeterViewModel VramMeter { get; } = new("VRAM");
 
     public ObservableCollection<string> VoiceInputDevices { get; } = new();
 
@@ -879,6 +899,15 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _activeConversationHistoryItem = new ConversationHistoryItemViewModel(_conversationId, "Current chat");
         ConversationHistory.Insert(0, _activeConversationHistoryItem);
+    }
+
+    private void RefreshResourceMeters()
+    {
+        var snapshot = _resourceMonitor.Sample();
+        CpuMeter.Update(snapshot.CpuPercent, "CPU counter unavailable");
+        RamMeter.Update(snapshot.RamPercent, "RAM counter unavailable");
+        GpuMeter.Update(snapshot.GpuPercent, "GPU counter unavailable");
+        VramMeter.Update(snapshot.VramPercent, "VRAM counter unavailable");
     }
 
     private void EraseHistory()
