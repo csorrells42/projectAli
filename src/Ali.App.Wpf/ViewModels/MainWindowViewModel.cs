@@ -104,6 +104,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _retainDebugAudio;
     private bool _autoSendVoiceTranscripts;
     private VoiceTurnMetadata? _lastVoiceMetadata;
+    private CorrectionReviewItemViewModel? _selectedCorrectionReviewItem;
+    private string _correctionReviewStatusText = "Correction queue not loaded yet.";
 
     public MainWindowViewModel(AliServices services)
     {
@@ -135,6 +137,11 @@ public sealed class MainWindowViewModel : ObservableObject
         StopSpeakingCommand = new RelayCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = new AsyncRelayCommand(OpenSettingsAsync);
         PlayPiperSampleCommand = new AsyncRelayCommand(PlayPiperSampleAsync, () => !IsSpeaking);
+        RefreshCorrectionsCommand = new AsyncRelayCommand(RefreshCorrectionsAsync);
+        MarkCorrectionReviewedCommand = new AsyncRelayCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
+        MarkCorrectionUnresolvedCommand = new AsyncRelayCommand(MarkSelectedCorrectionUnresolvedAsync, () => SelectedCorrectionReviewItem is not null);
+        ExportSelectedCorrectionCommand = new AsyncRelayCommand(ExportSelectedCorrectionAsync, () => SelectedCorrectionReviewItem is not null);
+        ExportAllCorrectionsCommand = new AsyncRelayCommand(ExportAllCorrectionsAsync);
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
@@ -187,6 +194,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
 
+    public ObservableCollection<CorrectionReviewItemViewModel> CorrectionReviewItems { get; } = new();
+
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
         get => _selectedConversationHistoryItem;
@@ -213,6 +222,24 @@ public sealed class MainWindowViewModel : ObservableObject
                 RefreshConversationHistory();
             }
         }
+    }
+
+    public CorrectionReviewItemViewModel? SelectedCorrectionReviewItem
+    {
+        get => _selectedCorrectionReviewItem;
+        set
+        {
+            if (SetProperty(ref _selectedCorrectionReviewItem, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public string CorrectionReviewStatusText
+    {
+        get => _correctionReviewStatusText;
+        private set => SetProperty(ref _correctionReviewStatusText, value);
     }
 
     public ResourceMeterViewModel CpuMeter { get; } = new("CPU");
@@ -284,6 +311,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenSettingsCommand { get; }
 
     public ICommand PlayPiperSampleCommand { get; }
+
+    public ICommand RefreshCorrectionsCommand { get; }
+
+    public ICommand MarkCorrectionReviewedCommand { get; }
+
+    public ICommand MarkCorrectionUnresolvedCommand { get; }
+
+    public ICommand ExportSelectedCorrectionCommand { get; }
+
+    public ICommand ExportAllCorrectionsCommand { get; }
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
@@ -1319,6 +1356,107 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task RefreshCorrectionsAsync()
+    {
+        try
+        {
+            var selectedId = SelectedCorrectionReviewItem?.Id;
+            var reports = await _services.Orchestrator.Corrections.ListAsync(CancellationToken.None).ConfigureAwait(true);
+
+            CorrectionReviewItems.Clear();
+            CorrectionReviewItemViewModel? selected = null;
+            foreach (var report in reports)
+            {
+                var item = new CorrectionReviewItemViewModel(report);
+                CorrectionReviewItems.Add(item);
+                if (selectedId is not null && item.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase))
+                {
+                    selected = item;
+                }
+            }
+
+            SelectedCorrectionReviewItem = selected ?? CorrectionReviewItems.FirstOrDefault();
+            CorrectionReviewStatusText = reports.Count == 0
+                ? "Correction queue is empty."
+                : $"Loaded {reports.Count} local correction report(s).";
+        }
+        catch (Exception ex)
+        {
+            CorrectionReviewStatusText = $"Correction queue load failed: {ex.Message}";
+        }
+    }
+
+    private async Task MarkSelectedCorrectionReviewedAsync()
+    {
+        await MarkSelectedCorrectionAsync(CorrectionStatus.Reviewed, "reviewed").ConfigureAwait(true);
+    }
+
+    private async Task MarkSelectedCorrectionUnresolvedAsync()
+    {
+        await MarkSelectedCorrectionAsync(CorrectionStatus.New, "unresolved").ConfigureAwait(true);
+    }
+
+    private async Task MarkSelectedCorrectionAsync(CorrectionStatus status, string displayStatus)
+    {
+        if (SelectedCorrectionReviewItem is null)
+        {
+            return;
+        }
+
+        var updated = await _services.Orchestrator.Corrections.SetStatusAsync(
+                SelectedCorrectionReviewItem.Id,
+                status,
+                CancellationToken.None)
+            .ConfigureAwait(true);
+
+        if (updated is null)
+        {
+            CorrectionReviewStatusText = "Selected correction no longer exists.";
+            await RefreshCorrectionsAsync().ConfigureAwait(true);
+            return;
+        }
+
+        SelectedCorrectionReviewItem.Update(updated);
+        CorrectionReviewStatusText = $"Marked correction {displayStatus}: {updated.Id}";
+    }
+
+    private async Task ExportSelectedCorrectionAsync()
+    {
+        if (SelectedCorrectionReviewItem is null)
+        {
+            return;
+        }
+
+        var path = await _services.Orchestrator.Corrections.ExportOneMarkdownAsync(
+                SelectedCorrectionReviewItem.Id,
+                CorrectionExportDirectory(),
+                CancellationToken.None)
+            .ConfigureAwait(true);
+
+        if (path is null)
+        {
+            CorrectionReviewStatusText = "Selected correction no longer exists.";
+            await RefreshCorrectionsAsync().ConfigureAwait(true);
+            return;
+        }
+
+        CorrectionReviewStatusText = $"Exported correction: {path}";
+        await RefreshCorrectionsAsync().ConfigureAwait(true);
+    }
+
+    private async Task ExportAllCorrectionsAsync()
+    {
+        var path = await _services.Orchestrator.Corrections.ExportAllMarkdownAsync(
+                CorrectionExportDirectory(),
+                CancellationToken.None)
+            .ConfigureAwait(true);
+
+        CorrectionReviewStatusText = $"Exported correction queue: {path}";
+    }
+
+    private string CorrectionExportDirectory() =>
+        Path.Combine(_services.DataRoot, "correction-exports");
+
     private OpenAiCompatibleRuntimeOptions BuildRuntimeOptionsFromUi()
     {
         if (!Uri.TryCreate(RuntimeEndpointText.Trim(), UriKind.Absolute, out var endpoint))
@@ -1869,6 +2007,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _voiceMonitorRequested = true;
         RefreshVoiceSettingsChoices();
         StartInputLevelMonitor();
+        await RefreshCorrectionsAsync().ConfigureAwait(true);
         await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
     }
 
@@ -2511,6 +2650,21 @@ public sealed class MainWindowViewModel : ObservableObject
         if (PlayPiperSampleCommand is AsyncRelayCommand playPiperSample)
         {
             playPiperSample.RaiseCanExecuteChanged();
+        }
+
+        if (MarkCorrectionReviewedCommand is AsyncRelayCommand markCorrectionReviewed)
+        {
+            markCorrectionReviewed.RaiseCanExecuteChanged();
+        }
+
+        if (MarkCorrectionUnresolvedCommand is AsyncRelayCommand markCorrectionUnresolved)
+        {
+            markCorrectionUnresolved.RaiseCanExecuteChanged();
+        }
+
+        if (ExportSelectedCorrectionCommand is AsyncRelayCommand exportSelectedCorrection)
+        {
+            exportSelectedCorrection.RaiseCanExecuteChanged();
         }
     }
 

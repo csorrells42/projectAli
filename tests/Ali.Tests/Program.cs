@@ -46,6 +46,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
     ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
+    ("correction queue can mark reviewed and unresolved", TestCorrectionQueueCanMarkReviewedAndUnresolved),
+    ("correction queue exports one and all", TestCorrectionQueueExportsOneAndAll),
+    ("correction queue survives deleted conversation reference", TestCorrectionQueueSurvivesDeletedConversationReference),
     ("conversation store saves and reloads messages", TestConversationStoreSavesAndReloadsMessages),
     ("conversation store lists recents newest first", TestConversationStoreListsRecentsNewestFirst),
     ("conversation search finds title and message text", TestConversationSearchFindsTitleAndMessageText),
@@ -342,6 +345,63 @@ static async Task TestCorrectionQueueStoresRuntimeSnapshot()
     Equal(profile.OutputTokenLimit, reports[0].OutputTokenLimit);
     Equal(profile.Temperature, reports[0].Temperature);
     Equal(profile.StreamingEnabled, reports[0].StreamingEnabled);
+}
+
+static async Task TestCorrectionQueueCanMarkReviewedAndUnresolved()
+{
+    var directory = NewTestDirectory();
+    var store = new FileCorrectionQueueStore(directory);
+    var queue = new CorrectionQueueService(store);
+    var report = await CreateCorrectionReportAsync(queue);
+
+    var reviewed = await queue.SetStatusAsync(report.Id, CorrectionStatus.Reviewed, CancellationToken.None);
+    var unresolved = await queue.SetStatusAsync(report.Id, CorrectionStatus.New, CancellationToken.None);
+    var listed = await queue.ListAsync(CancellationToken.None);
+
+    NotNull(reviewed, "Reviewed update should find the correction.");
+    NotNull(unresolved, "Unresolved update should find the correction.");
+    Equal(CorrectionStatus.Reviewed, reviewed!.Status);
+    Equal(CorrectionStatus.New, unresolved!.Status);
+    Equal(CorrectionStatus.New, listed.Single().Status);
+}
+
+static async Task TestCorrectionQueueExportsOneAndAll()
+{
+    var directory = NewTestDirectory();
+    var store = new FileCorrectionQueueStore(directory);
+    var queue = new CorrectionQueueService(store);
+    var report = await CreateCorrectionReportAsync(queue);
+    var exportDirectory = Path.Combine(directory, "exports");
+
+    var onePath = await queue.ExportOneMarkdownAsync(report.Id, exportDirectory, CancellationToken.None);
+    var allPath = await queue.ExportAllMarkdownAsync(exportDirectory, CancellationToken.None);
+    var stored = (await queue.ListAsync(CancellationToken.None)).Single(item => item.Id == report.Id);
+
+    NotNull(onePath, "Single correction export should create a path.");
+    Equal(true, File.Exists(onePath!));
+    Equal(true, File.Exists(allPath));
+    Contains("Exact User Question", File.ReadAllText(onePath!));
+    Contains("What command ran?", File.ReadAllText(onePath!));
+    Contains("The command succeeded.", File.ReadAllText(allPath));
+    Equal(CorrectionStatus.Exported, stored.Status);
+}
+
+static async Task TestCorrectionQueueSurvivesDeletedConversationReference()
+{
+    var directory = NewTestDirectory();
+    var conversationStore = new FileConversationStore(directory);
+    var correctionStore = new FileCorrectionQueueStore(directory);
+    var queue = new CorrectionQueueService(correctionStore);
+    conversationStore.Save(CreateStoredConversation("conv_deleted", "Deleted", "question", "answer"));
+    var report = await CreateCorrectionReportAsync(queue, conversationId: "conv_deleted");
+
+    Equal(true, conversationStore.Delete("conv_deleted"));
+    var listed = await queue.ListAsync(CancellationToken.None);
+
+    Equal(1, listed.Count);
+    Equal(report.Id, listed[0].Id);
+    Equal("conv_deleted", listed[0].ConversationId);
+    Equal("What command ran?", listed[0].Question);
 }
 
 static Task TestConversationStoreSavesAndReloadsMessages()
@@ -1150,6 +1210,24 @@ static StoredConversation CreateStoredConversation(
         createdAt,
         updatedAt ?? createdAt.AddSeconds(1),
         messages);
+}
+
+static Task<CorrectionReport> CreateCorrectionReportAsync(
+    CorrectionQueueService queue,
+    string conversationId = "conv_correction")
+{
+    var profile = CreateRuntimeOptions("fake-local-model").ToModelProfile(isLastKnownGood: true);
+    return queue.FlagIncorrectAsync(
+        conversationId: conversationId,
+        userMessageId: "msg_user",
+        assistantMessageId: "msg_assistant",
+        question: "What command ran?",
+        answer: "The command succeeded.",
+        modelProfile: profile,
+        answerEvidenceStatus: EvidenceStatus.Unknown,
+        category: CorrectionCategory.ClaimedActionSucceededWhenItDidNot,
+        userNote: "No receipt existed.",
+        cancellationToken: CancellationToken.None);
 }
 
 static OpenAiCompatibleRuntimeOptions CreateRuntimeOptions(string model, bool supportsVision = false) =>

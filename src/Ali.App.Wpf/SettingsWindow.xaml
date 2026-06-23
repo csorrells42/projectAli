@@ -550,6 +550,151 @@
                     </Border>
                 </Grid>
             </TabItem>
+
+            <TabItem Header="Corrections">
+                <Grid Background="{StaticResource AppBackgroundBrush}" Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            Padding="12"
+                            Margin="0,0,0,12">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshCorrectionsCommand}"
+                                        MinWidth="82"
+                                        Margin="8,0,0,0" />
+                                <Button Content="Reviewed"
+                                        Command="{Binding MarkCorrectionReviewedCommand}"
+                                        MinWidth="88"
+                                        Margin="8,0,0,0" />
+                                <Button Content="Unresolved"
+                                        Command="{Binding MarkCorrectionUnresolvedCommand}"
+                                        MinWidth="96"
+                                        Margin="8,0,0,0" />
+                                <Button Content="Export"
+                                        Command="{Binding ExportSelectedCorrectionCommand}"
+                                        MinWidth="78"
+                                        Margin="8,0,0,0" />
+                                <Button Content="Export All"
+                                        Command="{Binding ExportAllCorrectionsCommand}"
+                                        MinWidth="92"
+                                        Margin="8,0,0,0" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding CorrectionReviewStatusText}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="310" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox ItemsSource="{Binding CorrectionReviewItems}"
+                                 SelectedItem="{Binding SelectedCorrectionReviewItem, Mode=TwoWay}"
+                                 Background="{StaticResource PanelBrush}"
+                                 BorderBrush="{StaticResource BorderBrushDark}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="8"
+                                            Margin="0,0,0,6"
+                                            Background="{StaticResource PanelAltBrush}"
+                                            BorderBrush="{StaticResource BorderBrushDark}"
+                                            BorderThickness="1">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <TextBlock Text="{Binding DisplayStatus}"
+                                                           Foreground="{StaticResource AccentBrush}"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding CreatedAtText}"
+                                                           Foreground="{StaticResource SubtleTextBrush}"
+                                                           FontSize="11" />
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding QuestionPreview}"
+                                                       Foreground="{StaticResource TextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,5,0,0" />
+                                            <TextBlock Text="{Binding AnswerPreview}"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       Margin="0,4,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <Border Grid.Column="2"
+                                Background="{StaticResource PanelBrush}"
+                                BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="14">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel DataContext="{Binding SelectedCorrectionReviewItem}">
+                                    <TextBlock Text="{Binding Id}"
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontSize="18"
+                                               FontWeight="SemiBold"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding ConversationText}"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,10" />
+                                    <TextBlock Text="{Binding RuntimeText}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding VoiceText}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding AttachmentText}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding SafetyText}"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,14" />
+
+                                    <TextBlock Text="Exact user question"
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontWeight="SemiBold" />
+                                    <TextBox Text="{Binding Question}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             MinHeight="90"
+                                             Margin="0,6,0,12" />
+
+                                    <TextBlock Text="Exact assistant answer"
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontWeight="SemiBold" />
+                                    <TextBox Text="{Binding Answer}"
+                                             IsReadOnly="True"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             MinHeight="160"
+                                             Margin="0,6,0,0" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

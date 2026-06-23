@@ -28,6 +28,9 @@ public enum CorrectionStatus
     Fixed,
     VerificationPending,
     Verified,
+    Reviewed,
+    Exported,
+    Ignored,
     Closed,
     NotReproducible,
     Rejected
@@ -80,6 +83,8 @@ public sealed record CorrectionReport(
 public interface ICorrectionQueueStore
 {
     Task SaveAsync(CorrectionReport report, CancellationToken cancellationToken);
+
+    Task UpdateAsync(CorrectionReport report, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<CorrectionReport>> ListAsync(CancellationToken cancellationToken);
 }

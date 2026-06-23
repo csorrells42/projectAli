@@ -1,6 +1,7 @@
 using Ali.Core.Evidence;
 using Ali.Core.Models;
 using Ali.Core.Voice;
+using System.Text;
 
 namespace Ali.Core.Feedback;
 
@@ -93,5 +94,131 @@ public sealed class CorrectionQueueService(ICorrectionQueueStore store)
 
         await store.SaveAsync(report, cancellationToken).ConfigureAwait(false);
         return report;
+    }
+
+    public async Task<IReadOnlyList<CorrectionReport>> ListAsync(CancellationToken cancellationToken)
+    {
+        var reports = await store.ListAsync(cancellationToken).ConfigureAwait(false);
+        return reports
+            .OrderByDescending(report => report.CreatedAt)
+            .ToList();
+    }
+
+    public async Task<CorrectionReport?> SetStatusAsync(
+        string correctionId,
+        CorrectionStatus status,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(correctionId))
+        {
+            return null;
+        }
+
+        var reports = await store.ListAsync(cancellationToken).ConfigureAwait(false);
+        var report = reports.FirstOrDefault(item => item.Id.Equals(correctionId, StringComparison.OrdinalIgnoreCase));
+        if (report is null)
+        {
+            return null;
+        }
+
+        var updated = report with { Status = status };
+        await store.UpdateAsync(updated, cancellationToken).ConfigureAwait(false);
+        return updated;
+    }
+
+    public async Task<string?> ExportOneMarkdownAsync(
+        string correctionId,
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        var reports = await store.ListAsync(cancellationToken).ConfigureAwait(false);
+        var report = reports.FirstOrDefault(item => item.Id.Equals(correctionId, StringComparison.OrdinalIgnoreCase));
+        if (report is null)
+        {
+            return null;
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+        var path = Path.Combine(outputDirectory, $"{SafeFileName(report.Id)}.md");
+        await File.WriteAllTextAsync(path, RenderMarkdown([report]), cancellationToken).ConfigureAwait(false);
+        await SetStatusAsync(report.Id, CorrectionStatus.Exported, cancellationToken).ConfigureAwait(false);
+        return path;
+    }
+
+    public async Task<string> ExportAllMarkdownAsync(
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        var reports = await ListAsync(cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(outputDirectory);
+        var path = Path.Combine(outputDirectory, $"corrections_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.md");
+        await File.WriteAllTextAsync(path, RenderMarkdown(reports), cancellationToken).ConfigureAwait(false);
+        return path;
+    }
+
+    private static string RenderMarkdown(IReadOnlyList<CorrectionReport> reports)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("# Ali Correction Queue Export");
+        builder.AppendLine();
+        builder.AppendLine($"Exported: {DateTimeOffset.Now:O}");
+        builder.AppendLine();
+
+        foreach (var report in reports)
+        {
+            builder.AppendLine($"## {report.Id}");
+            builder.AppendLine();
+            builder.AppendLine($"- Status: {DisplayStatus(report.Status)}");
+            builder.AppendLine($"- Created: {report.CreatedAt:O}");
+            builder.AppendLine($"- Conversation: {report.ConversationId}");
+            builder.AppendLine($"- User message: {report.UserMessageId}");
+            builder.AppendLine($"- Assistant message: {report.AssistantMessageId}");
+            builder.AppendLine($"- Category: {report.Category}");
+            builder.AppendLine($"- Model: {report.ModelPackage}");
+            builder.AppendLine($"- Runtime endpoint: {report.RuntimeEndpoint}");
+            builder.AppendLine($"- Input origin: {report.InputOrigin}");
+            if (!string.IsNullOrWhiteSpace(report.UserNote))
+            {
+                builder.AppendLine($"- Note: {report.UserNote}");
+            }
+
+            builder.AppendLine();
+            builder.AppendLine("### Exact User Question");
+            builder.AppendLine();
+            builder.AppendLine("```text");
+            builder.AppendLine(report.Question);
+            builder.AppendLine("```");
+            builder.AppendLine();
+            builder.AppendLine("### Exact Assistant Answer");
+            builder.AppendLine();
+            builder.AppendLine("```text");
+            builder.AppendLine(report.Answer);
+            builder.AppendLine("```");
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    public static string DisplayStatus(CorrectionStatus status) =>
+        status switch
+        {
+            CorrectionStatus.New => "unresolved",
+            CorrectionStatus.Reviewed => "reviewed",
+            CorrectionStatus.Exported => "exported",
+            CorrectionStatus.Ignored => "ignored",
+            _ => status.ToString().ToLowerInvariant()
+        };
+
+    private static string SafeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            builder.Append(invalid.Contains(character) ? '_' : character);
+        }
+
+        return builder.ToString();
     }
 }
