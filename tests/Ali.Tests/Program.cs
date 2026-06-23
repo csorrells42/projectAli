@@ -44,9 +44,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
     ("health check retries empty non-streaming probe", TestHealthCheckRetriesEmptyNonStreamingProbe),
     ("health check accepts OK after stripped thinking text", TestHealthCheckAcceptsOkAfterStrippedThinkingText),
+    ("health check accepts reasoning-only streaming probe", TestHealthCheckAcceptsReasoningOnlyStreamingProbe),
     ("vision health check sends image content", TestVisionHealthCheckSendsImageContent),
     ("OpenAI stream parser extracts content delta", TestOpenAiStreamParserExtractsContentDelta),
+    ("OpenAI stream parser hides reasoning delta by default", TestOpenAiStreamParserHidesReasoningDeltaByDefault),
+    ("OpenAI stream parser can expose reasoning delta for health checks", TestOpenAiStreamParserCanExposeReasoningDeltaForHealthChecks),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
+    ("OpenAI runtime preserves normal prompt text", TestRuntimePreservesNormalPromptText),
+    ("OpenAI runtime reports empty visible stream content", TestRuntimeReportsEmptyVisibleStreamContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
     ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
     ("correction queue can mark reviewed and unresolved", TestCorrectionQueueCanMarkReviewedAndUnresolved),
@@ -218,6 +223,25 @@ static Task TestOpenAiStreamParserExtractsContentDelta()
     return Task.CompletedTask;
 }
 
+static Task TestOpenAiStreamParserHidesReasoningDeltaByDefault()
+{
+    var content = OpenAiStreamParser.ExtractContentDelta(
+        """{"choices":[{"delta":{"reasoning":"still thinking"}}]}""");
+
+    Equal(null, content);
+    return Task.CompletedTask;
+}
+
+static Task TestOpenAiStreamParserCanExposeReasoningDeltaForHealthChecks()
+{
+    var content = OpenAiStreamParser.ExtractContentDelta(
+        """{"choices":[{"delta":{"reasoning":"still thinking"}}]}""",
+        includeReasoning: true);
+
+    Equal("still thinking", content);
+    return Task.CompletedTask;
+}
+
 static async Task TestRuntimeSettingsSaveAndLoad()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -296,6 +320,19 @@ static async Task TestHealthCheckAcceptsOkAfterStrippedThinkingText()
     Equal(true, health.Succeeded);
 }
 
+static async Task TestHealthCheckAcceptsReasoningOnlyStreamingProbe()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var runtime = new OpenAiCompatibleLocalModelRuntime(
+        new HttpClient(new ReasoningOnlyStreamingHealthProbeHandler(options.Model)),
+        options);
+
+    var health = await runtime.CheckHealthAsync(CancellationToken.None);
+
+    Equal(true, health.Succeeded);
+    Equal(true, health.StreamingSupported);
+}
+
 static async Task TestVisionHealthCheckSendsImageContent()
 {
     var options = CreateRuntimeOptions("fake-vision-model", supportsVision: true);
@@ -316,6 +353,33 @@ static Task TestOpenAiResponseParserExtractsMessageContent()
 
     Equal("OK", content);
     return Task.CompletedTask;
+}
+
+static async Task TestRuntimePreservesNormalPromptText()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+
+    var answer = await StreamToStringAsync(runtime, "Say hello", CancellationToken.None);
+
+    Equal("OK", answer);
+    Contains("Say hello", handler.LastChatBody);
+    Equal(false, handler.LastChatBody.Contains("/no_think", StringComparison.OrdinalIgnoreCase));
+}
+
+static async Task TestRuntimeReportsEmptyVisibleStreamContent()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var runtime = new OpenAiCompatibleLocalModelRuntime(
+        new HttpClient(new EmptyStreamingContentHandler(options.Model)),
+        options);
+
+    var answer = await StreamToStringAsync(runtime, "Spend output budget reasoning", CancellationToken.None);
+
+    Equal(
+        "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
+        answer);
 }
 
 static async Task TestRuntimeCancellationPath()
@@ -2434,6 +2498,92 @@ internal sealed class ThinkingHealthProbeHandler(string model) : HttpMessageHand
         }
 
         return JsonResponse("""{"choices":[{"message":{"content":"<think>checking</think>\nOK"}}]}""");
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) =>
+        new(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+}
+
+internal sealed class EmptyStreamingContentHandler(string model) : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+
+        if (path.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonResponse($$"""{"data":[{"id":"{{model}}"}]}""");
+        }
+
+        if (!path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("not found")
+            };
+        }
+
+        var body = request.Content is null
+            ? string.Empty
+            : await request.Content.ReadAsStringAsync(cancellationToken);
+
+        return body.Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase)
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "data: {\"choices\":[{\"delta\":{\"reasoning\":\"still thinking\"}}]}\n\n" +
+                    "data: [DONE]\n\n")
+            }
+            : JsonResponse("""{"choices":[{"message":{"content":""}}]}""");
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) =>
+        new(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+}
+
+internal sealed class ReasoningOnlyStreamingHealthProbeHandler(string model) : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+
+        if (path.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonResponse($$"""{"data":[{"id":"{{model}}"}]}""");
+        }
+
+        if (!path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("not found")
+            };
+        }
+
+        var body = request.Content is null
+            ? string.Empty
+            : await request.Content.ReadAsStringAsync(cancellationToken);
+
+        return body.Contains("\"stream\":true", StringComparison.OrdinalIgnoreCase)
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"\",\"reasoning\":\"thinking\"}}]}\n\n" +
+                    "data: [DONE]\n\n")
+            }
+            : JsonResponse("""{"choices":[{"message":{"content":"OK"}}]}""");
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>

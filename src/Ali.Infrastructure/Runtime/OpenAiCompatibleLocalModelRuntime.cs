@@ -14,6 +14,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
     private const string HealthProbeExpectedResponse = "OK";
+    private const string NoThinkingInstruction = "/no_think";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
@@ -86,6 +87,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8);
+        var emittedContent = false;
 
         while (true)
         {
@@ -102,15 +104,25 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 continue;
             }
 
-            var content = OpenAiStreamParser.ExtractContentDelta(line["data:".Length..]);
+            var content = OpenAiStreamParser.ExtractContentDelta(
+                line["data:".Length..],
+                includeReasoning: isHealthCheck);
             if (!string.IsNullOrEmpty(content))
             {
+                emittedContent = true;
                 if (isHealthCheck)
                 {
                     WriteHealthLog($"response STREAM POST {uri} delta={content}");
                 }
                 yield return new ModelToken(content, EvidenceStatus.Unverified);
             }
+        }
+
+        if (!emittedContent && !isHealthCheck)
+        {
+            yield return new ModelToken(
+                "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
+                EvidenceStatus.Unverified);
         }
     }
 
@@ -262,7 +274,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             throw new HttpRequestException($"Chat completion failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
         }
 
-        return OpenAiStreamParser.ExtractMessageContent(body) ?? string.Empty;
+        return OpenAiStreamParser.ExtractMessageContent(body, includeReasoning: isHealthCheck) ?? string.Empty;
     }
 
     private async Task<string> SendNonStreamingProbeWithRetryAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -294,7 +306,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             builder.Append(token.Text);
         }
 
-        return IsExpectedHealthProbeResponse(NormalizeHealthProbeText(builder.ToString()));
+        var streamedText = builder.ToString();
+        return IsExpectedHealthProbeResponse(NormalizeHealthProbeText(streamedText))
+            || (!string.IsNullOrWhiteSpace(streamedText)
+                && !streamedText.TrimStart().StartsWith("Unknown:", StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<bool> CheckStreamingPromptWithRetryAsync(CancellationToken cancellationToken)
@@ -354,7 +369,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             .Append(new
             {
                 role = "user",
-                content = BuildUserContent(request)
+                content = BuildUserContent(request, includeNoThinkingInstruction: IsHealthCheckRequest(request))
             })
             .ToArray();
 
@@ -472,11 +487,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             }
         };
 
-    private static object BuildUserContent(ChatRequest request)
+    private static object BuildUserContent(ChatRequest request, bool includeNoThinkingInstruction)
     {
+        var userText = includeNoThinkingInstruction
+            ? BuildUserTextForRuntime(request.UserText)
+            : request.UserText;
         if (request.Attachments.Count == 0)
         {
-            return request.UserText;
+            return userText;
         }
 
         var content = new List<object>
@@ -484,7 +502,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             new
             {
                 type = "text",
-                text = request.UserText
+                text = userText
             }
         };
 
@@ -501,6 +519,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
 
         return content.ToArray();
+    }
+
+    private static string BuildUserTextForRuntime(string userText)
+    {
+        var trimmed = userText.TrimEnd();
+        return trimmed.Contains(NoThinkingInstruction, StringComparison.OrdinalIgnoreCase)
+            ? userText
+            : $"{trimmed} {NoThinkingInstruction}";
     }
 
     private sealed record ModelsCheckResult(bool Succeeded, string Summary)
