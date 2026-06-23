@@ -12,6 +12,8 @@ using Ali.App.Wpf;
 using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
+using Ali.Core.Memory;
+using Ali.Core.Reminders;
 using Ali.Core.Runtime;
 using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
@@ -29,6 +31,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _reminderTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly HashSet<string> _shownDueReminderIds = new(StringComparer.OrdinalIgnoreCase);
     private string _conversationId = $"conv_{Guid.NewGuid():N}";
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
     private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
@@ -106,6 +110,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private VoiceTurnMetadata? _lastVoiceMetadata;
     private CorrectionReviewItemViewModel? _selectedCorrectionReviewItem;
     private string _correctionReviewStatusText = "Correction queue not loaded yet.";
+    private MemoryEntryViewModel? _selectedMemoryEntry;
+    private ReminderEntryViewModel? _selectedReminderEntry;
+    private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
 
     public MainWindowViewModel(AliServices services)
     {
@@ -142,6 +149,12 @@ public sealed class MainWindowViewModel : ObservableObject
         MarkCorrectionUnresolvedCommand = new AsyncRelayCommand(MarkSelectedCorrectionUnresolvedAsync, () => SelectedCorrectionReviewItem is not null);
         ExportSelectedCorrectionCommand = new AsyncRelayCommand(ExportSelectedCorrectionAsync, () => SelectedCorrectionReviewItem is not null);
         ExportAllCorrectionsCommand = new AsyncRelayCommand(ExportAllCorrectionsAsync);
+        RefreshMemoryRemindersCommand = new RelayCommand(_ => RefreshMemoryReminders());
+        DeleteSelectedMemoryCommand = new RelayCommand(_ => DeleteSelectedMemory(), _ => SelectedMemoryEntry is not null);
+        ClearMemoriesCommand = new RelayCommand(_ => ClearMemories());
+        CancelSelectedReminderCommand = new RelayCommand(_ => SetSelectedReminderStatus(ReminderStatus.Cancelled), _ => SelectedReminderEntry is not null);
+        CompleteSelectedReminderCommand = new RelayCommand(_ => SetSelectedReminderStatus(ReminderStatus.Completed), _ => SelectedReminderEntry is not null);
+        ClearRemindersCommand = new RelayCommand(_ => ClearReminders());
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
@@ -176,7 +189,10 @@ public sealed class MainWindowViewModel : ObservableObject
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
+        _reminderTimer.Tick += (_, _) => CheckDueReminders();
+        _reminderTimer.Start();
         RefreshConversationHistory();
+        RefreshMemoryReminders();
 
         Messages.Add(new ChatMessageViewModel(
             id: $"msg_asst_{Guid.NewGuid():N}",
@@ -195,6 +211,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
 
     public ObservableCollection<CorrectionReviewItemViewModel> CorrectionReviewItems { get; } = new();
+
+    public ObservableCollection<MemoryEntryViewModel> MemoryEntries { get; } = new();
+
+    public ObservableCollection<ReminderEntryViewModel> ReminderEntries { get; } = new();
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
@@ -240,6 +260,36 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _correctionReviewStatusText;
         private set => SetProperty(ref _correctionReviewStatusText, value);
+    }
+
+    public MemoryEntryViewModel? SelectedMemoryEntry
+    {
+        get => _selectedMemoryEntry;
+        set
+        {
+            if (SetProperty(ref _selectedMemoryEntry, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public ReminderEntryViewModel? SelectedReminderEntry
+    {
+        get => _selectedReminderEntry;
+        set
+        {
+            if (SetProperty(ref _selectedReminderEntry, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public string MemoryReminderStatusText
+    {
+        get => _memoryReminderStatusText;
+        private set => SetProperty(ref _memoryReminderStatusText, value);
     }
 
     public ResourceMeterViewModel CpuMeter { get; } = new("CPU");
@@ -321,6 +371,18 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand ExportSelectedCorrectionCommand { get; }
 
     public ICommand ExportAllCorrectionsCommand { get; }
+
+    public ICommand RefreshMemoryRemindersCommand { get; }
+
+    public ICommand DeleteSelectedMemoryCommand { get; }
+
+    public ICommand ClearMemoriesCommand { get; }
+
+    public ICommand CancelSelectedReminderCommand { get; }
+
+    public ICommand CompleteSelectedReminderCommand { get; }
+
+    public ICommand ClearRemindersCommand { get; }
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
@@ -804,6 +866,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
         var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
         var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
+        var localFoundationStatus = ApplyLocalMemoryAndReminderRequests(text, userMessageId);
         var userMessage = new ChatMessageViewModel(
             userMessageId,
             ChatRole.User,
@@ -862,6 +925,10 @@ public sealed class MainWindowViewModel : ObservableObject
             ClearTemporaryAttachments();
             SaveActiveConversation();
             UpdateRuntimeStatus();
+            if (!string.IsNullOrWhiteSpace(localFoundationStatus))
+            {
+                StatusText = $"{StatusText} {localFoundationStatus}";
+            }
         }
 
         if (completed && inputOrigin == VoiceInputOrigin.Voice && !string.IsNullOrWhiteSpace(assistantMessage.Text))
@@ -1006,6 +1073,181 @@ public sealed class MainWindowViewModel : ObservableObject
         var conversation = BuildStoredConversation(_activeConversationHistoryItem);
         _services.Conversations.Save(conversation);
         RefreshConversationHistory();
+    }
+
+    private string ApplyLocalMemoryAndReminderRequests(string text, string userMessageId)
+    {
+        var statuses = new List<string>();
+        var memoryDecision = MemoryRequestParser.Evaluate(text);
+        if (memoryDecision.Kind == MemoryRequestKind.Save)
+        {
+            if (memoryDecision.Sensitivity == MemorySensitivity.PotentiallySensitive)
+            {
+                statuses.Add(memoryDecision.Message);
+            }
+            else if (!string.IsNullOrWhiteSpace(memoryDecision.Text))
+            {
+                var now = DateTimeOffset.UtcNow;
+                _services.Memories.Save(new MemoryEntry(
+                    $"mem_{Guid.NewGuid():N}",
+                    memoryDecision.Text,
+                    "general",
+                    now,
+                    now,
+                    MemorySource.ExplicitUserRequest,
+                    memoryDecision.Sensitivity,
+                    Active: true,
+                    _conversationId,
+                    userMessageId,
+                    "Saved from explicit chat request."));
+                statuses.Add(memoryDecision.Message);
+            }
+        }
+        else if (memoryDecision.Kind == MemoryRequestKind.Forget && !string.IsNullOrWhiteSpace(memoryDecision.Text))
+        {
+            var removed = _services.Memories.DeleteMatching(memoryDecision.Text);
+            statuses.Add($"Removed {removed} matching local memory item(s).");
+        }
+        else if (memoryDecision.Kind == MemoryRequestKind.Ambiguous)
+        {
+            statuses.Add(memoryDecision.Message);
+        }
+
+        var reminderDecision = ReminderRequestParser.Evaluate(text, DateTimeOffset.Now);
+        if (reminderDecision.Accepted && reminderDecision.Title is not null && reminderDecision.DueAt is not null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            _services.Reminders.Save(new ReminderEntry(
+                $"rem_{Guid.NewGuid():N}",
+                reminderDecision.Title,
+                reminderDecision.Title,
+                reminderDecision.DueAt.Value,
+                now,
+                ReminderStatus.Scheduled,
+                ConversationId: _conversationId,
+                MessageId: userMessageId));
+            statuses.Add(reminderDecision.Message);
+        }
+        else if (!string.IsNullOrWhiteSpace(reminderDecision.Message))
+        {
+            statuses.Add(reminderDecision.Message);
+        }
+
+        if (statuses.Count > 0)
+        {
+            RefreshMemoryReminders();
+        }
+
+        return string.Join(" ", statuses);
+    }
+
+    private void RefreshMemoryReminders()
+    {
+        var selectedMemoryId = SelectedMemoryEntry?.Id;
+        var selectedReminderId = SelectedReminderEntry?.Id;
+        var memoryResult = _services.Memories.List();
+        var reminderResult = _services.Reminders.List();
+
+        MemoryEntries.Clear();
+        foreach (var memory in memoryResult.Memories)
+        {
+            MemoryEntries.Add(new MemoryEntryViewModel(memory));
+        }
+
+        ReminderEntries.Clear();
+        foreach (var reminder in reminderResult.Reminders)
+        {
+            ReminderEntries.Add(new ReminderEntryViewModel(reminder));
+        }
+
+        SelectedMemoryEntry = MemoryEntries.FirstOrDefault(memory => memory.Id == selectedMemoryId)
+            ?? MemoryEntries.FirstOrDefault();
+        SelectedReminderEntry = ReminderEntries.FirstOrDefault(reminder => reminder.Id == selectedReminderId)
+            ?? ReminderEntries.FirstOrDefault();
+
+        var warningCount = memoryResult.Warnings.Count + reminderResult.Warnings.Count;
+        MemoryReminderStatusText = warningCount == 0
+            ? $"Loaded {MemoryEntries.Count} memory item(s) and {ReminderEntries.Count} reminder(s)."
+            : $"Loaded memory/reminders with {warningCount} warning(s).";
+    }
+
+    private void DeleteSelectedMemory()
+    {
+        if (SelectedMemoryEntry is null)
+        {
+            return;
+        }
+
+        _services.Memories.Delete(SelectedMemoryEntry.Id);
+        RefreshMemoryReminders();
+        MemoryReminderStatusText = "Deleted selected memory item only. Conversations and reminders were not erased.";
+    }
+
+    private void ClearMemories()
+    {
+        var result = System.Windows.MessageBox.Show(
+            "Clear local memories on this computer? This removes saved memory items only. It does not remove conversations, reminders, settings, local models, voice resources, correction reports, or the app itself.",
+            "Clear local memories",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        var removed = _services.Memories.Clear();
+        RefreshMemoryReminders();
+        MemoryReminderStatusText = $"Cleared {removed} memory item(s). Conversations and reminders were not erased.";
+    }
+
+    private void SetSelectedReminderStatus(ReminderStatus status)
+    {
+        if (SelectedReminderEntry is null)
+        {
+            return;
+        }
+
+        _services.Reminders.SetStatus(SelectedReminderEntry.Id, status);
+        RefreshMemoryReminders();
+        MemoryReminderStatusText = $"Marked selected reminder {status}.";
+    }
+
+    private void ClearReminders()
+    {
+        var result = System.Windows.MessageBox.Show(
+            "Clear local reminders on this computer? This removes saved reminders only. It does not remove conversations, memories, settings, local models, voice resources, correction reports, or the app itself.",
+            "Clear local reminders",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        var removed = _services.Reminders.Clear();
+        _shownDueReminderIds.Clear();
+        RefreshMemoryReminders();
+        MemoryReminderStatusText = $"Cleared {removed} reminder(s). Conversations and memories were not erased.";
+    }
+
+    private void CheckDueReminders()
+    {
+        var due = _services.Reminders
+            .ListDue(DateTimeOffset.Now)
+            .Where(reminder => _shownDueReminderIds.Add(reminder.ReminderId))
+            .ToList();
+        if (due.Count == 0)
+        {
+            return;
+        }
+
+        var first = due[0];
+        StatusText = due.Count == 1
+            ? $"Reminder due: {first.Title}"
+            : $"{due.Count} reminders are due. First: {first.Title}";
+        RefreshMemoryReminders();
     }
 
     private void ApplyFirstMessageTitleIfNeeded(string text)
@@ -2008,6 +2250,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshVoiceSettingsChoices();
         StartInputLevelMonitor();
         await RefreshCorrectionsAsync().ConfigureAwait(true);
+        RefreshMemoryReminders();
         await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
     }
 
@@ -2665,6 +2908,21 @@ public sealed class MainWindowViewModel : ObservableObject
         if (ExportSelectedCorrectionCommand is AsyncRelayCommand exportSelectedCorrection)
         {
             exportSelectedCorrection.RaiseCanExecuteChanged();
+        }
+
+        if (DeleteSelectedMemoryCommand is RelayCommand deleteMemory)
+        {
+            deleteMemory.RaiseCanExecuteChanged();
+        }
+
+        if (CancelSelectedReminderCommand is RelayCommand cancelReminder)
+        {
+            cancelReminder.RaiseCanExecuteChanged();
+        }
+
+        if (CompleteSelectedReminderCommand is RelayCommand completeReminder)
+        {
+            completeReminder.RaiseCanExecuteChanged();
         }
     }
 

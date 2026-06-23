@@ -695,6 +695,170 @@
                     </Grid>
                 </Grid>
             </TabItem>
+
+            <TabItem Header="Memory / Reminders">
+                <Grid Background="{StaticResource AppBackgroundBrush}" Margin="0,12,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            Padding="12"
+                            Margin="0,0,0,12">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right"
+                                    Content="Refresh"
+                                    Command="{Binding RefreshMemoryRemindersCommand}"
+                                    MinWidth="82"
+                                    Margin="8,0,0,0" />
+                            <TextBlock Text="{Binding MemoryReminderStatusText}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Background="{StaticResource PanelBrush}"
+                                BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="Memory"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,10" />
+                                <ListBox Grid.Row="1"
+                                         ItemsSource="{Binding MemoryEntries}"
+                                         SelectedItem="{Binding SelectedMemoryEntry, Mode=TwoWay}"
+                                         Background="{StaticResource InputBrush}"
+                                         BorderBrush="{StaticResource BorderBrushDark}"
+                                         Foreground="{StaticResource TextBrush}"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="8"
+                                                    Margin="0,0,0,6"
+                                                    Background="{StaticResource PanelAltBrush}"
+                                                    BorderBrush="{StaticResource BorderBrushDark}"
+                                                    BorderThickness="1">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Text}"
+                                                               Foreground="{StaticResource TextBrush}"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding UpdatedAtText}"
+                                                               Foreground="{StaticResource SubtleTextBrush}"
+                                                               FontSize="11"
+                                                               Margin="0,4,0,0" />
+                                                    <TextBlock Text="{Binding SensitivityText}"
+                                                               Foreground="{StaticResource MutedTextBrush}"
+                                                               FontSize="11"
+                                                               Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                    <Button Content="Delete"
+                                            Command="{Binding DeleteSelectedMemoryCommand}"
+                                            MinWidth="82"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Clear Memories"
+                                            Command="{Binding ClearMemoriesCommand}"
+                                            MinWidth="118"
+                                            BorderBrush="#7F1D1D"
+                                            Background="#2A1517" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Column="2"
+                                Background="{StaticResource PanelBrush}"
+                                BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="Local Reminders"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,0,0,10" />
+                                <ListBox Grid.Row="1"
+                                         ItemsSource="{Binding ReminderEntries}"
+                                         SelectedItem="{Binding SelectedReminderEntry, Mode=TwoWay}"
+                                         Background="{StaticResource InputBrush}"
+                                         BorderBrush="{StaticResource BorderBrushDark}"
+                                         Foreground="{StaticResource TextBrush}"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="8"
+                                                    Margin="0,0,0,6"
+                                                    Background="{StaticResource PanelAltBrush}"
+                                                    BorderBrush="{StaticResource BorderBrushDark}"
+                                                    BorderThickness="1">
+                                                <StackPanel>
+                                                    <DockPanel>
+                                                        <TextBlock Text="{Binding Title}"
+                                                                   Foreground="{StaticResource TextBrush}"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock DockPanel.Dock="Right"
+                                                                   Text="{Binding StatusText}"
+                                                                   Foreground="{StaticResource AccentBrush}"
+                                                                   FontSize="11" />
+                                                    </DockPanel>
+                                                    <TextBlock Text="{Binding DueAtText}"
+                                                               Foreground="{StaticResource MutedTextBrush}"
+                                                               FontSize="12"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                    <Button Content="Complete"
+                                            Command="{Binding CompleteSelectedReminderCommand}"
+                                            MinWidth="86"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Cancel"
+                                            Command="{Binding CancelSelectedReminderCommand}"
+                                            MinWidth="76"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Clear Reminders"
+                                            Command="{Binding ClearRemindersCommand}"
+                                            MinWidth="126"
+                                            BorderBrush="#7F1D1D"
+                                            Background="#2A1517" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

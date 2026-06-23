@@ -22,7 +22,9 @@ public sealed class AliServices
         ISpeechToTextProvider speechToText,
         ITextToSpeechProvider textToSpeech,
         ISpeechPlayer speechPlayer,
-        FileConversationStore conversations)
+        FileConversationStore conversations,
+        FileMemoryStore memories,
+        FileReminderStore reminders)
     {
         DataRoot = dataRoot;
         RuntimeController = runtimeController;
@@ -33,6 +35,8 @@ public sealed class AliServices
         TextToSpeech = textToSpeech;
         SpeechPlayer = speechPlayer;
         Conversations = conversations;
+        Memories = memories;
+        Reminders = reminders;
     }
 
     public string DataRoot { get; }
@@ -54,6 +58,10 @@ public sealed class AliServices
     public ISpeechPlayer SpeechPlayer { get; }
 
     public FileConversationStore Conversations { get; }
+
+    public FileMemoryStore Memories { get; }
+
+    public FileReminderStore Reminders { get; }
 
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
@@ -91,6 +99,8 @@ public sealed class AliServices
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Ali");
         var conversations = new FileConversationStore(localAliRoot);
+        var memories = new FileMemoryStore(localAliRoot);
+        var reminders = new FileReminderStore(localAliRoot);
         RuntimeSettingsStore.WriteExample(dataRoot);
 
         var fallbackRuntime = new DevelopmentLocalModelRuntime();
@@ -118,6 +128,8 @@ public sealed class AliServices
             speechToText,
             textToSpeech,
             speechPlayer,
-            conversations);
+            conversations,
+            memories,
+            reminders);
     }
 }

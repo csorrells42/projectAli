@@ -2,8 +2,10 @@ using System.Globalization;
 using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
+using Ali.Core.Memory;
 using Ali.Core.Models;
 using Ali.Core.Permissions;
+using Ali.Core.Reminders;
 using Ali.Core.Runtime;
 using Ali.Core.Truthfulness;
 using Ali.Core.Voice;
@@ -60,6 +62,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("conversation corrupt file does not crash listing", TestConversationCorruptFileDoesNotCrashListing),
     ("conversation attachment raw data is not persisted", TestConversationAttachmentRawDataIsNotPersisted),
     ("conversation title comes from first message", TestConversationTitleComesFromFirstMessage),
+    ("memory parser saves explicit requests only", TestMemoryParserSavesExplicitRequestsOnly),
+    ("memory parser refuses ambiguous or sensitive saves", TestMemoryParserRefusesAmbiguousOrSensitiveSaves),
+    ("memory store saves lists deletes and clears", TestMemoryStoreSavesListsDeletesAndClears),
+    ("memory corrupt file does not crash listing", TestMemoryCorruptFileDoesNotCrashListing),
+    ("reminder parser schedules only clear future requests", TestReminderParserSchedulesOnlyClearFutureRequests),
+    ("reminder store saves due cancels completes and clears", TestReminderStoreSavesDueCancelsCompletesAndClears),
+    ("chat erase does not erase memories or reminders", TestChatEraseDoesNotEraseMemoriesOrReminders),
+    ("memory and reminder clears do not erase conversations", TestMemoryAndReminderClearsDoNotEraseConversations),
     ("voice audio input is temporary by default", TestVoiceAudioInputIsTemporaryByDefault),
     ("voice transcript becomes user chat text", TestVoiceTranscriptBecomesUserChatText),
     ("speech tool policy refuses cloud STT endpoint", TestSpeechPolicyRefusesCloudSttEndpoint),
@@ -606,6 +616,149 @@ static Task TestConversationTitleComesFromFirstMessage()
 
     Contains("Please help me debug", title);
     Equal(true, title.Length <= 64);
+    return Task.CompletedTask;
+}
+
+static Task TestMemoryParserSavesExplicitRequestsOnly()
+{
+    var random = MemoryRequestParser.Evaluate("I like dark mode.");
+    var save = MemoryRequestParser.Evaluate("remember that I prefer concise reports");
+    var forget = MemoryRequestParser.Evaluate("forget that concise reports");
+
+    Equal(MemoryRequestKind.None, random.Kind);
+    Equal(MemoryRequestKind.Save, save.Kind);
+    Equal("I prefer concise reports", save.Text);
+    Equal(MemoryRequestKind.Forget, forget.Kind);
+    Equal("concise reports", forget.Text);
+    return Task.CompletedTask;
+}
+
+static Task TestMemoryParserRefusesAmbiguousOrSensitiveSaves()
+{
+    var ambiguous = MemoryRequestParser.Evaluate("remember");
+    var sensitive = MemoryRequestParser.Evaluate("remember that my password is swordfish");
+
+    Equal(MemoryRequestKind.Ambiguous, ambiguous.Kind);
+    Equal(MemoryRequestKind.Save, sensitive.Kind);
+    Equal(MemorySensitivity.PotentiallySensitive, sensitive.Sensitivity);
+    Contains("not saved", sensitive.Message);
+    return Task.CompletedTask;
+}
+
+static Task TestMemoryStoreSavesListsDeletesAndClears()
+{
+    var directory = NewTestDirectory();
+    var store = new FileMemoryStore(directory);
+    var now = DateTimeOffset.UtcNow;
+    var memory = store.Save(new MemoryEntry(
+        "mem_one",
+        "Chris prefers KISS",
+        "preference",
+        now,
+        now,
+        MemorySource.ExplicitUserRequest,
+        MemorySensitivity.Normal,
+        Active: true));
+
+    Equal("Chris prefers KISS", memory.Text);
+    Equal(1, store.List().Memories.Count);
+    Equal(1, store.DeleteMatching("KISS"));
+    Equal(0, store.List().Memories.Count);
+    store.Save(memory);
+    Equal(true, store.Delete("mem_one"));
+    Equal(0, store.List().Memories.Count);
+    store.Save(memory);
+    Equal(1, store.Clear());
+    return Task.CompletedTask;
+}
+
+static Task TestMemoryCorruptFileDoesNotCrashListing()
+{
+    var directory = NewTestDirectory();
+    var store = new FileMemoryStore(directory);
+    Directory.CreateDirectory(store.RootDirectory);
+    File.WriteAllText(store.FilePath, "{ broken");
+
+    var listed = store.List();
+
+    Equal(0, listed.Memories.Count);
+    Equal(true, listed.Warnings.Count > 0);
+    return Task.CompletedTask;
+}
+
+static Task TestReminderParserSchedulesOnlyClearFutureRequests()
+{
+    var now = new DateTimeOffset(2026, 6, 23, 8, 0, 0, TimeSpan.Zero);
+    var future = ReminderRequestParser.Evaluate("remind me to check Ali at 2026-06-23 09:00 +00:00", now);
+    var unclear = ReminderRequestParser.Evaluate("remind me to check Ali soon", now);
+    var past = ReminderRequestParser.Evaluate("remind me to check Ali at 2026-06-23 07:00 +00:00", now);
+
+    Equal(true, future.Accepted);
+    Equal("check Ali", future.Title);
+    Equal(false, unclear.Accepted);
+    Equal(false, past.Accepted);
+    return Task.CompletedTask;
+}
+
+static Task TestReminderStoreSavesDueCancelsCompletesAndClears()
+{
+    var directory = NewTestDirectory();
+    var store = new FileReminderStore(directory);
+    var now = DateTimeOffset.UtcNow;
+    var reminder = store.Save(new ReminderEntry(
+        "rem_one",
+        "Check Ali",
+        "Check Ali",
+        now.AddMinutes(-1),
+        now.AddMinutes(-2),
+        ReminderStatus.Scheduled));
+
+    Equal("Check Ali", reminder.Title);
+    Equal(1, store.ListDue(now).Count);
+    Equal(ReminderStatus.Cancelled, store.SetStatus("rem_one", ReminderStatus.Cancelled)!.Status);
+    Equal(0, store.ListDue(now).Count);
+    Equal(ReminderStatus.Completed, store.SetStatus("rem_one", ReminderStatus.Completed)!.Status);
+    Equal(1, store.Clear());
+    Equal(0, store.List().Reminders.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestChatEraseDoesNotEraseMemoriesOrReminders()
+{
+    var directory = NewTestDirectory();
+    var conversations = new FileConversationStore(directory);
+    var memories = new FileMemoryStore(directory);
+    var reminders = new FileReminderStore(directory);
+    var now = DateTimeOffset.UtcNow;
+    conversations.Save(CreateStoredConversation("conv_one", "One", "question", "answer"));
+    memories.Save(new MemoryEntry("mem_one", "Keep memory", "general", now, now, MemorySource.ExplicitUserRequest, MemorySensitivity.Normal, true));
+    reminders.Save(new ReminderEntry("rem_one", "Keep reminder", "Keep reminder", now.AddHours(1), now, ReminderStatus.Scheduled));
+
+    conversations.EraseAll();
+
+    Equal(0, conversations.ListSummaries().Conversations.Count);
+    Equal(1, memories.List().Memories.Count);
+    Equal(1, reminders.List().Reminders.Count);
+    return Task.CompletedTask;
+}
+
+static Task TestMemoryAndReminderClearsDoNotEraseConversations()
+{
+    var directory = NewTestDirectory();
+    var conversations = new FileConversationStore(directory);
+    var memories = new FileMemoryStore(directory);
+    var reminders = new FileReminderStore(directory);
+    var now = DateTimeOffset.UtcNow;
+    conversations.Save(CreateStoredConversation("conv_one", "One", "question", "answer"));
+    memories.Save(new MemoryEntry("mem_one", "Memory", "general", now, now, MemorySource.ExplicitUserRequest, MemorySensitivity.Normal, true));
+    reminders.Save(new ReminderEntry("rem_one", "Reminder", "Reminder", now.AddHours(1), now, ReminderStatus.Scheduled));
+
+    memories.Clear();
+    reminders.Clear();
+
+    Equal(1, conversations.ListSummaries().Conversations.Count);
+    Equal(0, memories.List().Memories.Count);
+    Equal(0, reminders.List().Reminders.Count);
     return Task.CompletedTask;
 }
 
