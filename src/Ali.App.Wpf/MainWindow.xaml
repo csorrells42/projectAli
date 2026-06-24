@@ -416,7 +416,7 @@
                                  FontSize="15"
                                  VerticalContentAlignment="Center"
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
-                                 KeyDown="ComposerTextBox_OnKeyDown" />
+                                 PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
                         <Button Grid.Column="2"
                                 Content="{Binding MicButtonText}"

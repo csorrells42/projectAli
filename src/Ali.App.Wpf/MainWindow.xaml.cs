@@ -59,7 +59,7 @@ public partial class MainWindow : Window
         Close();
     }
 
-    private async void ComposerTextBox_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    private async void ComposerTextBox_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == Key.V && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
