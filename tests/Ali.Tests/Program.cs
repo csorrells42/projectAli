@@ -51,6 +51,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI stream parser can expose reasoning delta for health checks", TestOpenAiStreamParserCanExposeReasoningDeltaForHealthChecks),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("OpenAI runtime preserves normal prompt text", TestRuntimePreservesNormalPromptText),
+    ("OpenAI runtime disables qwen thinking", TestRuntimeDisablesQwenThinking),
     ("OpenAI runtime reports empty visible stream content", TestRuntimeReportsEmptyVisibleStreamContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
     ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
@@ -366,6 +367,20 @@ static async Task TestRuntimePreservesNormalPromptText()
     Equal("OK", answer);
     Contains("Say hello", handler.LastChatBody);
     Equal(false, handler.LastChatBody.Contains("/no_think", StringComparison.OrdinalIgnoreCase));
+}
+
+static async Task TestRuntimeDisablesQwenThinking()
+{
+    var options = CreateRuntimeOptions("qwen3-vl:8b");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+
+    var answer = await StreamToStringAsync(runtime, "Say hello", CancellationToken.None);
+
+    Equal("OK", answer);
+    Contains("Say hello", handler.LastChatBody);
+    Contains("/no_think", handler.LastChatBody);
+    Contains("\"think\":false", handler.LastChatBody);
 }
 
 static async Task TestRuntimeReportsEmptyVisibleStreamContent()

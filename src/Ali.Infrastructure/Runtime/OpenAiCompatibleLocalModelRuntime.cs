@@ -369,7 +369,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             .Append(new
             {
                 role = "user",
-                content = BuildUserContent(request, includeNoThinkingInstruction: IsHealthCheckRequest(request))
+                content = BuildUserContent(request, includeNoThinkingInstruction: ShouldDisableThinking())
             })
             .ToArray();
 
@@ -380,7 +380,8 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             stream = stream ?? _options.StreamingEnabled,
             max_tokens = maxTokens ?? _options.OutputTokenLimit,
             temperature = _options.Temperature,
-            top_p = _options.TopP
+            top_p = _options.TopP,
+            think = ShouldDisableThinking() ? false : (bool?)null
         };
     }
 
@@ -427,6 +428,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private static bool IsHealthCheckRequest(ChatRequest request) =>
         string.Equals(request.ConversationId, "health_check", StringComparison.Ordinal);
+
+    private bool ShouldDisableThinking() =>
+        IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);
+
+    private static bool IsQwenThinkingRuntime(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && (value.Contains("qwen", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("qwq", StringComparison.OrdinalIgnoreCase));
 
     private static void WriteHealthLog(string message)
     {
