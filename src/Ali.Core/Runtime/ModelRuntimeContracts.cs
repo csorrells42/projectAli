@@ -66,4 +66,6 @@ public interface ILocalModelRuntime
         CancellationToken cancellationToken);
 
     Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken);
+
+    Task ShutdownAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

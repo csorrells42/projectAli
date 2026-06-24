@@ -46,6 +46,12 @@ public sealed class SafeActivatingLocalRuntime : ILocalModelRuntime
     public Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken) =>
         CheckCandidateAsync(cancellationToken);
 
+    public Task ShutdownAsync(CancellationToken cancellationToken) =>
+        _activeRuntime.ShutdownAsync(cancellationToken);
+
+    public Task<RuntimeHealthCheck> CheckActiveAsync(CancellationToken cancellationToken) =>
+        _activeRuntime.CheckHealthAsync(cancellationToken);
+
     public async Task<RuntimeHealthCheck> CheckCandidateAsync(CancellationToken cancellationToken)
     {
         if (_candidateRuntime is null)

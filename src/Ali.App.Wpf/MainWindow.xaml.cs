@@ -6,6 +6,10 @@ namespace Ali.App.Wpf;
 
 public partial class MainWindow : Window
 {
+    private bool _allowClose;
+    private bool _closing;
+    private Task? _startupTask;
+
     public MainWindow(MainWindowViewModel viewModel)
     {
         NativeTitleBarTheme.ApplyDarkTitleBar(this);
@@ -13,6 +17,46 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         viewModel.Messages.CollectionChanged += (_, _) =>
             Dispatcher.BeginInvoke(new Action(() => MessagesScrollViewer.ScrollToEnd()));
+        Loaded += MainWindow_OnLoaded;
+        Closing += MainWindow_OnClosing;
+    }
+
+    private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            _startupTask = viewModel.StartLocalRuntimeAsync();
+            await _startupTask.ConfigureAwait(true);
+        }
+    }
+
+    private async void MainWindow_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_allowClose)
+        {
+            return;
+        }
+
+        if (_closing)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        e.Cancel = true;
+        _closing = true;
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            if (_startupTask is { IsCompleted: false })
+            {
+                await _startupTask.ConfigureAwait(true);
+            }
+
+            await viewModel.ShutdownLocalRuntimeAsync().ConfigureAwait(true);
+        }
+
+        _allowClose = true;
+        Close();
     }
 
     private async void ComposerTextBox_OnKeyDown(object sender, System.Windows.Input.KeyEventArgs e)

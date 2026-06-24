@@ -52,6 +52,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("OpenAI runtime preserves normal prompt text", TestRuntimePreservesNormalPromptText),
     ("OpenAI runtime disables qwen thinking", TestRuntimeDisablesQwenThinking),
+    ("OpenAI runtime shutdown unloads model", TestRuntimeShutdownUnloadsModel),
     ("OpenAI runtime reports empty visible stream content", TestRuntimeReportsEmptyVisibleStreamContent),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
     ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
@@ -381,6 +382,19 @@ static async Task TestRuntimeDisablesQwenThinking()
     Contains("Say hello", handler.LastChatBody);
     Contains("/no_think", handler.LastChatBody);
     Contains("\"think\":false", handler.LastChatBody);
+}
+
+static async Task TestRuntimeShutdownUnloadsModel()
+{
+    var options = CreateRuntimeOptions("qwen3-vl:8b");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+
+    await runtime.ShutdownAsync(CancellationToken.None);
+
+    Equal(1, handler.UnloadRequestCount);
+    Contains("\"model\":\"qwen3-vl:8b\"", handler.LastUnloadBody);
+    Contains("\"keep_alive\":0", handler.LastUnloadBody);
 }
 
 static async Task TestRuntimeReportsEmptyVisibleStreamContent()
@@ -2371,7 +2385,11 @@ internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
 {
     public int ImageRequestCount { get; private set; }
 
+    public int UnloadRequestCount { get; private set; }
+
     public string LastChatBody { get; private set; } = string.Empty;
+
+    public string LastUnloadBody { get; private set; } = string.Empty;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -2384,6 +2402,15 @@ internal sealed class FakeOpenAiHandler(string model) : HttpMessageHandler
         if (path.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
         {
             return JsonResponse($$"""{"data":[{"id":"{{model}}"}]}""");
+        }
+
+        if (path.EndsWith("/api/generate", StringComparison.OrdinalIgnoreCase))
+        {
+            UnloadRequestCount++;
+            LastUnloadBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return JsonResponse("""{"done":true,"done_reason":"unload"}""");
         }
 
         if (!path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))

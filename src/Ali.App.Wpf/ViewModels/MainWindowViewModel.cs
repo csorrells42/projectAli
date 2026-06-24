@@ -19,6 +19,7 @@ using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Voice;
+using MediaBrushes = System.Windows.Media.Brushes;
 
 namespace Ali.App.Wpf.ViewModels;
 
@@ -31,6 +32,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _modelStatusTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _reminderTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly HashSet<string> _shownDueReminderIds = new(StringComparer.OrdinalIgnoreCase);
     private string _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
@@ -38,6 +40,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
     private string _conversationSearchText = string.Empty;
     private bool _loadingConversationHistorySelection;
+    private bool _checkingModelConnectionStatus;
     private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
@@ -77,6 +80,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _canRevertToLastKnownGood;
     private string _runtimeHealthResult = "No runtime health check has been run.";
     private string _activeRuntimeStatus = "Using safe deterministic stub.";
+    private string _modelConnectionStatusText = "model offline";
+    private System.Windows.Media.Brush _modelConnectionStatusBrush = MediaBrushes.Red;
     private string _attachmentStatus = "Screenshots are temporary by default.";
     private string _voiceStatus = "Voice idle.";
     private string _sttStatus = "STT status loading.";
@@ -189,6 +194,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
+        _modelStatusTimer.Tick += async (_, _) => await RefreshModelConnectionStatusAsync(showWaiting: false).ConfigureAwait(true);
+        _modelStatusTimer.Start();
         _reminderTimer.Tick += (_, _) => CheckDueReminders();
         _reminderTimer.Start();
         RefreshConversationHistory();
@@ -525,6 +532,18 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _activeRuntimeStatus, value);
     }
 
+    public string ModelConnectionStatusText
+    {
+        get => _modelConnectionStatusText;
+        private set => SetProperty(ref _modelConnectionStatusText, value);
+    }
+
+    public System.Windows.Media.Brush ModelConnectionStatusBrush
+    {
+        get => _modelConnectionStatusBrush;
+        private set => SetProperty(ref _modelConnectionStatusBrush, value);
+    }
+
     public string AttachmentStatus
     {
         get => _attachmentStatus;
@@ -850,6 +869,123 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _statusText, value);
     }
 
+    public async Task StartLocalRuntimeAsync()
+    {
+        var options = _services.LoadRuntimeSettings();
+        if (!options.Enabled || string.IsNullOrWhiteSpace(options.Model))
+        {
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = "Local model is not configured yet.";
+            return;
+        }
+
+        SetModelConnectionStatus("command sent, waiting on model to load", MediaBrushes.Gold);
+        StatusText = "Loading local model...";
+        await Task.Yield();
+
+        try
+        {
+            _services.ConfigureRuntimeCandidate(options);
+            var health = await _services.RuntimeController.CheckCandidateAsync(CancellationToken.None).ConfigureAwait(true);
+            RuntimeHealthResult = FormatHealthResult(health);
+            CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
+            if (health.Succeeded && _services.RuntimeController.ActivateLastHealthChecked())
+            {
+                CanActivateRuntime = false;
+                UpdateRuntimeStatus();
+                SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
+                StatusText = $"Connected to local model: {options.Model}";
+                return;
+            }
+
+            UpdateRuntimeStatus();
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = $"Local model failed to load: {health.Summary}";
+        }
+        catch (Exception ex)
+        {
+            RuntimeHealthResult = ex.Message;
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = $"Local model failed to load: {ex.Message}";
+        }
+    }
+
+    public async Task ShutdownLocalRuntimeAsync()
+    {
+        _modelStatusTimer.Stop();
+        SetModelConnectionStatus("command sent, waiting on model to shut down", MediaBrushes.Gold);
+        StatusText = "Shutting down local model...";
+        await Task.Yield();
+
+        try
+        {
+            using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await _services.RuntimeController.ShutdownAsync(shutdown.Token).ConfigureAwait(true);
+            _services.RuntimeController.RevertToFallback();
+            UpdateRuntimeStatus();
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = "Local model shut down.";
+        }
+        catch (Exception ex)
+        {
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = $"Local model shutdown did not complete cleanly: {ex.Message}";
+        }
+    }
+
+    public async Task RefreshModelConnectionStatusAsync(bool showWaiting)
+    {
+        if (_checkingModelConnectionStatus)
+        {
+            return;
+        }
+
+        if (_services.RuntimeController.IsUsingFallback)
+        {
+            if (!ModelConnectionStatusText.Contains("waiting", StringComparison.OrdinalIgnoreCase))
+            {
+                SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            }
+
+            return;
+        }
+
+        _checkingModelConnectionStatus = true;
+        if (showWaiting)
+        {
+            SetModelConnectionStatus("command sent, waiting on model to load", MediaBrushes.Gold);
+            await Task.Yield();
+        }
+
+        try
+        {
+            using var statusCheck = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var health = await _services.RuntimeController.CheckActiveAsync(statusCheck.Token).ConfigureAwait(true);
+            RuntimeHealthResult = FormatHealthResult(health);
+            if (health.Succeeded)
+            {
+                if (IsModelConnectedStatus())
+                {
+                    SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
+                }
+            }
+            else
+            {
+                SetModelConnectionStatus("model offline", MediaBrushes.Red);
+                StatusText = $"Local model communication failed: {health.Summary}";
+            }
+        }
+        catch (Exception ex)
+        {
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = $"Local model communication failed: {ex.Message}";
+        }
+        finally
+        {
+            _checkingModelConnectionStatus = false;
+        }
+    }
+
     public async Task SendAsync()
     {
         var text = ComposerText.Trim();
@@ -924,13 +1060,34 @@ public sealed class MainWindowViewModel : ObservableObject
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
             }
 
-            StatusText = "Response complete.";
+            if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
+            {
+                SetModelConnectionStatus("model offline", MediaBrushes.Red);
+                StatusText = "Local model communication failed.";
+            }
+            else if (!_services.RuntimeController.IsUsingFallback)
+            {
+                SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
+                StatusText = "Response complete.";
+            }
+            else
+            {
+                SetModelConnectionStatus("model offline", MediaBrushes.Red);
+                StatusText = "Response complete on deterministic stub.";
+            }
+
             completed = true;
         }
         catch (OperationCanceledException)
         {
             assistantMessage.Text += "\n\nStopped by user.";
             StatusText = "Response stopped.";
+        }
+        catch (HttpRequestException ex)
+        {
+            assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = $"Local model communication failed: {ex.Message}";
         }
         finally
         {
@@ -1533,6 +1690,8 @@ public sealed class MainWindowViewModel : ObservableObject
         IsBusy = true;
         CanActivateRuntime = false;
         StatusText = "Checking local runtime...";
+        SetModelConnectionStatus("command sent, waiting on model to load", MediaBrushes.Gold);
+        await Task.Yield();
 
         try
         {
@@ -1546,12 +1705,18 @@ public sealed class MainWindowViewModel : ObservableObject
                 : health.Succeeded
                     ? "No candidate runtime is active. Stub remains active."
                     : $"Runtime check failed: {health.Summary}";
+            if (!health.Succeeded)
+            {
+                SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            }
+
             UpdateRuntimeStatus();
         }
         catch (Exception ex)
         {
             RuntimeHealthResult = ex.Message;
             StatusText = $"Runtime check failed: {ex.Message}";
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
         }
         finally
         {
@@ -1569,6 +1734,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         CanActivateRuntime = false;
         UpdateRuntimeStatus();
+        SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
         StatusText = "Verified runtime activated.";
     }
 
@@ -1577,6 +1743,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _services.RuntimeController.RevertToFallback();
         CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
         UpdateRuntimeStatus();
+        SetModelConnectionStatus("model offline", MediaBrushes.Red);
         StatusText = "Reverted to deterministic stub.";
     }
 
@@ -1589,6 +1756,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         UpdateRuntimeStatus();
+        SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
         StatusText = "Reverted to last-known-good runtime.";
     }
 
@@ -2922,7 +3090,26 @@ public sealed class MainWindowViewModel : ObservableObject
         ActiveRuntimeStatus = _services.RuntimeController.IsUsingFallback
             ? "Active runtime: deterministic stub"
             : $"Active runtime: {_services.RuntimeController.ActiveProfile.PackageId}";
+        if (_services.RuntimeController.IsUsingFallback
+            && !ModelConnectionStatusText.Contains("waiting", StringComparison.OrdinalIgnoreCase))
+        {
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+        }
     }
+
+    private void SetModelConnectionStatus(string text, System.Windows.Media.Brush brush)
+    {
+        ModelConnectionStatusText = text;
+        ModelConnectionStatusBrush = brush;
+    }
+
+    private bool IsModelConnectedStatus() =>
+        string.Equals(ModelConnectionStatusText, "connected to model", StringComparison.OrdinalIgnoreCase);
+
+    private static bool LooksLikeRuntimeCommunicationFailure(string text) =>
+        text.Contains("local model runtime returned HTTP", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("local model runtime completed without visible assistant content", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("local model communication failed", StringComparison.OrdinalIgnoreCase);
 
     private void RaiseCommandStates()
     {

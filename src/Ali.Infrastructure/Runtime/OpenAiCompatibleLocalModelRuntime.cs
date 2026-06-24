@@ -221,6 +221,40 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
     }
 
+    public async Task ShutdownAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_options.Model))
+        {
+            return;
+        }
+
+        try
+        {
+            var uri = BuildOllamaApiUri("generate");
+            var payload = JsonSerializer.Serialize(
+                new
+                {
+                    model = _options.Model,
+                    keep_alive = 0,
+                    stream = false
+                },
+                JsonOptions);
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+
+            WriteHealthLog($"request POST {uri} unload payload={payload}");
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            WriteHealthLog($"response POST {uri} unload status={(int)response.StatusCode} body={TrimForUser(body)}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            WriteHealthLog($"unload exception type={ex.GetType().Name} message={ex.Message}");
+        }
+    }
+
     private async Task<ModelsCheckResult> CheckModelsEndpointAsync(CancellationToken cancellationToken)
     {
         var uri = BuildUri("models");
@@ -356,6 +390,17 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
 
         return new Uri(new Uri(baseText), relativePath);
+    }
+
+    private Uri BuildOllamaApiUri(string relativePath)
+    {
+        var builder = new UriBuilder(_options.Endpoint)
+        {
+            Path = $"/api/{relativePath.TrimStart('/')}",
+            Query = string.Empty
+        };
+
+        return builder.Uri;
     }
 
     private object BuildChatPayload(ChatRequest request, bool? stream = null, int? maxTokens = null)
