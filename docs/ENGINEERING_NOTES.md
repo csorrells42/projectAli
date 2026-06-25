@@ -73,6 +73,49 @@ docs
 - Voice safety: risky spoken commands are blocked in Phase 1C before they can be sent as action requests
 - Spoken response cleaner: removes URLs, markdown clutter, code blocks, stack traces, metadata, and citation markers
 - Correction reports now carry optional voice transcript/provider metadata without retaining raw audio
+- Local coding workspace policy: limits coding file actions to the approved programming workspace unless explicitly configured
+- Local coding tool service: workspace inspection, file open/read/search, package listing, guarded build/test/run/restore, guarded Git, receipts, patch preview/apply, last-failure diagnosis, and simple PDF generation
+
+## Coding Assistant Flow
+
+The coding assistant is intentionally tool-gated:
+
+```text
+user request
+-> command parser
+-> workspace policy
+-> local coding tool
+-> receipt
+-> chat response
+```
+
+For open-ended coding questions, Ali injects a read-only coding context pack into the model prompt:
+
+```text
+workspace map
+package references
+relevant source/config files
+last failed dotnet command, if any
+diagnostic source excerpts, if any
+guarded task plan
+```
+
+For explicit coding commands, Ali handles the request deterministically before calling the model.
+
+Current deterministic command groups:
+
+- Workspace: open/list/inspect approved coding workspace.
+- Read/search: open file, read file, search workspace.
+- Planning: build a guarded coding task plan.
+- Packages: list package references and confirmed outdated checks.
+- Build/test/run: confirmed `dotnet build`, `dotnet test`, `dotnet restore`, `dotnet run`.
+- Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line.
+- Patch loop: preview literal replacement, show pending preview, discard pending preview, confirm apply last preview.
+- File edits: confirmed create, append, and literal replace inside approved workspace.
+- Git: status/diff/log plus confirmed add/commit/merge; pull/push are blocked unless enabled.
+- Reports: simple local text PDF generation into Ali's generated documents folder.
+
+The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
 
 ## Bootstrap Storage
 

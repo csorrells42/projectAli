@@ -94,6 +94,61 @@ The helper lists the last 20 conversations from the current local Ali profile. T
 
 The helper does not add command execution, cloud fallback, file actions, voice, or user-isolated accounts. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 
+## Coding Assistant
+
+Ali can help with coding work inside the approved local programming workspace.
+
+Current default workspace:
+
+```text
+C:\Users\clsor\Documents\Programming Projects
+```
+
+Use Settings -> Permissions to review or change the approved workspace, file-open behavior, edit gates, build/test/run gates, and Git gates.
+
+Useful commands:
+
+- `inspect coding workspace`
+- `show project map`
+- `list packages`
+- `search workspace for WidgetFactory`
+- `read file "C:\path\to\file.cs" at line 42`
+- `plan coding task fix the build`
+- `show coding receipts`
+- `generate pdf "owner-demo.pdf" with text "Ali demo ready."`
+
+Guarded patch workflow:
+
+1. Ask Ali to plan the task.
+2. Ask Ali to preview the exact text change:
+
+```text
+preview replace in file "C:\path\to\file.cs" "old text" with "new text"
+```
+
+3. Review the preview.
+4. Use `show pending patch preview` if you need to see the pending patch again.
+5. Use `discard pending patch preview` if the patch is not wanted.
+6. Use `confirm apply last patch preview` to apply the last valid preview.
+7. Use a confirmed build/test command after the edit.
+
+Ali rechecks the pending patch before showing or applying it. If the file changed and the preview is stale, Ali discards the pending patch instead of applying an old change.
+
+Build and diagnostic workflow:
+
+- Build/test/run commands require confirmation.
+- Use `confirm dotnet build "C:\path\to\project-or-solution"` to run a guarded build.
+- If a build or test fails, use `diagnose last build failure`.
+- Use `open build error` to open the first diagnostic file at the reported line.
+
+Git workflow:
+
+- Read-only commands such as `git status`, `git diff`, and `git log` are allowed when Git permissions are enabled.
+- `git add`, `git commit`, and `git merge` require confirmation and follow the configured Git permission gates.
+- `git pull` and `git push` remain blocked unless network Git operations are deliberately enabled later.
+
+Ali does not silently change files, run builds, restore packages, or write Git history. Tool results are recorded as coding receipts so Ali can report what actually happened.
+
 ## Voice
 
 Phase 1C voice is local-only.
