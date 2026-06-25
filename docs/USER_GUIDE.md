@@ -175,6 +175,24 @@ Use `generate visual studio integration plan` to produce a deterministic handoff
 
 The HTML helper's Coding Bridge panel is the first local companion surface for that direction. It can submit deterministic coding commands to Ali on loopback, but all writes/builds/tests/Git actions still follow the same confirmation gates.
 
+Visual Studio can also call the current bridge through `Ali.App.VisualStudioBridge.exe`, which is designed for Visual Studio External Tools. Build the solution, start the WebHelper on loopback, then add an External Tool that points at:
+
+```text
+src\Ali.App.VisualStudioBridge\bin\Debug\net10.0\Ali.App.VisualStudioBridge.exe
+```
+
+Example External Tools arguments:
+
+```text
+--status
+--handoff
+--command "analyze solution architecture"
+--read-current-file --file "$(ItemPath)" --line "$(CurLine)"
+--command "read file \"{file}\" at line {line}" --file "$(ItemPath)" --line "$(CurLine)"
+```
+
+This is still not a Visual Studio extension. It is a guarded local bridge that lets Visual Studio invoke Ali's current deterministic coding abilities.
+
 ## Voice
 
 Phase 1C voice is local-only.

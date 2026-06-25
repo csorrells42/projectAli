@@ -506,6 +506,7 @@ public sealed class LocalCodingToolService(
             "Current bridge surface:",
             "- GET /api/coding/status on the local web helper.",
             "- POST /api/coding/command on the local web helper.",
+            "- Ali.App.VisualStudioBridge.exe can be configured as a Visual Studio External Tool and submits commands to the local helper.",
             "- Bridge endpoints are loopback-only and still use Ali's coding parser, policy gates, and receipts.",
             "Minimum integration contract:",
             "- Show workspace root, primary solution/project, architecture summary, coding receipts, pending patch state, and last dotnet failure state.",

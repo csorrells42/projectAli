@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ali.Tests", "tests\Ali.Test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ali.App.WebHelper", "src\Ali.App.WebHelper\Ali.App.WebHelper.csproj", "{4563B16B-EB70-4EE6-B9F9-6D4B794B5E59}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ali.App.VisualStudioBridge", "src\Ali.App.VisualStudioBridge\Ali.App.VisualStudioBridge.csproj", "{D996B21D-251F-4358-B27E-A96F36516C17}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +89,18 @@ Global
 		{4563B16B-EB70-4EE6-B9F9-6D4B794B5E59}.Release|x64.Build.0 = Release|Any CPU
 		{4563B16B-EB70-4EE6-B9F9-6D4B794B5E59}.Release|x86.ActiveCfg = Release|Any CPU
 		{4563B16B-EB70-4EE6-B9F9-6D4B794B5E59}.Release|x86.Build.0 = Release|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Debug|x64.Build.0 = Debug|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Debug|x86.Build.0 = Debug|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Release|x64.ActiveCfg = Release|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Release|x64.Build.0 = Release|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Release|x86.ActiveCfg = Release|Any CPU
+		{D996B21D-251F-4358-B27E-A96F36516C17}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -97,5 +111,6 @@ Global
 		{BF989DD0-F94A-40CF-BABB-356CB88B5CD7} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{AE4E9421-0EC9-493D-AAEB-5C1395072892} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{4563B16B-EB70-4EE6-B9F9-6D4B794B5E59} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{D996B21D-251F-4358-B27E-A96F36516C17} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

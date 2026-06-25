@@ -132,6 +132,8 @@ POST /api/coding/command { "command": "show visual studio integration" }
 
 Both endpoints honor the helper access token when configured and reject non-loopback callers. The built-in helper page includes a compact Coding Bridge panel that uses these endpoints as the first local companion surface for future Visual Studio integration.
 
+`Ali.App.VisualStudioBridge` is a buildable CLI bridge for Visual Studio External Tools. It accepts solution/file/line context, expands command templates such as `{file}` and `{line}`, and sends the resulting deterministic command to the loopback coding bridge. This gives Visual Studio a usable integration path without taking a dependency on Visual Studio SDK or VSIX packaging yet.
+
 ## Bootstrap Storage
 
 The correction queue currently uses a simple JSON file store so the first app loop can build without external packages or network access.
