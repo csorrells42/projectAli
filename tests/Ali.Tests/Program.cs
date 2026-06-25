@@ -61,6 +61,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
     ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
+    ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -454,6 +455,10 @@ static Task TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild()
     Equal(true, CodingToolRequestParser.TryParse($"start debugging \"{solutionPath}\"", out var debugRequest));
     Equal(CodingToolAction.OpenSolution, debugRequest.Action);
     Equal(solutionPath, debugRequest.Path);
+
+    Equal(true, CodingToolRequestParser.TryParse("open solution", out var openSolutionRequest));
+    Equal(CodingToolAction.OpenSolution, openSolutionRequest.Action);
+    Equal(null, openSolutionRequest.Path);
     return Task.CompletedTask;
 }
 
@@ -531,6 +536,38 @@ static async Task TestLocalCodingToolOpensFileWithSafeLauncher()
     Equal(1, launcher.Starts.Count);
     Equal(notepadPlusPlus, launcher.Starts[0].FileName);
     Contains(filePath, string.Join(" ", launcher.Starts[0].Arguments));
+}
+
+static async Task TestLocalCodingToolOpensPrimarySolution()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+
+    var visualStudioPath = Path.Combine(directory, "devenv.exe");
+    await File.WriteAllTextAsync(visualStudioPath, string.Empty);
+    var launcher = new FakeCodingProcessLauncher();
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        launcher,
+        configuredVisualStudioPath: visualStudioPath);
+
+    var result = await service.TryHandleAsync("open solution", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Opened solution in Visual Studio", result.Message);
+    Equal(solutionPath, result.TargetPath);
+    Equal(1, launcher.Starts.Count);
+    Equal(visualStudioPath, launcher.Starts[0].FileName);
+    Equal(solutionPath, launcher.Starts[0].Arguments[0]);
 }
 
 static async Task TestLocalCodingToolReadsAndSearchesWorkspace()

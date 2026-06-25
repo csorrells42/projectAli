@@ -573,9 +573,36 @@ public sealed class LocalCodingToolService(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!CodingWorkspacePolicy.TryNormalizePath(request.Path ?? string.Empty, out var fullPath))
+        string fullPath;
+        if (string.IsNullOrWhiteSpace(request.Path))
+        {
+            if (!Directory.Exists(Policy.WorkspaceRoot))
+            {
+                return Task.FromResult(new CodingToolResult(
+                    true,
+                    false,
+                    $"Coding workspace does not exist yet: {Policy.WorkspaceRoot}",
+                    "Visual Studio",
+                    Policy.WorkspaceRoot));
+            }
+
+            if (!TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out fullPath))
+            {
+                return Task.FromResult(new CodingToolResult(
+                    true,
+                    false,
+                    $"Coding tool could not find a solution or project under: {Policy.WorkspaceRoot}",
+                    "Visual Studio",
+                    Policy.WorkspaceRoot));
+            }
+        }
+        else if (!CodingWorkspacePolicy.TryNormalizePath(request.Path, out var normalizedPath))
         {
             return Task.FromResult(new CodingToolResult(true, false, "Coding tool blocked: invalid solution path."));
+        }
+        else
+        {
+            fullPath = normalizedPath;
         }
 
         if (!File.Exists(fullPath) && !Directory.Exists(fullPath))

@@ -38,6 +38,19 @@ public static class CodingToolRequestParser
         "start debugging "
     ];
 
+    private static readonly string[] OpenSolutionRequests =
+    [
+        "open solution",
+        "open sln",
+        "open project solution",
+        "open coding solution",
+        "open visual studio",
+        "open project in visual studio",
+        "start visual studio",
+        "debug solution",
+        "start debugging"
+    ];
+
     private static readonly string[] ReadPrefixes =
     [
         "read file ",
@@ -189,6 +202,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsOpenSolutionRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.OpenSolution, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
         {
             return true;
@@ -250,6 +269,9 @@ public static class CodingToolRequestParser
 
     private static bool IsInspectWorkspaceRequest(string text) =>
         InspectWorkspaceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsOpenSolutionRequest(string text) =>
+        OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool HasOpenIntent(string text)
     {

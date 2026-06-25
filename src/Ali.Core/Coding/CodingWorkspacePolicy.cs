@@ -89,6 +89,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Searching the approved coding workspace is allowed.");
         }
 
+        if (request.Action == CodingToolAction.OpenSolution && string.IsNullOrWhiteSpace(request.Path))
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Opening the primary solution in the approved coding workspace is allowed.");
+        }
+
         if (IsBuildTestRun(request.Action) && string.IsNullOrWhiteSpace(request.Path))
         {
             return EvaluateBuildTestRun(WorkspaceRoot, request);
