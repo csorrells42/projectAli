@@ -8,6 +8,7 @@ public sealed class CodingWorkspacePolicy
         string workspaceRoot,
         bool allowExplicitOutsideFileOpen = true,
         bool allowConfirmedBuildTestRunInsideWorkspace = true,
+        bool allowConfirmedEditInsideWorkspace = true,
         bool allowGitReadInsideWorkspace = true,
         bool allowConfirmedGitWriteInsideWorkspace = true,
         bool allowConfirmedGitMergeInsideWorkspace = true,
@@ -21,6 +22,7 @@ public sealed class CodingWorkspacePolicy
         WorkspaceRoot = NormalizeDirectory(workspaceRoot);
         AllowExplicitOutsideFileOpen = allowExplicitOutsideFileOpen;
         AllowConfirmedBuildTestRunInsideWorkspace = allowConfirmedBuildTestRunInsideWorkspace;
+        AllowConfirmedEditInsideWorkspace = allowConfirmedEditInsideWorkspace;
         AllowGitReadInsideWorkspace = allowGitReadInsideWorkspace;
         AllowConfirmedGitWriteInsideWorkspace = allowConfirmedGitWriteInsideWorkspace;
         AllowConfirmedGitMergeInsideWorkspace = allowConfirmedGitMergeInsideWorkspace;
@@ -32,6 +34,8 @@ public sealed class CodingWorkspacePolicy
     public bool AllowExplicitOutsideFileOpen { get; }
 
     public bool AllowConfirmedBuildTestRunInsideWorkspace { get; }
+
+    public bool AllowConfirmedEditInsideWorkspace { get; }
 
     public bool AllowGitReadInsideWorkspace { get; }
 
@@ -80,6 +84,11 @@ public sealed class CodingWorkspacePolicy
             return EvaluateBuildTestRun(WorkspaceRoot, request);
         }
 
+        if (IsEditAction(request.Action) && string.IsNullOrWhiteSpace(request.Path))
+        {
+            return CodingToolPermissionKind.Deny.AsPermission("A target file path is required for edit actions.");
+        }
+
         if (IsGitAction(request.Action) && string.IsNullOrWhiteSpace(request.Path))
         {
             return EvaluateGit(WorkspaceRoot, request);
@@ -112,6 +121,12 @@ public sealed class CodingWorkspacePolicy
 
             CodingToolAction.SearchWorkspace when insideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Searching inside the approved coding workspace is allowed."),
+
+            _ when IsEditAction(request.Action) && insideWorkspace =>
+                EvaluateEdit(request),
+
+            _ when IsEditAction(request.Action) =>
+                CodingToolPermissionKind.Deny.AsPermission("Edit/write actions are limited to the approved coding workspace."),
 
             CodingToolAction.OpenSolution when insideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Opening solutions inside the coding workspace is allowed."),
@@ -177,6 +192,23 @@ public sealed class CodingWorkspacePolicy
 
     private static bool IsBuildTestRun(CodingToolAction action) =>
         action is CodingToolAction.Build or CodingToolAction.Test or CodingToolAction.RunProject;
+
+    private CodingToolPermission EvaluateEdit(CodingToolRequest request)
+    {
+        if (!AllowConfirmedEditInsideWorkspace)
+        {
+            return CodingToolPermissionKind.Deny.AsPermission(
+                "Edit/write actions are disabled in coding permissions.");
+        }
+
+        return request.UserConfirmed
+            ? CodingToolPermissionKind.Allow.AsPermission("Confirmed edit/write action inside the approved coding workspace is allowed.")
+            : CodingToolPermissionKind.RequireConfirmation.AsPermission(
+                "Edit/write actions need an explicit confirmation phrase before changing files.");
+    }
+
+    private static bool IsEditAction(CodingToolAction action) =>
+        action is CodingToolAction.CreateFile or CodingToolAction.AppendFile or CodingToolAction.ReplaceText;
 
     private CodingToolPermission EvaluateGit(string fullPath, CodingToolRequest request)
     {

@@ -51,15 +51,20 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("permission service allows confirmed local build", TestPermissionAllowsConfirmedBuild),
     ("coding policy allows explicit file open outside workspace", TestCodingPolicyAllowsExplicitFileOpenOutsideWorkspace),
     ("coding policy can disable explicit outside file open", TestCodingPolicyCanDisableExplicitOutsideFileOpen),
+    ("coding policy gates confirmed workspace edits", TestCodingPolicyGatesConfirmedWorkspaceEdits),
     ("coding settings save and load", TestCodingSettingsSaveAndLoad),
     ("coding locator uses configured tool paths", TestCodingLocatorUsesConfiguredToolPaths),
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
+    ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
+    ("local coding tool handles guarded file edits", TestLocalCodingToolHandlesGuardedFileEdits),
+    ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
+    ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
     ("correction queue preserves exact question and answer", TestCorrectionQueuePreservesExactQuestionAndAnswer),
     ("endpoint policy allows loopback runtime", TestEndpointPolicyAllowsLoopback),
@@ -266,6 +271,44 @@ static Task TestCodingPolicyCanDisableExplicitOutsideFileOpen()
     return Task.CompletedTask;
 }
 
+static Task TestCodingPolicyGatesConfirmedWorkspaceEdits()
+{
+    var workspace = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"), "Programming Projects");
+    var insideFile = Path.Combine(workspace, "Program.cs");
+    var outsideFile = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"), "outside.cs");
+    var policy = new CodingWorkspacePolicy(workspace);
+
+    var needsConfirmation = policy.Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        insideFile,
+        Content: "class Demo { }"));
+    var confirmed = policy.Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        insideFile,
+        UserConfirmed: true,
+        Content: "class Demo { }"));
+    var outside = policy.Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        outsideFile,
+        UserConfirmed: true,
+        Content: "class Demo { }"));
+    var disabled = new CodingWorkspacePolicy(workspace, allowConfirmedEditInsideWorkspace: false)
+        .Evaluate(new CodingToolRequest(
+            CodingToolAction.CreateFile,
+            insideFile,
+            UserConfirmed: true,
+            Content: "class Demo { }"));
+
+    Equal(CodingToolPermissionKind.RequireConfirmation, needsConfirmation.Kind);
+    Contains("explicit confirmation", needsConfirmation.Reason);
+    Equal(CodingToolPermissionKind.Allow, confirmed.Kind);
+    Equal(CodingToolPermissionKind.Deny, outside.Kind);
+    Contains("approved coding workspace", outside.Reason);
+    Equal(CodingToolPermissionKind.Deny, disabled.Kind);
+    Contains("disabled", disabled.Reason);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingSettingsSaveAndLoad()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -312,6 +355,7 @@ static Task TestCodingSettingsSaveAndLoad()
     Equal(notepadPlusPlus, loaded.NotepadPlusPlusPath);
     Equal(visualStudio, loaded.VisualStudioPath);
     Equal(false, loaded.ToPolicy().AllowExplicitOutsideFileOpen);
+    Equal(false, loaded.ToPolicy().AllowConfirmedEditInsideWorkspace);
     Equal(false, loaded.ToPolicy().AllowGitNetworkOperations);
     return Task.CompletedTask;
 }
@@ -392,6 +436,31 @@ static Task TestCodingParserRoutesGuardedGitCommands()
     Equal(CodingToolAction.GitMerge, mergeRequest.Action);
     Equal("feature/coding-tools", mergeRequest.Query);
     Equal(true, mergeRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesGuardedFileEdits()
+{
+    var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Program.cs";
+
+    Equal(true, CodingToolRequestParser.TryParse($"confirm create file \"{path}\" with text \"class Demo {{ }}\"", out var createRequest));
+    Equal(CodingToolAction.CreateFile, createRequest.Action);
+    Equal(path, createRequest.Path);
+    Equal("class Demo { }", createRequest.Content);
+    Equal(true, createRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse($"confirm append to file \"{path}\" with text \" // done\"", out var appendRequest));
+    Equal(CodingToolAction.AppendFile, appendRequest.Action);
+    Equal(path, appendRequest.Path);
+    Equal(" // done", appendRequest.Content);
+    Equal(true, appendRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse($"confirm replace in file \"{path}\" \"Demo\" with \"Widget\"", out var replaceRequest));
+    Equal(CodingToolAction.ReplaceText, replaceRequest.Action);
+    Equal(path, replaceRequest.Path);
+    Equal("Demo", replaceRequest.Content);
+    Equal("Widget", replaceRequest.Replacement);
+    Equal(true, replaceRequest.UserConfirmed);
     return Task.CompletedTask;
 }
 
@@ -518,6 +587,90 @@ static async Task TestLocalCodingToolHandlesGuardedGitCommands()
     Equal("git", runner.Runs[0].FileName);
     Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
     Equal("commit -m Add guarded git tools", string.Join(" ", runner.Runs[1].Arguments));
+}
+
+static async Task TestLocalCodingToolHandlesGuardedFileEdits()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Demo", "Program.cs");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var needsConfirmation = await service.TryHandleAsync($"create file \"{filePath}\" with text \"class Demo {{ }}\"", CancellationToken.None);
+    Equal(true, needsConfirmation.Handled);
+    Equal(false, needsConfirmation.Succeeded);
+    Contains("needs confirmation", needsConfirmation.Message);
+    Equal(false, File.Exists(filePath));
+
+    var created = await service.TryHandleAsync($"confirm create file \"{filePath}\" with text \"class Demo {{ }}\"", CancellationToken.None);
+    Equal(true, created.Handled);
+    Equal(true, created.Succeeded);
+    Contains("Created file", created.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(filePath));
+
+    var appended = await service.TryHandleAsync($"confirm append to file \"{filePath}\" with text \" // done\"", CancellationToken.None);
+    Equal(true, appended.Handled);
+    Equal(true, appended.Succeeded);
+    Equal("class Demo { } // done", await File.ReadAllTextAsync(filePath));
+
+    var replaced = await service.TryHandleAsync($"confirm replace in file \"{filePath}\" \"Demo\" with \"Widget\"", CancellationToken.None);
+    Equal(true, replaced.Handled);
+    Equal(true, replaced.Succeeded);
+    Equal("class Widget { } // done", await File.ReadAllTextAsync(filePath));
+}
+
+static async Task TestLocalCodingToolRejectsAmbiguousFileEdits()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "alpha alpha");
+    var binaryPath = Path.Combine(workspace, "image.png");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var ambiguous = await service.TryHandleAsync($"confirm replace in file \"{filePath}\" \"alpha\" with \"beta\"", CancellationToken.None);
+    var binary = await service.TryHandleAsync($"confirm create file \"{binaryPath}\" with text \"not an image\"", CancellationToken.None);
+
+    Equal(true, ambiguous.Handled);
+    Equal(false, ambiguous.Succeeded);
+    Contains("found 2", ambiguous.Message);
+    Equal("alpha alpha", await File.ReadAllTextAsync(filePath));
+    Equal(true, binary.Handled);
+    Equal(false, binary.Succeeded);
+    Contains("text-like coding files", binary.Message);
+    Equal(false, File.Exists(binaryPath));
+}
+
+static async Task TestLocalCodingToolDeniesDisabledFileEdits()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+    service.UpdateSettings(new CodingToolSettings
+    {
+        WorkspaceRoot = workspace,
+        EditInsideWorkspaceMode = CodingPermissionModes.Disabled
+    });
+
+    var result = await service.TryHandleAsync($"confirm create file \"{filePath}\" with text \"class Demo {{ }}\"", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(false, result.Succeeded);
+    Contains("disabled", result.Message);
+    Equal(false, File.Exists(filePath));
 }
 
 static async Task TestOrchestratorHandlesExplicitCodingOpenRequest()

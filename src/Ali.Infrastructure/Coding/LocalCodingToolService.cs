@@ -15,6 +15,8 @@ public sealed class LocalCodingToolService(
     private const int MaxSearchMatches = 30;
     private const int MaxReadCharacters = 12_000;
     private const int MaxCommandOutputCharacters = 8_000;
+    private const int MaxEditContentCharacters = 20_000;
+    private const int MaxReplaceFileCharacters = 500_000;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(60);
     private static readonly string[] IgnoredDirectoryNames =
@@ -82,6 +84,8 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ListWorkspace => ListWorkspace(),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.CreateFile or CodingToolAction.AppendFile or CodingToolAction.ReplaceText =>
+                await EditFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenSolution => await OpenSolutionAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.Build or CodingToolAction.Test or CodingToolAction.RunProject =>
                 await RunDotNetCommandAsync(request, cancellationToken).ConfigureAwait(false),
@@ -220,6 +224,175 @@ public sealed class LocalCodingToolService(
             "File read",
             fullPath,
             request.LineNumber);
+    }
+
+    private async Task<CodingToolResult> EditFileAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CodingWorkspacePolicy.TryNormalizePath(request.Path ?? string.Empty, out var fullPath))
+        {
+            return new CodingToolResult(true, false, "Coding tool blocked: invalid edit file path.", "File edit");
+        }
+
+        if (!Policy.IsInsideWorkspace(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Coding tool blocked: edit target must be inside the approved coding workspace.",
+                "File edit",
+                fullPath);
+        }
+
+        if (!LooksTextReadable(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Coding tool blocked: only text-like coding files can be edited.",
+                "File edit",
+                fullPath);
+        }
+
+        return request.Action switch
+        {
+            CodingToolAction.CreateFile => await CreateFileAsync(fullPath, request.Content, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.AppendFile => await AppendFileAsync(fullPath, request.Content, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ReplaceText => await ReplaceTextAsync(fullPath, request.Content, request.Replacement, cancellationToken).ConfigureAwait(false),
+            _ => new CodingToolResult(true, false, "Coding tool blocked: unsupported file edit action.", "File edit", fullPath)
+        };
+    }
+
+    private static async Task<CodingToolResult> CreateFileAsync(
+        string fullPath,
+        string? content,
+        CancellationToken cancellationToken)
+    {
+        if (!ValidateEditContent(content, "New file content", out var error))
+        {
+            return new CodingToolResult(true, false, error, "File create", fullPath);
+        }
+
+        if (File.Exists(fullPath) || Directory.Exists(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: create file will not overwrite an existing path: {fullPath}",
+                "File create",
+                fullPath);
+        }
+
+        var directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return new CodingToolResult(true, false, "Coding tool blocked: create file needs a parent directory.", "File create", fullPath);
+        }
+
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(fullPath, content!, cancellationToken).ConfigureAwait(false);
+        return new CodingToolResult(
+            true,
+            true,
+            $"Created file: {fullPath}{Environment.NewLine}Wrote {content!.Length} character(s).",
+            "File create",
+            fullPath);
+    }
+
+    private static async Task<CodingToolResult> AppendFileAsync(
+        string fullPath,
+        string? content,
+        CancellationToken cancellationToken)
+    {
+        if (!ValidateEditContent(content, "Append content", out var error))
+        {
+            return new CodingToolResult(true, false, error, "File append", fullPath);
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: append target does not exist. Create the file first: {fullPath}",
+                "File append",
+                fullPath);
+        }
+
+        await File.AppendAllTextAsync(fullPath, content!, cancellationToken).ConfigureAwait(false);
+        return new CodingToolResult(
+            true,
+            true,
+            $"Appended to file: {fullPath}{Environment.NewLine}Added {content!.Length} character(s).",
+            "File append",
+            fullPath);
+    }
+
+    private static async Task<CodingToolResult> ReplaceTextAsync(
+        string fullPath,
+        string? oldText,
+        string? newText,
+        CancellationToken cancellationToken)
+    {
+        if (!ValidateEditContent(oldText, "Text to replace", out var oldTextError))
+        {
+            return new CodingToolResult(true, false, oldTextError, "File replace", fullPath);
+        }
+
+        if (oldText!.Length == 0)
+        {
+            return new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", "File replace", fullPath);
+        }
+
+        if (!ValidateEditContent(newText, "Replacement text", out var newTextError))
+        {
+            return new CodingToolResult(true, false, newTextError, "File replace", fullPath);
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: replace target does not exist: {fullPath}",
+                "File replace",
+                fullPath);
+        }
+
+        var fileInfo = new FileInfo(fullPath);
+        if (fileInfo.Length > MaxReplaceFileCharacters)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: replace target is too large for a safe literal edit ({fileInfo.Length} bytes).",
+                "File replace",
+                fullPath);
+        }
+
+        var existing = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
+        var count = CountOrdinalOccurrences(existing, oldText);
+        if (count != 1)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: literal replacement expected exactly one match but found {count}.",
+                "File replace",
+                fullPath);
+        }
+
+        var index = existing.IndexOf(oldText, StringComparison.Ordinal);
+        var updated = existing.Remove(index, oldText.Length).Insert(index, newText!);
+        await File.WriteAllTextAsync(fullPath, updated, cancellationToken).ConfigureAwait(false);
+        return new CodingToolResult(
+            true,
+            true,
+            $"Replaced text in file: {fullPath}{Environment.NewLine}Changed one literal match.",
+            "File replace",
+            fullPath);
     }
 
     private Task<CodingToolResult> OpenFileAsync(
@@ -404,6 +577,8 @@ public sealed class LocalCodingToolService(
             request.ExplicitUserPath,
             request.UserConfirmed,
             request.Query,
+            contentLength = request.Content?.Length,
+            replacementLength = request.Replacement?.Length,
             permission = permission.Kind.ToString(),
             permission.Reason,
             result.Succeeded,
@@ -734,6 +909,48 @@ public sealed class LocalCodingToolService(
                || extension.Equals(".yaml", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".props", StringComparison.OrdinalIgnoreCase)
                || extension.Equals(".targets", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ValidateEditContent(string? content, string label, out string error)
+    {
+        error = string.Empty;
+        if (content is null)
+        {
+            error = $"Coding tool blocked: {label} is required.";
+            return false;
+        }
+
+        if (content.Length > MaxEditContentCharacters)
+        {
+            error = $"Coding tool blocked: {label} is too large for a single safe edit ({content.Length} character(s)).";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static int CountOrdinalOccurrences(string text, string value)
+    {
+        if (value.Length == 0)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        var searchIndex = 0;
+        while (searchIndex < text.Length)
+        {
+            var index = text.IndexOf(value, searchIndex, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                break;
+            }
+
+            count++;
+            searchIndex = index + value.Length;
+        }
+
+        return count;
     }
 
     private static string TrimForChat(string text, int maxCharacters)

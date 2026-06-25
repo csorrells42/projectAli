@@ -48,6 +48,27 @@ public static class CodingToolRequestParser
         "inspect this file "
     ];
 
+    private static readonly string[] CreateFilePrefixes =
+    [
+        "create file ",
+        "create new file ",
+        "write file ",
+        "write new file "
+    ];
+
+    private static readonly string[] AppendFilePrefixes =
+    [
+        "append to file ",
+        "append file "
+    ];
+
+    private static readonly string[] ReplaceTextPrefixes =
+    [
+        "replace in file ",
+        "replace text in file ",
+        "replace literal in file "
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -124,6 +145,11 @@ public static class CodingToolRequestParser
         }
 
         if (TryParseRead(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
         }
@@ -227,6 +253,64 @@ public static class CodingToolRequestParser
             lineNumber,
             ExplicitUserPath: true,
             UserConfirmed: userConfirmed);
+        return true;
+    }
+
+    private static bool TryParseFileEdit(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (TryParseTextWrite(text, CreateFilePrefixes, CodingToolAction.CreateFile, userConfirmed, out request)
+            || TryParseTextWrite(text, AppendFilePrefixes, CodingToolAction.AppendFile, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (!StartsWithAny(text, ReplaceTextPrefixes))
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count < 3 || string.IsNullOrWhiteSpace(segments[0]))
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.ReplaceText,
+            segments[0].Trim(),
+            ExplicitUserPath: true,
+            UserConfirmed: userConfirmed,
+            Content: segments[1],
+            Replacement: segments[2]);
+        return true;
+    }
+
+    private static bool TryParseTextWrite(
+        string text,
+        IReadOnlyList<string> prefixes,
+        CodingToolAction action,
+        bool userConfirmed,
+        out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (!StartsWithAny(text, prefixes))
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count < 2 || string.IsNullOrWhiteSpace(segments[0]))
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            action,
+            segments[0].Trim(),
+            ExplicitUserPath: true,
+            UserConfirmed: userConfirmed,
+            Content: segments[1]);
         return true;
     }
 
@@ -455,6 +539,31 @@ public static class CodingToolRequestParser
 
         path = text.Substring(firstQuote + 1, secondQuote - firstQuote - 1).Trim();
         return path.Length > 0;
+    }
+
+    private static IReadOnlyList<string> ExtractQuotedSegments(string text)
+    {
+        var segments = new List<string>();
+        var searchIndex = 0;
+        while (searchIndex < text.Length)
+        {
+            var firstQuote = text.IndexOf('"', searchIndex);
+            if (firstQuote < 0)
+            {
+                break;
+            }
+
+            var secondQuote = text.IndexOf('"', firstQuote + 1);
+            if (secondQuote < 0)
+            {
+                break;
+            }
+
+            segments.Add(text.Substring(firstQuote + 1, secondQuote - firstQuote - 1));
+            searchIndex = secondQuote + 1;
+        }
+
+        return segments;
     }
 
     private static int FindDrivePathStart(string text)

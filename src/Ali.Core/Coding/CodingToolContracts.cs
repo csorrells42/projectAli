@@ -8,6 +8,9 @@ public enum CodingToolAction
     ListWorkspace,
     SearchWorkspace,
     ReadFile,
+    CreateFile,
+    AppendFile,
+    ReplaceText,
     Build,
     Test,
     RunProject,
@@ -34,7 +37,9 @@ public sealed record CodingToolRequest(
     int? LineNumber = null,
     bool ExplicitUserPath = false,
     bool UserConfirmed = false,
-    string? Query = null);
+    string? Query = null,
+    string? Content = null,
+    string? Replacement = null);
 
 public sealed record CodingToolPermission(
     CodingToolPermissionKind Kind,

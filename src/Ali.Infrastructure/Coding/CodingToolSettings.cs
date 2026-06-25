@@ -42,6 +42,7 @@ public sealed record CodingToolSettings
             WorkspaceRoot,
             AllowExplicitOutsideFileOpen && !CodingPermissionModes.IsDisabled(ExplicitOutsideFileOpenMode),
             !CodingPermissionModes.IsDisabled(BuildTestRunInsideWorkspaceMode),
+            !CodingPermissionModes.IsDisabled(EditInsideWorkspaceMode),
             !CodingPermissionModes.IsDisabled(GitReadMode),
             !CodingPermissionModes.IsDisabled(GitWriteMode),
             !CodingPermissionModes.IsDisabled(GitMergeMode),
