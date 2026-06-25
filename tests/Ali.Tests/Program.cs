@@ -65,6 +65,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
+    ("local coding tool summarizes dotnet diagnostics", TestLocalCodingToolSummarizesDotNetDiagnostics),
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
@@ -674,6 +675,34 @@ static async Task TestLocalCodingToolRequiresConfirmationBeforeBuild()
     Equal("dotnet", runner.Runs[0].FileName);
     Contains("build", string.Join(" ", runner.Runs[0].Arguments));
     Contains("--no-restore", string.Join(" ", runner.Runs[0].Arguments));
+}
+
+static async Task TestLocalCodingToolSummarizesDotNetDiagnostics()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var sourcePath = Path.Combine(workspace, "Widget.cs");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(sourcePath, "class Widget");
+    var diagnosticLine = $"{sourcePath}(12,5): error CS1002: ; expected [{projectPath}]";
+    var output = $"Build started.{Environment.NewLine}{diagnosticLine}{Environment.NewLine}Build FAILED.";
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(1, string.Empty, output, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync($"confirm dotnet build \"{projectPath}\"", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(false, result.Succeeded);
+    Contains("Build failed with exit code 1", result.Message);
+    Contains("Diagnostic summary:", result.Message);
+    Contains(diagnosticLine, result.Message);
+    Equal(1, runner.Runs.Count);
 }
 
 static async Task TestLocalCodingToolRequiresConfirmationBeforeRestore()

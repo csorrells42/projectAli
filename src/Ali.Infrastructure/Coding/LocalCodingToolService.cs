@@ -16,6 +16,7 @@ public sealed class LocalCodingToolService(
     private const int MaxSearchMatches = 30;
     private const int MaxReadCharacters = 12_000;
     private const int MaxCommandOutputCharacters = 8_000;
+    private const int MaxDiagnosticLines = 12;
     private const int MaxEditContentCharacters = 20_000;
     private const int MaxReplaceFileCharacters = 500_000;
     private const int MaxWorkspaceSummaryEntries = 20;
@@ -634,10 +635,14 @@ public sealed class LocalCodingToolService(
                 ? $"{verb} passed."
                 : $"{verb} failed with exit code {run.ExitCode}.";
         var commandLine = $"dotnet {string.Join(" ", arguments)}";
+        var diagnosticSummary = BuildDotNetDiagnosticSummary(request.Action, run, output);
+        var outputBlock = string.IsNullOrWhiteSpace(diagnosticSummary)
+            ? TrimForChat(output, MaxCommandOutputCharacters)
+            : $"{diagnosticSummary}{Environment.NewLine}{TrimForChat(output, MaxCommandOutputCharacters)}";
         return new CodingToolResult(
             true,
             run.ExitCode == 0 && !run.TimedOut,
-            $"{status}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{TrimForChat(output, MaxCommandOutputCharacters)}",
+            $"{status}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{outputBlock}",
             "dotnet",
             targetPath,
             ExitCode: run.ExitCode);
@@ -1226,6 +1231,75 @@ public sealed class LocalCodingToolService(
         return string.IsNullOrWhiteSpace(output)
             ? "No command output."
             : output.Trim();
+    }
+
+    private static string BuildDotNetDiagnosticSummary(
+        CodingToolAction action,
+        CodingCommandRun run,
+        string output)
+    {
+        if (run.ExitCode == 0 && !run.TimedOut)
+        {
+            return string.Empty;
+        }
+
+        var diagnostics = new List<string>();
+        foreach (var line in output.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!LooksLikeDotNetDiagnostic(action, line))
+            {
+                continue;
+            }
+
+            var trimmed = TrimForChat(line.Trim(), 360);
+            if (diagnostics.Any(existing => existing.Equals(trimmed, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            diagnostics.Add(trimmed);
+            if (diagnostics.Count >= MaxDiagnosticLines)
+            {
+                break;
+            }
+        }
+
+        if (diagnostics.Count == 0)
+        {
+            return "Diagnostic summary: No structured diagnostic lines were detected. Raw command output follows.";
+        }
+
+        return "Diagnostic summary:"
+               + Environment.NewLine
+               + string.Join(Environment.NewLine, diagnostics.Select(diagnostic => $"- {diagnostic}"));
+    }
+
+    private static bool LooksLikeDotNetDiagnostic(CodingToolAction action, string line)
+    {
+        var trimmed = line.Trim();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        if (trimmed.Contains(": error ", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains(": warning ", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("error ", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("warning ", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (action != CodingToolAction.Test)
+        {
+            return false;
+        }
+
+        return trimmed.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("Error Message:", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("Stack Trace:", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains(" Assert.", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains("Exception:", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool ShouldSkipPath(string path)
