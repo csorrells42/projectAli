@@ -158,6 +158,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.OpenWorkspace => await OpenWorkspaceAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListWorkspace => ListWorkspace(),
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
+            CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
@@ -485,6 +486,10 @@ public sealed class LocalCodingToolService(
         var inspection = InspectWorkspace();
         lines.Add(TrimForChat(inspection.Message, 8_000));
         lines.Add(string.Empty);
+        lines.Add("Solution Architecture");
+        var architecture = AnalyzeArchitecture();
+        lines.Add(TrimForChat(architecture.Message, 8_000));
+        lines.Add(string.Empty);
         lines.Add("Recent Coding Receipts");
         lines.Add(TrimForChat(ShowReceipts().Message, 8_000));
         lines.Add(string.Empty);
@@ -520,6 +525,7 @@ public sealed class LocalCodingToolService(
         lines.Add(string.Empty);
         lines.Add("Next Safe Commands");
         lines.Add("- inspect coding workspace");
+        lines.Add("- analyze solution architecture");
         lines.Add("- plan coding task <goal>");
         lines.Add("- preview replace in file \"path\" \"old text\" with \"new text\"");
         lines.Add("- preview patch bundle");
@@ -652,6 +658,107 @@ public sealed class LocalCodingToolService(
             true,
             string.Join(Environment.NewLine, lines),
             "Workspace inspection",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult AnalyzeArchitecture()
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding workspace does not exist yet: {Policy.WorkspaceRoot}",
+                "Architecture analysis",
+                Policy.WorkspaceRoot);
+        }
+
+        var files = EnumerateWorkspaceFiles().Take(10_000).ToList();
+        var solutions = files
+            .Where(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var projects = files
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var summaries = projects
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadProjectSummary)
+            .ToList();
+
+        var lines = new List<string>
+        {
+            $"Solution architecture analysis: {Policy.WorkspaceRoot}",
+            "No files were changed.",
+            $"Solutions found: {solutions.Count}",
+            $"Projects found: {projects.Count}",
+            $"Files scanned: {files.Count}"
+        };
+
+        AddPathSection(lines, "Solution files", solutions);
+        if (summaries.Count > 0)
+        {
+            lines.Add("Project map:");
+            foreach (var summary in summaries)
+            {
+                lines.Add($"- {summary.RelativePath}");
+                lines.Add(summary.TargetFrameworks.Count == 0
+                    ? "  Targets: not declared"
+                    : $"  Targets: {string.Join(", ", summary.TargetFrameworks)}");
+                lines.Add($"  Source files: {summary.CSharpSourceCount} C#, {summary.XamlFileCount} XAML, {summary.JsonFileCount} JSON/config");
+
+                if (summary.ProjectReferences.Count > 0)
+                {
+                    lines.Add($"  Project references: {string.Join(", ", summary.ProjectReferences.Take(8))}");
+                    if (summary.ProjectReferences.Count > 8)
+                    {
+                        lines.Add($"  ...{summary.ProjectReferences.Count - 8} more project reference(s) omitted.");
+                    }
+                }
+                else
+                {
+                    lines.Add("  Project references: none declared");
+                }
+
+                if (summary.PackageReferences.Count > 0)
+                {
+                    lines.Add($"  Package references: {string.Join(", ", summary.PackageReferences.Take(8))}");
+                    if (summary.PackageReferences.Count > 8)
+                    {
+                        lines.Add($"  ...{summary.PackageReferences.Count - 8} more package reference(s) omitted.");
+                    }
+                }
+                else
+                {
+                    lines.Add("  Package references: none declared");
+                }
+
+                if (!string.IsNullOrWhiteSpace(summary.Warning))
+                {
+                    lines.Add($"  Warning: {summary.Warning}");
+                }
+            }
+        }
+
+        if (projects.Count > MaxWorkspaceSummaryEntries)
+        {
+            lines.Add($"...{projects.Count - MaxWorkspaceSummaryEntries} more project file(s) omitted.");
+        }
+
+        lines.Add("Suggested guarded next steps:");
+        lines.Add("- open solution");
+        lines.Add("- list packages");
+        lines.Add("- confirm dotnet build \"path\"");
+        lines.Add("- diagnose last build failure");
+        lines.Add("- generate coding report");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Architecture analysis",
             Policy.WorkspaceRoot);
     }
 
@@ -1864,6 +1971,11 @@ public sealed class LocalCodingToolService(
                 lines.Add($"  Packages: {string.Join(", ", summary.PackageReferences.Take(8))}");
             }
 
+            if (summary.ProjectReferences.Count > 0)
+            {
+                lines.Add($"  Project refs: {string.Join(", ", summary.ProjectReferences.Take(8))}");
+            }
+
             if (!string.IsNullOrWhiteSpace(summary.Warning))
             {
                 lines.Add($"  Warning: {summary.Warning}");
@@ -1898,20 +2010,41 @@ public sealed class LocalCodingToolService(
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            var projectReferences = document
+                .Descendants()
+                .Where(element => element.Name.LocalName == "ProjectReference")
+                .Select(element => FormatProjectReference(projectFile, element))
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var projectDirectory = Path.GetDirectoryName(projectFile) ?? Policy.WorkspaceRoot;
+            var csharpSourceCount = CountProjectFiles(projectDirectory, ".cs");
+            var xamlFileCount = CountProjectFiles(projectDirectory, ".xaml");
+            var jsonFileCount = CountProjectFiles(projectDirectory, ".json");
 
-            return new ProjectSummary(relativePath, targetFrameworks, packageReferences, Warning: null);
+            return new ProjectSummary(
+                relativePath,
+                targetFrameworks,
+                packageReferences,
+                projectReferences,
+                csharpSourceCount,
+                xamlFileCount,
+                jsonFileCount,
+                Warning: null);
         }
         catch (IOException ex)
         {
-            return new ProjectSummary(relativePath, [], [], ex.Message);
+            return ProjectSummary.WithWarning(relativePath, ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new ProjectSummary(relativePath, [], [], ex.Message);
+            return ProjectSummary.WithWarning(relativePath, ex.Message);
         }
         catch (System.Xml.XmlException ex)
         {
-            return new ProjectSummary(relativePath, [], [], ex.Message);
+            return ProjectSummary.WithWarning(relativePath, ex.Message);
         }
     }
 
@@ -1943,6 +2076,45 @@ public sealed class LocalCodingToolService(
         return string.IsNullOrWhiteSpace(version)
             ? id.Trim()
             : $"{id.Trim()} {version.Trim()}";
+    }
+
+    private string? FormatProjectReference(string projectFile, XElement element)
+    {
+        var include = element.Attribute("Include")?.Value;
+        if (string.IsNullOrWhiteSpace(include))
+        {
+            return null;
+        }
+
+        var projectDirectory = Path.GetDirectoryName(projectFile) ?? Policy.WorkspaceRoot;
+        try
+        {
+            var referencedPath = Path.GetFullPath(Path.Combine(projectDirectory, include.Trim()));
+            return Policy.IsInsideWorkspace(referencedPath)
+                ? RelativeToWorkspace(referencedPath)
+                : include.Trim();
+        }
+        catch
+        {
+            return include.Trim();
+        }
+    }
+
+    private static int CountProjectFiles(string projectDirectory, string extension)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(projectDirectory, "*" + extension, SearchOption.AllDirectories)
+                .Count(file => !HasSkippedPathSegment(file));
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     private static void SearchFile(string file, string query, List<string> matches)
@@ -2740,6 +2912,14 @@ public sealed class LocalCodingToolService(
         return IgnoredDirectoryNames.Any(ignored => ignored.Equals(name, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool HasSkippedPathSegment(string path)
+    {
+        var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+        return path
+            .Split(separators, StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => IgnoredDirectoryNames.Any(ignored => ignored.Equals(segment, StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static bool LooksTextReadable(string file)
     {
         var extension = Path.GetExtension(file);
@@ -2952,7 +3132,15 @@ public sealed class LocalCodingToolService(
         string RelativePath,
         IReadOnlyList<string> TargetFrameworks,
         IReadOnlyList<string> PackageReferences,
-        string? Warning);
+        IReadOnlyList<string> ProjectReferences,
+        int CSharpSourceCount,
+        int XamlFileCount,
+        int JsonFileCount,
+        string? Warning)
+    {
+        public static ProjectSummary WithWarning(string relativePath, string warning) =>
+            new(relativePath, [], [], [], 0, 0, 0, warning);
+    }
 
     private sealed record DiagnosticFileReference(
         string Path,

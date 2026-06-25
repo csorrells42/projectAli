@@ -110,6 +110,7 @@ Useful commands:
 
 - `inspect coding workspace`
 - `show project map`
+- `analyze solution architecture`
 - `list packages`
 - `search workspace for WidgetFactory`
 - `read file "C:\path\to\file.cs" at line 42`
@@ -161,6 +162,8 @@ Git workflow:
 Ali does not silently change files, run builds, restore packages, or write Git history. Tool results are recorded as coding receipts so Ali can report what actually happened.
 
 Use `generate coding report` to export a local PDF summary of the current coding workspace, recent coding receipts, pending patch preview state, and last failed dotnet command if one is stored. The report is saved in Ali's generated documents folder.
+
+Visual Studio integration in this build is launch/configuration integration, not an in-Visual-Studio extension. Ali can open the configured solution in Visual Studio and inspect the project architecture from chat commands. A graphical Visual Studio panel or sidebar is a future extension phase.
 
 ## Voice
 

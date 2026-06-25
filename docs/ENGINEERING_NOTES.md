@@ -104,7 +104,7 @@ For explicit coding commands, Ali handles the request deterministically before c
 
 Current deterministic command groups:
 
-- Workspace: open/list/inspect approved coding workspace.
+- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis.
 - Read/search: open file, read file, search workspace.
 - Planning: build a guarded coding task plan.
 - Packages: list package references and confirmed outdated checks.
@@ -116,6 +116,8 @@ Current deterministic command groups:
 - Reports: simple local text PDF generation and coding session report PDF generation into Ali's generated documents folder.
 
 The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow multiple files, but only one edit per file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
+
+Visual Studio integration is currently external process launch plus configurable tool discovery. Ali does not yet install a Visual Studio extension, in-IDE tool window, or graphical architecture panel.
 
 ## Bootstrap Storage
 

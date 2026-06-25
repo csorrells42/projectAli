@@ -56,6 +56,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding locator uses configured tool paths", TestCodingLocatorUsesConfiguredToolPaths),
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
+    ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes last diagnostic open", TestCodingParserRoutesLastDiagnosticOpen),
@@ -77,6 +78,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool generates coding report PDF", TestLocalCodingToolGeneratesCodingReportPdf),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
+    ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
     ("local coding tool summarizes dotnet diagnostics", TestLocalCodingToolSummarizesDotNetDiagnostics),
@@ -428,6 +430,16 @@ static Task TestCodingParserRoutesWorkspaceInspection()
 
     Equal(true, CodingToolRequestParser.TryParse("show project map", out var mapRequest));
     Equal(CodingToolAction.InspectWorkspace, mapRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesArchitectureAnalysis()
+{
+    Equal(true, CodingToolRequestParser.TryParse("analyze solution architecture", out var analyzeRequest));
+    Equal(CodingToolAction.AnalyzeArchitecture, analyzeRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show architecture map", out var mapRequest));
+    Equal(CodingToolAction.AnalyzeArchitecture, mapRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -829,6 +841,7 @@ static async Task TestLocalCodingToolGeneratesCodingReportPdf()
     Contains("%PDF-1.4", text);
     Contains("Ali Coding Session Report", text);
     Contains("Workspace root:", text);
+    Contains("Solution Architecture", text);
     Contains("Recent Coding Receipts", text);
     Contains("InspectWorkspace", text);
     Contains("%%EOF", text);
@@ -902,6 +915,64 @@ static async Task TestLocalCodingToolInspectsWorkspaceProjectMap()
     Contains("net10.0", result.Message);
     Contains("CommunityToolkit.Mvvm", result.Message);
     Contains(Path.Combine("Demo", "Program.cs"), result.Message);
+}
+
+static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+
+    var coreDirectory = Path.Combine(workspace, "Demo.Core");
+    Directory.CreateDirectory(coreDirectory);
+    var coreProject = Path.Combine(coreDirectory, "Demo.Core.csproj");
+    await File.WriteAllTextAsync(
+        coreProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(coreDirectory, "Widget.cs"), "namespace Demo.Core; public sealed class Widget { }");
+
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    var appProject = Path.Combine(appDirectory, "Demo.App.csproj");
+    await File.WriteAllTextAsync(
+        appProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <ProjectReference Include="..\Demo.Core\Demo.Core.csproj" />
+            <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "MainWindow.xaml"), "<Window />");
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "MainWindow.xaml.cs"), "namespace Demo.App; public sealed class MainWindow { }");
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+
+    var result = await service.TryHandleAsync("analyze solution architecture", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Solution architecture analysis", result.Message);
+    Contains("No files were changed", result.Message);
+    Contains("Solutions found: 1", result.Message);
+    Contains("Projects found: 2", result.Message);
+    Contains(Path.Combine("Demo.App", "Demo.App.csproj"), result.Message);
+    Contains("Targets: net10.0-windows", result.Message);
+    Contains("Source files: 1 C#, 1 XAML", result.Message);
+    Contains(Path.Combine("Demo.Core", "Demo.Core.csproj"), result.Message);
+    Contains("CommunityToolkit.Mvvm 8.4.0", result.Message);
+    Contains("Suggested guarded next steps", result.Message);
 }
 
 static async Task TestLocalCodingToolListsPackageReferences()

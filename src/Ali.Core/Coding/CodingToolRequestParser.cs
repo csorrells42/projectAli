@@ -187,6 +187,21 @@ public static class CodingToolRequestParser
         "list projects"
     ];
 
+    private static readonly string[] AnalyzeArchitectureRequests =
+    [
+        "analyze solution architecture",
+        "analyze project architecture",
+        "analyze coding architecture",
+        "inspect solution architecture",
+        "inspect project architecture",
+        "show solution architecture",
+        "show project architecture",
+        "show architecture map",
+        "architecture map",
+        "solution architecture",
+        "project architecture"
+    ];
+
     private static readonly string[] PlanTaskPrefixes =
     [
         "plan coding task",
@@ -342,6 +357,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsAnalyzeArchitectureRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.AnalyzeArchitecture, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsOpenSolutionRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.OpenSolution, null, UserConfirmed: userConfirmed);
@@ -465,6 +486,9 @@ public static class CodingToolRequestParser
 
     private static bool IsInspectWorkspaceRequest(string text) =>
         InspectWorkspaceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsAnalyzeArchitectureRequest(string text) =>
+        AnalyzeArchitectureRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsOpenSolutionRequest(string text) =>
         OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

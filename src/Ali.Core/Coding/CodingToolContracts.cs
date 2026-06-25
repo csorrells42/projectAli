@@ -7,6 +7,7 @@ public enum CodingToolAction
     OpenWorkspace,
     ListWorkspace,
     InspectWorkspace,
+    AnalyzeArchitecture,
     PlanTask,
     ShowReceipts,
     GeneratePdf,
