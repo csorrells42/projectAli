@@ -166,6 +166,8 @@ public sealed class LocalCodingToolService(
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PreviewReplaceText => await PreviewReplaceTextAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowLastPatchPreview => await ShowLastPatchPreviewAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.DiscardLastPatchPreview => DiscardLastPatchPreview(),
             CodingToolAction.ApplyLastPatchPreview => await ApplyLastPatchPreviewAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.CreateFile or CodingToolAction.AppendFile or CodingToolAction.ReplaceText =>
                 await EditFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -802,6 +804,57 @@ public sealed class LocalCodingToolService(
                 Message = $"Last patch preview was not applied.{Environment.NewLine}{result.Message}",
                 ToolName = "Patch preview apply"
             };
+    }
+
+    private async Task<CodingToolResult> ShowLastPatchPreviewAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lastPatchPreviewRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No patch preview is waiting to be applied.",
+                "Pending patch preview");
+        }
+
+        var preview = await PreviewReplaceTextAsync(_lastPatchPreviewRequest, cancellationToken).ConfigureAwait(false);
+        if (!preview.Succeeded)
+        {
+            _lastPatchPreviewRequest = null;
+            return preview with
+            {
+                Message = $"Pending patch preview is no longer valid and was discarded.{Environment.NewLine}{preview.Message}",
+                ToolName = "Pending patch preview"
+            };
+        }
+
+        return preview with
+        {
+            Message = $"Pending patch preview is still valid.{Environment.NewLine}{preview.Message}",
+            ToolName = "Pending patch preview"
+        };
+    }
+
+    private CodingToolResult DiscardLastPatchPreview()
+    {
+        if (_lastPatchPreviewRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No pending patch preview was waiting to be discarded.",
+                "Pending patch preview");
+        }
+
+        var path = _lastPatchPreviewRequest.Path;
+        _lastPatchPreviewRequest = null;
+        return new CodingToolResult(
+            true,
+            true,
+            $"Discarded pending patch preview. No files were changed.{Environment.NewLine}Target: {path}",
+            "Pending patch preview",
+            path);
     }
 
     private static async Task<CodingToolResult> CreateFileAsync(

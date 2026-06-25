@@ -19,6 +19,8 @@ public enum CodingToolAction
     CreateFile,
     AppendFile,
     PreviewReplaceText,
+    ShowLastPatchPreview,
+    DiscardLastPatchPreview,
     ApplyLastPatchPreview,
     ReplaceText,
     Build,

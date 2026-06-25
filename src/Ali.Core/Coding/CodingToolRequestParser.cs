@@ -116,6 +116,30 @@ public static class CodingToolRequestParser
         "apply the preview"
     ];
 
+    private static readonly string[] ShowLastPatchPreviewRequests =
+    [
+        "show last patch preview",
+        "show the last patch preview",
+        "show pending patch preview",
+        "show the pending patch preview",
+        "show pending patch",
+        "show the pending patch",
+        "what patch is pending",
+        "what is the pending patch"
+    ];
+
+    private static readonly string[] DiscardLastPatchPreviewRequests =
+    [
+        "discard last patch preview",
+        "discard the last patch preview",
+        "discard pending patch preview",
+        "discard the pending patch preview",
+        "clear last patch preview",
+        "clear the last patch preview",
+        "clear pending patch",
+        "clear the pending patch"
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -343,6 +367,18 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsShowLastPatchPreviewRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowLastPatchPreview, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDiscardLastPatchPreviewRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DiscardLastPatchPreview, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsApplyLastPatchPreviewRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ApplyLastPatchPreview, null, UserConfirmed: userConfirmed);
@@ -407,6 +443,12 @@ public static class CodingToolRequestParser
 
     private static bool IsDiagnoseLastFailureRequest(string text) =>
         DiagnoseLastFailureRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowLastPatchPreviewRequest(string text) =>
+        ShowLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDiscardLastPatchPreviewRequest(string text) =>
+        DiscardLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsApplyLastPatchPreviewRequest(string text) =>
         ApplyLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

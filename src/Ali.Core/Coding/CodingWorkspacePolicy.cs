@@ -106,6 +106,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Opening the last diagnostic file is a read/open action and is limited to the approved workspace.");
         }
 
+        if (request.Action is CodingToolAction.ShowLastPatchPreview or CodingToolAction.DiscardLastPatchPreview)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Showing or discarding a pending patch preview is local state management and does not change files.");
+        }
+
         if (request.Action == CodingToolAction.DiagnoseLastFailure)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Diagnosing the last dotnet failure is read-only and allowed.");

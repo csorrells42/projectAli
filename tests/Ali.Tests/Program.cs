@@ -65,6 +65,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
     ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
+    ("coding parser routes patch preview state", TestCodingParserRoutesPatchPreviewState),
     ("coding parser routes apply last patch preview", TestCodingParserRoutesApplyLastPatchPreview),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
@@ -82,6 +83,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
+    ("local coding tool manages pending patch preview", TestLocalCodingToolManagesPendingPatchPreview),
     ("local coding tool applies last patch preview", TestLocalCodingToolAppliesLastPatchPreview),
     ("local coding tool handles guarded file edits", TestLocalCodingToolHandlesGuardedFileEdits),
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
@@ -588,6 +590,16 @@ static Task TestCodingParserRoutesGuardedFileEdits()
     Equal("Widget", previewRequest.Content);
     Equal("Gadget", previewRequest.Replacement);
     Equal(false, previewRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesPatchPreviewState()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show pending patch preview", out var showRequest));
+    Equal(CodingToolAction.ShowLastPatchPreview, showRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("discard pending patch preview", out var discardRequest));
+    Equal(CodingToolAction.DiscardLastPatchPreview, discardRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -1128,6 +1140,59 @@ static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
     Equal("class Demo { }", afterPreview);
     Equal(true, applied.Succeeded);
     Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
+}
+
+static async Task TestLocalCodingToolManagesPendingPatchPreview()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "class Demo { }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var emptyShow = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
+    var preview = await service.TryHandleAsync($"preview replace in file \"{filePath}\" \"Demo\" with \"Widget\"", CancellationToken.None);
+    var show = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
+    var discard = await service.TryHandleAsync("discard pending patch preview", CancellationToken.None);
+    var applyAfterDiscard = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, emptyShow.Handled);
+    Equal(true, emptyShow.Succeeded);
+    Contains("No patch preview", emptyShow.Message);
+    Equal(true, preview.Succeeded);
+    Equal(true, show.Handled);
+    Equal(true, show.Succeeded);
+    Contains("Pending patch preview is still valid", show.Message);
+    Contains("class Demo", show.Message);
+    Contains("class Widget", show.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(filePath));
+    Equal(true, discard.Handled);
+    Equal(true, discard.Succeeded);
+    Contains("Discarded pending patch preview", discard.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(filePath));
+    Equal(true, applyAfterDiscard.Handled);
+    Equal(false, applyAfterDiscard.Succeeded);
+    Contains("No patch preview", applyAfterDiscard.Message);
+
+    var stalePath = Path.Combine(workspace, "Stale.cs");
+    await File.WriteAllTextAsync(stalePath, "class Stale { }");
+    var stalePreview = await service.TryHandleAsync($"preview replace in file \"{stalePath}\" \"Stale\" with \"Fresh\"", CancellationToken.None);
+    await File.WriteAllTextAsync(stalePath, "class Changed { }");
+    var staleShow = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
+    var staleApply = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, stalePreview.Succeeded);
+    Equal(true, staleShow.Handled);
+    Equal(false, staleShow.Succeeded);
+    Contains("no longer valid", staleShow.Message);
+    Equal("class Changed { }", await File.ReadAllTextAsync(stalePath));
+    Equal(true, staleApply.Handled);
+    Equal(false, staleApply.Succeeded);
+    Contains("No patch preview", staleApply.Message);
 }
 
 static async Task TestLocalCodingToolAppliesLastPatchPreview()
