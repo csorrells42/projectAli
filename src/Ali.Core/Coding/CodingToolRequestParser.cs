@@ -104,6 +104,18 @@ public static class CodingToolRequestParser
         "write a pdf "
     ];
 
+    private static readonly string[] ApplyLastPatchPreviewRequests =
+    [
+        "apply last patch preview",
+        "apply the last patch preview",
+        "apply patch preview",
+        "apply the patch preview",
+        "apply last preview",
+        "apply the last preview",
+        "apply preview",
+        "apply the preview"
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -288,6 +300,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsApplyLastPatchPreviewRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ApplyLastPatchPreview, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
@@ -340,6 +358,9 @@ public static class CodingToolRequestParser
 
     private static bool IsReceiptRequest(string text) =>
         ReceiptRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsApplyLastPatchPreviewRequest(string text) =>
+        ApplyLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePlanTask(string text, bool userConfirmed, out CodingToolRequest request)
     {

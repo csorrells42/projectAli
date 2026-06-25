@@ -107,6 +107,7 @@ public sealed class LocalCodingToolService(
     private readonly string _generatedDocumentsRoot = Path.Combine(dataRoot, "GeneratedDocuments");
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
+    private CodingToolRequest? _lastPatchPreviewRequest;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
 
@@ -163,6 +164,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PreviewReplaceText => await PreviewReplaceTextAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ApplyLastPatchPreview => await ApplyLastPatchPreviewAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.CreateFile or CodingToolAction.AppendFile or CodingToolAction.ReplaceText =>
                 await EditFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenSolution => await OpenSolutionAsync(request, cancellationToken).ConfigureAwait(false),
@@ -176,6 +178,7 @@ public sealed class LocalCodingToolService(
             _ => await OpenFileAsync(request, cancellationToken).ConfigureAwait(false)
         };
 
+        StoreLastPatchPreview(request, result);
         await AppendLogAsync(request, result, permission, cancellationToken).ConfigureAwait(false);
         return result;
     }
@@ -753,6 +756,50 @@ public sealed class LocalCodingToolService(
         }
 
         return await PreviewReplaceTextAsync(fullPath, request.Content, request.Replacement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CodingToolResult> ApplyLastPatchPreviewAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lastPatchPreviewRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No patch preview is waiting to be applied. Preview the exact patch first.",
+                "Patch preview apply");
+        }
+
+        var applyRequest = _lastPatchPreviewRequest with
+        {
+            Action = CodingToolAction.ReplaceText,
+            UserConfirmed = true
+        };
+        _lastPatchPreviewRequest = null;
+
+        var permission = Policy.Evaluate(applyRequest);
+        if (permission.Kind != CodingToolPermissionKind.Allow)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: {permission.Reason}",
+                "Patch preview apply",
+                applyRequest.Path);
+        }
+
+        var result = await EditFileAsync(applyRequest, cancellationToken).ConfigureAwait(false);
+        return result.Succeeded
+            ? result with
+            {
+                Message = $"Applied last patch preview.{Environment.NewLine}{result.Message}",
+                ToolName = "Patch preview apply"
+            }
+            : result with
+            {
+                Message = $"Last patch preview was not applied.{Environment.NewLine}{result.Message}",
+                ToolName = "Patch preview apply"
+            };
     }
 
     private static async Task<CodingToolResult> CreateFileAsync(
@@ -1763,6 +1810,18 @@ public sealed class LocalCodingToolService(
 
         _lastDotNetRequest = request;
         _lastDotNetResult = result;
+    }
+
+    private void StoreLastPatchPreview(CodingToolRequest request, CodingToolResult result)
+    {
+        if (request.Action != CodingToolAction.PreviewReplaceText)
+        {
+            return;
+        }
+
+        _lastPatchPreviewRequest = result.Succeeded
+            ? request
+            : null;
     }
 
     private bool ShouldBuildCodingContext(string userText)

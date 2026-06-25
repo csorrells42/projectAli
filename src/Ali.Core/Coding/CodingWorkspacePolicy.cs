@@ -94,6 +94,13 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed.");
         }
 
+        if (request.Action == CodingToolAction.ApplyLastPatchPreview)
+        {
+            return request.UserConfirmed
+                ? CodingToolPermissionKind.Allow.AsPermission("Applying the last patch preview is allowed after explicit confirmation and revalidation.")
+                : CodingToolPermissionKind.RequireConfirmation.AsPermission("Applying the last patch preview changes files and needs explicit confirmation.");
+        }
+
         if (request.Action == CodingToolAction.ListPackages && string.IsNullOrWhiteSpace(request.Path))
         {
             return CodingToolPermissionKind.Allow.AsPermission("Listing package references in the approved coding workspace is allowed.");

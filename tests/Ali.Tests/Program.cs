@@ -63,6 +63,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
     ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
+    ("coding parser routes apply last patch preview", TestCodingParserRoutesApplyLastPatchPreview),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
@@ -77,6 +78,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
+    ("local coding tool applies last patch preview", TestLocalCodingToolAppliesLastPatchPreview),
     ("local coding tool handles guarded file edits", TestLocalCodingToolHandlesGuardedFileEdits),
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
@@ -565,6 +567,18 @@ static Task TestCodingParserRoutesGuardedFileEdits()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesApplyLastPatchPreview()
+{
+    Equal(true, CodingToolRequestParser.TryParse("apply last patch preview", out var needsConfirmationRequest));
+    Equal(CodingToolAction.ApplyLastPatchPreview, needsConfirmationRequest.Action);
+    Equal(false, needsConfirmationRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("confirm apply last patch preview", out var confirmedRequest));
+    Equal(CodingToolAction.ApplyLastPatchPreview, confirmedRequest.Action);
+    Equal(true, confirmedRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
 static async Task TestLocalCodingToolOpensFileWithSafeLauncher()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -1004,6 +1018,61 @@ static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
     Equal("class Demo { }", afterPreview);
     Equal(true, applied.Succeeded);
     Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
+}
+
+static async Task TestLocalCodingToolAppliesLastPatchPreview()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "class Demo { }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var noPreview = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, noPreview.Handled);
+    Equal(false, noPreview.Succeeded);
+    Contains("No patch preview", noPreview.Message);
+
+    var preview = await service.TryHandleAsync($"preview replace in file \"{filePath}\" \"Demo\" with \"Widget\"", CancellationToken.None);
+    Equal(true, preview.Succeeded);
+    Equal("class Demo { }", await File.ReadAllTextAsync(filePath));
+
+    var needsConfirmation = await service.TryHandleAsync("apply last patch preview", CancellationToken.None);
+    var afterNeedsConfirmation = await File.ReadAllTextAsync(filePath);
+    Equal(true, needsConfirmation.Handled);
+    Equal(false, needsConfirmation.Succeeded);
+    Contains("needs confirmation", needsConfirmation.Message);
+    Equal("class Demo { }", afterNeedsConfirmation);
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview", applied.Message);
+    Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
+
+    var secondApply = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, secondApply.Handled);
+    Equal(false, secondApply.Succeeded);
+    Contains("No patch preview", secondApply.Message);
+
+    var blockedPath = Path.Combine(workspace, "Blocked.cs");
+    await File.WriteAllTextAsync(blockedPath, "class Blocked { }");
+    var blockedPreview = await service.TryHandleAsync($"preview replace in file \"{blockedPath}\" \"Blocked\" with \"Allowed\"", CancellationToken.None);
+    service.UpdateSettings(new CodingToolSettings
+    {
+        WorkspaceRoot = workspace,
+        EditInsideWorkspaceMode = CodingPermissionModes.Disabled
+    });
+    var blockedApply = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, blockedPreview.Succeeded);
+    Equal(true, blockedApply.Handled);
+    Equal(false, blockedApply.Succeeded);
+    Contains("disabled", blockedApply.Message);
+    Equal("class Blocked { }", await File.ReadAllTextAsync(blockedPath));
 }
 
 static async Task TestLocalCodingToolHandlesGuardedFileEdits()
