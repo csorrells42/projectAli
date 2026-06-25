@@ -94,6 +94,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed.");
         }
 
+        if (request.Action == CodingToolAction.GenerateCodingReport)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Generating a coding session report PDF in Ali's local generated documents folder is allowed.");
+        }
+
         if (request.Action == CodingToolAction.ApplyLastPatchPreview)
         {
             return request.UserConfirmed

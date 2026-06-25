@@ -113,7 +113,7 @@ Current deterministic command groups:
 - Patch loop: preview literal replacement or a small multi-file literal patch bundle, show pending preview, discard pending preview, confirm apply last preview.
 - File edits: confirmed create, append, and literal replace inside approved workspace.
 - Git: status/diff/log plus confirmed add/commit/merge; pull/push are blocked unless enabled.
-- Reports: simple local text PDF generation into Ali's generated documents folder.
+- Reports: simple local text PDF generation and coding session report PDF generation into Ali's generated documents folder.
 
 The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow multiple files, but only one edit per file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
 

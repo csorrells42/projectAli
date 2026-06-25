@@ -10,6 +10,7 @@ public enum CodingToolAction
     PlanTask,
     ShowReceipts,
     GeneratePdf,
+    GenerateCodingReport,
     OpenLastDiagnostic,
     DiagnoseLastFailure,
     ListPackages,

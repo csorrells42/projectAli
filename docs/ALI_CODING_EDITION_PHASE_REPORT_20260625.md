@@ -39,6 +39,7 @@ inspect
 - Show and discard pending patch previews.
 - Stale pending patch previews are discarded instead of applied.
 - Simple local text-to-PDF generation.
+- Coding session report PDF generation from workspace inspection, receipts, pending patch state, and last dotnet failure state.
 
 ## Owner Commands
 
@@ -63,6 +64,7 @@ open build error
 git status
 confirm git commit "message"
 generate pdf "owner-demo.pdf" with text "Ali demo ready."
+generate coding report
 ```
 
 ## Validation

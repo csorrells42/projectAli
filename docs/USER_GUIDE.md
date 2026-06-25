@@ -116,6 +116,7 @@ Useful commands:
 - `plan coding task fix the build`
 - `show coding receipts`
 - `generate pdf "owner-demo.pdf" with text "Ali demo ready."`
+- `generate coding report`
 
 Guarded patch workflow:
 
@@ -158,6 +159,8 @@ Git workflow:
 - `git pull` and `git push` remain blocked unless network Git operations are deliberately enabled later.
 
 Ali does not silently change files, run builds, restore packages, or write Git history. Tool results are recorded as coding receipts so Ali can report what actually happened.
+
+Use `generate coding report` to export a local PDF summary of the current coding workspace, recent coding receipts, pending patch preview state, and last failed dotnet command if one is stored. The report is saved in Ali's generated documents folder.
 
 ## Voice
 

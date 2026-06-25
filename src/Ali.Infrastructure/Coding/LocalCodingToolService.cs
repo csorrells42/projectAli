@@ -161,6 +161,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.GenerateCodingReport => await GenerateCodingReportAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DiagnoseLastFailure => await DiagnoseLastFailureAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListPackages => ListPackages(request),
@@ -438,6 +439,97 @@ public sealed class LocalCodingToolService(
             $"Generated PDF: {uniquePath}{Environment.NewLine}Wrote {bytes.Length} byte(s) from {request.Content!.Length} text character(s).",
             "PDF generator",
             uniquePath);
+    }
+
+    private async Task<CodingToolResult> GenerateCodingReportAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryBuildGeneratedPdfPath(request.Path, out var pdfPath, out var pathError))
+        {
+            return new CodingToolResult(true, false, pathError, "Coding report", _generatedDocumentsRoot);
+        }
+
+        var reportText = await BuildCodingSessionReportAsync(cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(_generatedDocumentsRoot);
+        var uniquePath = BuildUniquePath(pdfPath);
+        var title = Path.GetFileNameWithoutExtension(uniquePath);
+        var bytes = SimplePdfWriter.BuildTextPdf(title, reportText);
+        await File.WriteAllBytesAsync(uniquePath, bytes, cancellationToken).ConfigureAwait(false);
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Generated coding session report PDF: {uniquePath}{Environment.NewLine}Wrote {bytes.Length} byte(s).",
+            "Coding report",
+            uniquePath);
+    }
+
+    private async Task<string> BuildCodingSessionReportAsync(CancellationToken cancellationToken)
+    {
+        var lines = new List<string>
+        {
+            "Ali Coding Session Report",
+            $"Generated: {DateTimeOffset.Now:u}",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            string.Empty,
+            "Summary",
+            "- This report is generated from Ali's local coding tool state.",
+            "- Tool receipts show actions Ali actually handled.",
+            "- It does not claim builds, tests, edits, or Git actions happened unless receipts or stored diagnostics show them.",
+            string.Empty,
+            "Workspace Inspection"
+        };
+
+        var inspection = InspectWorkspace();
+        lines.Add(TrimForChat(inspection.Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Recent Coding Receipts");
+        lines.Add(TrimForChat(ShowReceipts().Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Pending Patch Preview");
+        if (_lastPatchPreviewRequest is null)
+        {
+            lines.Add("No pending patch preview is waiting to be applied.");
+        }
+        else
+        {
+            var preview = _lastPatchPreviewRequest.Action == CodingToolAction.PreviewPatchBundle
+                ? await PreviewPatchBundleAsync(_lastPatchPreviewRequest, cancellationToken).ConfigureAwait(false)
+                : await PreviewReplaceTextAsync(_lastPatchPreviewRequest, cancellationToken).ConfigureAwait(false);
+            lines.Add(preview.Succeeded
+                ? TrimForChat(preview.Message, 8_000)
+                : $"Pending patch preview is stale or invalid: {TrimForChat(preview.Message, 4_000)}");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Last Dotnet Failure");
+        if (_lastDotNetRequest is null || _lastDotNetResult is not { Succeeded: false } lastDotNetResult)
+        {
+            lines.Add("No failed dotnet command is stored in this Ali session.");
+        }
+        else
+        {
+            lines.Add($"Action: {_lastDotNetRequest.Action}");
+            lines.Add($"Target: {_lastDotNetResult.TargetPath ?? _lastDotNetRequest.Path ?? Policy.WorkspaceRoot}");
+            lines.Add(lastDotNetResult.ExitCode is null ? "Exit code: unavailable" : $"Exit code: {lastDotNetResult.ExitCode.Value}");
+            lines.Add(TrimForChat(lastDotNetResult.Message, 8_000));
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Next Safe Commands");
+        lines.Add("- inspect coding workspace");
+        lines.Add("- plan coding task <goal>");
+        lines.Add("- preview replace in file \"path\" \"old text\" with \"new text\"");
+        lines.Add("- preview patch bundle");
+        lines.Add("- show pending patch preview");
+        lines.Add("- confirm apply last patch preview");
+        lines.Add("- confirm dotnet build \"path\"");
+        lines.Add("- diagnose last build failure");
+        lines.Add("- show coding receipts");
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private Task<CodingToolResult> OpenWorkspaceAsync(CancellationToken cancellationToken)

@@ -61,6 +61,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes last diagnostic open", TestCodingParserRoutesLastDiagnosticOpen),
     ("coding parser routes last failure diagnosis", TestCodingParserRoutesLastFailureDiagnosis),
     ("coding parser routes PDF generation", TestCodingParserRoutesPdfGeneration),
+    ("coding parser routes coding report generation", TestCodingParserRoutesCodingReportGeneration),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
@@ -73,6 +74,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool generates PDF", TestLocalCodingToolGeneratesPdf),
+    ("local coding tool generates coding report PDF", TestLocalCodingToolGeneratesCodingReportPdf),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -488,6 +490,18 @@ static Task TestCodingParserRoutesPdfGeneration()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesCodingReportGeneration()
+{
+    Equal(true, CodingToolRequestParser.TryParse("generate coding report", out var defaultRequest));
+    Equal(CodingToolAction.GenerateCodingReport, defaultRequest.Action);
+    Equal("ali-coding-session-report.pdf", defaultRequest.Path);
+
+    Equal(true, CodingToolRequestParser.TryParse("export coding session report \"demo-report.pdf\"", out var namedRequest));
+    Equal(CodingToolAction.GenerateCodingReport, namedRequest.Action);
+    Equal("demo-report.pdf", namedRequest.Path);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesPackageAndRestoreCommands()
 {
     var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Demo App.csproj";
@@ -785,6 +799,39 @@ static async Task TestLocalCodingToolGeneratesPdf()
     NotNull(second.TargetPath, "Second PDF generator result should report the generated path.");
     Equal(true, File.Exists(second.TargetPath!));
     Equal(false, string.Equals(first.TargetPath, second.TargetPath, StringComparison.OrdinalIgnoreCase));
+}
+
+static async Task TestLocalCodingToolGeneratesCodingReportPdf()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var inspection = await service.TryHandleAsync("inspect coding workspace", CancellationToken.None);
+    var report = await service.TryHandleAsync("generate coding report \"session-report.pdf\"", CancellationToken.None);
+
+    Equal(true, inspection.Handled);
+    Equal(true, inspection.Succeeded);
+    Equal(true, report.Handled);
+    Equal(true, report.Succeeded);
+    NotNull(report.TargetPath, "Coding report should report the generated PDF path.");
+    Contains(Path.Combine(directory, "GeneratedDocuments"), report.TargetPath!);
+    Equal(true, File.Exists(report.TargetPath!));
+
+    var bytes = await File.ReadAllBytesAsync(report.TargetPath!);
+    var text = System.Text.Encoding.ASCII.GetString(bytes);
+    Contains("%PDF-1.4", text);
+    Contains("Ali Coding Session Report", text);
+    Contains("Workspace root:", text);
+    Contains("Recent Coding Receipts", text);
+    Contains("InspectWorkspace", text);
+    Contains("%%EOF", text);
 }
 
 static async Task TestLocalCodingToolReadsAndSearchesWorkspace()

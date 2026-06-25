@@ -115,6 +115,19 @@ public static class CodingToolRequestParser
         "write a pdf "
     ];
 
+    private static readonly string[] GenerateCodingReportRequests =
+    [
+        "generate coding report",
+        "generate coding session report",
+        "generate code report",
+        "create coding report",
+        "create coding session report",
+        "create code report",
+        "export coding report",
+        "export coding session report",
+        "write coding report"
+    ];
+
     private static readonly string[] ApplyLastPatchPreviewRequests =
     [
         "apply last patch preview",
@@ -373,6 +386,11 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParseGenerateCodingReport(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (TryParseGeneratePdf(trimmed, userConfirmed, out request))
         {
             return true;
@@ -583,6 +601,28 @@ public static class CodingToolRequestParser
             ExplicitUserPath: false,
             UserConfirmed: userConfirmed,
             Content: segments[1]);
+        return true;
+    }
+
+    private static bool TryParseGenerateCodingReport(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var matched = GenerateCodingReportRequests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+            || GenerateCodingReportRequests.Any(candidate => text.StartsWith(candidate + " ", StringComparison.OrdinalIgnoreCase));
+        if (!matched)
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        var fileName = segments.Count > 0 && !string.IsNullOrWhiteSpace(segments[0])
+            ? segments[0].Trim()
+            : "ali-coding-session-report.pdf";
+        request = new CodingToolRequest(
+            CodingToolAction.GenerateCodingReport,
+            fileName,
+            ExplicitUserPath: false,
+            UserConfirmed: userConfirmed);
         return true;
     }
 
