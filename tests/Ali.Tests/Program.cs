@@ -57,6 +57,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
+    ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
@@ -64,6 +65,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
+    ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -427,6 +429,16 @@ static Task TestCodingParserRoutesGuardedTaskPlanning()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesCodingReceipts()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show coding receipts", out var receiptsRequest));
+    Equal(CodingToolAction.ShowReceipts, receiptsRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("coding status", out var statusRequest));
+    Equal(CodingToolAction.ShowReceipts, statusRequest.Action);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesPackageAndRestoreCommands()
 {
     var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Demo App.csproj";
@@ -611,6 +623,34 @@ static async Task TestLocalCodingToolPlansGuardedTask()
     Contains("File writes require", result.Message);
     Contains("Build, test, restore, and run require confirmation", result.Message);
     Equal(0, runner.Runs.Count);
+}
+
+static async Task TestLocalCodingToolShowsCodingReceipts()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "Console.WriteLine(\"hello\");");
+    var launcher = new FakeCodingProcessLauncher();
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        launcher);
+
+    var first = await service.TryHandleAsync("show coding receipts", CancellationToken.None);
+    var open = await service.TryHandleAsync($"open file \"{filePath}\"", CancellationToken.None);
+    var receipts = await service.TryHandleAsync("show coding receipts", CancellationToken.None);
+
+    Equal(true, first.Handled);
+    Equal(true, first.Succeeded);
+    Contains("No coding receipts", first.Message);
+    Equal(true, open.Succeeded);
+    Equal(true, receipts.Handled);
+    Equal(true, receipts.Succeeded);
+    Contains("Recent coding receipts", receipts.Message);
+    Contains("OpenFile succeeded", receipts.Message);
+    Contains(filePath, receipts.Message);
 }
 
 static async Task TestLocalCodingToolReadsAndSearchesWorkspace()

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Xml.Linq;
 using Ali.Core.Coding;
 
@@ -18,6 +19,7 @@ public sealed class LocalCodingToolService(
     private const int MaxCommandOutputCharacters = 8_000;
     private const int MaxContextPackCharacters = 18_000;
     private const int MaxContextSearchMatches = 14;
+    private const int MaxReceiptEntries = 12;
     private const int MaxDiagnosticLines = 12;
     private const int MaxEditContentCharacters = 20_000;
     private const int MaxReplaceFileCharacters = 500_000;
@@ -153,6 +155,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ListWorkspace => ListWorkspace(),
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -341,6 +344,58 @@ public sealed class LocalCodingToolService(
             plan.HasPlan ? plan.Text : "Coding task planner needs a clearer coding goal.",
             "Coding task planner",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowReceipts()
+    {
+        if (!File.Exists(_actionLogPath))
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No coding receipts have been recorded yet.",
+                "Coding receipts",
+                _actionLogPath);
+        }
+
+        var receipts = File.ReadLines(_actionLogPath)
+            .TakeLast(MaxReceiptEntries)
+            .Select(ParseReceiptLine)
+            .Where(receipt => receipt is not null)
+            .Select(receipt => receipt!)
+            .ToList();
+        if (receipts.Count == 0)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No readable coding receipts were found.",
+                "Coding receipts",
+                _actionLogPath);
+        }
+
+        var lines = new List<string>
+        {
+            $"Recent coding receipts from: {_actionLogPath}"
+        };
+        foreach (var receipt in receipts)
+        {
+            var status = receipt.Succeeded ? "succeeded" : "failed";
+            var target = string.IsNullOrWhiteSpace(receipt.TargetPath)
+                ? string.Empty
+                : $" target={receipt.TargetPath}";
+            var exit = receipt.ExitCode is null
+                ? string.Empty
+                : $" exit={receipt.ExitCode.Value}";
+            lines.Add($"- {receipt.Timestamp:u} {receipt.Action} {status}{exit}{target}");
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Coding receipts",
+            _actionLogPath);
     }
 
     private Task<CodingToolResult> OpenWorkspaceAsync(CancellationToken cancellationToken)
@@ -1499,6 +1554,54 @@ public sealed class LocalCodingToolService(
             : output.Trim();
     }
 
+    private static CodingReceipt? ParseReceiptLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            var timestamp = root.TryGetProperty("timestamp", out var timestampElement)
+                            && timestampElement.TryGetDateTimeOffset(out var parsedTimestamp)
+                ? parsedTimestamp
+                : DateTimeOffset.MinValue;
+            var action = ReadString(root, "action") ?? "UnknownAction";
+            var succeeded = ReadBool(root, "Succeeded") ?? ReadBool(root, "succeeded") ?? false;
+            var targetPath = ReadString(root, "TargetPath") ?? ReadString(root, "targetPath");
+            var exitCode = ReadInt(root, "ExitCode") ?? ReadInt(root, "exitCode");
+            return new CodingReceipt(timestamp, action, succeeded, targetPath, exitCode);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
+    }
+
+    private static bool? ReadBool(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var element) && element.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? element.GetBoolean()
+            : null;
+    }
+
+    private static int? ReadInt(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var value)
+            ? value
+            : null;
+    }
+
     private void StoreLastDotNetResult(CodingToolRequest request, CodingToolResult result)
     {
         if (request.Action is not (CodingToolAction.Build
@@ -2016,6 +2119,13 @@ public sealed class LocalCodingToolService(
     private sealed record DiagnosticFileReference(
         string Path,
         int? LineNumber);
+
+    private sealed record CodingReceipt(
+        DateTimeOffset Timestamp,
+        string Action,
+        bool Succeeded,
+        string? TargetPath,
+        int? ExitCode);
 }
 
 public interface ICodingProcessLauncher

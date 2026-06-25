@@ -119,6 +119,19 @@ public static class CodingToolRequestParser
         "plan fix"
     ];
 
+    private static readonly string[] ReceiptRequests =
+    [
+        "show coding receipts",
+        "show code receipts",
+        "show recent coding receipts",
+        "show recent code receipts",
+        "show coding actions",
+        "show recent coding actions",
+        "coding receipts",
+        "coding status",
+        "what did you do in coding"
+    ];
+
     private static readonly string[] PackagePrefixes =
     [
         "list packages",
@@ -227,6 +240,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsReceiptRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowReceipts, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
         {
             return true;
@@ -291,6 +310,9 @@ public static class CodingToolRequestParser
 
     private static bool IsOpenSolutionRequest(string text) =>
         OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsReceiptRequest(string text) =>
+        ReceiptRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePlanTask(string text, bool userConfirmed, out CodingToolRequest request)
     {

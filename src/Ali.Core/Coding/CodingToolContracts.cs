@@ -8,6 +8,7 @@ public enum CodingToolAction
     ListWorkspace,
     InspectWorkspace,
     PlanTask,
+    ShowReceipts,
     ListPackages,
     ListOutdatedPackages,
     SearchWorkspace,

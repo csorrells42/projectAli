@@ -84,6 +84,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Planning a coding task is read-only and allowed.");
         }
 
+        if (request.Action == CodingToolAction.ShowReceipts)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Showing recent coding receipts is read-only and allowed.");
+        }
+
         if (request.Action == CodingToolAction.ListPackages && string.IsNullOrWhiteSpace(request.Path))
         {
             return CodingToolPermissionKind.Allow.AsPermission("Listing package references in the approved coding workspace is allowed.");
