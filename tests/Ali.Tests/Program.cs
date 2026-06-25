@@ -59,6 +59,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
+    ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes last diagnostic open", TestCodingParserRoutesLastDiagnosticOpen),
     ("coding parser routes last failure diagnosis", TestCodingParserRoutesLastFailureDiagnosis),
     ("coding parser routes PDF generation", TestCodingParserRoutesPdfGeneration),
@@ -74,6 +75,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
+    ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
     ("local coding tool generates PDF", TestLocalCodingToolGeneratesPdf),
     ("local coding tool generates coding report PDF", TestLocalCodingToolGeneratesCodingReportPdf),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
@@ -467,6 +469,16 @@ static Task TestCodingParserRoutesCodingReceipts()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesToolIntegrationStatus()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show visual studio integration", out var visualStudioRequest));
+    Equal(CodingToolAction.ShowToolIntegrationStatus, visualStudioRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show coding tool status", out var statusRequest));
+    Equal(CodingToolAction.ShowToolIntegrationStatus, statusRequest.Action);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesLastDiagnosticOpen()
 {
     Equal(true, CodingToolRequestParser.TryParse("open build error", out var buildErrorRequest));
@@ -726,6 +738,37 @@ static async Task TestLocalCodingToolOpensPrimarySolution()
     Equal(1, launcher.Starts.Count);
     Equal(visualStudioPath, launcher.Starts[0].FileName);
     Equal(solutionPath, launcher.Starts[0].Arguments[0]);
+}
+
+static async Task TestLocalCodingToolShowsToolIntegrationStatus()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+
+    var notepadPlusPlus = Path.Combine(directory, "notepad++.exe");
+    await File.WriteAllTextAsync(notepadPlusPlus, string.Empty);
+    var visualStudioPath = Path.Combine(directory, "devenv.exe");
+    await File.WriteAllTextAsync(visualStudioPath, string.Empty);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredNotepadPlusPlusPath: notepadPlusPlus,
+        configuredVisualStudioPath: visualStudioPath);
+
+    var result = await service.TryHandleAsync("show visual studio integration", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Coding tool integration status", result.Message);
+    Contains(solutionPath, result.Message);
+    Contains(visualStudioPath, result.Message);
+    Contains(notepadPlusPlus, result.Message);
+    Contains("Visual Studio in-IDE panel: not installed", result.Message);
+    Contains("Git pull/push: blocked", result.Message);
 }
 
 static async Task TestLocalCodingToolPlansGuardedTask()

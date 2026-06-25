@@ -12,6 +12,7 @@ public enum CodingToolAction
     ShowReceipts,
     GeneratePdf,
     GenerateCodingReport,
+    ShowToolIntegrationStatus,
     OpenLastDiagnostic,
     DiagnoseLastFailure,
     ListPackages,

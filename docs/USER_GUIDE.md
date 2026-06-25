@@ -111,6 +111,7 @@ Useful commands:
 - `inspect coding workspace`
 - `show project map`
 - `analyze solution architecture`
+- `show visual studio integration`
 - `list packages`
 - `search workspace for WidgetFactory`
 - `read file "C:\path\to\file.cs" at line 42`

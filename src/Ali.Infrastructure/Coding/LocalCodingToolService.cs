@@ -161,6 +161,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
+            CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GenerateCodingReport => await GenerateCodingReportAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
@@ -411,6 +412,48 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Coding receipts",
             _actionLogPath);
+    }
+
+    private CodingToolResult ShowToolIntegrationStatus()
+    {
+        var notepadPlusPlus = CodingToolLocator.FindNotepadPlusPlus(_configuredNotepadPlusPlusPath);
+        var visualStudio = CodingToolLocator.FindVisualStudio(_configuredVisualStudioPath);
+        var hasWorkspace = Directory.Exists(Policy.WorkspaceRoot);
+        var primarySolution = hasWorkspace && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var solutionOrProject)
+            ? solutionOrProject
+            : null;
+
+        var lines = new List<string>
+        {
+            "Coding tool integration status:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Workspace exists: {hasWorkspace}",
+            $"Primary solution/project: {primarySolution ?? "not found"}",
+            $"Visual Studio: {visualStudio ?? "not found"}",
+            $"Notepad++: {notepadPlusPlus ?? "not found; Ali will fall back to Notepad for file open requests"}",
+            "Visual Studio in-IDE panel: not installed in this build.",
+            "Current integration mode: Ali chat commands plus external Visual Studio/Notepad++ launch.",
+            "Permission gates:",
+            $"- Explicit outside file open: {(Policy.AllowExplicitOutsideFileOpen ? "allowed" : "disabled")}",
+            $"- Confirmed build/test/run: {(Policy.AllowConfirmedBuildTestRunInsideWorkspace ? "available with confirmation" : "disabled")}",
+            $"- Confirmed edits: {(Policy.AllowConfirmedEditInsideWorkspace ? "available with confirmation" : "disabled")}",
+            $"- Git read: {(Policy.AllowGitReadInsideWorkspace ? "allowed" : "disabled")}",
+            $"- Git write: {(Policy.AllowConfirmedGitWriteInsideWorkspace ? "available with confirmation" : "disabled")}",
+            $"- Git merge: {(Policy.AllowConfirmedGitMergeInsideWorkspace ? "available with confirmation" : "disabled")}",
+            $"- Git pull/push: {(Policy.AllowGitNetworkOperations ? "available with confirmation" : "blocked")}",
+            "Useful commands:",
+            "- open solution",
+            "- analyze solution architecture",
+            "- show coding receipts",
+            "- generate coding report"
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Coding tool status",
+            Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> GeneratePdfAsync(

@@ -94,6 +94,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Showing recent coding receipts is read-only and allowed.");
         }
 
+        if (request.Action == CodingToolAction.ShowToolIntegrationStatus)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Showing coding tool integration status is read-only and allowed.");
+        }
+
         if (request.Action == CodingToolAction.GeneratePdf)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed.");

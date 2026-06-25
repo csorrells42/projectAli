@@ -23,6 +23,7 @@ inspect
 - Settings surface for coding permissions, tool paths, and Git gates.
 - Workspace inspection and project map.
 - Deterministic solution architecture analysis from solution/project files.
+- Visual Studio/Notepad++ integration status reporting from chat.
 - File open/read/search inside the approved workspace.
 - Explicit file open outside the workspace when allowed by policy.
 - Notepad++ and Visual Studio tool discovery with configurable paths.
@@ -48,6 +49,7 @@ inspect
 inspect coding workspace
 show project map
 analyze solution architecture
+show visual studio integration
 list packages
 search workspace for WidgetFactory
 read file "C:\path\to\file.cs" at line 42

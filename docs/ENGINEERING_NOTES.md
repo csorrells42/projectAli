@@ -104,7 +104,7 @@ For explicit coding commands, Ali handles the request deterministically before c
 
 Current deterministic command groups:
 
-- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis.
+- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis and coding tool integration status.
 - Read/search: open file, read file, search workspace.
 - Planning: build a guarded coding task plan.
 - Packages: list package references and confirmed outdated checks.

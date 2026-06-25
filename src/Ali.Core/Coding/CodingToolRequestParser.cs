@@ -128,6 +128,20 @@ public static class CodingToolRequestParser
         "write coding report"
     ];
 
+    private static readonly string[] ToolIntegrationStatusRequests =
+    [
+        "show visual studio integration",
+        "show visual studio status",
+        "visual studio integration status",
+        "visual studio status",
+        "show coding tool status",
+        "show coding tools",
+        "coding tool status",
+        "coding tools status",
+        "show programming tools",
+        "programming tool status"
+    ];
+
     private static readonly string[] ApplyLastPatchPreviewRequests =
     [
         "apply last patch preview",
@@ -412,6 +426,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsToolIntegrationStatusRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowToolIntegrationStatus, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseGeneratePdf(trimmed, userConfirmed, out request))
         {
             return true;
@@ -510,6 +530,9 @@ public static class CodingToolRequestParser
 
     private static bool IsApplyLastPatchPreviewRequest(string text) =>
         ApplyLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsToolIntegrationStatusRequest(string text) =>
+        ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePlanTask(string text, bool userConfirmed, out CodingToolRequest request)
     {
