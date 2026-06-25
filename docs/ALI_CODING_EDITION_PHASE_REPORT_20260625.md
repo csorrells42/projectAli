@@ -34,6 +34,7 @@ inspect
 - Coding task planner.
 - Coding action receipts.
 - Literal patch preview.
+- Small multi-file literal patch bundle preview.
 - Apply last guarded patch preview after confirmation.
 - Show and discard pending patch previews.
 - Stale pending patch previews are discarded instead of applied.
@@ -50,6 +51,9 @@ read file "C:\path\to\file.cs" at line 42
 plan coding task fix the build
 show coding receipts
 preview replace in file "C:\path\to\file.cs" "old text" with "new text"
+preview patch bundle
+file "C:\path\to\first.cs" replace "old text" with "new text"
+file "C:\path\to\second.cs" replace "old text" with "new text"
 show pending patch preview
 discard pending patch preview
 confirm apply last patch preview
@@ -90,7 +94,7 @@ ac02357 Summarize dotnet coding diagnostics
 ## Remaining Work
 
 - Live owner soak of the coding commands in a real external project.
-- Richer multi-file patch preview/apply format.
+- Richer patch preview/apply format that can safely handle multiple edits per file.
 - Better PDF/session report templates.
 - Installer-managed tool discovery and repair.
 - Optional project-specific build/test profiles.

@@ -65,6 +65,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
     ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
+    ("coding parser routes patch bundle preview", TestCodingParserRoutesPatchBundlePreview),
     ("coding parser routes patch preview state", TestCodingParserRoutesPatchPreviewState),
     ("coding parser routes apply last patch preview", TestCodingParserRoutesApplyLastPatchPreview),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
@@ -83,6 +84,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
+    ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
+    ("local coding tool rejects stale patch bundle", TestLocalCodingToolRejectsStalePatchBundle),
     ("local coding tool manages pending patch preview", TestLocalCodingToolManagesPendingPatchPreview),
     ("local coding tool applies last patch preview", TestLocalCodingToolAppliesLastPatchPreview),
     ("local coding tool handles guarded file edits", TestLocalCodingToolHandlesGuardedFileEdits),
@@ -590,6 +593,30 @@ static Task TestCodingParserRoutesGuardedFileEdits()
     Equal("Widget", previewRequest.Content);
     Equal("Gadget", previewRequest.Replacement);
     Equal(false, previewRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesPatchBundlePreview()
+{
+    var firstPath = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Program.cs";
+    var secondPath = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Widget.cs";
+
+    var command = $"""
+        preview patch bundle
+        file "{firstPath}" replace "Demo" with "Widget"
+        file "{secondPath}" replace "OldName" with "NewName"
+        """;
+
+    Equal(true, CodingToolRequestParser.TryParse(command, out var request));
+    Equal(CodingToolAction.PreviewPatchBundle, request.Action);
+    NotNull(request.PatchEdits, "Patch bundle should include parsed edits.");
+    Equal(2, request.PatchEdits!.Count);
+    Equal(firstPath, request.PatchEdits[0].Path);
+    Equal("Demo", request.PatchEdits[0].OldText);
+    Equal("Widget", request.PatchEdits[0].NewText);
+    Equal(secondPath, request.PatchEdits[1].Path);
+    Equal("OldName", request.PatchEdits[1].OldText);
+    Equal("NewName", request.PatchEdits[1].NewText);
     return Task.CompletedTask;
 }
 
@@ -1140,6 +1167,92 @@ static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
     Equal("class Demo { }", afterPreview);
     Equal(true, applied.Succeeded);
     Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
+}
+
+static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var firstPath = Path.Combine(workspace, "Program.cs");
+    var secondPath = Path.Combine(workspace, "Widget.cs");
+    await File.WriteAllTextAsync(firstPath, "class Demo { }");
+    await File.WriteAllTextAsync(secondPath, "class OldName { }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var command = $"""
+        preview patch bundle
+        file "{firstPath}" replace "Demo" with "Widget"
+        file "{secondPath}" replace "OldName" with "NewName"
+        """;
+    var preview = await service.TryHandleAsync(command, CancellationToken.None);
+    var show = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
+    var needsConfirmation = await service.TryHandleAsync("apply last patch preview", CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Patch bundle preview", preview.Message);
+    Contains("Edits: 2", preview.Message);
+    Contains("class Demo", preview.Message);
+    Contains("class NewName", preview.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(firstPath));
+    Equal("class OldName { }", await File.ReadAllTextAsync(secondPath));
+
+    Equal(true, show.Handled);
+    Equal(true, show.Succeeded);
+    Contains("Pending patch preview is still valid", show.Message);
+
+    Equal(true, needsConfirmation.Handled);
+    Equal(false, needsConfirmation.Succeeded);
+    Contains("needs confirmation", needsConfirmation.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(firstPath));
+    Equal("class OldName { }", await File.ReadAllTextAsync(secondPath));
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview bundle", applied.Message);
+    Equal("class Widget { }", await File.ReadAllTextAsync(firstPath));
+    Equal("class NewName { }", await File.ReadAllTextAsync(secondPath));
+}
+
+static async Task TestLocalCodingToolRejectsStalePatchBundle()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var firstPath = Path.Combine(workspace, "Program.cs");
+    var secondPath = Path.Combine(workspace, "Widget.cs");
+    await File.WriteAllTextAsync(firstPath, "class Demo { }");
+    await File.WriteAllTextAsync(secondPath, "class OldName { }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var command = $"""
+        preview patch bundle
+        file "{firstPath}" replace "Demo" with "Widget"
+        file "{secondPath}" replace "OldName" with "NewName"
+        """;
+    var preview = await service.TryHandleAsync(command, CancellationToken.None);
+    await File.WriteAllTextAsync(secondPath, "class AlreadyChanged { }");
+    var show = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
+    var apply = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Equal(true, show.Handled);
+    Equal(false, show.Succeeded);
+    Contains("no longer valid", show.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(firstPath));
+    Equal("class AlreadyChanged { }", await File.ReadAllTextAsync(secondPath));
+    Equal(true, apply.Handled);
+    Equal(false, apply.Succeeded);
+    Contains("No patch preview", apply.Message);
 }
 
 static async Task TestLocalCodingToolManagesPendingPatchPreview()

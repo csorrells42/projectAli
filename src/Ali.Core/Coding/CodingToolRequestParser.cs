@@ -92,6 +92,17 @@ public static class CodingToolRequestParser
         "dry-run replace in file "
     ];
 
+    private static readonly string[] PreviewPatchBundlePrefixes =
+    [
+        "preview patch bundle",
+        "preview patch set",
+        "preview multi-file patch",
+        "preview multifile patch",
+        "preview multiple file patch",
+        "dry run patch bundle",
+        "dry-run patch bundle"
+    ];
+
     private static readonly string[] GeneratePdfPrefixes =
     [
         "create pdf ",
@@ -367,6 +378,11 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParsePatchBundle(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (IsShowLastPatchPreviewRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowLastPatchPreview, null, UserConfirmed: userConfirmed);
@@ -568,6 +584,74 @@ public static class CodingToolRequestParser
             UserConfirmed: userConfirmed,
             Content: segments[1]);
         return true;
+    }
+
+    private static bool TryParsePatchBundle(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = PreviewPatchBundlePrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var body = text[prefix.Length..].Trim();
+        if (body.Length == 0)
+        {
+            return false;
+        }
+
+        var edits = new List<CodingPatchEdit>();
+        foreach (var line in SplitPatchBundleLines(body))
+        {
+            var segments = ExtractQuotedSegments(line);
+            if (segments.Count < 3 || string.IsNullOrWhiteSpace(segments[0]))
+            {
+                return false;
+            }
+
+            edits.Add(new CodingPatchEdit(
+                segments[0].Trim(),
+                segments[1],
+                segments[2]));
+        }
+
+        if (edits.Count == 0)
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.PreviewPatchBundle,
+            null,
+            ExplicitUserPath: true,
+            UserConfirmed: userConfirmed,
+            PatchEdits: edits);
+        return true;
+    }
+
+    private static IReadOnlyList<string> SplitPatchBundleLines(string text)
+    {
+        var lines = new List<string>();
+        foreach (var rawLine in text.Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.Equals("```", StringComparison.Ordinal)
+                || line.StartsWith("#", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            line = line.TrimStart('-', '*', ' ');
+            if (line.Length > 0)
+            {
+                lines.Add(line);
+            }
+        }
+
+        return lines;
     }
 
     private static bool TryParseFileEdit(string text, bool userConfirmed, out CodingToolRequest request)

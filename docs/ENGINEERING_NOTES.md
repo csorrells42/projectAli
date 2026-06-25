@@ -110,12 +110,12 @@ Current deterministic command groups:
 - Packages: list package references and confirmed outdated checks.
 - Build/test/run: confirmed `dotnet build`, `dotnet test`, `dotnet restore`, `dotnet run`.
 - Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line.
-- Patch loop: preview literal replacement, show pending preview, discard pending preview, confirm apply last preview.
+- Patch loop: preview literal replacement or a small multi-file literal patch bundle, show pending preview, discard pending preview, confirm apply last preview.
 - File edits: confirmed create, append, and literal replace inside approved workspace.
 - Git: status/diff/log plus confirmed add/commit/merge; pull/push are blocked unless enabled.
 - Reports: simple local text PDF generation into Ali's generated documents folder.
 
-The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
+The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow multiple files, but only one edit per file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
 
 ## Bootstrap Storage
 

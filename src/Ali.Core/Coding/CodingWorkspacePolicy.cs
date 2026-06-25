@@ -101,6 +101,11 @@ public sealed class CodingWorkspacePolicy
                 : CodingToolPermissionKind.RequireConfirmation.AsPermission("Applying the last patch preview changes files and needs explicit confirmation.");
         }
 
+        if (request.Action == CodingToolAction.PreviewPatchBundle)
+        {
+            return EvaluatePatchBundlePreview(request);
+        }
+
         if (request.Action == CodingToolAction.OpenLastDiagnostic)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Opening the last diagnostic file is a read/open action and is limited to the approved workspace.");
@@ -273,6 +278,29 @@ public sealed class CodingWorkspacePolicy
             ? CodingToolPermissionKind.Allow.AsPermission("Confirmed edit/write action inside the approved coding workspace is allowed.")
             : CodingToolPermissionKind.RequireConfirmation.AsPermission(
                 "Edit/write actions need an explicit confirmation phrase before changing files.");
+    }
+
+    private CodingToolPermission EvaluatePatchBundlePreview(CodingToolRequest request)
+    {
+        if (request.PatchEdits is null || request.PatchEdits.Count == 0)
+        {
+            return CodingToolPermissionKind.Deny.AsPermission("A patch bundle preview needs at least one file edit.");
+        }
+
+        foreach (var edit in request.PatchEdits)
+        {
+            if (!TryNormalizePath(edit.Path, out var fullPath))
+            {
+                return CodingToolPermissionKind.Deny.AsPermission("Every patch bundle target must be a valid local path.");
+            }
+
+            if (!IsInsideWorkspace(fullPath))
+            {
+                return CodingToolPermissionKind.Deny.AsPermission("Patch bundle previews are limited to the approved coding workspace.");
+            }
+        }
+
+        return CodingToolPermissionKind.Allow.AsPermission("Previewing a patch bundle inside the approved coding workspace is read-only and allowed.");
     }
 
     private static bool IsEditAction(CodingToolAction action) =>

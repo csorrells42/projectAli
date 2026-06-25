@@ -24,6 +24,7 @@ public sealed class LocalCodingToolService(
     private const int MaxEditContentCharacters = 20_000;
     private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
+    private const int MaxPatchBundleEdits = 8;
     private const int MaxWorkspaceSummaryEntries = 20;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(60);
@@ -166,6 +167,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PreviewReplaceText => await PreviewReplaceTextAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PreviewPatchBundle => await PreviewPatchBundleAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowLastPatchPreview => await ShowLastPatchPreviewAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DiscardLastPatchPreview => DiscardLastPatchPreview(),
             CodingToolAction.ApplyLastPatchPreview => await ApplyLastPatchPreviewAsync(cancellationToken).ConfigureAwait(false),
@@ -762,6 +764,49 @@ public sealed class LocalCodingToolService(
         return await PreviewReplaceTextAsync(fullPath, request.Content, request.Replacement, cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<CodingToolResult> PreviewPatchBundleAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryNormalizePatchBundle(request, out var edits, out var error))
+        {
+            return error;
+        }
+
+        var prepared = await PreparePatchBundleAsync(edits, "Patch bundle preview", cancellationToken).ConfigureAwait(false);
+        if (prepared.Error is not null)
+        {
+            return prepared.Error;
+        }
+
+        var lines = new List<string>
+        {
+            "Patch bundle preview:",
+            "No files were changed.",
+            $"Edits: {prepared.Edits.Count}",
+            "To apply this exact bundle, use: confirm apply last patch preview"
+        };
+
+        for (var index = 0; index < prepared.Edits.Count; index++)
+        {
+            var edit = prepared.Edits[index];
+            lines.Add(string.Empty);
+            lines.Add($"Edit {index + 1}: {edit.FullPath}");
+            lines.Add("Before:");
+            lines.Add(edit.BeforeSnippet);
+            lines.Add("After:");
+            lines.Add(edit.AfterSnippet);
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Patch bundle preview",
+            prepared.Edits.Count == 1 ? prepared.Edits[0].FullPath : Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ApplyLastPatchPreviewAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -772,6 +817,13 @@ public sealed class LocalCodingToolService(
                 false,
                 "No patch preview is waiting to be applied. Preview the exact patch first.",
                 "Patch preview apply");
+        }
+
+        if (_lastPatchPreviewRequest.Action == CodingToolAction.PreviewPatchBundle)
+        {
+            var patchBundleRequest = _lastPatchPreviewRequest;
+            _lastPatchPreviewRequest = null;
+            return await ApplyPatchBundlePreviewAsync(patchBundleRequest, cancellationToken).ConfigureAwait(false);
         }
 
         var applyRequest = _lastPatchPreviewRequest with
@@ -806,6 +858,71 @@ public sealed class LocalCodingToolService(
             };
     }
 
+    private async Task<CodingToolResult> ApplyPatchBundlePreviewAsync(
+        CodingToolRequest previewRequest,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryNormalizePatchBundle(previewRequest, out var edits, out var error))
+        {
+            return error with
+            {
+                Message = $"Last patch preview was not applied. No files were changed.{Environment.NewLine}{error.Message}",
+                ToolName = "Patch preview apply"
+            };
+        }
+
+        foreach (var edit in edits)
+        {
+            var applyRequest = new CodingToolRequest(
+                CodingToolAction.ReplaceText,
+                edit.FullPath,
+                ExplicitUserPath: false,
+                UserConfirmed: true,
+                Content: edit.OldText,
+                Replacement: edit.NewText);
+            var permission = Policy.Evaluate(applyRequest);
+            if (permission.Kind != CodingToolPermissionKind.Allow)
+            {
+                return new CodingToolResult(
+                    true,
+                    false,
+                    $"Coding tool blocked: {permission.Reason}",
+                    "Patch preview apply",
+                    edit.FullPath);
+            }
+        }
+
+        var prepared = await PreparePatchBundleAsync(edits, "Patch preview apply", cancellationToken).ConfigureAwait(false);
+        if (prepared.Error is not null)
+        {
+            return prepared.Error with
+            {
+                Message = $"Last patch preview was not applied. No files were changed.{Environment.NewLine}{prepared.Error.Message}",
+                ToolName = "Patch preview apply"
+            };
+        }
+
+        foreach (var edit in prepared.Edits)
+        {
+            await File.WriteAllTextAsync(edit.FullPath, edit.UpdatedText, cancellationToken).ConfigureAwait(false);
+        }
+
+        var lines = new List<string>
+        {
+            "Applied last patch preview bundle.",
+            $"Changed {prepared.Edits.Count} file(s)."
+        };
+        lines.AddRange(prepared.Edits.Select(edit => $"- {edit.FullPath}"));
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Patch preview apply",
+            prepared.Edits.Count == 1 ? prepared.Edits[0].FullPath : Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowLastPatchPreviewAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -818,7 +935,9 @@ public sealed class LocalCodingToolService(
                 "Pending patch preview");
         }
 
-        var preview = await PreviewReplaceTextAsync(_lastPatchPreviewRequest, cancellationToken).ConfigureAwait(false);
+        var preview = _lastPatchPreviewRequest.Action == CodingToolAction.PreviewPatchBundle
+            ? await PreviewPatchBundleAsync(_lastPatchPreviewRequest, cancellationToken).ConfigureAwait(false)
+            : await PreviewReplaceTextAsync(_lastPatchPreviewRequest, cancellationToken).ConfigureAwait(false);
         if (!preview.Succeeded)
         {
             _lastPatchPreviewRequest = null;
@@ -847,7 +966,8 @@ public sealed class LocalCodingToolService(
                 "Pending patch preview");
         }
 
-        var path = _lastPatchPreviewRequest.Path;
+        var path = _lastPatchPreviewRequest.Path
+                   ?? $"{_lastPatchPreviewRequest.PatchEdits?.Count ?? 0} bundled edit(s)";
         _lastPatchPreviewRequest = null;
         return new CodingToolResult(
             true,
@@ -855,6 +975,180 @@ public sealed class LocalCodingToolService(
             $"Discarded pending patch preview. No files were changed.{Environment.NewLine}Target: {path}",
             "Pending patch preview",
             path);
+    }
+
+    private bool TryNormalizePatchBundle(
+        CodingToolRequest request,
+        out IReadOnlyList<NormalizedPatchEdit> edits,
+        out CodingToolResult error)
+    {
+        edits = [];
+        error = CodingToolResult.NotHandled;
+        if (request.PatchEdits is null || request.PatchEdits.Count == 0)
+        {
+            error = new CodingToolResult(
+                true,
+                false,
+                "Coding tool blocked: patch bundle preview needs at least one file edit.",
+                "Patch bundle preview",
+                Policy.WorkspaceRoot);
+            return false;
+        }
+
+        if (request.PatchEdits.Count > MaxPatchBundleEdits)
+        {
+            error = new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: patch bundle can preview at most {MaxPatchBundleEdits} edit(s).",
+                "Patch bundle preview",
+                Policy.WorkspaceRoot);
+            return false;
+        }
+
+        var normalized = new List<NormalizedPatchEdit>();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edit in request.PatchEdits)
+        {
+            if (!CodingWorkspacePolicy.TryNormalizePath(edit.Path, out var fullPath))
+            {
+                error = new CodingToolResult(
+                    true,
+                    false,
+                    "Coding tool blocked: every patch bundle target must be a valid local path.",
+                    "Patch bundle preview",
+                    edit.Path);
+                return false;
+            }
+
+            if (!Policy.IsInsideWorkspace(fullPath))
+            {
+                error = new CodingToolResult(
+                    true,
+                    false,
+                    "Coding tool blocked: patch bundle targets must be inside the approved coding workspace.",
+                    "Patch bundle preview",
+                    fullPath);
+                return false;
+            }
+
+            if (!LooksTextReadable(fullPath))
+            {
+                error = new CodingToolResult(
+                    true,
+                    false,
+                    "Coding tool blocked: only text-like coding files can be included in a patch bundle.",
+                    "Patch bundle preview",
+                    fullPath);
+                return false;
+            }
+
+            if (!paths.Add(fullPath))
+            {
+                error = new CodingToolResult(
+                    true,
+                    false,
+                    "Coding tool blocked: patch bundles currently allow one edit per file. Preview same-file edits separately.",
+                    "Patch bundle preview",
+                    fullPath);
+                return false;
+            }
+
+            normalized.Add(new NormalizedPatchEdit(fullPath, edit.OldText, edit.NewText));
+        }
+
+        edits = normalized;
+        return true;
+    }
+
+    private static async Task<PatchBundlePreparation> PreparePatchBundleAsync(
+        IReadOnlyList<NormalizedPatchEdit> edits,
+        string toolName,
+        CancellationToken cancellationToken)
+    {
+        var prepared = new List<PreparedPatchEdit>();
+        foreach (var edit in edits)
+        {
+            var result = await PreparePatchEditAsync(edit, toolName, cancellationToken).ConfigureAwait(false);
+            if (result.Error is not null)
+            {
+                return new PatchBundlePreparation([], result.Error);
+            }
+
+            prepared.Add(result.Edit!);
+        }
+
+        return new PatchBundlePreparation(prepared, null);
+    }
+
+    private static async Task<PatchEditPreparation> PreparePatchEditAsync(
+        NormalizedPatchEdit edit,
+        string toolName,
+        CancellationToken cancellationToken)
+    {
+        if (!ValidateEditContent(edit.OldText, "Text to replace", out var oldTextError))
+        {
+            return new PatchEditPreparation(null, new CodingToolResult(true, false, oldTextError, toolName, edit.FullPath));
+        }
+
+        if (edit.OldText.Length == 0)
+        {
+            return new PatchEditPreparation(null, new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", toolName, edit.FullPath));
+        }
+
+        if (!ValidateEditContent(edit.NewText, "Replacement text", out var newTextError))
+        {
+            return new PatchEditPreparation(null, new CodingToolResult(true, false, newTextError, toolName, edit.FullPath));
+        }
+
+        if (!File.Exists(edit.FullPath))
+        {
+            return new PatchEditPreparation(
+                null,
+                new CodingToolResult(
+                    true,
+                    false,
+                    $"Coding tool blocked: patch bundle target does not exist: {edit.FullPath}",
+                    toolName,
+                    edit.FullPath));
+        }
+
+        var fileInfo = new FileInfo(edit.FullPath);
+        if (fileInfo.Length > MaxReplaceFileCharacters)
+        {
+            return new PatchEditPreparation(
+                null,
+                new CodingToolResult(
+                    true,
+                    false,
+                    $"Coding tool blocked: patch bundle target is too large for a safe literal patch ({fileInfo.Length} bytes).",
+                    toolName,
+                    edit.FullPath));
+        }
+
+        var existing = await File.ReadAllTextAsync(edit.FullPath, cancellationToken).ConfigureAwait(false);
+        var count = CountOrdinalOccurrences(existing, edit.OldText);
+        if (count != 1)
+        {
+            return new PatchEditPreparation(
+                null,
+                new CodingToolResult(
+                    true,
+                    false,
+                    $"Coding tool blocked: patch bundle expected exactly one match in {edit.FullPath} but found {count}.",
+                    toolName,
+                    edit.FullPath));
+        }
+
+        var index = existing.IndexOf(edit.OldText, StringComparison.Ordinal);
+        var updated = existing.Remove(index, edit.OldText.Length).Insert(index, edit.NewText);
+        return new PatchEditPreparation(
+            new PreparedPatchEdit(
+                edit.FullPath,
+                updated,
+                BuildSnippet(existing, index, edit.OldText.Length),
+                BuildSnippet(updated, index, edit.NewText.Length)),
+            null);
     }
 
     private static async Task<CodingToolResult> CreateFileAsync(
@@ -1382,6 +1676,7 @@ public sealed class LocalCodingToolService(
             request.Query,
             contentLength = request.Content?.Length,
             replacementLength = request.Replacement?.Length,
+            patchEditCount = request.PatchEdits?.Count,
             permission = permission.Kind.ToString(),
             permission.Reason,
             result.Succeeded,
@@ -1970,7 +2265,7 @@ public sealed class LocalCodingToolService(
 
     private void StoreLastPatchPreview(CodingToolRequest request, CodingToolResult result)
     {
-        if (request.Action != CodingToolAction.PreviewReplaceText)
+        if (request.Action is not (CodingToolAction.PreviewReplaceText or CodingToolAction.PreviewPatchBundle))
         {
             return;
         }
@@ -2541,6 +2836,25 @@ public sealed class LocalCodingToolService(
 
         return true;
     }
+
+    private sealed record NormalizedPatchEdit(
+        string FullPath,
+        string OldText,
+        string NewText);
+
+    private sealed record PreparedPatchEdit(
+        string FullPath,
+        string UpdatedText,
+        string BeforeSnippet,
+        string AfterSnippet);
+
+    private sealed record PatchEditPreparation(
+        PreparedPatchEdit? Edit,
+        CodingToolResult? Error);
+
+    private sealed record PatchBundlePreparation(
+        IReadOnlyList<PreparedPatchEdit> Edits,
+        CodingToolResult? Error);
 
     private sealed record ProjectSummary(
         string RelativePath,

@@ -19,6 +19,7 @@ public enum CodingToolAction
     CreateFile,
     AppendFile,
     PreviewReplaceText,
+    PreviewPatchBundle,
     ShowLastPatchPreview,
     DiscardLastPatchPreview,
     ApplyLastPatchPreview,
@@ -52,7 +53,13 @@ public sealed record CodingToolRequest(
     bool UserConfirmed = false,
     string? Query = null,
     string? Content = null,
-    string? Replacement = null);
+    string? Replacement = null,
+    IReadOnlyList<CodingPatchEdit>? PatchEdits = null);
+
+public sealed record CodingPatchEdit(
+    string Path,
+    string OldText,
+    string NewText);
 
 public sealed record CodingToolPermission(
     CodingToolPermissionKind Kind,

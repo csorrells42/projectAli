@@ -134,6 +134,16 @@ preview replace in file "C:\path\to\file.cs" "old text" with "new text"
 
 Ali rechecks the pending patch before showing or applying it. If the file changed and the preview is stale, Ali discards the pending patch instead of applying an old change.
 
+Multi-file patch bundles use the same preview and confirmation flow:
+
+```text
+preview patch bundle
+file "C:\path\to\first.cs" replace "old text" with "new text"
+file "C:\path\to\second.cs" replace "old text" with "new text"
+```
+
+Patch bundles are limited to exact literal replacements inside the approved coding workspace. Ali allows one edit per file in a bundle and rechecks every file before applying anything. Use `confirm apply last patch preview` only after reviewing the preview.
+
 Build and diagnostic workflow:
 
 - Build/test/run commands require confirmation.
