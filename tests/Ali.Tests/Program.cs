@@ -58,6 +58,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
+    ("coding parser routes PDF generation", TestCodingParserRoutesPdfGeneration),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
@@ -66,6 +67,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
+    ("local coding tool generates PDF", TestLocalCodingToolGeneratesPdf),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -440,6 +442,21 @@ static Task TestCodingParserRoutesCodingReceipts()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesPdfGeneration()
+{
+    Equal(true, CodingToolRequestParser.TryParse("generate pdf \"owner-demo.pdf\" with text \"Ali demo ready.\"", out var pdfRequest));
+    Equal(CodingToolAction.GeneratePdf, pdfRequest.Action);
+    Equal("owner-demo.pdf", pdfRequest.Path);
+    Equal("Ali demo ready.", pdfRequest.Content);
+    Equal(false, pdfRequest.ExplicitUserPath);
+
+    Equal(true, CodingToolRequestParser.TryParse("create a pdf \"handoff\" with text \"One page summary.\"", out var nameOnlyRequest));
+    Equal(CodingToolAction.GeneratePdf, nameOnlyRequest.Action);
+    Equal("handoff", nameOnlyRequest.Path);
+    Equal("One page summary.", nameOnlyRequest.Content);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesPackageAndRestoreCommands()
 {
     var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Demo App.csproj";
@@ -659,6 +676,38 @@ static async Task TestLocalCodingToolShowsCodingReceipts()
     Contains("Recent coding receipts", receipts.Message);
     Contains("OpenFile succeeded", receipts.Message);
     Contains(filePath, receipts.Message);
+}
+
+static async Task TestLocalCodingToolGeneratesPdf()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var first = await service.TryHandleAsync("generate pdf \"owner-demo.pdf\" with text \"Ali demo ready.\"", CancellationToken.None);
+    var second = await service.TryHandleAsync("generate pdf \"owner-demo.pdf\" with text \"Second copy.\"", CancellationToken.None);
+
+    Equal(true, first.Handled);
+    Equal(true, first.Succeeded);
+    NotNull(first.TargetPath, "PDF generator should report the generated path.");
+    Contains(Path.Combine(directory, "GeneratedDocuments"), first.TargetPath!);
+    Equal(true, File.Exists(first.TargetPath!));
+
+    var firstBytes = await File.ReadAllBytesAsync(first.TargetPath!);
+    var firstText = System.Text.Encoding.ASCII.GetString(firstBytes);
+    Contains("%PDF-1.4", firstText);
+    Contains("Ali demo ready.", firstText);
+    Contains("%%EOF", firstText);
+
+    Equal(true, second.Handled);
+    Equal(true, second.Succeeded);
+    NotNull(second.TargetPath, "Second PDF generator result should report the generated path.");
+    Equal(true, File.Exists(second.TargetPath!));
+    Equal(false, string.Equals(first.TargetPath, second.TargetPath, StringComparison.OrdinalIgnoreCase));
 }
 
 static async Task TestLocalCodingToolReadsAndSearchesWorkspace()

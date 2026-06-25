@@ -22,6 +22,7 @@ public sealed class LocalCodingToolService(
     private const int MaxReceiptEntries = 12;
     private const int MaxDiagnosticLines = 12;
     private const int MaxEditContentCharacters = 20_000;
+    private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
     private const int MaxWorkspaceSummaryEntries = 20;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
@@ -103,6 +104,7 @@ public sealed class LocalCodingToolService(
     private readonly ICodingProcessLauncher _processLauncher = processLauncher ?? new CodingProcessLauncher();
     private readonly ICodingCommandRunner _commandRunner = commandRunner ?? new CodingCommandRunner();
     private readonly string _actionLogPath = Path.Combine(dataRoot, "coding-tool-actions.jsonl");
+    private readonly string _generatedDocumentsRoot = Path.Combine(dataRoot, "GeneratedDocuments");
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
@@ -156,6 +158,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
+            CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -397,6 +400,35 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Coding receipts",
             _actionLogPath);
+    }
+
+    private async Task<CodingToolResult> GeneratePdfAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryBuildGeneratedPdfPath(request.Path, out var pdfPath, out var pathError))
+        {
+            return new CodingToolResult(true, false, pathError, "PDF generator", _generatedDocumentsRoot);
+        }
+
+        if (!ValidatePdfContent(request.Content, out var contentError))
+        {
+            return new CodingToolResult(true, false, contentError, "PDF generator", pdfPath);
+        }
+
+        Directory.CreateDirectory(_generatedDocumentsRoot);
+        var uniquePath = BuildUniquePath(pdfPath);
+        var title = Path.GetFileNameWithoutExtension(uniquePath);
+        var bytes = SimplePdfWriter.BuildTextPdf(title, request.Content!);
+        await File.WriteAllBytesAsync(uniquePath, bytes, cancellationToken).ConfigureAwait(false);
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Generated PDF: {uniquePath}{Environment.NewLine}Wrote {bytes.Length} byte(s) from {request.Content!.Length} text character(s).",
+            "PDF generator",
+            uniquePath);
     }
 
     private Task<CodingToolResult> OpenWorkspaceAsync(CancellationToken cancellationToken)
@@ -2158,6 +2190,73 @@ public sealed class LocalCodingToolService(
         }
 
         return true;
+    }
+
+    private bool TryBuildGeneratedPdfPath(string? requestedName, out string path, out string error)
+    {
+        path = string.Empty;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(requestedName))
+        {
+            error = "PDF generator needs a file name like \"owner-demo.pdf\".";
+            return false;
+        }
+
+        var fileName = Path.GetFileName(requestedName.Trim().Trim('"'));
+        if (string.IsNullOrWhiteSpace(fileName)
+            || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            error = "PDF generator blocked: PDF file name is not valid.";
+            return false;
+        }
+
+        if (!fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            fileName += ".pdf";
+        }
+
+        path = Path.Combine(_generatedDocumentsRoot, fileName);
+        return true;
+    }
+
+    private static bool ValidatePdfContent(string? content, out string error)
+    {
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            error = "PDF generator needs text content.";
+            return false;
+        }
+
+        if (content.Length > MaxPdfTextCharacters)
+        {
+            error = $"PDF generator blocked: text is too large for a single simple PDF ({content.Length} character(s)).";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string BuildUniquePath(string path)
+    {
+        if (!File.Exists(path) && !Directory.Exists(path))
+        {
+            return path;
+        }
+
+        var directory = Path.GetDirectoryName(path) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(path);
+        var extension = Path.GetExtension(path);
+        for (var index = 2; index < 10_000; index++)
+        {
+            var candidate = Path.Combine(directory, $"{name}-{index}{extension}");
+            if (!File.Exists(candidate) && !Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new IOException($"Could not find an available generated document path for: {path}");
     }
 
     private static int CountOrdinalOccurrences(string text, string value)

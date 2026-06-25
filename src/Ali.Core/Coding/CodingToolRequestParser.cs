@@ -92,6 +92,18 @@ public static class CodingToolRequestParser
         "dry-run replace in file "
     ];
 
+    private static readonly string[] GeneratePdfPrefixes =
+    [
+        "create pdf ",
+        "create a pdf ",
+        "generate pdf ",
+        "generate a pdf ",
+        "make pdf ",
+        "make a pdf ",
+        "write pdf ",
+        "write a pdf "
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -271,6 +283,11 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParseGeneratePdf(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
@@ -415,6 +432,29 @@ public static class CodingToolRequestParser
             lineNumber,
             ExplicitUserPath: true,
             UserConfirmed: userConfirmed);
+        return true;
+    }
+
+    private static bool TryParseGeneratePdf(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (!StartsWithAny(text, GeneratePdfPrefixes))
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count < 2 || string.IsNullOrWhiteSpace(segments[0]))
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.GeneratePdf,
+            segments[0].Trim(),
+            ExplicitUserPath: false,
+            UserConfirmed: userConfirmed,
+            Content: segments[1]);
         return true;
     }
 
