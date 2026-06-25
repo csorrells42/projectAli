@@ -101,6 +101,11 @@ public sealed class CodingWorkspacePolicy
                 : CodingToolPermissionKind.RequireConfirmation.AsPermission("Applying the last patch preview changes files and needs explicit confirmation.");
         }
 
+        if (request.Action == CodingToolAction.OpenLastDiagnostic)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Opening the last diagnostic file is a read/open action and is limited to the approved workspace.");
+        }
+
         if (request.Action == CodingToolAction.ListPackages && string.IsNullOrWhiteSpace(request.Path))
         {
             return CodingToolPermissionKind.Allow.AsPermission("Listing package references in the approved coding workspace is allowed.");

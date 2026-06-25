@@ -58,6 +58,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
+    ("coding parser routes last diagnostic open", TestCodingParserRoutesLastDiagnosticOpen),
     ("coding parser routes PDF generation", TestCodingParserRoutesPdfGeneration),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
@@ -74,6 +75,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
     ("local coding tool summarizes dotnet diagnostics", TestLocalCodingToolSummarizesDotNetDiagnostics),
+    ("local coding tool opens last diagnostic", TestLocalCodingToolOpensLastDiagnostic),
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
@@ -441,6 +443,16 @@ static Task TestCodingParserRoutesCodingReceipts()
 
     Equal(true, CodingToolRequestParser.TryParse("coding status", out var statusRequest));
     Equal(CodingToolAction.ShowReceipts, statusRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesLastDiagnosticOpen()
+{
+    Equal(true, CodingToolRequestParser.TryParse("open build error", out var buildErrorRequest));
+    Equal(CodingToolAction.OpenLastDiagnostic, buildErrorRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("open last compiler error", out var compilerErrorRequest));
+    Equal(CodingToolAction.OpenLastDiagnostic, compilerErrorRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -894,6 +906,46 @@ static async Task TestLocalCodingToolSummarizesDotNetDiagnostics()
     Contains("Diagnostic summary:", result.Message);
     Contains(diagnosticLine, result.Message);
     Equal(1, runner.Runs.Count);
+}
+
+static async Task TestLocalCodingToolOpensLastDiagnostic()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var sourcePath = Path.Combine(workspace, "Widget.cs");
+    var notepadPlusPlus = Path.Combine(directory, "notepad++.exe");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(sourcePath, "class Widget");
+    await File.WriteAllTextAsync(notepadPlusPlus, string.Empty);
+    var diagnosticLine = $"{sourcePath}(12,5): error CS1002: ; expected [{projectPath}]";
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(1, string.Empty, diagnosticLine, TimedOut: false));
+    var launcher = new FakeCodingProcessLauncher();
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        launcher,
+        runner,
+        configuredNotepadPlusPlusPath: notepadPlusPlus);
+
+    var beforeFailure = await service.TryHandleAsync("open build error", CancellationToken.None);
+    var build = await service.TryHandleAsync($"confirm dotnet build \"{projectPath}\"", CancellationToken.None);
+    var opened = await service.TryHandleAsync("open build error", CancellationToken.None);
+
+    Equal(true, beforeFailure.Handled);
+    Equal(false, beforeFailure.Succeeded);
+    Contains("No failed dotnet command", beforeFailure.Message);
+    Equal(false, build.Succeeded);
+    Equal(true, opened.Handled);
+    Equal(true, opened.Succeeded);
+    Equal(sourcePath, opened.TargetPath);
+    Equal(12, opened.LineNumber);
+    Contains("Opened last diagnostic file", opened.Message);
+    Equal(1, launcher.Starts.Count);
+    Equal(notepadPlusPlus, launcher.Starts[0].FileName);
+    Contains(sourcePath, string.Join(" ", launcher.Starts[0].Arguments));
+    Contains("-n12", string.Join(" ", launcher.Starts[0].Arguments));
 }
 
 static async Task TestLocalCodingToolRequiresConfirmationBeforeRestore()

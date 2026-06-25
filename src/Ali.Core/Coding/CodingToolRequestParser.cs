@@ -166,6 +166,20 @@ public static class CodingToolRequestParser
         "what did you do in coding"
     ];
 
+    private static readonly string[] OpenLastDiagnosticRequests =
+    [
+        "open last diagnostic",
+        "open last diagnostic file",
+        "open first diagnostic",
+        "open first diagnostic file",
+        "open last build error",
+        "open build error",
+        "open last error file",
+        "open failing file",
+        "open compiler error",
+        "open last compiler error"
+    ];
+
     private static readonly string[] PackagePrefixes =
     [
         "list packages",
@@ -280,6 +294,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsOpenLastDiagnosticRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.OpenLastDiagnostic, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
         {
             return true;
@@ -358,6 +378,9 @@ public static class CodingToolRequestParser
 
     private static bool IsReceiptRequest(string text) =>
         ReceiptRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsOpenLastDiagnosticRequest(string text) =>
+        OpenLastDiagnosticRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsApplyLastPatchPreviewRequest(string text) =>
         ApplyLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

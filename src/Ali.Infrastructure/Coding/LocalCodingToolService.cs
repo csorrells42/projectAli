@@ -160,6 +160,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -1046,6 +1047,52 @@ public sealed class LocalCodingToolService(
             "Notepad",
             fullPath,
             request.LineNumber));
+    }
+
+    private async Task<CodingToolResult> OpenLastDiagnosticAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lastDotNetResult is not { Succeeded: false } lastDotNetResult)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No failed dotnet command is available yet. Run a confirmed build or test first.",
+                "Last diagnostic",
+                Policy.WorkspaceRoot);
+        }
+
+        var diagnostic = ExtractDiagnosticFileReferences(lastDotNetResult.Message)
+            .FirstOrDefault(reference => File.Exists(reference.Path) && Policy.IsInsideWorkspace(reference.Path));
+        if (diagnostic is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "The last failed dotnet command did not include an openable diagnostic file inside the approved workspace.",
+                "Last diagnostic",
+                Policy.WorkspaceRoot);
+        }
+
+        var result = await OpenFileAsync(
+            new CodingToolRequest(
+                CodingToolAction.OpenFile,
+                diagnostic.Path,
+                diagnostic.LineNumber,
+                ExplicitUserPath: false,
+                UserConfirmed: true),
+            cancellationToken).ConfigureAwait(false);
+        return result.Succeeded
+            ? result with
+            {
+                Message = $"Opened last diagnostic file from the failed dotnet command.{Environment.NewLine}{result.Message}",
+                ToolName = "Last diagnostic"
+            }
+            : result with
+            {
+                Message = $"Could not open the last diagnostic file.{Environment.NewLine}{result.Message}",
+                ToolName = "Last diagnostic"
+            };
     }
 
     private Task<CodingToolResult> OpenSolutionAsync(
