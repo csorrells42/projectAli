@@ -105,6 +105,20 @@ public static class CodingToolRequestParser
         "list projects"
     ];
 
+    private static readonly string[] PlanTaskPrefixes =
+    [
+        "plan coding task",
+        "plan this coding task",
+        "plan code task",
+        "plan code change",
+        "plan coding change",
+        "make a coding plan",
+        "make coding plan",
+        "draft coding plan",
+        "plan the fix",
+        "plan fix"
+    ];
+
     private static readonly string[] PackagePrefixes =
     [
         "list packages",
@@ -208,6 +222,11 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParsePlanTask(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
         {
             return true;
@@ -272,6 +291,26 @@ public static class CodingToolRequestParser
 
     private static bool IsOpenSolutionRequest(string text) =>
         OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool TryParsePlanTask(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = PlanTaskPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.PlanTask,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
 
     private static bool HasOpenIntent(string text)
     {

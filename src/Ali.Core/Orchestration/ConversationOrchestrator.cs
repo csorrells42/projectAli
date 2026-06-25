@@ -98,6 +98,9 @@ public sealed class ConversationOrchestrator(
         var codingContext = LocalCodingTool is null
             ? CodingContextPack.Empty
             : await LocalCodingTool.BuildContextPackAsync(userText, cancellationToken).ConfigureAwait(false);
+        var codingTaskPlan = LocalCodingTool is null
+            ? CodingTaskPlan.Empty
+            : await LocalCodingTool.BuildTaskPlanAsync(userText, codingContext, cancellationToken).ConfigureAwait(false);
         var plannerHistory = AddSavedMemories(history);
         var sourcePlan = await SourcePlanner.PlanAsync(userText, plannerHistory, cancellationToken).ConfigureAwait(false);
         var sourceResult = sourcePlan.UseSources
@@ -106,7 +109,7 @@ public sealed class ConversationOrchestrator(
         var answerHistory = ShouldIncludeSavedMemoriesInAnswer(userText, sourcePlan)
             ? plannerHistory
             : history;
-        answerHistory = AddCodingContext(answerHistory, codingContext);
+        answerHistory = AddCodingContext(answerHistory, codingContext, codingTaskPlan);
         var enrichedHistory = answerHistory;
         if (sourceResult.HasSources)
         {
@@ -193,9 +196,11 @@ public sealed class ConversationOrchestrator(
 
     private static IReadOnlyList<ChatMessage> AddCodingContext(
         IReadOnlyList<ChatMessage> history,
-        CodingContextPack contextPack)
+        CodingContextPack contextPack,
+        CodingTaskPlan taskPlan)
     {
-        if (!contextPack.HasContext || string.IsNullOrWhiteSpace(contextPack.Text))
+        if ((!contextPack.HasContext || string.IsNullOrWhiteSpace(contextPack.Text))
+            && (!taskPlan.HasPlan || string.IsNullOrWhiteSpace(taskPlan.Text)))
         {
             return history;
         }
@@ -203,21 +208,41 @@ public sealed class ConversationOrchestrator(
         var instruction = contextPack.IncludesLastFailure
             ? "A local coding context pack is attached. Use it to explain the likely build/test failure and propose a small fix. Do not say you changed files. File edits still require explicit user confirmation."
             : "A local coding context pack is attached. Use it as read-only context for this coding question. Do not say you changed files or ran tools unless a tool result says so.";
+        if (taskPlan.HasPlan)
+        {
+            instruction += " A guarded coding task plan is also attached. Use it as the work order and preserve its confirmation gates.";
+        }
 
-        return history
+        var updated = history
             .Append(new ChatMessage(
                 $"msg_coding_instruction_{Guid.NewGuid():N}",
                 ChatRole.System,
                 instruction,
                 DateTimeOffset.UtcNow,
                 EvidenceStatus.Verified))
-            .Append(new ChatMessage(
+            .ToList();
+
+        if (contextPack.HasContext && !string.IsNullOrWhiteSpace(contextPack.Text))
+        {
+            updated.Add(new ChatMessage(
                 $"msg_coding_context_{Guid.NewGuid():N}",
                 ChatRole.User,
                 contextPack.Text,
                 DateTimeOffset.UtcNow,
-                EvidenceStatus.Verified))
-            .ToList();
+                EvidenceStatus.Verified));
+        }
+
+        if (taskPlan.HasPlan && !string.IsNullOrWhiteSpace(taskPlan.Text))
+        {
+            updated.Add(new ChatMessage(
+                $"msg_coding_plan_{Guid.NewGuid():N}",
+                ChatRole.User,
+                taskPlan.Text,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Verified));
+        }
+
+        return updated;
     }
 
     private IReadOnlyList<ChatMessage> AddSavedMemories(IReadOnlyList<ChatMessage> history)

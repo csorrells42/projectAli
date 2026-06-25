@@ -56,12 +56,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding locator uses configured tool paths", TestCodingLocatorUsesConfiguredToolPaths),
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
+    ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
     ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
+    ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -411,6 +413,20 @@ static Task TestCodingParserRoutesWorkspaceInspection()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesGuardedTaskPlanning()
+{
+    Equal(true, CodingToolRequestParser.TryParse("plan coding task add a settings button", out var planRequest));
+    Equal(CodingToolAction.PlanTask, planRequest.Action);
+    Equal("add a settings button", planRequest.Query);
+    Equal(false, planRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("confirm plan the fix for the broken build", out var confirmedPlanRequest));
+    Equal(CodingToolAction.PlanTask, confirmedPlanRequest.Action);
+    Equal("for the broken build", confirmedPlanRequest.Query);
+    Equal(true, confirmedPlanRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesPackageAndRestoreCommands()
 {
     var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Demo App.csproj";
@@ -570,6 +586,31 @@ static async Task TestLocalCodingToolOpensPrimarySolution()
     Equal(1, launcher.Starts.Count);
     Equal(visualStudioPath, launcher.Starts[0].FileName);
     Equal(solutionPath, launcher.Starts[0].Arguments[0]);
+}
+
+static async Task TestLocalCodingToolPlansGuardedTask()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("plan coding task fix the build and run tests", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Coding task plan", result.Message);
+    Contains("Permission gates", result.Message);
+    Contains("File writes require", result.Message);
+    Contains("Build, test, restore, and run require confirmation", result.Message);
+    Equal(0, runner.Runs.Count);
 }
 
 static async Task TestLocalCodingToolReadsAndSearchesWorkspace()
@@ -1003,6 +1044,8 @@ static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
 
     var context = string.Join(Environment.NewLine, runtime.LastRequest!.History.Select(message => message.Text));
     Contains("Ali coding context pack", context);
+    Contains("Coding task plan", context);
+    Contains("Permission gates", context);
     Contains("Demo.csproj", context);
     Contains("CommunityToolkit.Mvvm 8.4.0", context);
     Contains("WidgetFactory.cs", context);
@@ -1058,6 +1101,7 @@ static async Task TestOrchestratorInjectsLastBuildFailureContext()
 
     var context = string.Join(Environment.NewLine, runtime.LastRequest!.History.Select(message => message.Text));
     Contains("Last failed dotnet command", context);
+    Contains("Coding task plan", context);
     Contains("Diagnostic summary", context);
     Contains("CS1002", context);
     Contains("public sealed class Broken", context);

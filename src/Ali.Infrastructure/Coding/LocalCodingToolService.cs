@@ -152,6 +152,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.OpenWorkspace => await OpenWorkspaceAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListWorkspace => ListWorkspace(),
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
+            CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -176,8 +177,16 @@ public sealed class LocalCodingToolService(
         string userText,
         CancellationToken cancellationToken)
     {
+        return await BuildContextPackAsync(userText, force: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CodingContextPack> BuildContextPackAsync(
+        string userText,
+        bool force,
+        CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!ShouldBuildCodingContext(userText))
+        if (!force && !ShouldBuildCodingContext(userText))
         {
             return CodingContextPack.Empty;
         }
@@ -242,6 +251,96 @@ public sealed class LocalCodingToolService(
             true,
             TrimForChat(string.Join(Environment.NewLine, lines), MaxContextPackCharacters),
             includesLastFailure);
+    }
+
+    public Task<CodingTaskPlan> BuildTaskPlanAsync(
+        string userText,
+        CodingContextPack contextPack,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!contextPack.HasContext && !ShouldBuildCodingContext(userText))
+        {
+            return Task.FromResult(CodingTaskPlan.Empty);
+        }
+
+        var goal = string.IsNullOrWhiteSpace(userText)
+            ? "coding task"
+            : userText.Trim();
+        var wantsEdit = MentionsAny(goal, "add", "change", "edit", "fix", "implement", "modify", "patch", "repair", "update", "write");
+        var wantsVerification = MentionsAny(goal, "build", "compile", "run", "test", "verify");
+        var wantsGit = MentionsAny(goal, "commit", "git", "merge", "push", "pull");
+        var requiresConfirmation = wantsEdit || wantsVerification || wantsGit || contextPack.IncludesLastFailure;
+
+        var lines = new List<string>
+        {
+            "Coding task plan:",
+            $"Goal: {goal}",
+            "Receipts available:",
+            $"- Approved workspace: {Policy.WorkspaceRoot}",
+            contextPack.HasContext
+                ? "- Read-only project context: workspace map, package references, and relevant files are available."
+                : "- Read-only project context: not available yet."
+        };
+
+        if (contextPack.IncludesLastFailure)
+        {
+            lines.Add("- Last failed dotnet command: diagnostic summary and source excerpts are available.");
+        }
+
+        lines.Add("Proposed steps:");
+        var step = 1;
+        lines.Add($"{step++}. Inspect the provided workspace context and identify the smallest relevant files.");
+        if (contextPack.IncludesLastFailure)
+        {
+            lines.Add($"{step++}. Use the last dotnet diagnostic and included file excerpts to explain the likely failure.");
+        }
+        else
+        {
+            lines.Add($"{step++}. Read or search only the files needed for this goal.");
+        }
+
+        lines.Add($"{step++}. Propose the smallest safe change or answer, with file paths and line references when available.");
+        if (wantsEdit || contextPack.IncludesLastFailure)
+        {
+            lines.Add($"{step++}. Wait for explicit confirmation before writing files. Confirmed edits must use the guarded file-edit path.");
+        }
+
+        if (wantsVerification || wantsEdit || contextPack.IncludesLastFailure)
+        {
+            lines.Add($"{step++}. After confirmed edits, run only the relevant confirmed build/test command and report the result.");
+        }
+
+        if (wantsGit)
+        {
+            lines.Add($"{step++}. Use read-only git status/diff first; staging, commits, merges, pull, or push require their configured confirmation gates.");
+        }
+
+        lines.Add("Permission gates:");
+        lines.Add("- Read/open/search/inspect inside the approved workspace can proceed as read-only actions.");
+        lines.Add("- File writes require an explicit confirmation phrase before Ali changes files.");
+        lines.Add("- Build, test, restore, and run require confirmation before execution.");
+        lines.Add("- Git write/network actions follow the Git permission settings and may be blocked.");
+
+        return Task.FromResult(new CodingTaskPlan(
+            true,
+            string.Join(Environment.NewLine, lines),
+            requiresConfirmation));
+    }
+
+    private async Task<CodingToolResult> PlanTaskAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        var goal = request.Query ?? "coding task";
+        var contextPack = await BuildContextPackAsync(goal, force: true, cancellationToken).ConfigureAwait(false);
+        var plan = await BuildTaskPlanAsync(goal, contextPack, cancellationToken).ConfigureAwait(false);
+        return new CodingToolResult(
+            true,
+            plan.HasPlan,
+            plan.HasPlan ? plan.Text : "Coding task planner needs a clearer coding goal.",
+            "Coding task planner",
+            Policy.WorkspaceRoot);
     }
 
     private Task<CodingToolResult> OpenWorkspaceAsync(CancellationToken cancellationToken)
@@ -1472,6 +1571,19 @@ public sealed class LocalCodingToolService(
                || tokens.Contains("it")
                || tokens.Contains("that")
                || tokens.Contains("this");
+    }
+
+    private static bool MentionsAny(string text, params string[] terms)
+    {
+        foreach (var term in terms)
+        {
+            if (text.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void AddContextSection(

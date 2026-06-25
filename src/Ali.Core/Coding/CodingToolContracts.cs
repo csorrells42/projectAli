@@ -7,6 +7,7 @@ public enum CodingToolAction
     OpenWorkspace,
     ListWorkspace,
     InspectWorkspace,
+    PlanTask,
     ListPackages,
     ListOutdatedPackages,
     SearchWorkspace,
@@ -69,6 +70,14 @@ public sealed record CodingContextPack(
     public static CodingContextPack Empty { get; } = new(false, string.Empty);
 }
 
+public sealed record CodingTaskPlan(
+    bool HasPlan,
+    string Text,
+    bool RequiresConfirmation = false)
+{
+    public static CodingTaskPlan Empty { get; } = new(false, string.Empty);
+}
+
 public interface ILocalCodingTool
 {
     CodingWorkspacePolicy Policy { get; }
@@ -79,5 +88,10 @@ public interface ILocalCodingTool
 
     Task<CodingContextPack> BuildContextPackAsync(
         string userText,
+        CancellationToken cancellationToken);
+
+    Task<CodingTaskPlan> BuildTaskPlanAsync(
+        string userText,
+        CodingContextPack contextPack,
         CancellationToken cancellationToken);
 }
