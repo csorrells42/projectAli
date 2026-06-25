@@ -15,6 +15,7 @@ public sealed record VoiceRuntimeSettings(
     bool NormalizeBeforeStt = true,
     bool RetainDebugAudio = false,
     bool AutoSendVoiceTranscripts = false,
+    string PushToTalkKey = "NumPad0",
     string? WhisperExecutablePath = null,
     string? WhisperModelPath = null,
     string? WhisperArgumentsTemplate = null,

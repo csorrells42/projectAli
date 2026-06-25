@@ -3,6 +3,8 @@ using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
 using Ali.Infrastructure.Bootstrap;
+using Ali.Infrastructure.Runtime;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 var listenUrls = Environment.GetEnvironmentVariable("ALI_HELPER_URLS");
@@ -13,10 +15,13 @@ if (string.IsNullOrWhiteSpace(listenUrls))
 
 builder.WebHost.UseUrls(listenUrls);
 builder.Services.AddSingleton(AliServices.CreateForDesktop());
+builder.Services.AddSingleton<OllamaProcessOwner>();
 builder.Services.AddSingleton<HelperRuntimeState>();
 
 var app = builder.Build();
 var accessToken = Environment.GetEnvironmentVariable("ALI_HELPER_TOKEN");
+var ollamaOwner = app.Services.GetRequiredService<OllamaProcessOwner>();
+app.Lifetime.ApplicationStopping.Register(ollamaOwner.StopProcessesStartedByAli);
 
 app.MapGet("/", () => Results.Content(HelperPage.IndexHtml, "text/html; charset=utf-8"));
 
@@ -91,6 +96,7 @@ app.MapPost("/api/ask", async (
         return Results.BadRequest(new ErrorResponse("Message is too long for the basic helper."));
     }
 
+    await ollamaOwner.EnsureStartedForAsync(services.LoadRuntimeSettings(), cancellationToken).ConfigureAwait(false);
     var health = await state.EnsureLocalRuntimeActivatedAsync(services, cancellationToken).ConfigureAwait(false);
     if (!health.Succeeded || services.RuntimeController.IsUsingFallback)
     {
@@ -313,6 +319,159 @@ internal sealed class HelperRuntimeState
             _gate.Release();
         }
     }
+}
+
+internal sealed class OllamaProcessOwner
+{
+    private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
+    private readonly HashSet<int> _processIdsStartedByAli = new();
+    private bool _ollamaWasRunningAtStartup;
+    private bool _startInProgress;
+    private DateTimeOffset _nextStartAttemptAt = DateTimeOffset.MinValue;
+
+    public async Task EnsureStartedForAsync(
+        OpenAiCompatibleRuntimeOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (!options.Enabled || !IsLocalOllamaEndpoint(options.Endpoint))
+        {
+            return;
+        }
+
+        if (_startInProgress || _processIdsStartedByAli.Count > 0)
+        {
+            return;
+        }
+
+        var before = GetOllamaProcesses();
+        if (before.Count > 0)
+        {
+            _ollamaWasRunningAtStartup = true;
+            _nextStartAttemptAt = DateTimeOffset.MaxValue;
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now < _nextStartAttemptAt)
+        {
+            return;
+        }
+
+        _startInProgress = true;
+        _nextStartAttemptAt = now + OllamaStartRetryInterval;
+
+        var appPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "Ollama",
+            "ollama app.exe");
+        var serverPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "Ollama",
+            "ollama.exe");
+
+        try
+        {
+            var launchedProcess = StartOwnedOllamaProcess(serverPath, appPath);
+            if (launchedProcess is null)
+            {
+                return;
+            }
+
+            _processIdsStartedByAli.Add(launchedProcess.Id);
+            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken).ConfigureAwait(false);
+            var beforeIds = before.Select(process => process.Id).ToHashSet();
+            foreach (var process in GetOllamaProcesses())
+            {
+                if (!beforeIds.Contains(process.Id))
+                {
+                    _processIdsStartedByAli.Add(process.Id);
+                }
+            }
+        }
+        finally
+        {
+            _startInProgress = false;
+        }
+    }
+
+    private static Process? StartOwnedOllamaProcess(string serverPath, string appPath)
+    {
+        if (File.Exists(serverPath))
+        {
+            return Process.Start(new ProcessStartInfo
+            {
+                FileName = serverPath,
+                Arguments = "serve",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+        }
+
+        if (File.Exists(appPath))
+        {
+            return Process.Start(new ProcessStartInfo
+            {
+                FileName = appPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+        }
+
+        return null;
+    }
+
+    public void StopProcessesStartedByAli()
+    {
+        if (_ollamaWasRunningAtStartup || _processIdsStartedByAli.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var process in GetOllamaProcesses())
+        {
+            if (!_processIdsStartedByAli.Contains(process.Id))
+            {
+                continue;
+            }
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Best-effort cleanup of the Ollama instance Ali launched.
+            }
+        }
+
+        _processIdsStartedByAli.Clear();
+    }
+
+    private static IReadOnlyList<Process> GetOllamaProcesses()
+    {
+        try
+        {
+            return Process.GetProcesses()
+                .Where(process =>
+                    process.ProcessName.Equals("ollama", StringComparison.OrdinalIgnoreCase)
+                    || process.ProcessName.Equals("ollama app", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch
+        {
+            return Array.Empty<Process>();
+        }
+    }
+
+    private static bool IsLocalOllamaEndpoint(Uri endpoint) =>
+        endpoint.Port == 11434
+        && (endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
 }
 
 internal sealed record AskRequest(

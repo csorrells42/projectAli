@@ -2,8 +2,12 @@ using Ali.Core.Feedback;
 using Ali.Core.Orchestration;
 using Ali.Core.Permissions;
 using Ali.Core.Runtime;
+using Ali.Core.Sources;
 using Ali.Core.Voice;
+using Ali.Core.Coding;
+using Ali.Infrastructure.Coding;
 using Ali.Infrastructure.Runtime;
+using Ali.Infrastructure.Sources;
 using Ali.Infrastructure.Storage;
 using Ali.Infrastructure.Voice;
 
@@ -24,7 +28,8 @@ public sealed class AliServices
         ISpeechPlayer speechPlayer,
         FileConversationStore conversations,
         FileMemoryStore memories,
-        FileReminderStore reminders)
+        FileReminderStore reminders,
+        ILocalCodingTool localCodingTool)
     {
         DataRoot = dataRoot;
         RuntimeController = runtimeController;
@@ -37,6 +42,7 @@ public sealed class AliServices
         Conversations = conversations;
         Memories = memories;
         Reminders = reminders;
+        LocalCodingTool = localCodingTool;
     }
 
     public string DataRoot { get; }
@@ -44,6 +50,12 @@ public sealed class AliServices
     public string RuntimeSettingsPath => RuntimeSettingsStore.GetSettingsPath(DataRoot);
 
     public string RuntimeSettingsExamplePath => RuntimeSettingsStore.GetExamplePath(DataRoot);
+
+    public string LocalVectorLibrarySettingsPath => LocalVectorLibrarySettingsStore.GetSettingsPath(DataRoot);
+
+    public string LocalVectorLibraryIndexPath => LocalVectorLibrarySettingsStore.GetIndexPath(DataRoot);
+
+    public string CodingToolSettingsPath => CodingToolSettingsStore.GetSettingsPath(DataRoot);
 
     public SafeActivatingLocalRuntime RuntimeController { get; }
 
@@ -63,11 +75,34 @@ public sealed class AliServices
 
     public FileReminderStore Reminders { get; }
 
+    public ILocalCodingTool LocalCodingTool { get; }
+
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
 
     public void SaveRuntimeSettings(OpenAiCompatibleRuntimeOptions options) =>
         RuntimeSettingsStore.Save(DataRoot, options);
+
+    public LocalVectorLibrarySettings LoadLocalVectorLibrarySettings() =>
+        LocalVectorLibrarySettingsStore.LoadOrDefault(DataRoot);
+
+    public void SaveLocalVectorLibrarySettings(LocalVectorLibrarySettings settings) =>
+        LocalVectorLibrarySettingsStore.Save(DataRoot, settings);
+
+    public CodingToolSettings LoadCodingToolSettings() =>
+        CodingToolSettingsStore.LoadOrDefault(DataRoot);
+
+    public void SaveCodingToolSettings(CodingToolSettings settings)
+    {
+        CodingToolSettingsStore.Save(DataRoot, settings);
+        if (LocalCodingTool is LocalCodingToolService codingToolService)
+        {
+            codingToolService.UpdateSettings(settings);
+        }
+    }
+
+    public LocalVectorLibraryRetriever CreateLocalVectorLibraryRetriever() =>
+        new(DataRoot, _httpClient, LoadLocalVectorLibrarySettings());
 
     public void ConfigureRuntimeCandidate(OpenAiCompatibleRuntimeOptions options)
     {
@@ -106,13 +141,32 @@ public sealed class AliServices
         var fallbackRuntime = new DevelopmentLocalModelRuntime();
         var configuredOptions = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot);
         var httpClient = new HttpClient();
+        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
+        var sourceStore = new FileSourceRetriever(dataRoot, httpClient);
+        sourceStore.WriteExample();
+        LocalVectorLibrarySettingsStore.WriteExample(dataRoot);
+        CodingToolSettingsStore.WriteExample(dataRoot);
+        var localLibrary = new LocalVectorLibraryRetriever(dataRoot, httpClient);
+        localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
             ? new OpenAiCompatibleLocalModelRuntime(httpClient, configuredOptions)
             : null;
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
         var permissions = new PermissionService();
-        var orchestrator = new ConversationOrchestrator(runtime, permissions, correctionQueue);
+        var codingSettings = CodingToolSettingsStore.LoadOrDefault(dataRoot);
+        var localCodingTool = new LocalCodingToolService(
+            codingSettings.ToPolicy(),
+            dataRoot,
+            configuredNotepadPlusPlusPath: codingSettings.NotepadPlusPlusPath,
+            configuredVisualStudioPath: codingSettings.VisualStudioPath);
+        var orchestrator = new ConversationOrchestrator(
+            runtime,
+            permissions,
+            correctionQueue,
+            new CompositeSourceRetriever(localLibrary, sourceStore.CreateRetriever()),
+            memoryStore: memories,
+            localCodingTool: localCodingTool);
 
         var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions.FromEnvironment());
@@ -130,6 +184,7 @@ public sealed class AliServices
             speechPlayer,
             conversations,
             memories,
-            reminders);
+            reminders,
+            localCodingTool);
     }
 }

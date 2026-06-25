@@ -45,6 +45,14 @@ public sealed class ChatMessageViewModel : ObservableObject
 
     public string RoleName => Role.ToString();
 
+    public System.Windows.HorizontalAlignment MessageAlignment => Role == ChatRole.User
+        ? System.Windows.HorizontalAlignment.Right
+        : System.Windows.HorizontalAlignment.Left;
+
+    public System.Windows.TextAlignment MessageTextAlignment => Role == ChatRole.User
+        ? System.Windows.TextAlignment.Right
+        : System.Windows.TextAlignment.Left;
+
     public DateTimeOffset CreatedAt { get; }
 
     public string? SourceUserMessageId { get; }

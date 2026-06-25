@@ -234,6 +234,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Text="Ali"
@@ -302,6 +303,15 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     <Button Grid.Column="4"
+                            Content="Local Library"
+                            Command="{Binding OpenLocalLibraryCommand}"
+                            Height="34"
+                            MinHeight="34"
+                            Margin="0,0,8,0"
+                            Padding="12,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Open Ali's approved local RAG folder and vector index." />
+                    <Button Grid.Column="5"
                             Content="Settings"
                             Command="{Binding OpenSettingsCommand}"
                             Height="34"
@@ -319,16 +329,18 @@
                 <ItemsControl ItemsSource="{Binding Messages}" MaxWidth="840" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
-                            <StackPanel Margin="0,0,0,18">
-                                <DockPanel Margin="0,0,0,6">
-                                    <TextBlock Text="{Binding RoleName}" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-                                    <TextBlock DockPanel.Dock="Right"
-                                               Text="{Binding EvidenceStatus}"
-                                               Foreground="{StaticResource SubtleTextBrush}"
-                                               FontSize="12" />
-                                </DockPanel>
-                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{StaticResource TextBrush}" FontSize="15" LineHeight="22" />
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <StackPanel Margin="0,0,0,18"
+                                        MaxWidth="760"
+                                        HorizontalAlignment="{Binding MessageAlignment}">
+                                <TextBlock Text="{Binding Text}"
+                                           TextWrapping="Wrap"
+                                           TextAlignment="{Binding MessageTextAlignment}"
+                                           Foreground="{StaticResource TextBrush}"
+                                           FontSize="15"
+                                           LineHeight="22" />
+                                <StackPanel Orientation="Horizontal"
+                                            Margin="0,8,0,0"
+                                            HorizontalAlignment="{Binding MessageAlignment}">
                                     <Button Content="Flag as incorrect"
                                             Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}"
@@ -393,7 +405,6 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <Button Grid.Column="0"
@@ -419,26 +430,27 @@
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
                         <Button Grid.Column="2"
-                                Content="{Binding MicButtonText}"
                                 Command="{Binding ToggleVoiceRecordingCommand}"
                                 ToolTip="Record speech into the chat bar"
-                                Style="{StaticResource ComposerButton}" />
+                                Style="{StaticResource ComposerButton}">
+                            <TextBlock Text="{Binding MicButtonText}"
+                                       Foreground="#EF4444"
+                                       FontWeight="SemiBold" />
+                        </Button>
                         <Button Grid.Column="3"
                                 Content="{Binding VoiceModeButtonText}"
                                 Command="{Binding ToggleVoiceModeCommand}"
-                                ToolTip="Toggle hands-free voice mode"
+                                ToolTip="{Binding PushToTalkHintText}"
                                 Style="{StaticResource ComposerButton}"
-                                MinWidth="96" />
+                                MinWidth="150" />
                         <Button Grid.Column="4"
-                                Content="Stop"
-                                Command="{Binding StopCommand}"
-                                ToolTip="Stop the current response"
-                                Style="{StaticResource ComposerButton}" />
-                        <Button Grid.Column="5"
-                                Content="Send"
+                                Content="{Binding SendButtonText}"
                                 Command="{Binding SendCommand}"
-                                ToolTip="Send chat"
-                                Style="{StaticResource ComposerButton}" />
+                                ToolTip="{Binding SendButtonToolTip}"
+                                Style="{StaticResource ComposerButton}"
+                                Background="{Binding SendButtonBackground}"
+                                BorderBrush="{Binding SendButtonBorderBrush}"
+                                MinWidth="72" />
                     </Grid>
                 </Border>
 

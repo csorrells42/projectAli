@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Ali.Core.Voice;
@@ -22,6 +24,7 @@ public static partial class SpeechOutputCleaner
         cleaned = MetadataLineRegex().Replace(cleaned, " ");
         cleaned = CitationRegex().Replace(cleaned, string.Empty);
         cleaned = InlineCodeRegex().Replace(cleaned, "$1");
+        cleaned = RemoveEmoticons(cleaned);
         cleaned = MarkdownMarkerRegex().Replace(cleaned, string.Empty);
         cleaned = BulletPrefixRegex().Replace(cleaned, string.Empty);
         cleaned = WhitespaceRegex().Replace(cleaned, " ").Trim();
@@ -43,6 +46,53 @@ public static partial class SpeechOutputCleaner
             ? trimmed[..(lastSentence + 1)].Trim()
             : $"{trimmed.TrimEnd('.', ',', ';', ':')}...";
     }
+
+    private static string RemoveEmoticons(string text)
+    {
+        foreach (var emoticon in CommonAsciiEmoticons)
+        {
+            text = text.Replace(emoticon, " ", StringComparison.Ordinal);
+        }
+
+        var builder = new StringBuilder(text.Length);
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.OtherSymbol or UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark)
+            {
+                continue;
+            }
+
+            builder.Append(rune);
+        }
+
+        return builder.ToString();
+    }
+
+    private static readonly string[] CommonAsciiEmoticons =
+    [
+        ":-)",
+        ":)",
+        ";-)",
+        ";)",
+        ":-D",
+        ":D",
+        ":-(",
+        ":(",
+        ":-P",
+        ":P",
+        ";-P",
+        ";P",
+        ":-/",
+        ":/",
+        @":-\",
+        @":\",
+        ":-|",
+        ":|",
+        "<3",
+        "xD",
+        "XD"
+    ];
 
     [GeneratedRegex(@"<think\b[^>]*>.*?</think>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex ThinkingBlockRegex();

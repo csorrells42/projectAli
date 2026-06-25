@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -10,6 +11,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Ali.App.Wpf;
 using Ali.Core.Conversations;
+using Ali.Core.Coding;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
 using Ali.Core.Memory;
@@ -17,6 +19,7 @@ using Ali.Core.Reminders;
 using Ali.Core.Runtime;
 using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
+using Ali.Infrastructure.Coding;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Voice;
 using MediaBrushes = System.Windows.Media.Brushes;
@@ -28,6 +31,19 @@ public sealed class MainWindowViewModel : ObservableObject
     private const double SpectrumRenderWidth = 720d;
     private const double SpectrumRenderHeight = 130d;
     private const double SpectrumRenderInset = 12d;
+    private const string RuntimeTopPModelDefault = "Model default";
+    private static readonly TimeSpan ModelStatusPingTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
+    private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
+    private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
+    private static readonly string[] CodingWorkspaceAccessModeChoiceValues = [CodingPermissionModes.Allowed];
+    private static readonly string[] CodingExplicitOutsideFileOpenModeChoiceValues = [CodingPermissionModes.Allowed, CodingPermissionModes.Disabled];
+    private static readonly string[] CodingSearchOutsideWorkspaceModeChoiceValues = [CodingPermissionModes.AskFirst, CodingPermissionModes.Disabled];
+    private static readonly string[] CodingConfirmOrDisabledModeChoiceValues = [CodingPermissionModes.ConfirmEachTime, CodingPermissionModes.Disabled];
+    private static readonly string[] CodingDestructiveActionModeChoiceValues = [CodingPermissionModes.ExtraConfirmation, CodingPermissionModes.Disabled];
+    private static readonly string[] CodingBlockedModeChoiceValues = [CodingPermissionModes.Blocked];
+    private static readonly string[] CodingGitReadModeChoiceValues = [CodingPermissionModes.Allowed, CodingPermissionModes.Disabled];
+    private static readonly string[] CodingGitNetworkModeChoiceValues = [CodingPermissionModes.Blocked, CodingPermissionModes.ConfirmEachTime];
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly SystemResourceMonitor _resourceMonitor = new();
@@ -41,6 +57,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _conversationSearchText = string.Empty;
     private bool _loadingConversationHistorySelection;
     private bool _checkingModelConnectionStatus;
+    private bool _ollamaWasRunningAtStartup;
+    private bool _ollamaStartInProgress;
+    private DateTimeOffset _nextOllamaStartAttemptAt = DateTimeOffset.MinValue;
+    private readonly HashSet<int> _ollamaProcessIdsStartedByAli = new();
     private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
@@ -50,6 +70,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
     private SettingsWindow? _settingsWindow;
+    private LocalLibraryWindow? _localLibraryWindow;
     private bool _voiceMonitorRequested;
     private bool _suppressInputMonitorRestart;
     private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
@@ -69,7 +90,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeContextText = "2048";
     private string _runtimeOutputLimitText = "256";
     private string _runtimeTemperatureText = "0.2";
-    private string _runtimeTopPText = string.Empty;
+    private string _runtimeTopPText = RuntimeTopPModelDefault;
     private string _runtimeQuantizationText = "Installed package default";
     private string _selectedRuntimeModelChoice = string.Empty;
     private string _runtimeSelectionStatusText = "Runtime model list has not been refreshed yet.";
@@ -112,12 +133,33 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _normalizeBeforeStt;
     private bool _retainDebugAudio;
     private bool _autoSendVoiceTranscripts;
+    private string _pushToTalkKeyText = "NumPad0";
+    private bool _isAssigningPushToTalkKey;
+    private bool _pushToTalkKeyDown;
+    private bool _currentVoiceInputShouldAutoSend;
     private VoiceTurnMetadata? _lastVoiceMetadata;
     private CorrectionReviewItemViewModel? _selectedCorrectionReviewItem;
     private string _correctionReviewStatusText = "Correction queue not loaded yet.";
     private MemoryEntryViewModel? _selectedMemoryEntry;
     private ReminderEntryViewModel? _selectedReminderEntry;
     private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
+    private string _codingWorkspaceRootText = string.Empty;
+    private bool _codingAllowExplicitOutsideFileOpen = true;
+    private string _codingWorkspaceAccessMode = CodingPermissionModes.Allowed;
+    private string _codingExplicitOutsideFileOpenMode = CodingPermissionModes.Allowed;
+    private string _codingSearchOutsideWorkspaceMode = CodingPermissionModes.AskFirst;
+    private string _codingEditInsideWorkspaceMode = CodingPermissionModes.ConfirmEachTime;
+    private string _codingBuildTestRunInsideWorkspaceMode = CodingPermissionModes.ConfirmEachTime;
+    private string _codingDestructiveActionMode = CodingPermissionModes.ExtraConfirmation;
+    private string _codingOutsideEditRunMode = CodingPermissionModes.Blocked;
+    private string _codingSystemAdminActionMode = CodingPermissionModes.Blocked;
+    private string _codingGitReadMode = CodingPermissionModes.Allowed;
+    private string _codingGitWriteMode = CodingPermissionModes.ConfirmEachTime;
+    private string _codingGitMergeMode = CodingPermissionModes.ExtraConfirmation;
+    private string _codingGitNetworkMode = CodingPermissionModes.Blocked;
+    private string _codingNotepadPlusPlusPathText = string.Empty;
+    private string _codingVisualStudioPathText = string.Empty;
+    private string _codingPermissionsStatusText = "Coding permissions not loaded yet.";
 
     public MainWindowViewModel(AliServices services)
     {
@@ -127,7 +169,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ResourceMeters.Add(GpuMeter);
         ResourceMeters.Add(VramMeter);
 
-        SendCommand = CreateAsyncCommand(SendAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ComposerText));
+        SendCommand = CreateAsyncCommand(SendAsync, () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
         NewChatCommand = CreateCommand(_ => StartNewChat());
         EraseHistoryCommand = CreateCommand(_ => EraseHistory());
@@ -145,9 +187,11 @@ public sealed class MainWindowViewModel : ObservableObject
         RemoveAttachmentCommand = CreateCommand(RemoveAttachment);
         ToggleVoiceRecordingCommand = CreateAsyncCommand(ToggleVoiceRecordingAsync, () => !IsBusy || IsRecording || IsTranscribing);
         ToggleVoiceModeCommand = CreateCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
-        SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !AutoSendVoiceTranscripts && !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
+        BeginAssignPushToTalkKeyCommand = CreateCommand(_ => BeginAssignPushToTalkKey());
+        SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
+        OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         PlayPiperSampleCommand = CreateAsyncCommand(PlayPiperSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -160,12 +204,18 @@ public sealed class MainWindowViewModel : ObservableObject
         CancelSelectedReminderCommand = CreateCommand(_ => SetSelectedReminderStatus(ReminderStatus.Cancelled), _ => SelectedReminderEntry is not null);
         CompleteSelectedReminderCommand = CreateCommand(_ => SetSelectedReminderStatus(ReminderStatus.Completed), _ => SelectedReminderEntry is not null);
         ClearRemindersCommand = CreateCommand(_ => ClearReminders());
+        SaveCodingPermissionsCommand = CreateCommand(_ => SaveCodingPermissions());
+        ResetCodingPermissionsCommand = CreateCommand(_ => ResetCodingPermissionsToDefault());
+        BrowseCodingWorkspaceRootCommand = CreateCommand(_ => BrowseCodingWorkspaceRoot());
+        BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
+        BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
         _normalizeBeforeStt = _voiceSettings.NormalizeBeforeStt;
         _retainDebugAudio = _voiceSettings.RetainDebugAudio;
         _autoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
+        _pushToTalkKeyText = NormalizePushToTalkKey(_voiceSettings.PushToTalkKey);
         LoadSpeechToolSettings();
         ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
         foreach (var preset in VoiceInputPreset.All)
@@ -189,6 +239,20 @@ public sealed class MainWindowViewModel : ObservableObject
 
         RefreshSpeechToolStatuses();
 
+        ReplaceChoices(RuntimeTemperatureChoices, RuntimeTemperatureChoiceValues);
+        ReplaceChoices(RuntimeTopPChoices, RuntimeTopPChoiceValues);
+        ReplaceChoices(CodingWorkspaceAccessModeChoices, CodingWorkspaceAccessModeChoiceValues);
+        ReplaceChoices(CodingExplicitOutsideFileOpenModeChoices, CodingExplicitOutsideFileOpenModeChoiceValues);
+        ReplaceChoices(CodingSearchOutsideWorkspaceModeChoices, CodingSearchOutsideWorkspaceModeChoiceValues);
+        ReplaceChoices(CodingEditInsideWorkspaceModeChoices, CodingConfirmOrDisabledModeChoiceValues);
+        ReplaceChoices(CodingBuildTestRunInsideWorkspaceModeChoices, CodingConfirmOrDisabledModeChoiceValues);
+        ReplaceChoices(CodingDestructiveActionModeChoices, CodingDestructiveActionModeChoiceValues);
+        ReplaceChoices(CodingOutsideEditRunModeChoices, CodingBlockedModeChoiceValues);
+        ReplaceChoices(CodingSystemAdminActionModeChoices, CodingBlockedModeChoiceValues);
+        ReplaceChoices(CodingGitReadModeChoices, CodingGitReadModeChoiceValues);
+        ReplaceChoices(CodingGitWriteModeChoices, CodingConfirmOrDisabledModeChoiceValues);
+        ReplaceChoices(CodingGitMergeModeChoices, CodingDestructiveActionModeChoiceValues);
+        ReplaceChoices(CodingGitNetworkModeChoices, CodingGitNetworkModeChoiceValues);
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
@@ -200,6 +264,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _reminderTimer.Start();
         RefreshConversationHistory();
         RefreshMemoryReminders();
+        LoadCodingPermissions();
         StatusText = "New chat ready. Saved chats are available in the sidebar.";
     }
 
@@ -340,6 +405,34 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> RuntimeOutputLimitChoices { get; } = new();
 
+    public ObservableCollection<string> RuntimeTemperatureChoices { get; } = new();
+
+    public ObservableCollection<string> RuntimeTopPChoices { get; } = new();
+
+    public ObservableCollection<string> CodingWorkspaceAccessModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingExplicitOutsideFileOpenModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingSearchOutsideWorkspaceModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingEditInsideWorkspaceModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingBuildTestRunInsideWorkspaceModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingDestructiveActionModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingOutsideEditRunModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingSystemAdminActionModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingGitReadModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingGitWriteModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingGitMergeModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingGitNetworkModeChoices { get; } = new();
+
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
@@ -376,11 +469,15 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand ToggleVoiceModeCommand { get; }
 
+    public ICommand BeginAssignPushToTalkKeyCommand { get; }
+
     public ICommand SendTranscriptCommand { get; }
 
     public ICommand StopSpeakingCommand { get; }
 
     public ICommand OpenSettingsCommand { get; }
+
+    public ICommand OpenLocalLibraryCommand { get; }
 
     public ICommand PlayPiperSampleCommand { get; }
 
@@ -406,11 +503,192 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand ClearRemindersCommand { get; }
 
+    public ICommand SaveCodingPermissionsCommand { get; }
+
+    public ICommand ResetCodingPermissionsCommand { get; }
+
+    public ICommand BrowseCodingWorkspaceRootCommand { get; }
+
+    public ICommand BrowseNotepadPlusPlusPathCommand { get; }
+
+    public ICommand BrowseVisualStudioPathCommand { get; }
+
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
+
+    public string CodingToolSettingsPath => _services.CodingToolSettingsPath;
+
+    public string CodingWorkspaceRootText
+    {
+        get => _codingWorkspaceRootText;
+        set
+        {
+            if (SetProperty(ref _codingWorkspaceRootText, value))
+            {
+                OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            }
+        }
+    }
+
+    public bool CodingAllowExplicitOutsideFileOpen
+    {
+        get => _codingAllowExplicitOutsideFileOpen;
+        set
+        {
+            if (SetProperty(ref _codingAllowExplicitOutsideFileOpen, value))
+            {
+                var mode = value ? CodingPermissionModes.Allowed : CodingPermissionModes.Disabled;
+                if (!_codingExplicitOutsideFileOpenMode.Equals(mode, StringComparison.OrdinalIgnoreCase))
+                {
+                    _codingExplicitOutsideFileOpenMode = mode;
+                    OnPropertyChanged(nameof(CodingExplicitOutsideFileOpenMode));
+                }
+
+                OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            }
+        }
+    }
+
+    public string CodingWorkspaceAccessMode
+    {
+        get => _codingWorkspaceAccessMode;
+        set => SetCodingPermissionMode(ref _codingWorkspaceAccessMode, value);
+    }
+
+    public string CodingExplicitOutsideFileOpenMode
+    {
+        get => _codingExplicitOutsideFileOpenMode;
+        set
+        {
+            if (SetCodingPermissionMode(ref _codingExplicitOutsideFileOpenMode, value))
+            {
+                var allowOutsideFileOpen = !CodingPermissionModes.IsDisabled(_codingExplicitOutsideFileOpenMode);
+                if (_codingAllowExplicitOutsideFileOpen != allowOutsideFileOpen)
+                {
+                    _codingAllowExplicitOutsideFileOpen = allowOutsideFileOpen;
+                    OnPropertyChanged(nameof(CodingAllowExplicitOutsideFileOpen));
+                }
+            }
+        }
+    }
+
+    public string CodingSearchOutsideWorkspaceMode
+    {
+        get => _codingSearchOutsideWorkspaceMode;
+        set => SetCodingPermissionMode(ref _codingSearchOutsideWorkspaceMode, value);
+    }
+
+    public string CodingEditInsideWorkspaceMode
+    {
+        get => _codingEditInsideWorkspaceMode;
+        set => SetCodingPermissionMode(ref _codingEditInsideWorkspaceMode, value);
+    }
+
+    public string CodingBuildTestRunInsideWorkspaceMode
+    {
+        get => _codingBuildTestRunInsideWorkspaceMode;
+        set => SetCodingPermissionMode(ref _codingBuildTestRunInsideWorkspaceMode, value);
+    }
+
+    public string CodingDestructiveActionMode
+    {
+        get => _codingDestructiveActionMode;
+        set => SetCodingPermissionMode(ref _codingDestructiveActionMode, value);
+    }
+
+    public string CodingOutsideEditRunMode
+    {
+        get => _codingOutsideEditRunMode;
+        set => SetCodingPermissionMode(ref _codingOutsideEditRunMode, value);
+    }
+
+    public string CodingSystemAdminActionMode
+    {
+        get => _codingSystemAdminActionMode;
+        set => SetCodingPermissionMode(ref _codingSystemAdminActionMode, value);
+    }
+
+    public string CodingGitReadMode
+    {
+        get => _codingGitReadMode;
+        set => SetCodingPermissionMode(ref _codingGitReadMode, value);
+    }
+
+    public string CodingGitWriteMode
+    {
+        get => _codingGitWriteMode;
+        set => SetCodingPermissionMode(ref _codingGitWriteMode, value);
+    }
+
+    public string CodingGitMergeMode
+    {
+        get => _codingGitMergeMode;
+        set => SetCodingPermissionMode(ref _codingGitMergeMode, value);
+    }
+
+    public string CodingGitNetworkMode
+    {
+        get => _codingGitNetworkMode;
+        set => SetCodingPermissionMode(ref _codingGitNetworkMode, value);
+    }
+
+    public string CodingNotepadPlusPlusPathText
+    {
+        get => _codingNotepadPlusPlusPathText;
+        set
+        {
+            if (SetProperty(ref _codingNotepadPlusPlusPathText, value))
+            {
+                OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            }
+        }
+    }
+
+    public string CodingVisualStudioPathText
+    {
+        get => _codingVisualStudioPathText;
+        set
+        {
+            if (SetProperty(ref _codingVisualStudioPathText, value))
+            {
+                OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            }
+        }
+    }
+
+    public string CodingPermissionsStatusText
+    {
+        get => _codingPermissionsStatusText;
+        private set => SetProperty(ref _codingPermissionsStatusText, value);
+    }
+
+    public string CodingPermissionSummaryText =>
+        string.Join(
+            Environment.NewLine,
+            [
+                $"Workspace domain: {CodingWorkspaceRootText}",
+                $"Notepad++: {DescribeConfiguredToolPath(CodingNotepadPlusPlusPathText)}",
+                $"Visual Studio: {DescribeConfiguredToolPath(CodingVisualStudioPathText)}",
+                $"Read/open/search inside workspace: {CodingWorkspaceAccessMode}.",
+                $"Explicit outside file open/read: {CodingExplicitOutsideFileOpenMode}.",
+                $"Search outside workspace: {CodingSearchOutsideWorkspaceMode}.",
+                $"Edit/write inside workspace: {CodingEditInsideWorkspaceMode}.",
+                $"Build/test/run inside workspace: {CodingBuildTestRunInsideWorkspaceMode}.",
+                $"Delete/move/overwrite: {CodingDestructiveActionMode}.",
+                $"Edit/run outside workspace: {CodingOutsideEditRunMode}.",
+                $"System folders, registry, services, drivers, security settings: {CodingSystemAdminActionMode}.",
+                $"Git status/diff/log: {CodingGitReadMode}.",
+                $"Git add/commit: {CodingGitWriteMode}.",
+                $"Git merge: {CodingGitMergeMode}.",
+                $"Git pull/push: {CodingGitNetworkMode}."
+            ]);
 
     public string MicButtonText => IsRecording ? "Stop Mic" : IsTranscribing ? "Transcribing" : "Mic";
 
-    public string VoiceModeButtonText => AutoSendVoiceTranscripts ? "Hands Free On" : "Voice Mode";
+    public string VoiceModeButtonText => AutoSendVoiceTranscripts
+        ? $"PTT On ({PushToTalkKeyLabel})"
+        : $"PTT Off ({PushToTalkKeyLabel})";
+
+    public string PushToTalkHintText => $"Hold {PushToTalkKeyLabel} to record. Release to transcribe and send.";
 
     public string RuntimeDisplay
     {
@@ -704,18 +982,52 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _autoSendVoiceTranscripts, value))
             {
-                OnPropertyChanged(nameof(ManualTranscriptReviewEnabled));
-                OnPropertyChanged(nameof(ManualTranscriptReviewOpacity));
                 OnPropertyChanged(nameof(VoiceModeButtonText));
+                OnPropertyChanged(nameof(PushToTalkHintText));
                 SaveVoiceSettings(autoSendVoiceTranscripts: value);
+                VoiceStatus = value
+                    ? $"Push to Talk enabled. Hold {PushToTalkKeyLabel} to speak."
+                    : "Push to Talk disabled. Mic button still transcribes into the chat bar.";
                 RaiseCommandStates();
             }
         }
     }
 
-    public bool ManualTranscriptReviewEnabled => !AutoSendVoiceTranscripts;
+    public string PushToTalkKeyText
+    {
+        get => _pushToTalkKeyText;
+        private set
+        {
+            var normalized = NormalizePushToTalkKey(value);
+            if (SetProperty(ref _pushToTalkKeyText, normalized))
+            {
+                OnPropertyChanged(nameof(PushToTalkKeyLabel));
+                OnPropertyChanged(nameof(VoiceModeButtonText));
+                OnPropertyChanged(nameof(PushToTalkHintText));
+                SaveVoiceSettings(pushToTalkKey: normalized);
+            }
+        }
+    }
 
-    public double ManualTranscriptReviewOpacity => AutoSendVoiceTranscripts ? 0.45d : 1d;
+    public string PushToTalkKeyLabel => FormatPushToTalkKeyLabel(_pushToTalkKeyText);
+
+    public bool IsAssigningPushToTalkKey
+    {
+        get => _isAssigningPushToTalkKey;
+        private set
+        {
+            if (SetProperty(ref _isAssigningPushToTalkKey, value))
+            {
+                OnPropertyChanged(nameof(AssignPushToTalkKeyButtonText));
+            }
+        }
+    }
+
+    public string AssignPushToTalkKeyButtonText => IsAssigningPushToTalkKey ? "Press Key..." : "Set PTT Key";
+
+    public bool ManualTranscriptReviewEnabled => true;
+
+    public double ManualTranscriptReviewOpacity => 1d;
 
     public PointCollection SpectrumLivePoints
     {
@@ -834,6 +1146,10 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isSpeaking, value))
             {
+                OnPropertyChanged(nameof(SendButtonText));
+                OnPropertyChanged(nameof(SendButtonToolTip));
+                OnPropertyChanged(nameof(SendButtonBackground));
+                OnPropertyChanged(nameof(SendButtonBorderBrush));
                 RaiseCommandStates();
             }
         }
@@ -858,10 +1174,26 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isBusy, value))
             {
+                OnPropertyChanged(nameof(SendButtonText));
+                OnPropertyChanged(nameof(SendButtonToolTip));
+                OnPropertyChanged(nameof(SendButtonBackground));
+                OnPropertyChanged(nameof(SendButtonBorderBrush));
                 RaiseCommandStates();
             }
         }
     }
+
+    public string SendButtonText => IsBusy || IsSpeaking ? "Stop" : "Send";
+
+    public string SendButtonToolTip => IsBusy
+        ? "Stop the current response"
+        : IsSpeaking
+            ? "Stop speaking"
+            : "Send chat";
+
+    public System.Windows.Media.Brush SendButtonBackground => IsBusy || IsSpeaking ? MediaBrushes.DarkRed : MediaBrushes.DarkGreen;
+
+    public System.Windows.Media.Brush SendButtonBorderBrush => IsBusy || IsSpeaking ? MediaBrushes.IndianRed : MediaBrushes.LimeGreen;
 
     public string StatusText
     {
@@ -885,6 +1217,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
+            await EnsureLocalOllamaStartedAsync(options).ConfigureAwait(true);
             _services.ConfigureRuntimeCandidate(options);
             var health = await _services.RuntimeController.CheckCandidateAsync(CancellationToken.None).ConfigureAwait(true);
             RuntimeHealthResult = FormatHealthResult(health);
@@ -921,6 +1254,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await _services.RuntimeController.ShutdownAsync(shutdown.Token).ConfigureAwait(true);
+            StopOllamaProcessesStartedByAli();
             _services.RuntimeController.RevertToFallback();
             UpdateRuntimeStatus();
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
@@ -933,9 +1267,158 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task EnsureLocalOllamaStartedAsync(OpenAiCompatibleRuntimeOptions options)
+    {
+        if (!IsLocalOllamaEndpoint(options.Endpoint))
+        {
+            return;
+        }
+
+        if (_ollamaStartInProgress || _ollamaProcessIdsStartedByAli.Count > 0)
+        {
+            return;
+        }
+
+        var before = GetOllamaProcesses();
+        if (before.Count > 0)
+        {
+            _ollamaWasRunningAtStartup = true;
+            _nextOllamaStartAttemptAt = DateTimeOffset.MaxValue;
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now < _nextOllamaStartAttemptAt)
+        {
+            return;
+        }
+
+        _ollamaStartInProgress = true;
+        _nextOllamaStartAttemptAt = now + OllamaStartRetryInterval;
+
+        var appPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "Ollama",
+            "ollama app.exe");
+        var serverPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "Ollama",
+            "ollama.exe");
+
+        try
+        {
+            var launchedProcess = StartOwnedOllamaProcess(serverPath, appPath);
+            if (launchedProcess is null)
+            {
+                return;
+            }
+
+            _ollamaProcessIdsStartedByAli.Add(launchedProcess.Id);
+            await Task.Delay(TimeSpan.FromMilliseconds(750)).ConfigureAwait(true);
+            var beforeIds = before.Select(process => process.Id).ToHashSet();
+            foreach (var process in GetOllamaProcesses())
+            {
+                if (!beforeIds.Contains(process.Id))
+                {
+                    _ollamaProcessIdsStartedByAli.Add(process.Id);
+                }
+            }
+        }
+        finally
+        {
+            _ollamaStartInProgress = false;
+        }
+    }
+
+    private static Process? StartOwnedOllamaProcess(string serverPath, string appPath)
+    {
+        if (File.Exists(serverPath))
+        {
+            return Process.Start(new ProcessStartInfo
+            {
+                FileName = serverPath,
+                Arguments = "serve",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+        }
+
+        if (File.Exists(appPath))
+        {
+            return Process.Start(new ProcessStartInfo
+            {
+                FileName = appPath,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+        }
+
+        return null;
+    }
+
+    private void StopOllamaProcessesStartedByAli()
+    {
+        if (_ollamaWasRunningAtStartup || _ollamaProcessIdsStartedByAli.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var process in GetOllamaProcesses())
+        {
+            if (!_ollamaProcessIdsStartedByAli.Contains(process.Id))
+            {
+                continue;
+            }
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Best-effort cleanup of the Ollama instance Ali launched.
+            }
+        }
+
+        _ollamaProcessIdsStartedByAli.Clear();
+    }
+
+    private static IReadOnlyList<Process> GetOllamaProcesses()
+    {
+        try
+        {
+            return Process.GetProcesses()
+                .Where(process => IsOllamaProcess(process.ProcessName))
+                .ToList();
+        }
+        catch
+        {
+            return Array.Empty<Process>();
+        }
+    }
+
+    private static bool IsOllamaProcess(string processName) =>
+        processName.Equals("ollama", StringComparison.OrdinalIgnoreCase)
+        || processName.Equals("ollama app", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLocalOllamaEndpoint(Uri endpoint) =>
+        endpoint.Port == 11434
+        && (endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
+
     public async Task RefreshModelConnectionStatusAsync(bool showWaiting)
     {
         if (_checkingModelConnectionStatus)
+        {
+            return;
+        }
+
+        if (IsBusy || IsRecording || IsTranscribing || IsSpeaking)
         {
             return;
         }
@@ -959,15 +1442,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
-            using var statusCheck = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            var health = await _services.RuntimeController.CheckActiveAsync(statusCheck.Token).ConfigureAwait(true);
+            using var statusCheck = new CancellationTokenSource(ModelStatusPingTimeout);
+            var health = await CheckRuntimeEndpointStatusAsync(
+                _services.LoadRuntimeSettings(),
+                statusCheck.Token).ConfigureAwait(true);
             RuntimeHealthResult = FormatHealthResult(health);
             if (health.Succeeded)
             {
-                if (IsModelConnectedStatus())
-                {
-                    SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
-                }
+                SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
             }
             else
             {
@@ -988,8 +1470,20 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task SendAsync()
     {
+        if (IsBusy)
+        {
+            Stop();
+            return;
+        }
+
+        if (IsSpeaking)
+        {
+            StopSpeaking();
+            return;
+        }
+
         var text = ComposerText.Trim();
-        if (string.IsNullOrWhiteSpace(text) || IsBusy)
+        if (string.IsNullOrWhiteSpace(text))
         {
             return;
         }
@@ -1411,6 +1905,154 @@ public sealed class MainWindowViewModel : ObservableObject
         MemoryReminderStatusText = $"Cleared {removed} reminder(s). Conversations and memories were not erased.";
     }
 
+    private void LoadCodingPermissions()
+    {
+        var settings = _services.LoadCodingToolSettings();
+        ApplyCodingToolSettings(settings);
+        CodingPermissionsStatusText = $"Coding permissions loaded from {CodingToolSettingsPath}.";
+    }
+
+    private void SaveCodingPermissions()
+    {
+        if (!CodingWorkspacePolicy.TryNormalizePath(CodingWorkspaceRootText, out var workspaceRoot))
+        {
+            CodingPermissionsStatusText = "Coding workspace must be a fully-qualified local path.";
+            return;
+        }
+
+        var explicitOutsideFileOpenMode = PickChoice(
+            CodingExplicitOutsideFileOpenModeChoices,
+            CodingExplicitOutsideFileOpenMode,
+            CodingPermissionModes.Allowed,
+            resetToSmallest: false);
+        var settings = new CodingToolSettings
+        {
+            WorkspaceRoot = workspaceRoot,
+            AllowExplicitOutsideFileOpen = !CodingPermissionModes.IsDisabled(explicitOutsideFileOpenMode),
+            WorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, CodingWorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false),
+            ExplicitOutsideFileOpenMode = explicitOutsideFileOpenMode,
+            SearchOutsideWorkspaceMode = PickChoice(CodingSearchOutsideWorkspaceModeChoices, CodingSearchOutsideWorkspaceMode, CodingPermissionModes.AskFirst, resetToSmallest: false),
+            EditInsideWorkspaceMode = PickChoice(CodingEditInsideWorkspaceModeChoices, CodingEditInsideWorkspaceMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false),
+            BuildTestRunInsideWorkspaceMode = PickChoice(CodingBuildTestRunInsideWorkspaceModeChoices, CodingBuildTestRunInsideWorkspaceMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false),
+            DestructiveActionMode = PickChoice(CodingDestructiveActionModeChoices, CodingDestructiveActionMode, CodingPermissionModes.ExtraConfirmation, resetToSmallest: false),
+            OutsideEditRunMode = PickChoice(CodingOutsideEditRunModeChoices, CodingOutsideEditRunMode, CodingPermissionModes.Blocked, resetToSmallest: false),
+            SystemAdminActionMode = PickChoice(CodingSystemAdminActionModeChoices, CodingSystemAdminActionMode, CodingPermissionModes.Blocked, resetToSmallest: false),
+            GitReadMode = PickChoice(CodingGitReadModeChoices, CodingGitReadMode, CodingPermissionModes.Allowed, resetToSmallest: false),
+            GitWriteMode = PickChoice(CodingGitWriteModeChoices, CodingGitWriteMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false),
+            GitMergeMode = PickChoice(CodingGitMergeModeChoices, CodingGitMergeMode, CodingPermissionModes.ExtraConfirmation, resetToSmallest: false),
+            GitNetworkMode = PickChoice(CodingGitNetworkModeChoices, CodingGitNetworkMode, CodingPermissionModes.Blocked, resetToSmallest: false),
+            NotepadPlusPlusPath = NormalizeOptionalCodingToolPath(CodingNotepadPlusPlusPathText),
+            VisualStudioPath = NormalizeOptionalCodingToolPath(CodingVisualStudioPathText)
+        };
+        _services.SaveCodingToolSettings(settings);
+        ApplyCodingToolSettings(settings);
+        CodingPermissionsStatusText = $"Saved coding permissions. Workspace: {workspaceRoot}";
+    }
+
+    private void ResetCodingPermissionsToDefault()
+    {
+        var settings = new CodingToolSettings();
+        _services.SaveCodingToolSettings(settings);
+        ApplyCodingToolSettings(settings);
+        CodingPermissionsStatusText = "Coding permissions reset to default.";
+    }
+
+    private void ApplyCodingToolSettings(CodingToolSettings settings)
+    {
+        CodingWorkspaceRootText = settings.WorkspaceRoot;
+        CodingWorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, settings.WorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false);
+        CodingExplicitOutsideFileOpenMode = settings.AllowExplicitOutsideFileOpen
+            ? PickChoice(CodingExplicitOutsideFileOpenModeChoices, settings.ExplicitOutsideFileOpenMode, CodingPermissionModes.Allowed, resetToSmallest: false)
+            : CodingPermissionModes.Disabled;
+        CodingSearchOutsideWorkspaceMode = PickChoice(CodingSearchOutsideWorkspaceModeChoices, settings.SearchOutsideWorkspaceMode, CodingPermissionModes.AskFirst, resetToSmallest: false);
+        CodingEditInsideWorkspaceMode = PickChoice(CodingEditInsideWorkspaceModeChoices, settings.EditInsideWorkspaceMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false);
+        CodingBuildTestRunInsideWorkspaceMode = PickChoice(CodingBuildTestRunInsideWorkspaceModeChoices, settings.BuildTestRunInsideWorkspaceMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false);
+        CodingDestructiveActionMode = PickChoice(CodingDestructiveActionModeChoices, settings.DestructiveActionMode, CodingPermissionModes.ExtraConfirmation, resetToSmallest: false);
+        CodingOutsideEditRunMode = PickChoice(CodingOutsideEditRunModeChoices, settings.OutsideEditRunMode, CodingPermissionModes.Blocked, resetToSmallest: false);
+        CodingSystemAdminActionMode = PickChoice(CodingSystemAdminActionModeChoices, settings.SystemAdminActionMode, CodingPermissionModes.Blocked, resetToSmallest: false);
+        CodingGitReadMode = PickChoice(CodingGitReadModeChoices, settings.GitReadMode, CodingPermissionModes.Allowed, resetToSmallest: false);
+        CodingGitWriteMode = PickChoice(CodingGitWriteModeChoices, settings.GitWriteMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false);
+        CodingGitMergeMode = PickChoice(CodingGitMergeModeChoices, settings.GitMergeMode, CodingPermissionModes.ExtraConfirmation, resetToSmallest: false);
+        CodingGitNetworkMode = PickChoice(CodingGitNetworkModeChoices, settings.GitNetworkMode, CodingPermissionModes.Blocked, resetToSmallest: false);
+        CodingAllowExplicitOutsideFileOpen = !CodingPermissionModes.IsDisabled(CodingExplicitOutsideFileOpenMode);
+        CodingNotepadPlusPlusPathText = settings.NotepadPlusPlusPath;
+        CodingVisualStudioPathText = settings.VisualStudioPath;
+        OnPropertyChanged(nameof(CodingPermissionSummaryText));
+    }
+
+    private bool SetCodingPermissionMode(ref string field, string value)
+    {
+        if (SetProperty(ref field, value?.Trim() ?? string.Empty))
+        {
+            OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            return true;
+        }
+
+        return false;
+    }
+
+    private void BrowseCodingWorkspaceRoot()
+    {
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var selectedPath = Directory.Exists(CodingWorkspaceRootText)
+            ? CodingWorkspaceRootText
+            : Path.Combine(documents, "Programming Projects");
+
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "Choose Ali's coding workspace folder",
+            SelectedPath = selectedPath,
+            ShowNewFolderButton = true
+        };
+
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            CodingWorkspaceRootText = dialog.SelectedPath;
+        }
+    }
+
+    private void BrowseCodingToolPath(string title, string filter, Action<string> applyPath)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            CheckFileExists = true,
+            Multiselect = false
+        };
+
+        var owner = System.Windows.Application.Current?.Windows
+            .OfType<SettingsWindow>()
+            .FirstOrDefault(window => window.DataContext == this)
+            ?? System.Windows.Application.Current?.MainWindow;
+        if (dialog.ShowDialog(owner) == true)
+        {
+            applyPath(dialog.FileName);
+        }
+    }
+
+    private static string NormalizeOptionalCodingToolPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Path.GetFullPath(path.Trim().Trim('"'));
+        }
+        catch
+        {
+            return path.Trim().Trim('"');
+        }
+    }
+
+    private static string DescribeConfiguredToolPath(string path) =>
+        string.IsNullOrWhiteSpace(path)
+            ? "auto-detect"
+            : path;
+
     private void CheckDueReminders()
     {
         var due = _services.Reminders
@@ -1598,7 +2240,67 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        _currentVoiceInputShouldAutoSend = false;
         await StartVoiceRecordingAsync().ConfigureAwait(true);
+    }
+
+    public bool IsPushToTalkKey(Key key) =>
+        AutoSendVoiceTranscripts
+        && TryParsePushToTalkKey(_pushToTalkKeyText, out var configuredKey)
+        && key == configuredKey;
+
+    public void BeginAssignPushToTalkKey()
+    {
+        IsAssigningPushToTalkKey = true;
+        VoiceSettingsStatusText = "Press the key to use for Push to Talk. Ali will save the next keypress.";
+    }
+
+    public void AssignPushToTalkKey(Key key)
+    {
+        if (key is Key.None or Key.System)
+        {
+            VoiceSettingsStatusText = "That key cannot be used for Push to Talk.";
+            return;
+        }
+
+        PushToTalkKeyText = NormalizePushToTalkKey(key.ToString());
+        IsAssigningPushToTalkKey = false;
+        VoiceSettingsStatusText = $"Push to Talk key set to {PushToTalkKeyLabel}.";
+    }
+
+    public async Task StartPushToTalkAsync()
+    {
+        if (!AutoSendVoiceTranscripts || _pushToTalkKeyDown || IsRecording || IsTranscribing || IsBusy)
+        {
+            return;
+        }
+
+        _pushToTalkKeyDown = true;
+        _currentVoiceInputShouldAutoSend = true;
+        try
+        {
+            await StartVoiceRecordingAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            _pushToTalkKeyDown = false;
+            _currentVoiceInputShouldAutoSend = false;
+            throw;
+        }
+    }
+
+    public async Task StopPushToTalkAsync()
+    {
+        if (!_pushToTalkKeyDown)
+        {
+            return;
+        }
+
+        _pushToTalkKeyDown = false;
+        if (IsRecording || IsTranscribing)
+        {
+            await StopVoiceRecordingOrTranscriptionAsync().ConfigureAwait(true);
+        }
     }
 
     private void LoadRuntimeSettings()
@@ -1916,6 +2618,32 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Max output tokens must be at least 1.");
         }
 
+        if (!double.TryParse(RuntimeTemperatureText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature)
+            || temperature < 0
+            || temperature > 2)
+        {
+            throw new InvalidOperationException("Temperature must be a number from 0 to 2.");
+        }
+
+        double? topP = null;
+        var topPText = RuntimeTopPText.Trim();
+        if (topPText.Equals(RuntimeTopPModelDefault, StringComparison.OrdinalIgnoreCase))
+        {
+            topPText = string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(topPText))
+        {
+            if (!double.TryParse(topPText, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedTopP)
+                || parsedTopP <= 0
+                || parsedTopP > 1)
+            {
+                throw new InvalidOperationException("Top-p must be blank or a number greater than 0 and no more than 1.");
+            }
+
+            topP = parsedTopP;
+        }
+
         var model = RuntimeModelText.Trim();
         var selectedModel = CurrentRuntimeModelChoice();
         var quantization = PreferConfigured(RuntimeQuantizationText, selectedModel?.DefaultQuantization ?? "Installed package default");
@@ -1930,10 +2658,10 @@ public sealed class MainWindowViewModel : ObservableObject
             Quantization: quantization,
             ContextTokens: contextTokens,
             OutputTokenLimit: outputLimit,
-            Temperature: 0.2,
-            TopP: null,
-            StreamingEnabled: selectedModel?.StreamingEnabled ?? true,
-            SupportsVision: selectedModel?.SupportsVision ?? LooksLikeVisionModel(model),
+            Temperature: temperature,
+            TopP: topP,
+            StreamingEnabled: RuntimeStreamingEnabled,
+            SupportsVision: RuntimeVisionEnabled,
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false);
     }
@@ -2145,6 +2873,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task TranscribeAudioAsync(VoiceAudioInput audioInput)
     {
         var shouldAutoSend = false;
+        var routeAsPushToTalk = _currentVoiceInputShouldAutoSend;
         try
         {
             IsTranscribing = true;
@@ -2179,12 +2908,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 audioInput,
                 _activeVoiceInput?.Token ?? CancellationToken.None).ConfigureAwait(true);
             UpdateLastSttDebugText();
+            var normalizedTranscript = SpeechTranscriptGuard.NormalizeAssistantName(transcript.Text);
 
-            var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript.Text, requireAssistantName: true);
+            var transcriptGuard = SpeechTranscriptGuard.Evaluate(normalizedTranscript);
             if (!transcriptGuard.Accepted)
             {
                 _lastVoiceMetadata = CreateVoiceMetadata(
-                    transcript.Text,
+                    normalizedTranscript,
                     audioInput,
                     suspiciousOrNoSpeech: true,
                     rejectionReason: transcriptGuard.Reason);
@@ -2194,16 +2924,16 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             SaveLastSuccessfulSttDevice();
-            LastTranscript = transcript.Text;
-            EditableTranscript = transcript.Text;
-            var routing = VoiceTranscriptRouting.Decide(AutoSendVoiceTranscripts);
+            LastTranscript = normalizedTranscript;
+            EditableTranscript = normalizedTranscript;
+            var routing = VoiceTranscriptRouting.Decide(routeAsPushToTalk);
             if (routing.PlaceTranscriptInComposer)
             {
-                ComposerText = transcript.Text;
+                ComposerText = normalizedTranscript;
             }
 
             _lastVoiceMetadata = CreateVoiceMetadata(
-                transcript.Text,
+                normalizedTranscript,
                 audioInput,
                 suspiciousOrNoSpeech: false,
                 rejectionReason: null);
@@ -2233,6 +2963,7 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             IsTranscribing = false;
+            _currentVoiceInputShouldAutoSend = false;
             DeleteVoiceAudioIfTemporary(audioInput);
             _activeVoiceInput?.Dispose();
             _activeVoiceInput = null;
@@ -2247,13 +2978,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task SendTranscriptAsync()
     {
-        var transcript = EditableTranscript.Trim();
+        var transcript = SpeechTranscriptGuard.NormalizeAssistantName(EditableTranscript).Trim();
         if (string.IsNullOrWhiteSpace(transcript) || IsBusy)
         {
             return;
         }
 
-        var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript, requireAssistantName: true);
+        var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript);
         if (!transcriptGuard.Accepted)
         {
             _lastVoiceMetadata = CreateVoiceMetadata(
@@ -2500,6 +3231,29 @@ public sealed class MainWindowViewModel : ObservableObject
         return true;
     }
 
+    private void OpenLocalLibrary()
+    {
+        if (_localLibraryWindow is not null)
+        {
+            if (!_localLibraryWindow.IsVisible)
+            {
+                _localLibraryWindow.Show();
+            }
+
+            _localLibraryWindow.Activate();
+            return;
+        }
+
+        var owner = System.Windows.Application.Current?.MainWindow;
+        _localLibraryWindow = new LocalLibraryWindow(_services)
+        {
+            Owner = owner
+        };
+        _localLibraryWindow.Closed += (_, _) => _localLibraryWindow = null;
+        _localLibraryWindow.Show();
+        _localLibraryWindow.Activate();
+    }
+
     private void RefreshVoiceSettingsChoices()
     {
         _suppressInputMonitorRestart = true;
@@ -2634,17 +3388,28 @@ public sealed class MainWindowViewModel : ObservableObject
         var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
         LoadPiperVoiceChoices();
 
-        WhisperExecutableText = ToPortablePath(PreferConfigured(_voiceSettings.WhisperExecutablePath, whisperDefaults.ExecutablePath)) ?? string.Empty;
-        WhisperModelText = ToPortablePath(PreferConfigured(_voiceSettings.WhisperModelPath, whisperDefaults.ModelPath)) ?? string.Empty;
-        WhisperArgumentsText = PreferConfigured(_voiceSettings.WhisperArgumentsTemplate, whisperDefaults.ArgumentsTemplate);
-        PiperExecutableText = ToPortablePath(PreferConfigured(
+        WhisperExecutableText = ToPortablePath(PreferValidConfiguredPath(
+            _voiceSettings.WhisperExecutablePath,
+            PreferConfigured(FindLocalWhisperPythonExecutable(), whisperDefaults.ExecutablePath))) ?? string.Empty;
+        WhisperModelText = ToPortablePath(PreferValidConfiguredPath(
+            _voiceSettings.WhisperModelPath,
+            PreferConfigured(FindLocalWhisperModelRoot(), whisperDefaults.ModelPath))) ?? string.Empty;
+        var localWhisperArguments = BuildLocalWhisperArgumentsTemplate();
+        WhisperArgumentsText = PreferWhisperArgumentsTemplate(
+            _voiceSettings.WhisperArgumentsTemplate,
+            localWhisperArguments,
+            whisperDefaults.ArgumentsTemplate);
+        PiperExecutableText = ToPortablePath(PreferPiperExecutablePath(
             _voiceSettings.PiperExecutablePath,
             PreferConfigured(FindLocalPiperExecutable(), piperDefaults.ExecutablePath))) ?? string.Empty;
-        PiperModelText = ToPortablePath(PreferConfigured(
+        PiperModelText = ToPortablePath(PreferValidConfiguredPath(
             _voiceSettings.PiperModelPath,
             PreferConfigured(PreferredPiperModelPath(), piperDefaults.ModelPath))) ?? string.Empty;
         PiperVoiceText = PreferConfigured(_voiceSettings.PiperVoiceId, piperDefaults.VoiceId);
-        PiperArgumentsText = PreferConfigured(_voiceSettings.PiperArgumentsTemplate, piperDefaults.ArgumentsTemplate);
+        PiperArgumentsText = PreferPiperArgumentsTemplate(
+            _voiceSettings.PiperArgumentsTemplate,
+            BuildLocalPiperArgumentsTemplate(),
+            piperDefaults.ArgumentsTemplate);
         SelectedPiperVoiceChoice = FindPiperVoiceLabelForModel(PiperModelText) ?? PiperVoiceChoices.FirstOrDefault() ?? string.Empty;
         ApplySelectedPiperVoiceChoice(SelectedPiperVoiceChoice, applySettings: false);
         _loadingSpeechToolSettings = false;
@@ -2707,6 +3472,35 @@ public sealed class MainWindowViewModel : ObservableObject
             ResolvePortablePath(WhisperModelText),
             PreferConfigured(WhisperArgumentsText, defaults.ArgumentsTemplate),
             defaults.OutputTextSuffix);
+    }
+
+    private static string? FindLocalWhisperPythonExecutable()
+    {
+        var candidate = LocalVoiceResourceLocator.FindWhisperPythonExecutable(AppBaseDirectory);
+        return File.Exists(candidate) ? ToPortablePath(candidate) : null;
+    }
+
+    private static string? FindLocalWhisperModelRoot()
+    {
+        var candidate = LocalVoiceResourceLocator.FindWhisperModelRoot(AppBaseDirectory);
+        return Directory.Exists(candidate) ? ToPortablePath(candidate) : null;
+    }
+
+    private static string? BuildLocalWhisperArgumentsTemplate()
+    {
+        var script = FindLocalWhisperScript();
+        var portableScript = File.Exists(script) ? ToPortablePath(script) : null;
+        return string.IsNullOrWhiteSpace(portableScript)
+            ? null
+            : $"\"{portableScript}\" --audio \"{{audio}}\" --model-root \"{{model}}\" --model-id small.en --output-base \"{{outputBase}}\" --vad-filter";
+    }
+
+    private static string BuildLocalPiperArgumentsTemplate() =>
+        "-m piper --model \"{model}\" --output_file \"{output}\"";
+
+    private static string? FindLocalWhisperScript()
+    {
+        return LocalVoiceResourceLocator.FindWhisperScript(AppBaseDirectory);
     }
 
     private PiperCliTextToSpeechOptions BuildPiperOptionsFromUi()
@@ -2837,8 +3631,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         RuntimeEnabled = options.Enabled;
         RuntimeEndpointText = options.Endpoint.ToString();
-        RuntimeTemperatureText = options.Temperature.ToString(CultureInfo.InvariantCulture);
-        RuntimeTopPText = options.TopP?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        var temperatureText = options.Temperature.ToString(CultureInfo.InvariantCulture);
+        var topPText = options.TopP?.ToString(CultureInfo.InvariantCulture) ?? RuntimeTopPModelDefault;
+        EnsureChoice(RuntimeTemperatureChoices, temperatureText);
+        EnsureChoice(RuntimeTopPChoices, topPText);
+        RuntimeTemperatureText = temperatureText;
+        RuntimeTopPText = topPText;
         RuntimeStreamingEnabled = options.StreamingEnabled;
         RuntimeVisionEnabled = options.SupportsVision;
 
@@ -2972,6 +3770,17 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private static void EnsureChoice(ObservableCollection<string> target, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || target.Any(choice => choice.Equals(value, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        target.Add(value);
+    }
+
     private static string PickChoice(
         ObservableCollection<string> choices,
         string? preferred,
@@ -3010,6 +3819,76 @@ public sealed class MainWindowViewModel : ObservableObject
         response.EnsureSuccessStatusCode();
         return ParseRuntimeModelChoices(body);
     }
+
+    private static async Task<RuntimeHealthCheck> CheckRuntimeEndpointStatusAsync(
+        OpenAiCompatibleRuntimeOptions options,
+        CancellationToken cancellationToken)
+    {
+        var started = DateTimeOffset.UtcNow;
+        if (!options.Enabled)
+        {
+            return CreateRuntimeEndpointStatus(
+                started,
+                succeeded: false,
+                options,
+                "Local model runtime is disabled.",
+                "Local model runtime is disabled.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Model))
+        {
+            return CreateRuntimeEndpointStatus(
+                started,
+                succeeded: false,
+                options,
+                "Model/package ID is required before checking a runtime.",
+                "Model/package ID is required before checking a runtime.");
+        }
+
+        try
+        {
+            var choices = await FetchInstalledRuntimeModelChoicesAsync(
+                options.Endpoint,
+                cancellationToken).ConfigureAwait(false);
+
+            if (choices.Any(choice => choice.Model.Equals(options.Model, StringComparison.OrdinalIgnoreCase)))
+            {
+                return CreateRuntimeEndpointStatus(
+                    started,
+                    succeeded: true,
+                    options,
+                    $"Local runtime endpoint responded and listed model '{options.Model}'.");
+            }
+
+            var summary = choices.Count == 0
+                ? "Local runtime endpoint responded, but no installed models were listed."
+                : $"Local runtime endpoint responded, but model '{options.Model}' was not listed.";
+            return CreateRuntimeEndpointStatus(started, succeeded: false, options, summary, summary);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or JsonException)
+        {
+            var summary = $"Local runtime endpoint ping failed: {ex.Message}";
+            return CreateRuntimeEndpointStatus(started, succeeded: false, options, summary, summary);
+        }
+    }
+
+    private static RuntimeHealthCheck CreateRuntimeEndpointStatus(
+        DateTimeOffset started,
+        bool succeeded,
+        OpenAiCompatibleRuntimeOptions options,
+        string summary,
+        string? errorText = null) =>
+        new(
+            Succeeded: succeeded,
+            Summary: summary,
+            CheckedAt: DateTimeOffset.UtcNow,
+            Elapsed: DateTimeOffset.UtcNow - started,
+            Endpoint: options.Endpoint.ToString(),
+            ModelPackageId: options.Model,
+            ContextTokens: options.ContextTokens,
+            OutputTokenLimit: options.OutputTokenLimit,
+            Temperature: options.Temperature,
+            ErrorText: errorText);
 
     private static IReadOnlyList<RuntimeModelChoice> ParseRuntimeModelChoices(string json)
     {
@@ -3108,7 +3987,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private static bool LooksLikeRuntimeCommunicationFailure(string text) =>
         text.Contains("local model runtime returned HTTP", StringComparison.OrdinalIgnoreCase)
-        || text.Contains("local model runtime completed without visible assistant content", StringComparison.OrdinalIgnoreCase)
         || text.Contains("local model communication failed", StringComparison.OrdinalIgnoreCase);
 
     private void RaiseCommandStates()
@@ -3495,7 +4373,8 @@ public sealed class MainWindowViewModel : ObservableObject
         double? extraInputGainDb = null,
         bool? normalizeBeforeStt = null,
         bool? retainDebugAudio = null,
-        bool? autoSendVoiceTranscripts = null)
+        bool? autoSendVoiceTranscripts = null,
+        string? pushToTalkKey = null)
     {
         if (_loadingVoiceSettings)
         {
@@ -3517,11 +4396,54 @@ public sealed class MainWindowViewModel : ObservableObject
             ExtraInputGainDb = extraInputGainDb ?? _voiceSettings.ExtraInputGainDb,
             NormalizeBeforeStt = normalizeBeforeStt ?? _voiceSettings.NormalizeBeforeStt,
             RetainDebugAudio = retainDebugAudio ?? _voiceSettings.RetainDebugAudio,
-            AutoSendVoiceTranscripts = autoSendVoiceTranscripts ?? _voiceSettings.AutoSendVoiceTranscripts
+            AutoSendVoiceTranscripts = autoSendVoiceTranscripts ?? _voiceSettings.AutoSendVoiceTranscripts,
+            PushToTalkKey = NormalizePushToTalkKey(pushToTalkKey ?? _voiceSettings.PushToTalkKey)
         };
 
         VoiceRuntimeSettingsStore.Save(_services.DataRoot, _voiceSettings);
     }
+
+    private static bool TryParsePushToTalkKey(string? value, out Key key)
+    {
+        var normalized = NormalizePushToTalkKey(value);
+        return Enum.TryParse(normalized, ignoreCase: true, out key);
+    }
+
+    private static string NormalizePushToTalkKey(string? value)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? "NumPad0" : value.Trim();
+        return text.Replace(" ", string.Empty, StringComparison.OrdinalIgnoreCase).ToUpperInvariant() switch
+        {
+            "KEYPAD0" or "NUMPAD0" or "NUM0" => nameof(Key.NumPad0),
+            "KEYPAD1" or "NUMPAD1" or "NUM1" => nameof(Key.NumPad1),
+            "KEYPAD2" or "NUMPAD2" or "NUM2" => nameof(Key.NumPad2),
+            "KEYPAD3" or "NUMPAD3" or "NUM3" => nameof(Key.NumPad3),
+            "KEYPAD4" or "NUMPAD4" or "NUM4" => nameof(Key.NumPad4),
+            "KEYPAD5" or "NUMPAD5" or "NUM5" => nameof(Key.NumPad5),
+            "KEYPAD6" or "NUMPAD6" or "NUM6" => nameof(Key.NumPad6),
+            "KEYPAD7" or "NUMPAD7" or "NUM7" => nameof(Key.NumPad7),
+            "KEYPAD8" or "NUMPAD8" or "NUM8" => nameof(Key.NumPad8),
+            "KEYPAD9" or "NUMPAD9" or "NUM9" => nameof(Key.NumPad9),
+            _ when Enum.TryParse<Key>(text, ignoreCase: true, out var key) => key.ToString(),
+            _ => nameof(Key.NumPad0)
+        };
+    }
+
+    private static string FormatPushToTalkKeyLabel(string value) =>
+        value switch
+        {
+            nameof(Key.NumPad0) => "Keypad 0",
+            nameof(Key.NumPad1) => "Keypad 1",
+            nameof(Key.NumPad2) => "Keypad 2",
+            nameof(Key.NumPad3) => "Keypad 3",
+            nameof(Key.NumPad4) => "Keypad 4",
+            nameof(Key.NumPad5) => "Keypad 5",
+            nameof(Key.NumPad6) => "Keypad 6",
+            nameof(Key.NumPad7) => "Keypad 7",
+            nameof(Key.NumPad8) => "Keypad 8",
+            nameof(Key.NumPad9) => "Keypad 9",
+            _ => value
+        };
 
     private int CurrentInputDeviceNumber() =>
         TryReadDeviceNumber(SelectedVoiceInputDevice, out var deviceNumber) ? deviceNumber : 0;
@@ -3670,6 +4592,73 @@ public sealed class MainWindowViewModel : ObservableObject
     private static string PreferConfigured(string? configured, string? fallback) =>
         string.IsNullOrWhiteSpace(configured) ? fallback ?? string.Empty : configured.Trim();
 
+    private static string PreferValidConfiguredPath(string? configured, string? fallback)
+    {
+        var resolved = ResolvePortablePath(configured);
+        return !string.IsNullOrWhiteSpace(configured) && LocalPathExists(resolved)
+            ? configured.Trim()
+            : fallback ?? string.Empty;
+    }
+
+    private static string PreferPiperExecutablePath(string? configured, string? fallback)
+    {
+        var resolved = ResolvePortablePath(configured);
+        if (!string.IsNullOrWhiteSpace(configured)
+            && LocalPathExists(resolved)
+            && !IsGeneratedPiperShimPath(resolved))
+        {
+            return configured.Trim();
+        }
+
+        return fallback ?? string.Empty;
+    }
+
+    private static string PreferWhisperArgumentsTemplate(
+        string? configured,
+        string? localWhisperArguments,
+        string fallback)
+    {
+        var configuredTrim = NullIfWhiteSpace(configured);
+        if (configuredTrim is null)
+        {
+            return PreferConfigured(localWhisperArguments, fallback);
+        }
+
+        return configuredTrim.Contains("local_whisper_stt.py", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(localWhisperArguments)
+                ? localWhisperArguments
+                : configuredTrim;
+    }
+
+    private static string PreferPiperArgumentsTemplate(
+        string? configured,
+        string localPiperArguments,
+        string fallback)
+    {
+        var configuredTrim = NullIfWhiteSpace(configured);
+        if (configuredTrim is null)
+        {
+            return PreferConfigured(localPiperArguments, fallback);
+        }
+
+        return IsGeneratedPiperShimArguments(configuredTrim)
+            ? localPiperArguments
+            : configuredTrim;
+    }
+
+    private static bool IsGeneratedPiperShimPath(string? value)
+    {
+        var resolved = ResolvePortablePath(value);
+        return !string.IsNullOrWhiteSpace(resolved)
+            && Path.GetFileName(resolved).Equals("piper.exe", StringComparison.OrdinalIgnoreCase)
+            && resolved.Contains($"{Path.DirectorySeparatorChar}python-venv{Path.DirectorySeparatorChar}Scripts{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsGeneratedPiperShimArguments(string value) =>
+        !value.Contains("-m piper", StringComparison.OrdinalIgnoreCase)
+        && value.Contains("--model", StringComparison.OrdinalIgnoreCase)
+        && value.Contains("--output_file", StringComparison.OrdinalIgnoreCase);
+
     private static string? NullIfWhiteSpace(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -3678,84 +4667,31 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private static string AppBaseDirectory => Path.GetFullPath(AppContext.BaseDirectory);
 
-    private static string? ResolvePortablePath(string? value)
-    {
-        var trimmed = NullIfWhiteSpace(value);
-        if (trimmed is null)
-        {
-            return null;
-        }
+    private static string? ResolvePortablePath(string? value) =>
+        LocalVoiceResourceLocator.ResolvePath(AppBaseDirectory, value);
 
-        try
-        {
-            return Path.GetFullPath(Path.IsPathRooted(trimmed)
-                ? trimmed
-                : Path.Combine(AppBaseDirectory, trimmed));
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return trimmed;
-        }
-    }
-
-    private static string? ToPortablePath(string? value)
-    {
-        var fullPath = ResolvePortablePath(value);
-        if (fullPath is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var relativePath = Path.GetRelativePath(AppBaseDirectory, fullPath);
-            return string.IsNullOrWhiteSpace(relativePath) ? fullPath : relativePath;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return fullPath;
-        }
-    }
+    private static string? ToPortablePath(string? value) =>
+        LocalVoiceResourceLocator.ToPortablePath(AppBaseDirectory, value);
 
     private static string? FindLocalPiperExecutable()
     {
-        var voiceRoot = FindLocalVoiceResourceDirectory();
-        var candidate = voiceRoot is null
-            ? null
-            : Path.Combine(voiceRoot, "python-venv", "Scripts", "piper.exe");
-
+        var candidate = LocalVoiceResourceLocator.FindPythonExecutable(AppBaseDirectory);
         return File.Exists(candidate) ? ToPortablePath(candidate) : null;
     }
 
     private static string? FindLocalPiperVoiceDirectory()
     {
-        var voiceRoot = FindLocalVoiceResourceDirectory();
-        var candidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "piper");
+        var candidate = LocalVoiceResourceLocator.FindPiperVoiceDirectory(AppBaseDirectory);
         return Directory.Exists(candidate) ? candidate : null;
     }
 
     private static string? FindLocalVoiceResourceDirectory()
     {
-        var executableLocalVoiceRoot = Path.Combine(AppBaseDirectory, "lib", "voice");
-        if (Directory.Exists(executableLocalVoiceRoot))
-        {
-            return executableLocalVoiceRoot;
-        }
-
-        var directory = new DirectoryInfo(AppBaseDirectory);
-        while (directory is not null)
-        {
-            var candidate = Path.Combine(directory.FullName, "lib", "voice");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
+        return LocalVoiceResourceLocator.FindVoiceRoot(AppBaseDirectory);
     }
+
+    private static bool LocalPathExists(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path));
 
     private static string FormatPiperVoiceLabel(string voiceId)
     {

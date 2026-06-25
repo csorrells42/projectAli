@@ -8,6 +8,8 @@
         MinWidth="840"
         Background="#0B0B0D"
         FontFamily="Segoe UI"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B0B0D" />
@@ -238,7 +240,7 @@
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
             <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Margin" Value="0,0,6,0" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="{x:Type TabItem}">
@@ -246,6 +248,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1"
+                                Margin="0,0,1,0"
                                 Padding="{TemplateBinding Padding}"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter ContentSource="Header"
@@ -292,14 +295,17 @@
             <TextBlock Text="Local runtime, voice, and microphone controls." Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
         </StackPanel>
 
-        <TabControl Grid.Row="1">
-            <TabItem Header="Runtime">
+        <TabControl x:Name="SettingsTabs"
+                    Grid.Row="1"
+                    Margin="0,0,10,0"
+                    ClipToBounds="False">
+            <TabItem x:Name="RuntimeTab" Header="Runtime">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource AppBackgroundBrush}">
                     <Border Background="{StaticResource PanelBrush}"
                             BorderBrush="{StaticResource BorderBrushDark}"
                             BorderThickness="1"
                             Padding="16"
-                            Margin="0,12,0,0">
+                            Margin="0,12,10,0">
                         <StackPanel>
                             <TextBlock Text="Runtime Settings"
                                        FontSize="18"
@@ -315,69 +321,188 @@
                                        Foreground="{StaticResource MutedTextBrush}"
                                        Margin="0,0,0,10" />
 
-                            <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
-                            <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <DockPanel Margin="0,0,0,4">
-                                <TextBlock Text="Installed model" Style="{StaticResource FieldLabel}" />
-                                <Button DockPanel.Dock="Right"
-                                        Content="Refresh"
-                                        Command="{Binding RefreshRuntimeModelsCommand}"
-                                        Padding="8,5"
-                                        Margin="8,0,0,0" />
-                            </DockPanel>
-                            <ComboBox ItemsSource="{Binding RuntimeModelChoices}"
-                                      SelectedItem="{Binding SelectedRuntimeModelChoice}"
-                                      Margin="0,2,0,8" />
-                            <TextBlock Text="{Binding RuntimeSelectionStatusText}"
-                                       TextWrapping="Wrap"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="12"
-                                       Margin="0,0,0,8" />
-
-                            <TextBlock Text="Quantization" Style="{StaticResource FieldLabel}" />
-                            <ComboBox ItemsSource="{Binding RuntimeQuantizationChoices}"
-                                      SelectedItem="{Binding RuntimeQuantizationText}"
-                                      Margin="0,2,0,8" />
-
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="12" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Context" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox ItemsSource="{Binding RuntimeContextChoices}"
-                                              SelectedItem="{Binding RuntimeContextText}"
-                                              Margin="0,2,0,8" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Output" Style="{StaticResource FieldLabel}" />
-                                    <ComboBox ItemsSource="{Binding RuntimeOutputLimitChoices}"
-                                              SelectedItem="{Binding RuntimeOutputLimitText}"
-                                              Margin="0,2,0,8" />
-                                </StackPanel>
-                            </Grid>
-
-                            <UniformGrid Columns="4" Margin="0,8,0,0">
-                                <Button Content="Save" Command="{Binding SaveRuntimeSettingsCommand}" Margin="0,0,5,0" />
-                                <Button Content="Check" Command="{Binding CheckRuntimeCommand}" Margin="5,0,5,0" />
-                                <Button Content="Activate"
-                                        Command="{Binding ActivateRuntimeCommand}"
-                                        IsEnabled="{Binding CanActivateRuntime}"
-                                        Margin="5,0,5,0" />
-                                <Button Content="Stub" Command="{Binding RevertToStubCommand}" Margin="5,0,0,0" />
-                            </UniformGrid>
-
-                            <Border BorderBrush="{StaticResource BorderBrushDark}"
+                            <Border Background="#201819"
+                                    BorderBrush="#684044"
                                     BorderThickness="1"
-                                    Padding="10"
-                                    Margin="0,12,0,0">
-                                <TextBlock Text="{Binding RuntimeHealthResult}"
-                                           TextWrapping="Wrap"
-                                           Foreground="{StaticResource TextBrush}" />
+                                    Padding="12"
+                                    Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Advanced runtime settings"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="These settings can break local model startup, slow Ali down, or make owner testing confusing if changed accidentally."
+                                               TextWrapping="Wrap"
+                                               FontSize="12"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Margin="0,3,0,8" />
+                                    <CheckBox x:Name="RuntimeAdvancedUnlockCheck"
+                                              Content="I understand. Enable runtime settings."
+                                              ToolTip="Check this only when intentionally changing local runtime settings." />
+                                </StackPanel>
                             </Border>
+
+                            <StackPanel IsEnabled="{Binding IsChecked, ElementName=RuntimeAdvancedUnlockCheck}"
+                                        Margin="0,0,4,0">
+                                <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}"
+                                         Margin="0,2,0,2" />
+                                <Button Content="Refresh"
+                                        Command="{Binding RefreshRuntimeModelsCommand}"
+                                        Width="86"
+                                        Padding="8,5"
+                                        HorizontalAlignment="Right"
+                                        Margin="0,4,0,2"
+                                        ToolTip="Refresh installed model choices from the endpoint." />
+                                <TextBlock Text="Local OpenAI-compatible URL. Leave this on localhost for owner testing."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,8" />
+
+                                <TextBlock Text="Installed model" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding RuntimeModelChoices}"
+                                          SelectedItem="{Binding SelectedRuntimeModelChoice}"
+                                          Margin="0,2,0,4" />
+                                <TextBlock Text="Ali will use this model only after Check passes and Activate is clicked."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,6" />
+                                <TextBlock Text="{Binding RuntimeSelectionStatusText}"
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="12"
+                                           Margin="0,0,0,8" />
+
+                                <TextBlock Text="Quantization" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding RuntimeQuantizationChoices}"
+                                          SelectedItem="{Binding RuntimeQuantizationText}"
+                                          Margin="0,2,0,2" />
+                                <TextBlock Text="Model packaging/performance profile. Usually leave this on the installed default."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,8" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Context" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding RuntimeContextChoices}"
+                                                  SelectedItem="{Binding RuntimeContextText}"
+                                                  Margin="0,2,0,2" />
+                                        <TextBlock Text="Memory window; higher uses more RAM."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Output" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding RuntimeOutputLimitChoices}"
+                                                  SelectedItem="{Binding RuntimeOutputLimitText}"
+                                                  Margin="0,2,0,2" />
+                                        <TextBlock Text="Max reply length in tokens."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="Temperature" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding RuntimeTemperatureChoices}"
+                                                  SelectedItem="{Binding RuntimeTemperatureText}"
+                                                  Margin="0,2,0,2"
+                                                  ToolTip="Lower is steadier. Use 0.0-1.0 for normal Ali testing." />
+                                        <TextBlock Text="Lower is steadier; presets stay in range."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="6">
+                                        <TextBlock Text="Top-p" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding RuntimeTopPChoices}"
+                                                  SelectedItem="{Binding RuntimeTopPText}"
+                                                  Margin="0,2,0,2"
+                                                  ToolTip="Optional nucleus sampling value. Use model default unless tuning is needed." />
+                                        <TextBlock Text="Sampling cutoff; default is usually best."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <CheckBox Content="Streaming responses"
+                                                  IsChecked="{Binding RuntimeStreamingEnabled}"
+                                                  Margin="0,0,0,2"
+                                                  ToolTip="User selectable. Shows response text as it arrives." />
+                                        <TextBlock Text="User selectable; shows response text as it arrives."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <CheckBox Content="Vision/image support"
+                                                  IsChecked="{Binding RuntimeVisionEnabled}"
+                                                  Margin="0,0,0,2"
+                                                  ToolTip="User selectable. Enable only for image-capable models." />
+                                        <TextBlock Text="User selectable; enable only for image-capable models."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock Text="Stop markers are controlled by the Ollama model tag or Modelfile."
+                                           TextWrapping="Wrap"
+                                           FontSize="12"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,8,0,0" />
+
+                                <StackPanel Orientation="Horizontal"
+                                            HorizontalAlignment="Center"
+                                            Margin="0,8,0,0">
+                                    <Button Content="Save"
+                                            Command="{Binding SaveRuntimeSettingsCommand}"
+                                            Width="86"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Check"
+                                            Command="{Binding CheckRuntimeCommand}"
+                                            Width="86"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Activate"
+                                            Command="{Binding ActivateRuntimeCommand}"
+                                            IsEnabled="{Binding CanActivateRuntime}"
+                                            Width="86"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Stub"
+                                            Command="{Binding RevertToStubCommand}"
+                                            Width="86"
+                                            Margin="0" />
+                                </StackPanel>
+
+                                <Border BorderBrush="{StaticResource BorderBrushDark}"
+                                        BorderThickness="1"
+                                        Padding="10"
+                                        Margin="0,12,0,0">
+                                    <TextBlock Text="{Binding RuntimeHealthResult}"
+                                               TextWrapping="Wrap"
+                                               Foreground="{StaticResource TextBrush}" />
+                                </Border>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </ScrollViewer>
@@ -403,6 +528,8 @@
                                 <ColumnDefinition Width="112" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
@@ -441,6 +568,17 @@
                                        Foreground="{StaticResource TextBrush}"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0" />
+
+                            <TextBlock Grid.Column="7"
+                                       Text="{Binding PushToTalkKeyLabel}"
+                                       Foreground="{StaticResource TextBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="14,0,8,0" />
+                            <Button Grid.Column="8"
+                                    Content="{Binding AssignPushToTalkKeyButtonText}"
+                                    Command="{Binding BeginAssignPushToTalkKeyCommand}"
+                                    MinWidth="104"
+                                    ToolTip="Click, then press the key you want to use for Push to Talk." />
                         </Grid>
                     </Border>
 
@@ -867,6 +1005,383 @@
                         </Border>
                     </Grid>
                 </Grid>
+            </TabItem>
+
+            <TabItem Header="Coding / Permissions">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource AppBackgroundBrush}">
+                    <StackPanel Margin="0,12,10,0">
+                        <Border Background="{StaticResource PanelBrush}"
+                                BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="14"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Coding Workspace"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="Ali can open, inspect, and later assist with projects in this folder. Keep this as the main coding domain."
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,3,0,12" />
+
+                                <TextBlock Text="Workspace root" Style="{StaticResource FieldLabel}" />
+                                <Grid Margin="0,2,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="120" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding CodingWorkspaceRootText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0" />
+                                    <Button Grid.Column="2"
+                                            Content="Choose Folder"
+                                            Command="{Binding BrowseCodingWorkspaceRootCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                </Grid>
+                                <TextBlock Text="Default: C:\Users\&lt;you&gt;\Documents\Programming Projects"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,10" />
+
+                                <TextBlock Text="Notepad++ executable or install folder" Style="{StaticResource FieldLabel}" />
+                                <Grid Margin="0,2,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="112" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding CodingNotepadPlusPlusPathText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0" />
+                                    <Button Grid.Column="2"
+                                            Content="Choose Exe"
+                                            Command="{Binding BrowseNotepadPlusPlusPathCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                </Grid>
+                                <TextBlock Text="Leave blank to auto-detect. You may paste notepad++.exe or the Notepad++ install folder."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,10" />
+
+                                <TextBlock Text="Visual Studio executable or install folder" Style="{StaticResource FieldLabel}" />
+                                <Grid Margin="0,2,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="112" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding CodingVisualStudioPathText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0" />
+                                    <Button Grid.Column="2"
+                                            Content="Choose Exe"
+                                            Command="{Binding BrowseVisualStudioPathCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                </Grid>
+                                <TextBlock Text="Leave blank to auto-detect with vswhere and normal install paths. You may paste devenv.exe, Common7\IDE, or the Visual Studio install root."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,10" />
+
+                                <TextBlock Text="Permission Controls"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,4,0,4" />
+                                <TextBlock Text="These are Ali's coding guardrails. Locked rows are shown for clarity and require a separate high-trust workflow before they can change."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,8" />
+                                <Grid Margin="0,2,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="230" />
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                               Text="Workspace read/open/search"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="0"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingWorkspaceAccessModeChoices}"
+                                              SelectedItem="{Binding CodingWorkspaceAccessMode}"
+                                              IsEnabled="False"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="2"
+                                               Text="Allowed inside the approved coding folder."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Text="Explicit outside file open/read"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="1"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingExplicitOutsideFileOpenModeChoices}"
+                                              SelectedItem="{Binding CodingExplicitOutsideFileOpenMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="2"
+                                               Text="Allows opening a full file path you directly provide. It does not allow outside edits or broad searches."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="2"
+                                               Text="Search outside workspace"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="2"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingSearchOutsideWorkspaceModeChoices}"
+                                              SelectedItem="{Binding CodingSearchOutsideWorkspaceMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="2"
+                                               Text="Future file search behavior outside the approved folder."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="3"
+                                               Text="Edit/write inside workspace"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="3"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingEditInsideWorkspaceModeChoices}"
+                                              SelectedItem="{Binding CodingEditInsideWorkspaceMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="3"
+                                               Grid.Column="2"
+                                               Text="Future code edit behavior inside the approved folder."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="4"
+                                               Text="Build/test/run inside workspace"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="4"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingBuildTestRunInsideWorkspaceModeChoices}"
+                                              SelectedItem="{Binding CodingBuildTestRunInsideWorkspaceMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="4"
+                                               Grid.Column="2"
+                                               Text="Future compile, test, and local command behavior inside the approved folder."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="5"
+                                               Text="Delete/move/overwrite"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="5"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingDestructiveActionModeChoices}"
+                                              SelectedItem="{Binding CodingDestructiveActionMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="5"
+                                               Grid.Column="2"
+                                               Text="Future destructive file behavior. Extra confirmation means Ali must ask before proceeding."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="6"
+                                               Text="Edit/run outside workspace"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="6"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingOutsideEditRunModeChoices}"
+                                              SelectedItem="{Binding CodingOutsideEditRunMode}"
+                                              IsEnabled="False"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="6"
+                                               Grid.Column="2"
+                                               Text="Blocked for owner testing."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="7"
+                                               Text="System folders and admin actions"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,0" />
+                                    <ComboBox Grid.Row="7"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingSystemAdminActionModeChoices}"
+                                              SelectedItem="{Binding CodingSystemAdminActionMode}"
+                                              IsEnabled="False"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Grid.Row="7"
+                                               Grid.Column="2"
+                                               Text="Blocked here. Registry, services, drivers, and security settings stay out of this normal coding flow."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,0" />
+                                </Grid>
+
+                                <TextBlock Text="Git Controls"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,4,0,4" />
+                                <TextBlock Text="Git is limited to repositories inside the approved workspace. Read-only inspection is separate from staging, committing, merging, and network operations."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,8" />
+                                <Grid Margin="0,2,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="230" />
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                               Text="Status, diff, and log"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="0"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingGitReadModeChoices}"
+                                              SelectedItem="{Binding CodingGitReadMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="2"
+                                               Text="Read-only repository inspection inside the approved workspace."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Text="Stage and commit"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="1"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingGitWriteModeChoices}"
+                                              SelectedItem="{Binding CodingGitWriteMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="2"
+                                               Text="Git add and commit require confirmation and are blocked when disabled."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="2"
+                                               Text="Merge"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="2"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingGitMergeModeChoices}"
+                                              SelectedItem="{Binding CodingGitMergeMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="2"
+                                               Text="Merge requires extra confirmation because conflicts can change many files."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="3"
+                                               Text="Pull and push"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,0" />
+                                    <ComboBox Grid.Row="3"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingGitNetworkModeChoices}"
+                                              SelectedItem="{Binding CodingGitNetworkMode, Mode=TwoWay}"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Grid.Row="3"
+                                               Grid.Column="2"
+                                               Text="Default is blocked. If enabled, network Git actions still require confirmation."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,0" />
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button Content="Reset"
+                                            Command="{Binding ResetCodingPermissionsCommand}"
+                                            Width="86"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Save"
+                                            Command="{Binding SaveCodingPermissionsCommand}"
+                                            Width="86"
+                                            Margin="0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource PanelBrush}"
+                                BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="14">
+                            <StackPanel>
+                                <TextBlock Text="Status"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="{Binding CodingPermissionsStatusText}"
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,8,0,0" />
+                                <TextBlock Text="{Binding CodingToolSettingsPath}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
         </TabControl>
     </Grid>

@@ -23,6 +23,10 @@ public static class MemoryRequestParser
     private static readonly string[] SavePrefixes =
     [
         "remember that ",
+        "remember this,",
+        "remember this:",
+        "remember this ",
+        "remember,",
         "save this ",
         "from now on "
     ];

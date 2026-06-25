@@ -13,8 +13,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 {
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
+    private const int QwenVisibleOutputTokenFloor = 512;
+    private const int QwenVisibleOutputRetryTokenLimit = 1024;
     private const string HealthProbeExpectedResponse = "OK";
-    private const string NoThinkingInstruction = "/no_think";
+    private const string SourcePlannerConversationId = "source_query_plan";
+    private const string AliPersonaInstruction =
+        "You are Ali, the local desktop assistant in this application. If asked who you are or what your name is, identify yourself as Ali. Do not prepend your name or identity to ordinary answers. Do not argue that your name is Qwen, the model package, or the model provider; those are implementation details. If asked whether you are connected to the internet, answer as Ali: you run on this computer and can use only the local app/runtime features that are enabled; do not claim live web browsing, training cutoffs, or internet limitations unless the user asks specifically about web access. If the app provides source excerpts, treat them as app-provided evidence and do not say you lack real-time data. Keep normal replies concise: usually one short paragraph or a few bullets. Avoid emoji and emoticons in normal replies.";
+    private const string VisibleOutputRetryInstruction =
+        "The previous runtime attempt produced no visible assistant content. Follow the existing instructions exactly, but write the final result in visible assistant message content only. Do not include hidden reasoning, analysis, or <think> blocks. If the task requires JSON, return only that JSON.";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
@@ -46,6 +52,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         if (!_options.StreamingEnabled)
         {
             var content = await SendNonStreamingPromptAsync(request, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                yield return new ModelToken(
+                    "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
+                    EvidenceStatus.Unverified);
+                yield break;
+            }
+
             yield return new ModelToken(content, EvidenceStatus.Unverified);
             yield break;
         }
@@ -120,6 +134,13 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
         if (!emittedContent && !isHealthCheck)
         {
+            var fallbackContent = await SendVisibleOutputRetryAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(fallbackContent))
+            {
+                yield return new ModelToken(fallbackContent, EvidenceStatus.Unverified);
+                yield break;
+            }
+
             yield return new ModelToken(
                 "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
                 EvidenceStatus.Unverified);
@@ -163,7 +184,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             }
 
             var nonStreamingText = await SendNonStreamingProbeWithRetryAsync(
-                BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text. /no_think"),
+                BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text."),
                 cancellationToken).ConfigureAwait(false);
 
             var normalizedNonStreamingText = NormalizeHealthProbeText(nonStreamingText);
@@ -281,14 +302,64 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private async Task<string> SendNonStreamingPromptAsync(ChatRequest request, CancellationToken cancellationToken)
     {
+        var isHealthCheck = IsHealthCheckRequest(request);
+        var text = await SendNonStreamingPromptAsync(
+            request,
+            maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null,
+            isHealthCheck,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!isHealthCheck && ShouldDisableThinking() && string.IsNullOrWhiteSpace(text))
+        {
+            text = await SendNonStreamingPromptAsync(
+                request,
+                maxTokens: QwenVisibleOutputRetryTokenLimit,
+                isHealthCheck: false,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!isHealthCheck && ShouldDisableThinking() && string.IsNullOrWhiteSpace(text))
+        {
+            text = await SendVisibleOutputRetryAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        return text;
+    }
+
+    private async Task<string> SendVisibleOutputRetryAsync(ChatRequest request, CancellationToken cancellationToken)
+    {
+        var retryRequest = request with
+        {
+            History = request.History
+                .Append(new ChatMessage(
+                    "runtime_visible_output_retry",
+                    ChatRole.System,
+                    VisibleOutputRetryInstruction,
+                    DateTimeOffset.UtcNow,
+                    EvidenceStatus.Unverified))
+                .ToList()
+        };
+
+        return await SendNonStreamingPromptAsync(
+            retryRequest,
+            maxTokens: QwenVisibleOutputRetryTokenLimit,
+            isHealthCheck: false,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string> SendNonStreamingPromptAsync(
+        ChatRequest request,
+        int? maxTokens,
+        bool isHealthCheck,
+        CancellationToken cancellationToken)
+    {
         var uri = BuildUri("chat/completions");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri);
-        var isHealthCheck = IsHealthCheckRequest(request);
         var payload = JsonSerializer.Serialize(
             BuildChatPayload(
                 request,
                 stream: false,
-                maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null),
+                maxTokens: maxTokens),
             JsonOptions);
         httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
         if (isHealthCheck)
@@ -334,7 +405,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     {
         var builder = new StringBuilder();
         await foreach (var token in StreamChatAsync(
-                           BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text. /no_think"),
+                           BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text."),
                            cancellationToken).ConfigureAwait(false))
         {
             builder.Append(token.Text);
@@ -405,29 +476,61 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private object BuildChatPayload(ChatRequest request, bool? stream = null, int? maxTokens = null)
     {
-        var messages = request.History
+        var messages = new List<object>();
+        if (!IsHealthCheckRequest(request) && !IsSourcePlannerRequest(request))
+        {
+            messages.Add(new
+            {
+                role = "system",
+                content = (object)AliPersonaInstruction
+            });
+            messages.Add(new
+            {
+                role = "system",
+                content = (object)BuildCurrentDateInstruction()
+            });
+        }
+
+        messages.AddRange(request.History
             .Select(message => new
             {
                 role = message.Role.ToString().ToLowerInvariant(),
                 content = (object)message.Text
-            })
-            .Append(new
-            {
-                role = "user",
-                content = BuildUserContent(request, includeNoThinkingInstruction: ShouldDisableThinking())
-            })
-            .ToArray();
+            }));
+        messages.Add(new
+        {
+            role = "user",
+            content = BuildUserContent(request)
+        });
 
         return new
         {
             model = _options.Model,
-            messages,
+            messages = messages.ToArray(),
             stream = stream ?? _options.StreamingEnabled,
-            max_tokens = maxTokens ?? _options.OutputTokenLimit,
-            temperature = _options.Temperature,
-            top_p = _options.TopP,
+            max_tokens = ResolveMaxTokens(maxTokens),
+            temperature = maxTokens.HasValue ? 0 : _options.Temperature,
+            top_p = maxTokens.HasValue ? 0.1 : _options.TopP,
             think = ShouldDisableThinking() ? false : (bool?)null
         };
+    }
+
+    private int ResolveMaxTokens(int? requestedMaxTokens)
+    {
+        if (requestedMaxTokens.HasValue)
+        {
+            return requestedMaxTokens.Value;
+        }
+
+        return ShouldDisableThinking()
+            ? Math.Max(_options.OutputTokenLimit, QwenVisibleOutputTokenFloor)
+            : _options.OutputTokenLimit;
+    }
+
+    private static string BuildCurrentDateInstruction()
+    {
+        var now = DateTimeOffset.Now;
+        return $"Current local date: {now:dddd, MMMM d, yyyy}. Current local time: {now:HH:mm zzz}. Use this date for relative-date questions. Do not answer from an old training cutoff when current app-provided source evidence or the current local date is relevant.";
     }
 
     private void EnsureEndpointAllowed()
@@ -473,6 +576,9 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private static bool IsHealthCheckRequest(ChatRequest request) =>
         string.Equals(request.ConversationId, "health_check", StringComparison.Ordinal);
+
+    private static bool IsSourcePlannerRequest(ChatRequest request) =>
+        string.Equals(request.ConversationId, SourcePlannerConversationId, StringComparison.Ordinal);
 
     private bool ShouldDisableThinking() =>
         IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);
@@ -526,7 +632,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             History: Array.Empty<ChatMessage>());
 
     private static ChatRequest BuildVisionProbeRequest() =>
-        BuildProbeRequest("Describe this image in one short phrase. /no_think") with
+        BuildProbeRequest("Describe this image in one short phrase.") with
         {
             Attachments = new[]
             {
@@ -541,11 +647,9 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             }
         };
 
-    private static object BuildUserContent(ChatRequest request, bool includeNoThinkingInstruction)
+    private static object BuildUserContent(ChatRequest request)
     {
-        var userText = includeNoThinkingInstruction
-            ? BuildUserTextForRuntime(request.UserText)
-            : request.UserText;
+        var userText = request.UserText;
         if (request.Attachments.Count == 0)
         {
             return userText;
@@ -573,14 +677,6 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
 
         return content.ToArray();
-    }
-
-    private static string BuildUserTextForRuntime(string userText)
-    {
-        var trimmed = userText.TrimEnd();
-        return trimmed.Contains(NoThinkingInstruction, StringComparison.OrdinalIgnoreCase)
-            ? userText
-            : $"{trimmed} {NoThinkingInstruction}";
     }
 
     private sealed record ModelsCheckResult(bool Succeeded, string Summary)

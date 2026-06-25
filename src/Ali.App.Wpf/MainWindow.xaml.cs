@@ -19,6 +19,8 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(new Action(() => MessagesScrollViewer.ScrollToEnd()));
         Loaded += MainWindow_OnLoaded;
         Closing += MainWindow_OnClosing;
+        PreviewKeyDown += MainWindow_OnPreviewKeyDown;
+        PreviewKeyUp += MainWindow_OnPreviewKeyUp;
     }
 
     private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)
@@ -86,6 +88,28 @@ public partial class MainWindow : Window
         {
             await sendViewModel.SendAsync().ConfigureAwait(true);
         }
+    }
+
+    private async void MainWindow_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.IsRepeat || DataContext is not MainWindowViewModel viewModel || !viewModel.IsPushToTalkKey(e.Key))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await viewModel.StartPushToTalkAsync().ConfigureAwait(true);
+    }
+
+    private async void MainWindow_OnPreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel || !viewModel.IsPushToTalkKey(e.Key))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await viewModel.StopPushToTalkAsync().ConfigureAwait(true);
     }
 
     private void HistoryMenuButton_OnClick(object sender, RoutedEventArgs e)
