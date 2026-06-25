@@ -5,6 +5,7 @@ using Ali.Core.Runtime;
 using Ali.Infrastructure.Bootstrap;
 using Ali.Infrastructure.Runtime;
 using System.Diagnostics;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 var listenUrls = Environment.GetEnvironmentVariable("ALI_HELPER_URLS");
@@ -72,6 +73,61 @@ app.MapPost("/api/conversations", (HttpContext httpContext) =>
 
     var conversationId = $"web_{Guid.NewGuid():N}";
     return Results.Ok(new NewConversationResponse(conversationId));
+});
+
+app.MapGet("/api/coding/status", async (
+    HttpContext httpContext,
+    AliServices services,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsAuthorized(httpContext, accessToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!IsLoopbackRequest(httpContext))
+    {
+        return Results.Json(
+            new ErrorResponse("Coding bridge is loopback-only."),
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    var result = await services.LocalCodingTool.TryHandleAsync("show visual studio integration", cancellationToken).ConfigureAwait(false);
+    return Results.Ok(CodingCommandResponse.FromResult(result));
+});
+
+app.MapPost("/api/coding/command", async (
+    CodingCommandRequest request,
+    HttpContext httpContext,
+    AliServices services,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsAuthorized(httpContext, accessToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!IsLoopbackRequest(httpContext))
+    {
+        return Results.Json(
+            new ErrorResponse("Coding bridge is loopback-only."),
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Command))
+    {
+        return Results.BadRequest(new ErrorResponse("Command is required."));
+    }
+
+    if (request.Command.Length > 12000)
+    {
+        return Results.BadRequest(new ErrorResponse("Command is too long for the coding bridge."));
+    }
+
+    var result = await services.LocalCodingTool.TryHandleAsync(request.Command.Trim(), cancellationToken).ConfigureAwait(false);
+    return result.Handled
+        ? Results.Ok(CodingCommandResponse.FromResult(result))
+        : Results.BadRequest(new ErrorResponse("Not a deterministic Ali coding command."));
 });
 
 app.MapPost("/api/ask", async (
@@ -167,6 +223,22 @@ static bool IsAuthorized(HttpContext context, string? accessToken)
 
     return context.Request.Headers.TryGetValue("X-Ali-Helper-Token", out var value)
         && string.Equals(value.ToString(), accessToken, StringComparison.Ordinal);
+}
+
+static bool IsLoopbackRequest(HttpContext context)
+{
+    var address = context.Connection.RemoteIpAddress;
+    if (address is null)
+    {
+        return true;
+    }
+
+    if (address.IsIPv4MappedToIPv6)
+    {
+        address = address.MapToIPv4();
+    }
+
+    return IPAddress.IsLoopback(address);
 }
 
 static IReadOnlyList<ChatMessage> BuildHistory(IReadOnlyList<AskHistoryItem>? history)
@@ -479,6 +551,28 @@ internal sealed record AskRequest(
     string? ConversationId = null,
     IReadOnlyList<AskHistoryItem>? History = null);
 
+internal sealed record CodingCommandRequest(string Command);
+
+internal sealed record CodingCommandResponse(
+    bool Handled,
+    bool Succeeded,
+    string Message,
+    string? ToolName,
+    string? TargetPath,
+    int? LineNumber,
+    int? ExitCode)
+{
+    public static CodingCommandResponse FromResult(Ali.Core.Coding.CodingToolResult result) =>
+        new(
+            result.Handled,
+            result.Succeeded,
+            result.Message,
+            result.ToolName,
+            result.TargetPath,
+            result.LineNumber,
+            result.ExitCode);
+}
+
 internal sealed record AskHistoryItem(string Role, string Text);
 
 internal sealed record AskResponse(
@@ -645,6 +739,52 @@ public const string IndexHtml = """
       background: #151a22;
     }
 
+    #codingBridge {
+      border-top: 1px solid #2a3038;
+      margin-top: 12px;
+      padding-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    #codingBridge h2 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    #codingCommand {
+      min-height: 70px;
+      resize: vertical;
+      background: #11161d;
+      color: #eef2f7;
+      border: 1px solid #384250;
+      border-radius: 8px;
+      padding: 8px;
+      font: inherit;
+      font-size: 12px;
+    }
+
+    #codingRun {
+      height: 36px;
+      min-width: 0;
+    }
+
+    #codingOutput {
+      min-height: 100px;
+      max-height: 240px;
+      overflow: auto;
+      white-space: pre-wrap;
+      margin: 0;
+      border: 1px solid #2a3038;
+      border-radius: 8px;
+      padding: 8px;
+      background: #101419;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
     .history-item {
       width: 100%;
       display: block;
@@ -752,6 +892,12 @@ public const string IndexHtml = """
     <aside>
       <button id="newChat" type="button">New Chat</button>
       <div id="history"></div>
+      <section id="codingBridge">
+        <h2>Coding Bridge</h2>
+        <textarea id="codingCommand" placeholder="show visual studio integration"></textarea>
+        <button id="codingRun" type="button">Run</button>
+        <pre id="codingOutput">Checking coding bridge...</pre>
+      </section>
     </aside>
     <section id="chat"></section>
   </main>
@@ -768,6 +914,9 @@ public const string IndexHtml = """
     const send = document.getElementById('send');
     const status = document.getElementById('status');
     const token = document.getElementById('token');
+    const codingCommand = document.getElementById('codingCommand');
+    const codingRun = document.getElementById('codingRun');
+    const codingOutput = document.getElementById('codingOutput');
     let conversationId = crypto.randomUUID();
     const history = [];
     token.value = localStorage.getItem('aliHelperToken') || '';
@@ -873,6 +1022,43 @@ public const string IndexHtml = """
       }
     }
 
+    async function refreshCodingStatus() {
+      try {
+        const res = await fetch('/api/coding/status', { headers: requestHeaders() });
+        const data = await res.json();
+        if (!res.ok) {
+          codingOutput.textContent = data.error || `HTTP ${res.status}`;
+          return;
+        }
+
+        codingOutput.textContent = data.message || 'Coding bridge ready.';
+      } catch (error) {
+        codingOutput.textContent = error.message || 'Coding bridge unavailable';
+      }
+    }
+
+    codingRun.addEventListener('click', async () => {
+      const command = codingCommand.value.trim() || 'show visual studio integration';
+      codingRun.disabled = true;
+      try {
+        const res = await fetch('/api/coding/command', {
+          method: 'POST',
+          headers: requestHeaders(true),
+          body: JSON.stringify({ command })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          codingOutput.textContent = data.error || `HTTP ${res.status}`;
+        } else {
+          codingOutput.textContent = `${data.succeeded ? 'SUCCEEDED' : 'NOT APPLIED'} | ${data.toolName || 'coding'}\n${data.message || ''}`;
+        }
+      } catch (error) {
+        codingOutput.textContent = error.message || 'Coding bridge request failed';
+      } finally {
+        codingRun.disabled = false;
+      }
+    });
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const text = message.value.trim();
@@ -911,6 +1097,7 @@ public const string IndexHtml = """
     });
 
     refreshStatus();
+    refreshCodingStatus();
     refreshHistory();
   </script>
 </body>

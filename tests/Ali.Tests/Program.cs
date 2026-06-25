@@ -60,8 +60,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
+    ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
     ("coding parser routes last diagnostic open", TestCodingParserRoutesLastDiagnosticOpen),
     ("coding parser routes last failure diagnosis", TestCodingParserRoutesLastFailureDiagnosis),
+    ("coding parser routes last failure patch suggestion", TestCodingParserRoutesLastFailurePatchSuggestion),
     ("coding parser routes PDF generation", TestCodingParserRoutesPdfGeneration),
     ("coding parser routes coding report generation", TestCodingParserRoutesCodingReportGeneration),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
@@ -76,6 +78,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
+    ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
     ("local coding tool generates PDF", TestLocalCodingToolGeneratesPdf),
     ("local coding tool generates coding report PDF", TestLocalCodingToolGeneratesCodingReportPdf),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
@@ -86,11 +89,13 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool summarizes dotnet diagnostics", TestLocalCodingToolSummarizesDotNetDiagnostics),
     ("local coding tool opens last diagnostic", TestLocalCodingToolOpensLastDiagnostic),
     ("local coding tool diagnoses last failure", TestLocalCodingToolDiagnosesLastFailure),
+    ("local coding tool suggests last failure patch", TestLocalCodingToolSuggestsLastFailurePatch),
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
+    ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
     ("local coding tool rejects stale patch bundle", TestLocalCodingToolRejectsStalePatchBundle),
     ("local coding tool manages pending patch preview", TestLocalCodingToolManagesPendingPatchPreview),
     ("local coding tool applies last patch preview", TestLocalCodingToolAppliesLastPatchPreview),
@@ -479,6 +484,17 @@ static Task TestCodingParserRoutesToolIntegrationStatus()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesVisualStudioHandoff()
+{
+    Equal(true, CodingToolRequestParser.TryParse("generate visual studio integration plan", out var handoffRequest));
+    Equal(CodingToolAction.GenerateVisualStudioHandoff, handoffRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan vs integration", out var planRequest));
+    Equal(CodingToolAction.GenerateVisualStudioHandoff, planRequest.Action);
+
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesLastDiagnosticOpen()
 {
     Equal(true, CodingToolRequestParser.TryParse("open build error", out var buildErrorRequest));
@@ -496,6 +512,17 @@ static Task TestCodingParserRoutesLastFailureDiagnosis()
 
     Equal(true, CodingToolRequestParser.TryParse("explain last compiler error", out var compilerRequest));
     Equal(CodingToolAction.DiagnoseLastFailure, compilerRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesLastFailurePatchSuggestion()
+{
+    Equal(true, CodingToolRequestParser.TryParse("suggest patch from last failure", out var suggestRequest));
+    Equal(CodingToolAction.SuggestLastFailurePatch, suggestRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("preview fix from last failure", out var previewRequest));
+    Equal(CodingToolAction.SuggestLastFailurePatch, previewRequest.Action);
+
     return Task.CompletedTask;
 }
 
@@ -769,6 +796,47 @@ static async Task TestLocalCodingToolShowsToolIntegrationStatus()
     Contains(notepadPlusPlus, result.Message);
     Contains("Visual Studio in-IDE panel: not installed", result.Message);
     Contains("Git pull/push: blocked", result.Message);
+    Contains("generate visual studio integration plan", result.Message);
+}
+
+static async Task TestLocalCodingToolGeneratesVisualStudioHandoff()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.App.csproj");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    var visualStudioPath = Path.Combine(directory, "devenv.exe");
+    await File.WriteAllTextAsync(visualStudioPath, string.Empty);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredVisualStudioPath: visualStudioPath);
+
+    var result = await service.TryHandleAsync("generate visual studio integration plan", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Visual Studio integration handoff", result.Message);
+    Contains("no Visual Studio extension or in-IDE panel is installed", result.Message);
+    Contains(solutionPath, result.Message);
+    Contains(visualStudioPath, result.Message);
+    Contains("Minimum integration contract", result.Message);
+    Contains("Workspace architecture snapshot", result.Message);
+    Contains("Demo.App.csproj", result.Message);
 }
 
 static async Task TestLocalCodingToolPlansGuardedTask()
@@ -791,6 +859,7 @@ static async Task TestLocalCodingToolPlansGuardedTask()
     Equal(true, result.Succeeded);
     Contains("Coding task plan", result.Message);
     Contains("Permission gates", result.Message);
+    Contains("Impact checklist", result.Message);
     Contains("File writes require", result.Message);
     Contains("Build, test, restore, and run require confirmation", result.Message);
     Equal(0, runner.Runs.Count);
@@ -1206,6 +1275,46 @@ static async Task TestLocalCodingToolDiagnosesLastFailure()
     Equal(0, launcher.Starts.Count);
 }
 
+static async Task TestLocalCodingToolSuggestsLastFailurePatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var sourcePath = Path.Combine(workspace, "Widget.cs");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(
+        sourcePath,
+        string.Join(
+            Environment.NewLine,
+            Enumerable.Range(1, 15).Select(line => line == 12 ? "var value = 1" : $"// line {line}")));
+    var diagnosticLine = $"{sourcePath}(12,5): error CS1002: ; expected [{projectPath}]";
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(1, string.Empty, diagnosticLine, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var build = await service.TryHandleAsync($"confirm dotnet build \"{projectPath}\"", CancellationToken.None);
+    var suggestion = await service.TryHandleAsync("suggest patch from last failure", CancellationToken.None);
+    var afterSuggestion = await File.ReadAllTextAsync(sourcePath);
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(false, build.Succeeded);
+    Equal(true, suggestion.Handled);
+    Equal(true, suggestion.Succeeded);
+    Contains("Suggested patch from last failure", suggestion.Message);
+    Contains("No files were changed", suggestion.Message);
+    Contains("var value = 1;", suggestion.Message);
+    Contains("confirm apply last patch preview", suggestion.Message);
+    Contains("var value = 1", afterSuggestion);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview", applied.Message);
+    Contains("var value = 1;", await File.ReadAllTextAsync(sourcePath));
+}
+
 static async Task TestLocalCodingToolRequiresConfirmationBeforeRestore()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -1378,6 +1487,38 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Contains("Applied last patch preview bundle", applied.Message);
     Equal("class Widget { }", await File.ReadAllTextAsync(firstPath));
     Equal("class NewName { }", await File.ReadAllTextAsync(secondPath));
+}
+
+static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "class Demo { string Name => \"OldName\"; }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var command = $"""
+        preview patch bundle
+        file "{filePath}" replace "Demo" with "Widget"
+        file "{filePath}" replace "OldName" with "NewName"
+        """;
+    var preview = await service.TryHandleAsync(command, CancellationToken.None);
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Patch bundle preview", preview.Message);
+    Contains("Edits: 2", preview.Message);
+    Contains("class Widget", preview.Message);
+    Contains("NewName", preview.Message);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied 2 edit(s) across 1 file(s)", applied.Message);
+    Equal("class Widget { string Name => \"NewName\"; }", await File.ReadAllTextAsync(filePath));
 }
 
 static async Task TestLocalCodingToolRejectsStalePatchBundle()

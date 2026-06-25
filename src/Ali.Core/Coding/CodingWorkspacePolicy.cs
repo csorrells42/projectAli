@@ -99,6 +99,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Showing coding tool integration status is read-only and allowed.");
         }
 
+        if (request.Action == CodingToolAction.GenerateVisualStudioHandoff)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Generating a Visual Studio integration handoff is read-only and allowed.");
+        }
+
         if (request.Action == CodingToolAction.GeneratePdf)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed.");
@@ -134,6 +139,11 @@ public sealed class CodingWorkspacePolicy
         if (request.Action == CodingToolAction.DiagnoseLastFailure)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Diagnosing the last dotnet failure is read-only and allowed.");
+        }
+
+        if (request.Action == CodingToolAction.SuggestLastFailurePatch)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Suggesting a patch from the last dotnet failure is preview-only and allowed.");
         }
 
         if (request.Action == CodingToolAction.ListPackages && string.IsNullOrWhiteSpace(request.Path))

@@ -162,10 +162,12 @@ public sealed class LocalCodingToolService(
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
+            CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GenerateCodingReport => await GenerateCodingReportAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DiagnoseLastFailure => await DiagnoseLastFailureAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.SuggestLastFailurePatch => await SuggestLastFailurePatchAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -289,6 +291,7 @@ public sealed class LocalCodingToolService(
         var wantsEdit = MentionsAny(goal, "add", "change", "edit", "fix", "implement", "modify", "patch", "repair", "update", "write");
         var wantsVerification = MentionsAny(goal, "build", "compile", "run", "test", "verify");
         var wantsGit = MentionsAny(goal, "commit", "git", "merge", "push", "pull");
+        var wantsVisualStudio = MentionsAny(goal, "devenv", "extension", "ide", "tool window", "visual studio", "vsix");
         var requiresConfirmation = wantsEdit || wantsVerification || wantsGit || contextPack.IncludesLastFailure;
 
         var lines = new List<string>
@@ -301,6 +304,14 @@ public sealed class LocalCodingToolService(
                 ? "- Read-only project context: workspace map, package references, and relevant files are available."
                 : "- Read-only project context: not available yet."
         };
+
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : null;
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            lines.Add($"- Primary solution/project: {primaryTarget}");
+        }
 
         if (contextPack.IncludesLastFailure)
         {
@@ -320,6 +331,7 @@ public sealed class LocalCodingToolService(
         }
 
         lines.Add($"{step++}. Propose the smallest safe change or answer, with file paths and line references when available.");
+        lines.Add($"{step++}. Identify the likely impact surface: command parser, policy gate, local service behavior, tests, and docs when the task changes Ali's coding command surface.");
         if (wantsEdit || contextPack.IncludesLastFailure)
         {
             lines.Add($"{step++}. Wait for explicit confirmation before writing files. Confirmed edits must use the guarded file-edit path.");
@@ -335,6 +347,16 @@ public sealed class LocalCodingToolService(
             lines.Add($"{step++}. Use read-only git status/diff first; staging, commits, merges, pull, or push require their configured confirmation gates.");
         }
 
+        if (wantsVisualStudio)
+        {
+            lines.Add($"{step++}. Use `generate visual studio integration plan` for the deterministic VS extension/companion handoff before implementing UI-side integration.");
+        }
+
+        lines.Add("Impact checklist:");
+        lines.Add("- Parser: add or adjust command phrases only when the command is deterministic.");
+        lines.Add("- Policy: keep read-only actions allowed and writes/builds/Git behind existing confirmation gates.");
+        lines.Add("- Service: record receipts and avoid claiming external IDE state unless the launcher/tool result proves it.");
+        lines.Add("- Tests/docs: cover parser routing, service output, and the user-facing truth boundary.");
         lines.Add("Permission gates:");
         lines.Add("- Read/open/search/inspect inside the approved workspace can proceed as read-only actions.");
         lines.Add("- File writes require an explicit confirmation phrase before Ali changes files.");
@@ -444,6 +466,7 @@ public sealed class LocalCodingToolService(
             "Useful commands:",
             "- open solution",
             "- analyze solution architecture",
+            "- generate visual studio integration plan",
             "- show coding receipts",
             "- generate coding report"
         };
@@ -454,6 +477,57 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Coding tool status",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult GenerateVisualStudioHandoff()
+    {
+        var notepadPlusPlus = CodingToolLocator.FindNotepadPlusPlus(_configuredNotepadPlusPlusPath);
+        var visualStudio = CodingToolLocator.FindVisualStudio(_configuredVisualStudioPath);
+        var hasWorkspace = Directory.Exists(Policy.WorkspaceRoot);
+        var primarySolution = hasWorkspace && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var solutionOrProject)
+            ? solutionOrProject
+            : null;
+        var architecture = hasWorkspace
+            ? AnalyzeArchitecture().Message
+            : $"Coding workspace does not exist yet: {Policy.WorkspaceRoot}";
+
+        var lines = new List<string>
+        {
+            "Visual Studio integration handoff:",
+            "Current truth: no Visual Studio extension or in-IDE panel is installed in this build.",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Workspace exists: {hasWorkspace}",
+            $"Primary solution/project: {primarySolution ?? "not found"}",
+            $"Visual Studio launcher: {visualStudio ?? "not found"}",
+            $"File editor launcher: {notepadPlusPlus ?? "Notepad fallback"}",
+            "Recommended phase shape:",
+            "- Option A: Visual Studio extension/tool window that calls Ali's existing guarded command surface.",
+            "- Option B: Local companion window that follows the active solution and sends context to Ali.",
+            "Current bridge surface:",
+            "- GET /api/coding/status on the local web helper.",
+            "- POST /api/coding/command on the local web helper.",
+            "- Bridge endpoints are loopback-only and still use Ali's coding parser, policy gates, and receipts.",
+            "Minimum integration contract:",
+            "- Show workspace root, primary solution/project, architecture summary, coding receipts, pending patch state, and last dotnet failure state.",
+            "- Accept deterministic Ali coding commands: inspect workspace, analyze architecture, plan coding task, show receipts, preview patch, show pending patch, apply confirmed patch, and generate coding report.",
+            "- Pass current solution/file/line as context only after the user invokes the command.",
+            "- Route edits, builds, tests, run, restore, and Git writes through Ali's existing confirmation gates.",
+            "- Keep Git pull/push blocked unless the configured Git network gate is deliberately enabled.",
+            "First implementation slice:",
+            "1. Add a local loopback or named-pipe command endpoint in Ali with explicit local-only binding.",
+            "2. Build a VS tool window or companion window that displays status and submits deterministic commands.",
+            "3. Return tool results and receipts to the panel without granting direct IDE write authority.",
+            "4. Add tests for command parsing, policy enforcement, endpoint authorization, and stale patch prevention.",
+            "Workspace architecture snapshot:",
+            TrimForChat(architecture, 5_500)
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Visual Studio handoff",
+            primarySolution ?? Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> GeneratePdfAsync(
@@ -574,8 +648,10 @@ public sealed class LocalCodingToolService(
         lines.Add("- preview patch bundle");
         lines.Add("- show pending patch preview");
         lines.Add("- confirm apply last patch preview");
+        lines.Add("- suggest patch from last failure");
         lines.Add("- confirm dotnet build \"path\"");
         lines.Add("- diagnose last build failure");
+        lines.Add("- generate visual studio integration plan");
         lines.Add("- show coding receipts");
 
         return string.Join(Environment.NewLine, lines);
@@ -1145,24 +1221,31 @@ public sealed class LocalCodingToolService(
             };
         }
 
-        foreach (var edit in prepared.Edits)
+        var finalEditsByFile = prepared.Edits
+            .GroupBy(edit => edit.FullPath, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+        foreach (var edit in finalEditsByFile)
         {
             await File.WriteAllTextAsync(edit.FullPath, edit.UpdatedText, cancellationToken).ConfigureAwait(false);
         }
 
+        var changedFiles = finalEditsByFile
+            .Select(edit => edit.FullPath)
+            .ToList();
         var lines = new List<string>
         {
             "Applied last patch preview bundle.",
-            $"Changed {prepared.Edits.Count} file(s)."
+            $"Applied {prepared.Edits.Count} edit(s) across {changedFiles.Count} file(s)."
         };
-        lines.AddRange(prepared.Edits.Select(edit => $"- {edit.FullPath}"));
+        lines.AddRange(changedFiles.Select(path => $"- {path}"));
 
         return new CodingToolResult(
             true,
             true,
             string.Join(Environment.NewLine, lines),
             "Patch preview apply",
-            prepared.Edits.Count == 1 ? prepared.Edits[0].FullPath : Policy.WorkspaceRoot);
+            changedFiles.Count == 1 ? changedFiles[0] : Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> ShowLastPatchPreviewAsync(CancellationToken cancellationToken)
@@ -1249,7 +1332,6 @@ public sealed class LocalCodingToolService(
         }
 
         var normalized = new List<NormalizedPatchEdit>();
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var edit in request.PatchEdits)
         {
             if (!CodingWorkspacePolicy.TryNormalizePath(edit.Path, out var fullPath))
@@ -1285,17 +1367,6 @@ public sealed class LocalCodingToolService(
                 return false;
             }
 
-            if (!paths.Add(fullPath))
-            {
-                error = new CodingToolResult(
-                    true,
-                    false,
-                    "Coding tool blocked: patch bundles currently allow one edit per file. Preview same-file edits separately.",
-                    "Patch bundle preview",
-                    fullPath);
-                return false;
-            }
-
             normalized.Add(new NormalizedPatchEdit(fullPath, edit.OldText, edit.NewText));
         }
 
@@ -1309,9 +1380,10 @@ public sealed class LocalCodingToolService(
         CancellationToken cancellationToken)
     {
         var prepared = new List<PreparedPatchEdit>();
+        var currentTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var edit in edits)
         {
-            var result = await PreparePatchEditAsync(edit, toolName, cancellationToken).ConfigureAwait(false);
+            var result = await PreparePatchEditAsync(edit, currentTexts, toolName, cancellationToken).ConfigureAwait(false);
             if (result.Error is not null)
             {
                 return new PatchBundlePreparation([], result.Error);
@@ -1325,6 +1397,7 @@ public sealed class LocalCodingToolService(
 
     private static async Task<PatchEditPreparation> PreparePatchEditAsync(
         NormalizedPatchEdit edit,
+        Dictionary<string, string> currentTexts,
         string toolName,
         CancellationToken cancellationToken)
     {
@@ -1368,7 +1441,11 @@ public sealed class LocalCodingToolService(
                     edit.FullPath));
         }
 
-        var existing = await File.ReadAllTextAsync(edit.FullPath, cancellationToken).ConfigureAwait(false);
+        if (!currentTexts.TryGetValue(edit.FullPath, out var existing))
+        {
+            existing = await File.ReadAllTextAsync(edit.FullPath, cancellationToken).ConfigureAwait(false);
+        }
+
         var count = CountOrdinalOccurrences(existing, edit.OldText);
         if (count != 1)
         {
@@ -1384,6 +1461,7 @@ public sealed class LocalCodingToolService(
 
         var index = existing.IndexOf(edit.OldText, StringComparison.Ordinal);
         var updated = existing.Remove(index, edit.OldText.Length).Insert(index, edit.NewText);
+        currentTexts[edit.FullPath] = updated;
         return new PatchEditPreparation(
             new PreparedPatchEdit(
                 edit.FullPath,
@@ -1725,6 +1803,7 @@ public sealed class LocalCodingToolService(
         }
 
         lines.Add("- plan fix <short description>");
+        lines.Add("- suggest patch from last failure");
         lines.Add("- preview replace in file \"path\" \"old text\" with \"new text\"");
         lines.Add("- confirm apply last patch preview");
         if (!string.IsNullOrWhiteSpace(target))
@@ -1738,6 +1817,97 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Last failure diagnosis",
             target);
+    }
+
+    private async Task<CodingToolResult> SuggestLastFailurePatchAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lastDotNetResult is not { Succeeded: false } lastDotNetResult)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No failed dotnet command is available yet. Run a confirmed build or test first.",
+                "Last failure patch suggestion",
+                Policy.WorkspaceRoot);
+        }
+
+        var diagnostic = ExtractDiagnosticFileReferences(lastDotNetResult.Message)
+            .FirstOrDefault(reference => reference.LineNumber is > 0
+                                         && File.Exists(reference.Path)
+                                         && Policy.IsInsideWorkspace(reference.Path));
+        if (diagnostic is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No deterministic patch suggestion is available because the last failure did not include a source file and line inside the approved workspace.",
+                "Last failure patch suggestion",
+                Policy.WorkspaceRoot);
+        }
+
+        if (!lastDotNetResult.Message.Contains("CS1002", StringComparison.OrdinalIgnoreCase)
+            || !lastDotNetResult.Message.Contains("; expected", StringComparison.OrdinalIgnoreCase))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No deterministic patch suggestion is available for this diagnostic yet. Ali can currently preview simple CS1002 semicolon fixes only.",
+                "Last failure patch suggestion",
+                diagnostic.Path,
+                diagnostic.LineNumber);
+        }
+
+        var lines = await File.ReadAllLinesAsync(diagnostic.Path, cancellationToken).ConfigureAwait(false);
+        if (diagnostic.LineNumber is null || diagnostic.LineNumber.Value > lines.Length)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No deterministic patch suggestion is available because the diagnostic line is outside the current file.",
+                "Last failure patch suggestion",
+                diagnostic.Path,
+                diagnostic.LineNumber);
+        }
+
+        var oldLine = lines[diagnostic.LineNumber.Value - 1];
+        var trimmedEnd = oldLine.TrimEnd();
+        if (trimmedEnd.EndsWith(";", StringComparison.Ordinal)
+            || trimmedEnd.EndsWith("{", StringComparison.Ordinal)
+            || trimmedEnd.EndsWith("}", StringComparison.Ordinal))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No deterministic patch suggestion is available because the diagnostic line does not look like a simple missing semicolon case.",
+                "Last failure patch suggestion",
+                diagnostic.Path,
+                diagnostic.LineNumber);
+        }
+
+        var trailingWhitespace = oldLine[trimmedEnd.Length..];
+        var newLine = trimmedEnd + ";" + trailingWhitespace;
+        var previewRequest = new CodingToolRequest(
+            CodingToolAction.PreviewReplaceText,
+            diagnostic.Path,
+            diagnostic.LineNumber,
+            ExplicitUserPath: false,
+            UserConfirmed: false,
+            Content: oldLine,
+            Replacement: newLine);
+        var preview = await PreviewReplaceTextAsync(previewRequest, cancellationToken).ConfigureAwait(false);
+        if (preview.Succeeded)
+        {
+            _lastPatchPreviewRequest = previewRequest;
+        }
+
+        return preview with
+        {
+            Message = preview.Succeeded
+                ? $"Suggested patch from last failure. No files were changed.{Environment.NewLine}Diagnostic: CS1002 ; expected{Environment.NewLine}To apply this pending preview after review, use: confirm apply last patch preview{Environment.NewLine}{preview.Message}"
+                : $"No deterministic patch suggestion was stored. No files were changed.{Environment.NewLine}{preview.Message}",
+            ToolName = "Last failure patch suggestion"
+        };
     }
 
     private Task<CodingToolResult> OpenSolutionAsync(

@@ -142,6 +142,21 @@ public static class CodingToolRequestParser
         "programming tool status"
     ];
 
+    private static readonly string[] VisualStudioHandoffRequests =
+    [
+        "generate visual studio handoff",
+        "generate visual studio integration handoff",
+        "generate visual studio integration plan",
+        "generate vs integration plan",
+        "plan visual studio integration",
+        "plan vs integration",
+        "show visual studio handoff",
+        "show visual studio integration plan",
+        "visual studio handoff",
+        "visual studio integration plan",
+        "vs integration plan"
+    ];
+
     private static readonly string[] ApplyLastPatchPreviewRequests =
     [
         "apply last patch preview",
@@ -272,6 +287,18 @@ public static class CodingToolRequestParser
         "summarize last failure",
         "summarize last build error",
         "what failed last"
+    ];
+
+    private static readonly string[] SuggestLastFailurePatchRequests =
+    [
+        "suggest patch from last failure",
+        "suggest patch for last failure",
+        "suggest patch from last build failure",
+        "suggest patch for last build failure",
+        "suggest fix from last failure",
+        "suggest fix for last failure",
+        "preview patch from last failure",
+        "preview fix from last failure"
     ];
 
     private static readonly string[] PackagePrefixes =
@@ -406,6 +433,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsSuggestLastFailurePatchRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.SuggestLastFailurePatch, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
         {
             return true;
@@ -429,6 +462,12 @@ public static class CodingToolRequestParser
         if (IsToolIntegrationStatusRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowToolIntegrationStatus, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsVisualStudioHandoffRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.GenerateVisualStudioHandoff, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -522,6 +561,9 @@ public static class CodingToolRequestParser
     private static bool IsDiagnoseLastFailureRequest(string text) =>
         DiagnoseLastFailureRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsSuggestLastFailurePatchRequest(string text) =>
+        SuggestLastFailurePatchRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsShowLastPatchPreviewRequest(string text) =>
         ShowLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -533,6 +575,9 @@ public static class CodingToolRequestParser
 
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsVisualStudioHandoffRequest(string text) =>
+        VisualStudioHandoffRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePlanTask(string text, bool userConfirmed, out CodingToolRequest request)
     {

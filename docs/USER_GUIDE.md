@@ -92,7 +92,9 @@ The helper serves one HTML page for basic chat, recent history, and runtime erro
 
 The helper lists the last 20 conversations from the current local Ali profile. This is not a personal-account or multi-user system; anyone with access to the same helper/profile can see the same helper history. If `ALI_HELPER_TOKEN` is configured, ask and history endpoints require that token.
 
-The helper does not add command execution, cloud fallback, file actions, voice, or user-isolated accounts. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
+The helper includes a local Coding Bridge panel for deterministic Ali coding commands. The bridge endpoints are loopback-only and still route through Ali's existing coding parser, workspace policy, confirmation gates, and receipts. This is a local companion surface for future Visual Studio integration, not a Visual Studio extension.
+
+The helper does not add cloud fallback, voice, user-isolated accounts, or direct ungated file authority. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 
 ## Coding Assistant
 
@@ -112,11 +114,13 @@ Useful commands:
 - `show project map`
 - `analyze solution architecture`
 - `show visual studio integration`
+- `generate visual studio integration plan`
 - `list packages`
 - `search workspace for WidgetFactory`
 - `read file "C:\path\to\file.cs" at line 42`
 - `plan coding task fix the build`
 - `show coding receipts`
+- `suggest patch from last failure`
 - `generate pdf "owner-demo.pdf" with text "Ali demo ready."`
 - `generate coding report`
 
@@ -145,7 +149,7 @@ file "C:\path\to\first.cs" replace "old text" with "new text"
 file "C:\path\to\second.cs" replace "old text" with "new text"
 ```
 
-Patch bundles are limited to exact literal replacements inside the approved coding workspace. Ali allows one edit per file in a bundle and rechecks every file before applying anything. Use `confirm apply last patch preview` only after reviewing the preview.
+Patch bundles are limited to exact literal replacements inside the approved coding workspace. Ali allows up to eight edits in a bundle, including multiple sequential edits in the same file. Ali rechecks every edit before applying anything and writes only after the whole bundle validates. Use `confirm apply last patch preview` only after reviewing the preview.
 
 Build and diagnostic workflow:
 
@@ -153,6 +157,7 @@ Build and diagnostic workflow:
 - Use `confirm dotnet build "C:\path\to\project-or-solution"` to run a guarded build.
 - If a build or test fails, use `diagnose last build failure`.
 - Use `open build error` to open the first diagnostic file at the reported line.
+- Use `suggest patch from last failure` for narrow deterministic preview-only fixes. This currently supports simple `CS1002 ; expected` diagnostics by previewing a semicolon addition at the reported source line. It does not apply the change unless you review the preview and use `confirm apply last patch preview`.
 
 Git workflow:
 
@@ -165,6 +170,10 @@ Ali does not silently change files, run builds, restore packages, or write Git h
 Use `generate coding report` to export a local PDF summary of the current coding workspace, recent coding receipts, pending patch preview state, and last failed dotnet command if one is stored. The report is saved in Ali's generated documents folder.
 
 Visual Studio integration in this build is launch/configuration integration, not an in-Visual-Studio extension. Ali can open the configured solution in Visual Studio and inspect the project architecture from chat commands. A graphical Visual Studio panel or sidebar is a future extension phase.
+
+Use `generate visual studio integration plan` to produce a deterministic handoff for that future phase. The handoff reports the current workspace, launcher discovery, architecture snapshot, and the minimum guarded contract a VS extension or local companion window must follow. It does not install an extension or claim an in-IDE panel exists.
+
+The HTML helper's Coding Bridge panel is the first local companion surface for that direction. It can submit deterministic coding commands to Ali on loopback, but all writes/builds/tests/Git actions still follow the same confirmation gates.
 
 ## Voice
 

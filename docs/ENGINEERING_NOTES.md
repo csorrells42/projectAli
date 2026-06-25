@@ -104,20 +104,33 @@ For explicit coding commands, Ali handles the request deterministically before c
 
 Current deterministic command groups:
 
-- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis and coding tool integration status.
+- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis, coding tool integration status, and Visual Studio integration handoff planning.
 - Read/search: open file, read file, search workspace.
 - Planning: build a guarded coding task plan.
 - Packages: list package references and confirmed outdated checks.
 - Build/test/run: confirmed `dotnet build`, `dotnet test`, `dotnet restore`, `dotnet run`.
-- Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line.
-- Patch loop: preview literal replacement or a small multi-file literal patch bundle, show pending preview, discard pending preview, confirm apply last preview.
+- Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line, and suggest narrow preview-only patches from supported diagnostics.
+- Patch loop: preview literal replacement or a small literal patch bundle, show pending preview, discard pending preview, confirm apply last preview.
 - File edits: confirmed create, append, and literal replace inside approved workspace.
 - Git: status/diff/log plus confirmed add/commit/merge; pull/push are blocked unless enabled.
 - Reports: simple local text PDF generation and coding session report PDF generation into Ali's generated documents folder.
 
-The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow multiple files, but only one edit per file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
+The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow up to eight edits total and can apply multiple sequential edits in the same file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
+
+The `suggest patch from last failure` command is preview-only. It currently supports one deterministic compiler-repair case: `CS1002 ; expected` with an openable source file/line inside the approved workspace. The command stores a pending patch preview only when the exact line replacement can be validated through the normal patch preview path.
 
 Visual Studio integration is currently external process launch plus configurable tool discovery. Ali does not yet install a Visual Studio extension, in-IDE tool window, or graphical architecture panel.
+
+The `generate visual studio integration plan` command is a read-only bridge toward deeper integration. It reports the current launcher/workspace state, includes an architecture snapshot, and defines the minimum contract for a future VSIX tool window or local companion window: show status, submit deterministic Ali coding commands, pass current file/line context only on user action, and keep edits/builds/tests/Git writes inside the existing confirmation gates.
+
+`Ali.App.WebHelper` now exposes a loopback-only coding command bridge:
+
+```text
+GET  /api/coding/status
+POST /api/coding/command { "command": "show visual studio integration" }
+```
+
+Both endpoints honor the helper access token when configured and reject non-loopback callers. The built-in helper page includes a compact Coding Bridge panel that uses these endpoints as the first local companion surface for future Visual Studio integration.
 
 ## Bootstrap Storage
 
