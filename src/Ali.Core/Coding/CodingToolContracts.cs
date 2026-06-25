@@ -15,6 +15,7 @@ public enum CodingToolAction
     ReadFile,
     CreateFile,
     AppendFile,
+    PreviewReplaceText,
     ReplaceText,
     Build,
     Test,

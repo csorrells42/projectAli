@@ -74,6 +74,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
+    ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool handles guarded file edits", TestLocalCodingToolHandlesGuardedFileEdits),
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
@@ -537,6 +538,13 @@ static Task TestCodingParserRoutesGuardedFileEdits()
     Equal("Demo", replaceRequest.Content);
     Equal("Widget", replaceRequest.Replacement);
     Equal(true, replaceRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse($"preview replace in file \"{path}\" \"Widget\" with \"Gadget\"", out var previewRequest));
+    Equal(CodingToolAction.PreviewReplaceText, previewRequest.Action);
+    Equal(path, previewRequest.Path);
+    Equal("Widget", previewRequest.Content);
+    Equal("Gadget", previewRequest.Replacement);
+    Equal(false, previewRequest.UserConfirmed);
     return Task.CompletedTask;
 }
 
@@ -918,6 +926,35 @@ static async Task TestLocalCodingToolHandlesGuardedGitCommands()
     Equal("git", runner.Runs[0].FileName);
     Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
     Equal("commit -m Add guarded git tools", string.Join(" ", runner.Runs[1].Arguments));
+}
+
+static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "class Demo { }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var preview = await service.TryHandleAsync($"preview replace in file \"{filePath}\" \"Demo\" with \"Widget\"", CancellationToken.None);
+    var afterPreview = await File.ReadAllTextAsync(filePath);
+    var applied = await service.TryHandleAsync($"confirm replace in file \"{filePath}\" \"Demo\" with \"Widget\"", CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Patch preview", preview.Message);
+    Contains("No files were changed", preview.Message);
+    Contains("Before:", preview.Message);
+    Contains("After:", preview.Message);
+    Contains("class Demo", preview.Message);
+    Contains("class Widget", preview.Message);
+    Equal("class Demo { }", afterPreview);
+    Equal(true, applied.Succeeded);
+    Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
 }
 
 static async Task TestLocalCodingToolHandlesGuardedFileEdits()

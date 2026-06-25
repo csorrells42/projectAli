@@ -82,6 +82,16 @@ public static class CodingToolRequestParser
         "replace literal in file "
     ];
 
+    private static readonly string[] PreviewReplaceTextPrefixes =
+    [
+        "preview replace in file ",
+        "preview replace text in file ",
+        "preview replace literal in file ",
+        "preview patch in file ",
+        "dry run replace in file ",
+        "dry-run replace in file "
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -417,7 +427,8 @@ public static class CodingToolRequestParser
             return true;
         }
 
-        if (!StartsWithAny(text, ReplaceTextPrefixes))
+        var isPreview = StartsWithAny(text, PreviewReplaceTextPrefixes);
+        if (!isPreview && !StartsWithAny(text, ReplaceTextPrefixes))
         {
             return false;
         }
@@ -429,7 +440,7 @@ public static class CodingToolRequestParser
         }
 
         request = new CodingToolRequest(
-            CodingToolAction.ReplaceText,
+            isPreview ? CodingToolAction.PreviewReplaceText : CodingToolAction.ReplaceText,
             segments[0].Trim(),
             ExplicitUserPath: true,
             UserConfirmed: userConfirmed,

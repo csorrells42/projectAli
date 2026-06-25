@@ -159,6 +159,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PreviewReplaceText => await PreviewReplaceTextAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.CreateFile or CodingToolAction.AppendFile or CodingToolAction.ReplaceText =>
                 await EditFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenSolution => await OpenSolutionAsync(request, cancellationToken).ConfigureAwait(false),
@@ -689,6 +690,39 @@ public sealed class LocalCodingToolService(
         };
     }
 
+    private async Task<CodingToolResult> PreviewReplaceTextAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CodingWorkspacePolicy.TryNormalizePath(request.Path ?? string.Empty, out var fullPath))
+        {
+            return new CodingToolResult(true, false, "Coding tool blocked: invalid preview file path.", "Patch preview");
+        }
+
+        if (!Policy.IsInsideWorkspace(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Coding tool blocked: patch preview target must be inside the approved coding workspace.",
+                "Patch preview",
+                fullPath);
+        }
+
+        if (!LooksTextReadable(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Coding tool blocked: only text-like coding files can be previewed.",
+                "Patch preview",
+                fullPath);
+        }
+
+        return await PreviewReplaceTextAsync(fullPath, request.Content, request.Replacement, cancellationToken).ConfigureAwait(false);
+    }
+
     private static async Task<CodingToolResult> CreateFileAsync(
         string fullPath,
         string? content,
@@ -751,6 +785,81 @@ public sealed class LocalCodingToolService(
             true,
             $"Appended to file: {fullPath}{Environment.NewLine}Added {content!.Length} character(s).",
             "File append",
+            fullPath);
+    }
+
+    private static async Task<CodingToolResult> PreviewReplaceTextAsync(
+        string fullPath,
+        string? oldText,
+        string? newText,
+        CancellationToken cancellationToken)
+    {
+        if (!ValidateEditContent(oldText, "Text to replace", out var oldTextError))
+        {
+            return new CodingToolResult(true, false, oldTextError, "Patch preview", fullPath);
+        }
+
+        if (oldText!.Length == 0)
+        {
+            return new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", "Patch preview", fullPath);
+        }
+
+        if (!ValidateEditContent(newText, "Replacement text", out var newTextError))
+        {
+            return new CodingToolResult(true, false, newTextError, "Patch preview", fullPath);
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: preview target does not exist: {fullPath}",
+                "Patch preview",
+                fullPath);
+        }
+
+        var fileInfo = new FileInfo(fullPath);
+        if (fileInfo.Length > MaxReplaceFileCharacters)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: preview target is too large for a safe literal patch ({fileInfo.Length} bytes).",
+                "Patch preview",
+                fullPath);
+        }
+
+        var existing = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
+        var count = CountOrdinalOccurrences(existing, oldText);
+        if (count != 1)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding tool blocked: patch preview expected exactly one match but found {count}.",
+                "Patch preview",
+                fullPath);
+        }
+
+        var index = existing.IndexOf(oldText, StringComparison.Ordinal);
+        var updated = existing.Remove(index, oldText.Length).Insert(index, newText!);
+        var before = BuildSnippet(existing, index, oldText.Length);
+        var after = BuildSnippet(updated, index, newText!.Length);
+        var message = string.Join(
+            Environment.NewLine,
+            $"Patch preview for: {fullPath}",
+            "No files were changed.",
+            "To apply this exact change, use the confirmed replace command.",
+            "Before:",
+            before,
+            "After:",
+            after);
+        return new CodingToolResult(
+            true,
+            true,
+            message,
+            "Patch preview",
             fullPath);
     }
 
@@ -2083,6 +2192,15 @@ public sealed class LocalCodingToolService(
         }
 
         return text[..maxCharacters] + $"{Environment.NewLine}...output truncated.";
+    }
+
+    private static string BuildSnippet(string text, int changeIndex, int changeLength)
+    {
+        var start = Math.Max(0, changeIndex - 180);
+        var end = Math.Min(text.Length, changeIndex + Math.Max(changeLength, 1) + 180);
+        var prefix = start > 0 ? "... " : string.Empty;
+        var suffix = end < text.Length ? " ..." : string.Empty;
+        return prefix + text[start..end].Trim() + suffix;
     }
 
     private static bool IsSafeGitRef(string? value)

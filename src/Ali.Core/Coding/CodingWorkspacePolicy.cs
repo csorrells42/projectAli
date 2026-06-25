@@ -159,6 +159,12 @@ public sealed class CodingWorkspacePolicy
             _ when IsEditAction(request.Action) =>
                 CodingToolPermissionKind.Deny.AsPermission("Edit/write actions are limited to the approved coding workspace."),
 
+            CodingToolAction.PreviewReplaceText when insideWorkspace =>
+                CodingToolPermissionKind.Allow.AsPermission("Previewing a literal replacement inside the approved coding workspace is read-only and allowed."),
+
+            CodingToolAction.PreviewReplaceText =>
+                CodingToolPermissionKind.Deny.AsPermission("Patch previews are limited to the approved coding workspace."),
+
             CodingToolAction.OpenSolution when insideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Opening solutions inside the coding workspace is allowed."),
 
