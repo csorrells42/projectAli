@@ -161,6 +161,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.DiagnoseLastFailure => await DiagnoseLastFailureAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
@@ -1093,6 +1094,61 @@ public sealed class LocalCodingToolService(
                 Message = $"Could not open the last diagnostic file.{Environment.NewLine}{result.Message}",
                 ToolName = "Last diagnostic"
             };
+    }
+
+    private async Task<CodingToolResult> DiagnoseLastFailureAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lastDotNetRequest is null || _lastDotNetResult is not { Succeeded: false } lastDotNetResult)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No failed dotnet command is available yet. Run a confirmed build, test, restore, or run command first.",
+                "Last failure diagnosis",
+                Policy.WorkspaceRoot);
+        }
+
+        var target = string.IsNullOrWhiteSpace(lastDotNetResult.TargetPath)
+            ? _lastDotNetRequest.Path ?? Policy.WorkspaceRoot
+            : lastDotNetResult.TargetPath;
+        var lines = new List<string>
+        {
+            "Last dotnet failure diagnosis:",
+            "No files were changed by this diagnostic command.",
+            $"Action: {_lastDotNetRequest.Action}",
+            $"Target: {target}",
+            lastDotNetResult.ExitCode is null
+                ? "Exit code: unavailable"
+                : $"Exit code: {lastDotNetResult.ExitCode.Value}",
+            "Stored command result:",
+            TrimForChat(lastDotNetResult.Message, 6_000)
+        };
+
+        await AddDiagnosticFileExcerptsAsync(lines, lastDotNetResult.Message, cancellationToken).ConfigureAwait(false);
+
+        var openableDiagnostic = ExtractDiagnosticFileReferences(lastDotNetResult.Message)
+            .FirstOrDefault(reference => File.Exists(reference.Path) && Policy.IsInsideWorkspace(reference.Path));
+        lines.Add("Next guarded commands:");
+        if (openableDiagnostic is not null)
+        {
+            lines.Add("- open build error");
+        }
+
+        lines.Add("- plan fix <short description>");
+        lines.Add("- preview replace in file \"path\" \"old text\" with \"new text\"");
+        lines.Add("- confirm apply last patch preview");
+        if (!string.IsNullOrWhiteSpace(target))
+        {
+            lines.Add($"- confirm dotnet build \"{target}\"");
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Last failure diagnosis",
+            target);
     }
 
     private Task<CodingToolResult> OpenSolutionAsync(

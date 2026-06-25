@@ -106,6 +106,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Opening the last diagnostic file is a read/open action and is limited to the approved workspace.");
         }
 
+        if (request.Action == CodingToolAction.DiagnoseLastFailure)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Diagnosing the last dotnet failure is read-only and allowed.");
+        }
+
         if (request.Action == CodingToolAction.ListPackages && string.IsNullOrWhiteSpace(request.Path))
         {
             return CodingToolPermissionKind.Allow.AsPermission("Listing package references in the approved coding workspace is allowed.");

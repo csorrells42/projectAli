@@ -180,6 +180,23 @@ public static class CodingToolRequestParser
         "open last compiler error"
     ];
 
+    private static readonly string[] DiagnoseLastFailureRequests =
+    [
+        "diagnose last failure",
+        "diagnose last build failure",
+        "diagnose last test failure",
+        "diagnose last dotnet failure",
+        "explain last failure",
+        "explain last build error",
+        "explain last compiler error",
+        "show last failure",
+        "show last build failure",
+        "show last dotnet failure",
+        "summarize last failure",
+        "summarize last build error",
+        "what failed last"
+    ];
+
     private static readonly string[] PackagePrefixes =
     [
         "list packages",
@@ -300,6 +317,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsDiagnoseLastFailureRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DiagnoseLastFailure, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
         {
             return true;
@@ -381,6 +404,9 @@ public static class CodingToolRequestParser
 
     private static bool IsOpenLastDiagnosticRequest(string text) =>
         OpenLastDiagnosticRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDiagnoseLastFailureRequest(string text) =>
+        DiagnoseLastFailureRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsApplyLastPatchPreviewRequest(string text) =>
         ApplyLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

@@ -11,6 +11,7 @@ public enum CodingToolAction
     ShowReceipts,
     GeneratePdf,
     OpenLastDiagnostic,
+    DiagnoseLastFailure,
     ListPackages,
     ListOutdatedPackages,
     SearchWorkspace,
