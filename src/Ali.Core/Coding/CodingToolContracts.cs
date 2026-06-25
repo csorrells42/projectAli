@@ -61,11 +61,23 @@ public sealed record CodingToolResult(
     public static CodingToolResult NotHandled { get; } = new(false, false, string.Empty);
 }
 
+public sealed record CodingContextPack(
+    bool HasContext,
+    string Text,
+    bool IncludesLastFailure = false)
+{
+    public static CodingContextPack Empty { get; } = new(false, string.Empty);
+}
+
 public interface ILocalCodingTool
 {
     CodingWorkspacePolicy Policy { get; }
 
     Task<CodingToolResult> TryHandleAsync(
+        string userText,
+        CancellationToken cancellationToken);
+
+    Task<CodingContextPack> BuildContextPackAsync(
         string userText,
         CancellationToken cancellationToken);
 }

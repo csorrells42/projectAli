@@ -95,6 +95,9 @@ public sealed class ConversationOrchestrator(
             }
         }
 
+        var codingContext = LocalCodingTool is null
+            ? CodingContextPack.Empty
+            : await LocalCodingTool.BuildContextPackAsync(userText, cancellationToken).ConfigureAwait(false);
         var plannerHistory = AddSavedMemories(history);
         var sourcePlan = await SourcePlanner.PlanAsync(userText, plannerHistory, cancellationToken).ConfigureAwait(false);
         var sourceResult = sourcePlan.UseSources
@@ -103,6 +106,7 @@ public sealed class ConversationOrchestrator(
         var answerHistory = ShouldIncludeSavedMemoriesInAnswer(userText, sourcePlan)
             ? plannerHistory
             : history;
+        answerHistory = AddCodingContext(answerHistory, codingContext);
         var enrichedHistory = answerHistory;
         if (sourceResult.HasSources)
         {
@@ -186,6 +190,35 @@ public sealed class ConversationOrchestrator(
 
     private static string StripModelGeneratedSourceAppendix(string answer) =>
         SourcesCheckedRegex.Replace(answer, string.Empty).TrimEnd();
+
+    private static IReadOnlyList<ChatMessage> AddCodingContext(
+        IReadOnlyList<ChatMessage> history,
+        CodingContextPack contextPack)
+    {
+        if (!contextPack.HasContext || string.IsNullOrWhiteSpace(contextPack.Text))
+        {
+            return history;
+        }
+
+        var instruction = contextPack.IncludesLastFailure
+            ? "A local coding context pack is attached. Use it to explain the likely build/test failure and propose a small fix. Do not say you changed files. File edits still require explicit user confirmation."
+            : "A local coding context pack is attached. Use it as read-only context for this coding question. Do not say you changed files or ran tools unless a tool result says so.";
+
+        return history
+            .Append(new ChatMessage(
+                $"msg_coding_instruction_{Guid.NewGuid():N}",
+                ChatRole.System,
+                instruction,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Verified))
+            .Append(new ChatMessage(
+                $"msg_coding_context_{Guid.NewGuid():N}",
+                ChatRole.User,
+                contextPack.Text,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Verified))
+            .ToList();
+    }
 
     private IReadOnlyList<ChatMessage> AddSavedMemories(IReadOnlyList<ChatMessage> history)
     {

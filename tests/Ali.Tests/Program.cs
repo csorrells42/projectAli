@@ -74,6 +74,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
+    ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
+    ("orchestrator injects last build failure context", TestOrchestratorInjectsLastBuildFailureContext),
     ("correction queue preserves exact question and answer", TestCorrectionQueuePreservesExactQuestionAndAnswer),
     ("endpoint policy allows loopback runtime", TestEndpointPolicyAllowsLoopback),
     ("endpoint policy refuses public runtime", TestEndpointPolicyRefusesPublicEndpoint),
@@ -955,6 +957,110 @@ static async Task TestOrchestratorHandlesExplicitCodingOpenRequest()
     Contains("Opened file", chunks[0].Text);
     Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
     Equal(1, launcher.Starts.Count);
+}
+
+static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(projectDirectory, "WidgetFactory.cs"), "public sealed class WidgetFactory { }");
+
+    var codingTool = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+    var runtime = new FixedTextRuntime("I can help with this project.");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    await foreach (var _ in orchestrator.StreamAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "help me understand this C# project",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+    }
+
+    var context = string.Join(Environment.NewLine, runtime.LastRequest!.History.Select(message => message.Text));
+    Contains("Ali coding context pack", context);
+    Contains("Demo.csproj", context);
+    Contains("CommunityToolkit.Mvvm 8.4.0", context);
+    Contains("WidgetFactory.cs", context);
+}
+
+static async Task TestOrchestratorInjectsLastBuildFailureContext()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var sourcePath = Path.Combine(workspace, "Broken.cs");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(
+        sourcePath,
+        """
+        public sealed class Broken
+        {
+            public void Go()
+            {
+                var value = 1
+            }
+        }
+        """);
+    var diagnosticLine = $"{sourcePath}(5,22): error CS1002: ; expected [{projectPath}]";
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(1, string.Empty, diagnosticLine, TimedOut: false));
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+    var buildResult = await codingTool.TryHandleAsync($"confirm dotnet build \"{projectPath}\"", CancellationToken.None);
+    Equal(false, buildResult.Succeeded);
+
+    var runtime = new FixedTextRuntime("The likely fix is to add the missing semicolon.");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    await foreach (var _ in orchestrator.StreamAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "fix it please",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+    }
+
+    var context = string.Join(Environment.NewLine, runtime.LastRequest!.History.Select(message => message.Text));
+    Contains("Last failed dotnet command", context);
+    Contains("Diagnostic summary", context);
+    Contains("CS1002", context);
+    Contains("public sealed class Broken", context);
 }
 
 static async Task TestCorrectionQueuePreservesExactQuestionAndAnswer()

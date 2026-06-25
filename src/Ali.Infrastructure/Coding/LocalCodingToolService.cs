@@ -16,6 +16,8 @@ public sealed class LocalCodingToolService(
     private const int MaxSearchMatches = 30;
     private const int MaxReadCharacters = 12_000;
     private const int MaxCommandOutputCharacters = 8_000;
+    private const int MaxContextPackCharacters = 18_000;
+    private const int MaxContextSearchMatches = 14;
     private const int MaxDiagnosticLines = 12;
     private const int MaxEditContentCharacters = 20_000;
     private const int MaxReplaceFileCharacters = 500_000;
@@ -33,10 +35,74 @@ public sealed class LocalCodingToolService(
         ".agents",
         ".codex"
     ];
+    private static readonly char[] ContextTokenSeparators =
+        [' ', '\t', '\r', '\n', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_', '(', ')', '[', ']', '{', '}', '"', '\'', '`'];
+    private static readonly HashSet<string> CodingContextTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "app",
+        "async",
+        "build",
+        "bug",
+        "class",
+        "code",
+        "compile",
+        "compiler",
+        "csharp",
+        "debug",
+        "dependency",
+        "dotnet",
+        "error",
+        "exception",
+        "fail",
+        "failed",
+        "fix",
+        "function",
+        "method",
+        "namespace",
+        "package",
+        "project",
+        "solution",
+        "test",
+        "wpf"
+    };
+    private static readonly HashSet<string> ContextStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "about",
+        "after",
+        "again",
+        "also",
+        "and",
+        "are",
+        "can",
+        "could",
+        "does",
+        "for",
+        "from",
+        "have",
+        "help",
+        "how",
+        "into",
+        "just",
+        "like",
+        "need",
+        "please",
+        "should",
+        "that",
+        "the",
+        "this",
+        "what",
+        "when",
+        "where",
+        "with",
+        "would",
+        "you"
+    };
 
     private readonly ICodingProcessLauncher _processLauncher = processLauncher ?? new CodingProcessLauncher();
     private readonly ICodingCommandRunner _commandRunner = commandRunner ?? new CodingCommandRunner();
     private readonly string _actionLogPath = Path.Combine(dataRoot, "coding-tool-actions.jsonl");
+    private CodingToolRequest? _lastDotNetRequest;
+    private CodingToolResult? _lastDotNetResult;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
 
@@ -104,6 +170,78 @@ public sealed class LocalCodingToolService(
 
         await AppendLogAsync(request, result, permission, cancellationToken).ConfigureAwait(false);
         return result;
+    }
+
+    public async Task<CodingContextPack> BuildContextPackAsync(
+        string userText,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!ShouldBuildCodingContext(userText))
+        {
+            return CodingContextPack.Empty;
+        }
+
+        var includesLastFailure = _lastDotNetResult is { Succeeded: false };
+        var lines = new List<string>
+        {
+            "Ali coding context pack (read-only).",
+            "Use this context to answer coding questions about the approved local workspace.",
+            "Do not claim files were changed, builds were run, or tests were run unless a tool result below proves it.",
+            "When proposing code changes, keep them small and tell the user edits require explicit confirmation before Ali writes files.",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Current user request: {userText.Trim()}"
+        };
+
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            lines.Add($"Coding workspace does not exist yet: {Policy.WorkspaceRoot}");
+            return new CodingContextPack(true, string.Join(Environment.NewLine, lines), includesLastFailure);
+        }
+
+        var inspection = InspectWorkspace();
+        AddContextSection(lines, "Workspace map", inspection.Message, 5_000);
+
+        var packageReport = ListPackages(new CodingToolRequest(CodingToolAction.ListPackages, null));
+        if (packageReport.Succeeded)
+        {
+            AddContextSection(lines, "Package references", packageReport.Message, 4_000);
+        }
+
+        var relevantFiles = EnumerateWorkspaceFiles()
+            .Where(IsContextRelevantFile)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(RelativeToWorkspace)
+            .ToList();
+        if (relevantFiles.Count > 0)
+        {
+            lines.Add("Relevant source/config files:");
+            lines.AddRange(relevantFiles.Select(path => $"- {path}"));
+        }
+
+        if (_lastDotNetRequest is not null && _lastDotNetResult is { Succeeded: false } lastDotNetResult)
+        {
+            AddContextSection(
+                lines,
+                "Last failed dotnet command",
+                lastDotNetResult.Message,
+                5_500);
+            await AddDiagnosticFileExcerptsAsync(lines, lastDotNetResult.Message, cancellationToken).ConfigureAwait(false);
+        }
+
+        var searchTerms = ExtractContextSearchTerms(userText);
+        var matches = FindContextMatches(searchTerms);
+        if (matches.Count > 0)
+        {
+            lines.Add("Relevant workspace matches:");
+            lines.AddRange(matches.Select(match => $"- {match}"));
+        }
+
+        return new CodingContextPack(
+            true,
+            TrimForChat(string.Join(Environment.NewLine, lines), MaxContextPackCharacters),
+            includesLastFailure);
     }
 
     private Task<CodingToolResult> OpenWorkspaceAsync(CancellationToken cancellationToken)
@@ -666,13 +804,15 @@ public sealed class LocalCodingToolService(
         var outputBlock = string.IsNullOrWhiteSpace(diagnosticSummary)
             ? TrimForChat(output, MaxCommandOutputCharacters)
             : $"{diagnosticSummary}{Environment.NewLine}{TrimForChat(output, MaxCommandOutputCharacters)}";
-        return new CodingToolResult(
+        var result = new CodingToolResult(
             true,
             run.ExitCode == 0 && !run.TimedOut,
             $"{status}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{outputBlock}",
             "dotnet",
             targetPath,
             ExitCode: run.ExitCode);
+        StoreLastDotNetResult(request, result);
+        return result;
     }
 
     private async Task<CodingToolResult> RunGitCommandAsync(
@@ -1260,6 +1400,313 @@ public sealed class LocalCodingToolService(
             : output.Trim();
     }
 
+    private void StoreLastDotNetResult(CodingToolRequest request, CodingToolResult result)
+    {
+        if (request.Action is not (CodingToolAction.Build
+            or CodingToolAction.Test
+            or CodingToolAction.Restore
+            or CodingToolAction.ListOutdatedPackages
+            or CodingToolAction.RunProject))
+        {
+            return;
+        }
+
+        if (result.Succeeded)
+        {
+            _lastDotNetRequest = null;
+            _lastDotNetResult = null;
+            return;
+        }
+
+        _lastDotNetRequest = request;
+        _lastDotNetResult = result;
+    }
+
+    private bool ShouldBuildCodingContext(string userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText))
+        {
+            return false;
+        }
+
+        var text = userText.Trim();
+        if (CodingToolRequestParser.TryParse(text, out _))
+        {
+            return false;
+        }
+
+        if (_lastDotNetResult is { Succeeded: false } && MentionsLastFailureFollowUp(text))
+        {
+            return true;
+        }
+
+        if (text.Contains("c#", StringComparison.OrdinalIgnoreCase)
+            || text.Contains(".cs", StringComparison.OrdinalIgnoreCase)
+            || text.Contains(".xaml", StringComparison.OrdinalIgnoreCase)
+            || text.Contains(".csproj", StringComparison.OrdinalIgnoreCase)
+            || text.Contains(".sln", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("visual studio", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var tokens = ExtractContextSearchTerms(text);
+        return tokens.Any(token => CodingContextTerms.Contains(token));
+    }
+
+    private static bool MentionsLastFailureFollowUp(string text)
+    {
+        var tokens = text
+            .Split(ContextTokenSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return tokens.Contains("fix")
+               || tokens.Contains("why")
+               || tokens.Contains("error")
+               || tokens.Contains("errors")
+               || tokens.Contains("failed")
+               || tokens.Contains("failure")
+               || tokens.Contains("build")
+               || tokens.Contains("test")
+               || tokens.Contains("it")
+               || tokens.Contains("that")
+               || tokens.Contains("this");
+    }
+
+    private static void AddContextSection(
+        List<string> lines,
+        string title,
+        string content,
+        int maxCharacters)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return;
+        }
+
+        lines.Add($"{title}:");
+        lines.Add(TrimForChat(content.Trim(), maxCharacters));
+    }
+
+    private static IReadOnlyList<string> ExtractContextSearchTerms(string text)
+    {
+        var terms = new List<string>();
+        foreach (var rawToken in text.Split(ContextTokenSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var token = new string(rawToken.Where(char.IsLetterOrDigit).ToArray());
+            if (token.Length < 3
+                || token.All(char.IsDigit)
+                || ContextStopWords.Contains(token)
+                || terms.Any(existing => existing.Equals(token, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            terms.Add(token);
+            if (terms.Count >= 6)
+            {
+                break;
+            }
+        }
+
+        return terms;
+    }
+
+    private IReadOnlyList<string> FindContextMatches(IReadOnlyList<string> terms)
+    {
+        if (terms.Count == 0)
+        {
+            return [];
+        }
+
+        var matches = new List<string>();
+        foreach (var term in terms)
+        {
+            foreach (var file in EnumerateWorkspaceFiles().Take(5_000))
+            {
+                if (matches.Count >= MaxContextSearchMatches)
+                {
+                    return matches;
+                }
+
+                var relativePath = RelativeToWorkspace(file);
+                if (Path.GetFileName(file).Contains(term, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddUniqueMatch(matches, $"{relativePath}: file name match");
+                    continue;
+                }
+
+                SearchContextFile(file, term, matches);
+            }
+        }
+
+        return matches;
+    }
+
+    private void SearchContextFile(string file, string term, List<string> matches)
+    {
+        if (!LooksTextReadable(file))
+        {
+            return;
+        }
+
+        try
+        {
+            var lineNumber = 0;
+            foreach (var line in File.ReadLines(file))
+            {
+                lineNumber++;
+                if (!line.Contains(term, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                AddUniqueMatch(
+                    matches,
+                    $"{RelativeToWorkspace(file)}:{lineNumber}: {TrimForChat(line.Trim(), 180)}");
+                return;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void AddUniqueMatch(List<string> matches, string match)
+    {
+        if (matches.Any(existing => existing.Equals(match, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        matches.Add(match);
+    }
+
+    private async Task AddDiagnosticFileExcerptsAsync(
+        List<string> lines,
+        string diagnosticText,
+        CancellationToken cancellationToken)
+    {
+        var references = ExtractDiagnosticFileReferences(diagnosticText).Take(3).ToList();
+        if (references.Count == 0)
+        {
+            return;
+        }
+
+        lines.Add("Diagnostic file excerpts:");
+        foreach (var reference in references)
+        {
+            if (!File.Exists(reference.Path) || !Policy.IsInsideWorkspace(reference.Path))
+            {
+                continue;
+            }
+
+            var preview = await ReadFilePreviewAsync(reference.Path, reference.LineNumber, cancellationToken).ConfigureAwait(false);
+            lines.Add($"File: {reference.Path} at line {reference.LineNumber}");
+            lines.Add(TrimForChat(preview, 3_500));
+        }
+    }
+
+    private static IReadOnlyList<DiagnosticFileReference> ExtractDiagnosticFileReferences(string diagnosticText)
+    {
+        var references = new List<DiagnosticFileReference>();
+        foreach (var line in diagnosticText.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!TryExtractDiagnosticFileReference(line, out var reference))
+            {
+                continue;
+            }
+
+            if (references.Any(existing =>
+                    existing.Path.Equals(reference.Path, StringComparison.OrdinalIgnoreCase)
+                    && existing.LineNumber == reference.LineNumber))
+            {
+                continue;
+            }
+
+            references.Add(reference);
+        }
+
+        return references;
+    }
+
+    private static bool TryExtractDiagnosticFileReference(
+        string line,
+        out DiagnosticFileReference reference)
+    {
+        reference = new DiagnosticFileReference(string.Empty, null);
+        var extensionEnd = FindDiagnosticExtensionEnd(line);
+        if (extensionEnd < 0)
+        {
+            return false;
+        }
+
+        var start = FindDrivePathStart(line, extensionEnd);
+        if (start < 0)
+        {
+            return false;
+        }
+
+        var path = line[start..extensionEnd];
+        if (!CodingWorkspacePolicy.TryNormalizePath(path, out var fullPath))
+        {
+            return false;
+        }
+
+        reference = new DiagnosticFileReference(fullPath, TryReadDiagnosticLineNumber(line, extensionEnd));
+        return true;
+    }
+
+    private static int FindDiagnosticExtensionEnd(string line)
+    {
+        foreach (var extension in new[] { ".cs(", ".xaml(", ".csproj(", ".props(", ".targets(" })
+        {
+            var index = line.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                return index + extension.Length - 1;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindDrivePathStart(string line, int beforeIndex)
+    {
+        for (var i = 0; i < beforeIndex - 1; i++)
+        {
+            if (char.IsLetter(line[i]) && line[i + 1] == ':')
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int? TryReadDiagnosticLineNumber(string line, int extensionEnd)
+    {
+        if (extensionEnd >= line.Length || line[extensionEnd] != '(')
+        {
+            return null;
+        }
+
+        var numberStart = extensionEnd + 1;
+        var numberEnd = numberStart;
+        while (numberEnd < line.Length && char.IsDigit(line[numberEnd]))
+        {
+            numberEnd++;
+        }
+
+        return numberEnd > numberStart && int.TryParse(line[numberStart..numberEnd], out var lineNumber)
+            ? lineNumber
+            : null;
+    }
+
     private static string BuildDotNetDiagnosticSummary(
         CodingToolAction action,
         CodingCommandRun run,
@@ -1358,6 +1805,19 @@ public sealed class LocalCodingToolService(
                || extension.Equals(".targets", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsContextRelevantFile(string file)
+    {
+        var extension = Path.GetExtension(file);
+        return extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".json", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".props", StringComparison.OrdinalIgnoreCase)
+               || extension.Equals(".targets", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool ValidateEditContent(string? content, string label, out string error)
     {
         error = string.Empty;
@@ -1440,6 +1900,10 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> TargetFrameworks,
         IReadOnlyList<string> PackageReferences,
         string? Warning);
+
+    private sealed record DiagnosticFileReference(
+        string Path,
+        int? LineNumber);
 }
 
 public interface ICodingProcessLauncher
