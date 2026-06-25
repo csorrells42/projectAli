@@ -74,6 +74,16 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Listing the approved coding workspace is allowed.");
         }
 
+        if (request.Action == CodingToolAction.InspectWorkspace)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Inspecting the approved coding workspace is allowed.");
+        }
+
+        if (request.Action == CodingToolAction.ListPackages && string.IsNullOrWhiteSpace(request.Path))
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Listing package references in the approved coding workspace is allowed.");
+        }
+
         if (request.Action == CodingToolAction.SearchWorkspace && string.IsNullOrWhiteSpace(request.Path))
         {
             return CodingToolPermissionKind.Allow.AsPermission("Searching the approved coding workspace is allowed.");
@@ -121,6 +131,12 @@ public sealed class CodingWorkspacePolicy
 
             CodingToolAction.SearchWorkspace when insideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Searching inside the approved coding workspace is allowed."),
+
+            CodingToolAction.ListPackages when insideWorkspace =>
+                CodingToolPermissionKind.Allow.AsPermission("Listing package references inside the approved coding workspace is allowed."),
+
+            CodingToolAction.ListPackages =>
+                CodingToolPermissionKind.Deny.AsPermission("Package inspection is limited to the approved coding workspace."),
 
             _ when IsEditAction(request.Action) && insideWorkspace =>
                 EvaluateEdit(request),
@@ -175,23 +191,27 @@ public sealed class CodingWorkspacePolicy
         if (!IsInsideWorkspace(fullPath))
         {
             return CodingToolPermissionKind.RequireConfirmation.AsPermission(
-                "Build, test, and run actions are limited to the approved coding workspace.");
+                "Build, test, restore, and run actions are limited to the approved coding workspace.");
         }
 
         if (!AllowConfirmedBuildTestRunInsideWorkspace)
         {
             return CodingToolPermissionKind.Deny.AsPermission(
-                "Build, test, and run actions are disabled in coding permissions.");
+                "Build, test, restore, and run actions are disabled in coding permissions.");
         }
 
         return request.UserConfirmed
-            ? CodingToolPermissionKind.Allow.AsPermission("Confirmed build/test/run action inside the approved coding workspace is allowed.")
+            ? CodingToolPermissionKind.Allow.AsPermission("Confirmed build/test/restore/run action inside the approved coding workspace is allowed.")
             : CodingToolPermissionKind.RequireConfirmation.AsPermission(
-                "Build, test, and run actions need an explicit confirmation phrase before execution.");
+                "Build, test, restore, and run actions need an explicit confirmation phrase before execution.");
     }
 
     private static bool IsBuildTestRun(CodingToolAction action) =>
-        action is CodingToolAction.Build or CodingToolAction.Test or CodingToolAction.RunProject;
+        action is CodingToolAction.Build
+            or CodingToolAction.Test
+            or CodingToolAction.Restore
+            or CodingToolAction.ListOutdatedPackages
+            or CodingToolAction.RunProject;
 
     private CodingToolPermission EvaluateEdit(CodingToolRequest request)
     {

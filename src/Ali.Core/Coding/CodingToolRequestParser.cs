@@ -78,6 +78,41 @@ public static class CodingToolRequestParser
         "find in coding workspace "
     ];
 
+    private static readonly string[] InspectWorkspaceRequests =
+    [
+        "inspect workspace",
+        "inspect coding workspace",
+        "analyze workspace",
+        "analyze coding workspace",
+        "summarize workspace",
+        "summarize coding workspace",
+        "show project map",
+        "show coding project map",
+        "list solutions",
+        "list projects"
+    ];
+
+    private static readonly string[] PackagePrefixes =
+    [
+        "list packages",
+        "list package references",
+        "list dependencies",
+        "inspect packages",
+        "inspect dependencies",
+        "show packages",
+        "show dependencies"
+    ];
+
+    private static readonly string[] OutdatedPackagePrefixes =
+    [
+        "dotnet list package --outdated",
+        "list outdated packages",
+        "check outdated packages",
+        "inspect outdated packages",
+        "check package updates",
+        "check dependency updates"
+    ];
+
     private static readonly string[] BuildPrefixes =
     [
         "dotnet build",
@@ -95,6 +130,15 @@ public static class CodingToolRequestParser
         "test solution",
         "test project",
         "run tests"
+    ];
+
+    private static readonly string[] RestorePrefixes =
+    [
+        "dotnet restore",
+        "restore packages",
+        "restore project",
+        "restore solution",
+        "restore workspace"
     ];
 
     private static readonly string[] RunPrefixes =
@@ -139,7 +183,18 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsInspectWorkspaceRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.InspectWorkspace, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseSearch(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParsePackages(trimmed, userConfirmed, out request))
         {
             return true;
         }
@@ -193,6 +248,9 @@ public static class CodingToolRequestParser
         || text.Equals("show coding workspace files", StringComparison.OrdinalIgnoreCase)
         || text.Equals("list programming projects", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsInspectWorkspaceRequest(string text) =>
+        InspectWorkspaceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool HasOpenIntent(string text)
     {
         foreach (var prefix in OpenPrefixes)
@@ -232,6 +290,17 @@ public static class CodingToolRequestParser
         }
 
         return false;
+    }
+
+    private static bool TryParsePackages(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (!TryParseWorkspaceCommand(text, PackagePrefixes, CodingToolAction.ListPackages, userConfirmed, out request))
+        {
+            return TryParseWorkspaceCommand(text, OutdatedPackagePrefixes, CodingToolAction.ListOutdatedPackages, userConfirmed, out request);
+        }
+
+        return true;
     }
 
     private static bool TryParseRead(string text, bool userConfirmed, out CodingToolRequest request)
@@ -319,6 +388,7 @@ public static class CodingToolRequestParser
         request = new CodingToolRequest(CodingToolAction.OpenFile, null);
         if (TryParseWorkspaceCommand(text, BuildPrefixes, CodingToolAction.Build, userConfirmed, out request)
             || TryParseWorkspaceCommand(text, TestPrefixes, CodingToolAction.Test, userConfirmed, out request)
+            || TryParseWorkspaceCommand(text, RestorePrefixes, CodingToolAction.Restore, userConfirmed, out request)
             || TryParseWorkspaceCommand(text, RunPrefixes, CodingToolAction.RunProject, userConfirmed, out request))
         {
             return true;

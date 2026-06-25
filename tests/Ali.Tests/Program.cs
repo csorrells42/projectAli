@@ -55,12 +55,18 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding settings save and load", TestCodingSettingsSaveAndLoad),
     ("coding locator uses configured tool paths", TestCodingLocatorUsesConfiguredToolPaths),
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
+    ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
+    ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
     ("coding parser routes guarded git commands", TestCodingParserRoutesGuardedGitCommands),
     ("coding parser routes guarded file edits", TestCodingParserRoutesGuardedFileEdits),
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
+    ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
+    ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
+    ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
+    ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
     ("local coding tool handles guarded file edits", TestLocalCodingToolHandlesGuardedFileEdits),
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
@@ -391,6 +397,40 @@ static Task TestCodingParserExtractsQuotedPathAndLine()
     return Task.CompletedTask;
 }
 
+static Task TestCodingParserRoutesWorkspaceInspection()
+{
+    Equal(true, CodingToolRequestParser.TryParse("inspect coding workspace", out var inspectRequest));
+    Equal(CodingToolAction.InspectWorkspace, inspectRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show project map", out var mapRequest));
+    Equal(CodingToolAction.InspectWorkspace, mapRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesPackageAndRestoreCommands()
+{
+    var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Demo App.csproj";
+
+    Equal(true, CodingToolRequestParser.TryParse("list packages", out var packagesRequest));
+    Equal(CodingToolAction.ListPackages, packagesRequest.Action);
+    Equal(null, packagesRequest.Path);
+
+    Equal(true, CodingToolRequestParser.TryParse($"inspect dependencies \"{path}\"", out var targetPackagesRequest));
+    Equal(CodingToolAction.ListPackages, targetPackagesRequest.Action);
+    Equal(path, targetPackagesRequest.Path);
+
+    Equal(true, CodingToolRequestParser.TryParse($"confirm dotnet restore \"{path}\"", out var restoreRequest));
+    Equal(CodingToolAction.Restore, restoreRequest.Action);
+    Equal(path, restoreRequest.Path);
+    Equal(true, restoreRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse($"confirm check outdated packages \"{path}\"", out var outdatedRequest));
+    Equal(CodingToolAction.ListOutdatedPackages, outdatedRequest.Action);
+    Equal(path, outdatedRequest.Path);
+    Equal(true, outdatedRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
 static Task TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild()
 {
     var path = @"C:\Users\clsor\Documents\Programming Projects\Demo App\Demo App.csproj";
@@ -525,6 +565,88 @@ static async Task TestLocalCodingToolReadsAndSearchesWorkspace()
     Contains("WidgetFactory", readResult.Message);
 }
 
+static async Task TestLocalCodingToolInspectsWorkspaceProjectMap()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(projectDirectory, "Program.cs"), "Console.WriteLine(\"hello\");");
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+
+    var result = await service.TryHandleAsync("inspect coding workspace", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Coding workspace inspection", result.Message);
+    Contains("Demo.sln", result.Message);
+    Contains(Path.Combine("Demo", "Demo.csproj"), result.Message);
+    Contains("net10.0", result.Message);
+    Contains("CommunityToolkit.Mvvm", result.Message);
+    Contains(Path.Combine("Demo", "Program.cs"), result.Message);
+}
+
+static async Task TestLocalCodingToolListsPackageReferences()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+            <PackageReference Include="Microsoft.Extensions.Logging">
+              <Version>10.0.0</Version>
+            </PackageReference>
+          </ItemGroup>
+        </Project>
+        """);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("list packages", CancellationToken.None);
+    var targetResult = await service.TryHandleAsync($"inspect dependencies \"{projectPath}\"", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Package references", result.Message);
+    Contains("CommunityToolkit.Mvvm 8.4.0", result.Message);
+    Contains("Microsoft.Extensions.Logging 10.0.0", result.Message);
+    Contains("net10.0-windows", result.Message);
+    Equal(true, targetResult.Handled);
+    Equal(true, targetResult.Succeeded);
+    Contains(Path.Combine("Demo", "Demo.csproj"), targetResult.Message);
+    Equal(0, runner.Runs.Count);
+}
+
 static async Task TestLocalCodingToolRequiresConfirmationBeforeBuild()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -552,6 +674,66 @@ static async Task TestLocalCodingToolRequiresConfirmationBeforeBuild()
     Equal("dotnet", runner.Runs[0].FileName);
     Contains("build", string.Join(" ", runner.Runs[0].Arguments));
     Contains("--no-restore", string.Join(" ", runner.Runs[0].Arguments));
+}
+
+static async Task TestLocalCodingToolRequiresConfirmationBeforeRestore()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Restore completed.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var needsConfirmation = await service.TryHandleAsync($"dotnet restore \"{projectPath}\"", CancellationToken.None);
+    var confirmed = await service.TryHandleAsync($"confirm dotnet restore \"{projectPath}\"", CancellationToken.None);
+
+    Equal(true, needsConfirmation.Handled);
+    Equal(false, needsConfirmation.Succeeded);
+    Contains("needs confirmation", needsConfirmation.Message);
+    Equal(true, confirmed.Handled);
+    Equal(true, confirmed.Succeeded);
+    Contains("Restore passed", confirmed.Message);
+    Equal(1, runner.Runs.Count);
+    Equal("dotnet", runner.Runs[0].FileName);
+    Equal($"restore {projectPath}", string.Join(" ", runner.Runs[0].Arguments));
+}
+
+static async Task TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "No updates found.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var needsConfirmation = await service.TryHandleAsync($"check outdated packages \"{projectPath}\"", CancellationToken.None);
+    var confirmed = await service.TryHandleAsync($"confirm check outdated packages \"{projectPath}\"", CancellationToken.None);
+    var confirmedNoPath = await service.TryHandleAsync("confirm check outdated packages", CancellationToken.None);
+
+    Equal(true, needsConfirmation.Handled);
+    Equal(false, needsConfirmation.Succeeded);
+    Contains("needs confirmation", needsConfirmation.Message);
+    Equal(true, confirmed.Handled);
+    Equal(true, confirmed.Succeeded);
+    Contains("Package update check passed", confirmed.Message);
+    Equal(true, confirmedNoPath.Handled);
+    Equal(true, confirmedNoPath.Succeeded);
+    Equal(2, runner.Runs.Count);
+    Equal("dotnet", runner.Runs[0].FileName);
+    Equal($"list {projectPath} package --outdated", string.Join(" ", runner.Runs[0].Arguments));
+    Equal($"list {projectPath} package --outdated", string.Join(" ", runner.Runs[1].Arguments));
 }
 
 static async Task TestLocalCodingToolHandlesGuardedGitCommands()

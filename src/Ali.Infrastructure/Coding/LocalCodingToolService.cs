@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Xml.Linq;
 using Ali.Core.Coding;
 
 namespace Ali.Infrastructure.Coding;
@@ -17,6 +18,7 @@ public sealed class LocalCodingToolService(
     private const int MaxCommandOutputCharacters = 8_000;
     private const int MaxEditContentCharacters = 20_000;
     private const int MaxReplaceFileCharacters = 500_000;
+    private const int MaxWorkspaceSummaryEntries = 20;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(60);
     private static readonly string[] IgnoredDirectoryNames =
@@ -82,12 +84,15 @@ public sealed class LocalCodingToolService(
         {
             CodingToolAction.OpenWorkspace => await OpenWorkspaceAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ListWorkspace => ListWorkspace(),
+            CodingToolAction.InspectWorkspace => InspectWorkspace(),
+            CodingToolAction.ListPackages => ListPackages(request),
             CodingToolAction.SearchWorkspace => SearchWorkspace(request),
             CodingToolAction.ReadFile => await ReadFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.CreateFile or CodingToolAction.AppendFile or CodingToolAction.ReplaceText =>
                 await EditFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenSolution => await OpenSolutionAsync(request, cancellationToken).ConfigureAwait(false),
-            CodingToolAction.Build or CodingToolAction.Test or CodingToolAction.RunProject =>
+            CodingToolAction.Build or CodingToolAction.Test or CodingToolAction.Restore
+                or CodingToolAction.ListOutdatedPackages or CodingToolAction.RunProject =>
                 await RunDotNetCommandAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GitStatus or CodingToolAction.GitDiff or CodingToolAction.GitLog
                 or CodingToolAction.GitAdd or CodingToolAction.GitCommit or CodingToolAction.GitMerge
@@ -153,6 +158,132 @@ public sealed class LocalCodingToolService(
             $"Coding workspace: {Policy.WorkspaceRoot}{Environment.NewLine}{body}{truncated}",
             "Workspace list",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult InspectWorkspace()
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding workspace does not exist yet: {Policy.WorkspaceRoot}",
+                "Workspace inspection",
+                Policy.WorkspaceRoot);
+        }
+
+        var files = EnumerateWorkspaceFiles().Take(10_000).ToList();
+        var solutions = files
+            .Where(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var projects = files
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var entryPoints = files
+            .Where(IsLikelyEntryPoint)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(RelativeToWorkspace)
+            .ToList();
+        var extensionCounts = files
+            .Select(Path.GetExtension)
+            .Where(extension => !string.IsNullOrWhiteSpace(extension))
+            .GroupBy(extension => extension!, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(group => $"{group.Key}: {group.Count()}")
+            .ToList();
+
+        var lines = new List<string>
+        {
+            $"Coding workspace inspection: {Policy.WorkspaceRoot}",
+            $"Files scanned: {files.Count}",
+            $"Solutions: {solutions.Count}",
+            $"Projects: {projects.Count}"
+        };
+
+        AddPathSection(lines, "Solution files", solutions);
+        AddProjectSection(lines, projects);
+        if (entryPoints.Count > 0)
+        {
+            lines.Add("Likely entry/UI files:");
+            lines.AddRange(entryPoints.Select(path => $"- {path}"));
+        }
+
+        if (extensionCounts.Count > 0)
+        {
+            lines.Add("Top file types:");
+            lines.AddRange(extensionCounts.Select(item => $"- {item}"));
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Workspace inspection",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ListPackages(CodingToolRequest request)
+    {
+        if (!ResolveProjectReportTargets(request, out var projectFiles, out var targetPath, out var error))
+        {
+            return new CodingToolResult(true, false, error, "Package references", request.Path ?? Policy.WorkspaceRoot);
+        }
+
+        var lines = new List<string>
+        {
+            $"Package references for: {targetPath}",
+            $"Projects checked: {projectFiles.Count}"
+        };
+
+        var totalPackages = 0;
+        foreach (var summary in projectFiles.Take(MaxWorkspaceSummaryEntries).Select(ReadProjectSummary))
+        {
+            lines.Add($"- {summary.RelativePath}");
+            if (summary.TargetFrameworks.Count > 0)
+            {
+                lines.Add($"  Target: {string.Join(", ", summary.TargetFrameworks)}");
+            }
+
+            if (summary.PackageReferences.Count == 0)
+            {
+                lines.Add("  Packages: none declared");
+            }
+            else
+            {
+                totalPackages += summary.PackageReferences.Count;
+                lines.AddRange(summary.PackageReferences.Take(12).Select(package => $"  Package: {package}"));
+                if (summary.PackageReferences.Count > 12)
+                {
+                    lines.Add($"  ...{summary.PackageReferences.Count - 12} more package reference(s) omitted.");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(summary.Warning))
+            {
+                lines.Add($"  Warning: {summary.Warning}");
+            }
+        }
+
+        if (projectFiles.Count > MaxWorkspaceSummaryEntries)
+        {
+            lines.Add($"...{projectFiles.Count - MaxWorkspaceSummaryEntries} more project file(s) omitted.");
+        }
+
+        lines.Add($"Total package references listed: {totalPackages}");
+        lines.Add("Outdated/vulnerable package checks are not run by this read-only report. Use a confirmed dotnet package command for live NuGet checks.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Package references",
+            targetPath);
     }
 
     private CodingToolResult SearchWorkspace(CodingToolRequest request)
@@ -492,6 +623,8 @@ public sealed class LocalCodingToolService(
         {
             CodingToolAction.Build => "Build",
             CodingToolAction.Test => "Test",
+            CodingToolAction.Restore => "Restore",
+            CodingToolAction.ListOutdatedPackages => "Package update check",
             _ => "Run"
         };
         var output = MergeCommandOutput(run);
@@ -636,6 +769,125 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private void AddPathSection(List<string> lines, string title, IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0)
+        {
+            return;
+        }
+
+        lines.Add($"{title}:");
+        lines.AddRange(paths
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(path => $"- {RelativeToWorkspace(path)}"));
+        if (paths.Count > MaxWorkspaceSummaryEntries)
+        {
+            lines.Add($"- ...{paths.Count - MaxWorkspaceSummaryEntries} more omitted.");
+        }
+    }
+
+    private void AddProjectSection(List<string> lines, IReadOnlyList<string> projectFiles)
+    {
+        if (projectFiles.Count == 0)
+        {
+            return;
+        }
+
+        lines.Add("Project files:");
+        foreach (var summary in projectFiles.Take(MaxWorkspaceSummaryEntries).Select(ReadProjectSummary))
+        {
+            lines.Add($"- {summary.RelativePath}");
+            if (summary.TargetFrameworks.Count > 0)
+            {
+                lines.Add($"  Target: {string.Join(", ", summary.TargetFrameworks)}");
+            }
+
+            if (summary.PackageReferences.Count > 0)
+            {
+                lines.Add($"  Packages: {string.Join(", ", summary.PackageReferences.Take(8))}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(summary.Warning))
+            {
+                lines.Add($"  Warning: {summary.Warning}");
+            }
+        }
+
+        if (projectFiles.Count > MaxWorkspaceSummaryEntries)
+        {
+            lines.Add($"- ...{projectFiles.Count - MaxWorkspaceSummaryEntries} more omitted.");
+        }
+    }
+
+    private ProjectSummary ReadProjectSummary(string projectFile)
+    {
+        var relativePath = RelativeToWorkspace(projectFile);
+        try
+        {
+            var document = XDocument.Load(projectFile);
+            var targetFrameworks = document
+                .Descendants()
+                .Where(element => element.Name.LocalName is "TargetFramework" or "TargetFrameworks")
+                .SelectMany(element => SplitSemicolonList(element.Value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var packageReferences = document
+                .Descendants()
+                .Where(element => element.Name.LocalName == "PackageReference")
+                .Select(FormatPackageReference)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return new ProjectSummary(relativePath, targetFrameworks, packageReferences, Warning: null);
+        }
+        catch (IOException ex)
+        {
+            return new ProjectSummary(relativePath, [], [], ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return new ProjectSummary(relativePath, [], [], ex.Message);
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            return new ProjectSummary(relativePath, [], [], ex.Message);
+        }
+    }
+
+    private string RelativeToWorkspace(string path) =>
+        Path.GetRelativePath(Policy.WorkspaceRoot, path);
+
+    private static bool IsLikelyEntryPoint(string file)
+    {
+        var name = Path.GetFileName(file);
+        return name.Equals("Program.cs", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("App.xaml", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("MainWindow.xaml", StringComparison.OrdinalIgnoreCase)
+               || name.Equals("appsettings.json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> SplitSemicolonList(string value) =>
+        value.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static string? FormatPackageReference(XElement element)
+    {
+        var id = element.Attribute("Include")?.Value ?? element.Attribute("Update")?.Value;
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        var version = element.Attribute("Version")?.Value
+                      ?? element.Elements().FirstOrDefault(child => child.Name.LocalName == "Version")?.Value;
+        return string.IsNullOrWhiteSpace(version)
+            ? id.Trim()
+            : $"{id.Trim()} {version.Trim()}";
+    }
+
     private static void SearchFile(string file, string query, List<string> matches)
     {
         if (!LooksTextReadable(file))
@@ -726,10 +978,102 @@ public sealed class LocalCodingToolService(
             return false;
         }
 
+        if (request.Action == CodingToolAction.ListOutdatedPackages && Directory.Exists(targetPath))
+        {
+            if (!TryFindPrimaryProjectOrSolution(targetPath, out var packageTarget))
+            {
+                error = $"Coding tool could not find a project or solution under: {targetPath}";
+                return false;
+            }
+
+            targetPath = packageTarget;
+        }
+
         workingDirectory = Directory.Exists(targetPath)
             ? targetPath
             : Path.GetDirectoryName(targetPath) ?? Policy.WorkspaceRoot;
         return true;
+    }
+
+    private bool ResolveProjectReportTargets(
+        CodingToolRequest request,
+        out IReadOnlyList<string> projectFiles,
+        out string targetPath,
+        out string error)
+    {
+        projectFiles = [];
+        error = string.Empty;
+        targetPath = string.IsNullOrWhiteSpace(request.Path)
+            ? Policy.WorkspaceRoot
+            : request.Path;
+
+        if (!CodingWorkspacePolicy.TryNormalizePath(targetPath, out var fullPath))
+        {
+            error = "Coding tool blocked: invalid package target path.";
+            return false;
+        }
+
+        if (!Policy.IsInsideWorkspace(fullPath))
+        {
+            error = "Package inspection is limited to the approved coding workspace.";
+            return false;
+        }
+
+        targetPath = fullPath;
+        if (File.Exists(targetPath))
+        {
+            if (!targetPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                && !targetPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                && !targetPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "Package inspection target must be a project, solution, or folder.";
+                return false;
+            }
+
+            projectFiles = targetPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                ? [targetPath]
+                : FindProjectsNearSolution(targetPath);
+            return true;
+        }
+
+        if (!Directory.Exists(targetPath))
+        {
+            error = $"Coding tool could not find package target: {targetPath}";
+            return false;
+        }
+
+        var normalizedTargetPath = targetPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        projectFiles = EnumerateWorkspaceFiles()
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                           && file.StartsWith(normalizedTargetPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return true;
+    }
+
+    private IReadOnlyList<string> FindProjectsNearSolution(string solutionPath)
+    {
+        var solutionDirectory = Path.GetDirectoryName(solutionPath) ?? Policy.WorkspaceRoot;
+        return EnumerateWorkspaceFiles()
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                           && file.StartsWith(solutionDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private bool TryFindPrimaryProjectOrSolution(string directory, out string targetPath)
+    {
+        var normalizedDirectory = directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var candidates = EnumerateWorkspaceFiles()
+            .Where(file => file.StartsWith(normalizedDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            .Where(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        targetPath = candidates.FirstOrDefault() ?? string.Empty;
+        return targetPath.Length > 0;
     }
 
     private static IReadOnlyList<string> BuildDotNetArguments(
@@ -741,6 +1085,8 @@ public sealed class LocalCodingToolService(
         {
             CodingToolAction.Build => ["build", targetPath, "--no-restore"],
             CodingToolAction.Test => ["test", targetPath, "--no-restore"],
+            CodingToolAction.Restore => ["restore", targetPath],
+            CodingToolAction.ListOutdatedPackages => ["list", targetPath, "package", "--outdated"],
             CodingToolAction.RunProject when Directory.Exists(targetPath) => ["run", "--no-restore"],
             CodingToolAction.RunProject => ["run", "--no-restore", "--project", targetPath],
             _ => ["--info"]
@@ -987,6 +1333,12 @@ public sealed class LocalCodingToolService(
 
         return true;
     }
+
+    private sealed record ProjectSummary(
+        string RelativePath,
+        IReadOnlyList<string> TargetFrameworks,
+        IReadOnlyList<string> PackageReferences,
+        string? Warning);
 }
 
 public interface ICodingProcessLauncher
