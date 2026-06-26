@@ -633,6 +633,45 @@ static Task TestCodingParserRoutesWindowsTroubleshooting()
     Equal(CodingToolAction.PlanRogueProcessHunt, huntRequest.Action);
     Equal("port 8765", huntRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("collect process evidence dotnet", out var processRequest));
+    Equal(CodingToolAction.CollectProcessEvidence, processRequest.Action);
+    Equal("dotnet", processRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("diagnose port 8765", out var portRequest));
+    Equal(CodingToolAction.DiagnosePortOwner, portRequest.Action);
+    Equal("8765", portRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("diagnose file lock Ali.Infrastructure.dll", out var fileLockRequest));
+    Equal(CodingToolAction.DiagnoseFileLock, fileLockRequest.Action);
+    Equal("Ali.Infrastructure.dll", fileLockRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("inspect services and startup", out var servicesRequest));
+    Equal(CodingToolAction.InspectServicesStartup, servicesRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("triage event logs", out var eventRequest));
+    Equal(CodingToolAction.TriageEventLogs, eventRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan stop process 1234", out var stopPlanRequest));
+    Equal(CodingToolAction.PlanProcessStop, stopPlanRequest.Action);
+    Equal("1234", stopPlanRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("confirm stop process 1234", out var stopRequest));
+    Equal(CodingToolAction.ExecuteProcessStop, stopRequest.Action);
+    Equal("1234", stopRequest.Query);
+    Equal(true, stopRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("diagnose build lock", out var buildLockRequest));
+    Equal(CodingToolAction.DiagnoseBuildLock, buildLockRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("classify last build failure", out var classifyRequest));
+    Equal(CodingToolAction.ClassifyLastFailure, classifyRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show roadmap step checklist", out var checklistRequest));
+    Equal(CodingToolAction.ShowRoadmapStepChecklist, checklistRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show install doctor", out var installRequest));
+    Equal(CodingToolAction.ShowInstallDoctor, installRequest.Action);
+
     return Task.CompletedTask;
 }
 
@@ -1545,14 +1584,31 @@ static async Task TestLocalCodingToolShowsWindowsTroubleshooting()
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Programming Projects");
     Directory.CreateDirectory(workspace);
+    var netstatOutput = """
+      Proto  Local Address          Foreign Address        State           PID
+      TCP    127.0.0.1:8765         0.0.0.0:0              LISTENING       4242
+      TCP    [::1]:8765             [::]:0                 LISTENING       4242
+      UDP    0.0.0.0:5353           *:*                                    5353
+    """;
     var service = new LocalCodingToolService(
         new CodingWorkspacePolicy(workspace),
         directory,
         new FakeCodingProcessLauncher(),
-        new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false)));
+        new FakeCodingCommandRunner(new CodingCommandRun(0, netstatOutput, string.Empty, TimedOut: false)));
 
     var toolkit = await service.TryHandleAsync("show windows troubleshooting toolkit", CancellationToken.None);
     var hunt = await service.TryHandleAsync("plan rogue process hunt port 8765", CancellationToken.None);
+    var evidence = await service.TryHandleAsync("collect process evidence", CancellationToken.None);
+    var port = await service.TryHandleAsync("diagnose port 8765", CancellationToken.None);
+    var fileLock = await service.TryHandleAsync("diagnose file lock Ali.Infrastructure.dll", CancellationToken.None);
+    var services = await service.TryHandleAsync("inspect services and startup", CancellationToken.None);
+    var events = await service.TryHandleAsync("triage event logs", CancellationToken.None);
+    var stopPlan = await service.TryHandleAsync("plan stop process 4242", CancellationToken.None);
+    var stopNeedsConfirmation = await service.TryHandleAsync("stop process 4242", CancellationToken.None);
+    var buildLock = await service.TryHandleAsync("diagnose build lock", CancellationToken.None);
+    var classifier = await service.TryHandleAsync("classify last build failure", CancellationToken.None);
+    var checklist = await service.TryHandleAsync("show roadmap step checklist", CancellationToken.None);
+    var installDoctor = await service.TryHandleAsync("show install doctor", CancellationToken.None);
 
     Equal(true, toolkit.Succeeded);
     Contains("Windows troubleshooting toolkit", toolkit.Message);
@@ -1564,6 +1620,30 @@ static async Task TestLocalCodingToolShowsWindowsTroubleshooting()
     Contains("port 8765", hunt.Message);
     Contains("No processes were stopped", hunt.Message);
     Contains("Stop rule", hunt.Message);
+    Equal(true, evidence.Succeeded);
+    Contains("Process evidence", evidence.Message);
+    Contains("No processes were stopped", evidence.Message);
+    Equal(true, port.Succeeded);
+    Contains("Port owner diagnostic", port.Message);
+    Contains("PID 4242", port.Message);
+    Equal(true, fileLock.Succeeded);
+    Contains("File lock diagnostic", fileLock.Message);
+    Equal(true, services.Succeeded);
+    Contains("Services/startup inspector", services.Message);
+    Equal(true, events.Succeeded);
+    Contains("Event log triage", events.Message);
+    Equal(true, stopPlan.Succeeded);
+    Contains("Approved process stop plan", stopPlan.Message);
+    Equal(false, stopNeedsConfirmation.Succeeded);
+    Contains("needs confirmation", stopNeedsConfirmation.Message);
+    Equal(true, buildLock.Succeeded);
+    Contains("Build lock diagnostic", buildLock.Message);
+    Equal(true, classifier.Succeeded);
+    Contains("No failed dotnet command", classifier.Message);
+    Equal(true, checklist.Succeeded);
+    Contains("Roadmap step acceptance checklist", checklist.Message);
+    Equal(true, installDoctor.Succeeded);
+    Contains("Ali install doctor", installDoctor.Message);
 }
 
 static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()

@@ -1045,9 +1045,17 @@ public const string IndexHtml = """
             <button class="command-chip confirm" type="button" data-command="confirm dotnet build &quot;path&quot;">Build</button>
             <button class="command-chip confirm" type="button" data-command="confirm dotnet test &quot;path&quot;">Test</button>
             <button class="command-chip" type="button" data-command="diagnose last build failure">Diagnose</button>
+            <button class="command-chip" type="button" data-command="classify last build failure">Classify</button>
             <button class="command-chip" type="button" data-command="suggest patch from last failure">Patch Preview</button>
+            <button class="command-chip" type="button" data-command="diagnose build lock">Build Lock</button>
+            <button class="command-chip" type="button" data-command="show roadmap step checklist">Step Check</button>
+            <button class="command-chip" type="button" data-command="show install doctor">Install Doctor</button>
             <button class="command-chip" type="button" data-command="show windows troubleshooting toolkit">Win Toolkit</button>
+            <button class="command-chip" type="button" data-command="collect process evidence ">Process Evidence</button>
+            <button class="command-chip" type="button" data-command="diagnose port ">Port Owner</button>
             <button class="command-chip" type="button" data-command="plan rogue process hunt ">Process Hunt</button>
+            <button class="command-chip" type="button" data-command="inspect services and startup">Services</button>
+            <button class="command-chip" type="button" data-command="triage event logs">Event Logs</button>
           </div>
         </div>
         <div class="command-group">

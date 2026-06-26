@@ -404,6 +404,108 @@ public static class CodingToolRequestParser
         "find port owner"
     ];
 
+    private static readonly string[] ProcessEvidencePrefixes =
+    [
+        "collect process evidence",
+        "show process evidence",
+        "inspect process",
+        "inspect processes",
+        "diagnose process",
+        "diagnose processes"
+    ];
+
+    private static readonly string[] PortOwnerPrefixes =
+    [
+        "diagnose port",
+        "find port",
+        "find port owner",
+        "who owns port",
+        "what owns port",
+        "show port owner"
+    ];
+
+    private static readonly string[] FileLockPrefixes =
+    [
+        "diagnose file lock",
+        "find file lock",
+        "find locking process",
+        "who is locking",
+        "what is locking",
+        "diagnose locked file"
+    ];
+
+    private static readonly string[] ServicesStartupRequests =
+    [
+        "inspect services startup",
+        "inspect services and startup",
+        "show services startup",
+        "show services and startup",
+        "inspect startup entries",
+        "show startup entries"
+    ];
+
+    private static readonly string[] EventLogTriageRequests =
+    [
+        "triage event logs",
+        "triage windows event logs",
+        "show event log triage",
+        "show recent event errors",
+        "inspect event logs",
+        "inspect windows event logs"
+    ];
+
+    private static readonly string[] ProcessStopPlanPrefixes =
+    [
+        "plan process stop",
+        "plan stop process",
+        "preview process stop",
+        "preview stop process"
+    ];
+
+    private static readonly string[] ProcessStopPrefixes =
+    [
+        "stop process",
+        "stop pid",
+        "taskkill pid"
+    ];
+
+    private static readonly string[] BuildLockDiagnosisRequests =
+    [
+        "diagnose build lock",
+        "diagnose locked build",
+        "diagnose build file lock",
+        "recover build lock",
+        "find build lock"
+    ];
+
+    private static readonly string[] ClassifyLastFailureRequests =
+    [
+        "classify last failure",
+        "classify last build failure",
+        "classify last dotnet failure",
+        "classify build failure"
+    ];
+
+    private static readonly string[] RoadmapStepChecklistRequests =
+    [
+        "show roadmap step checklist",
+        "show step acceptance checklist",
+        "roadmap step checklist",
+        "step acceptance checklist",
+        "can we mark roadmap step complete"
+    ];
+
+    private static readonly string[] InstallDoctorRequests =
+    [
+        "show install doctor",
+        "run install doctor",
+        "install doctor",
+        "diagnose install",
+        "diagnose ali install",
+        "check installation",
+        "check ali installation"
+    ];
+
     private static readonly string[] AdvanceRoadmapStepRequests =
     [
         "advance roadmap step",
@@ -965,6 +1067,51 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParseProcessEvidence(trimmed, userConfirmed, out request)
+            || TryParsePortOwner(trimmed, userConfirmed, out request)
+            || TryParseFileLock(trimmed, userConfirmed, out request)
+            || TryParseProcessStopPlan(trimmed, userConfirmed, out request)
+            || TryParseProcessStop(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsServicesStartupRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.InspectServicesStartup, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsEventLogTriageRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.TriageEventLogs, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBuildLockDiagnosisRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DiagnoseBuildLock, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsClassifyLastFailureRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ClassifyLastFailure, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRoadmapStepChecklistRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRoadmapStepChecklist, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsInstallDoctorRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowInstallDoctor, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
@@ -1101,6 +1248,24 @@ public static class CodingToolRequestParser
 
     private static bool IsWindowsTroubleshootingToolkitRequest(string text) =>
         WindowsTroubleshootingToolkitRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsServicesStartupRequest(string text) =>
+        ServicesStartupRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsEventLogTriageRequest(string text) =>
+        EventLogTriageRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBuildLockDiagnosisRequest(string text) =>
+        BuildLockDiagnosisRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsClassifyLastFailureRequest(string text) =>
+        ClassifyLastFailureRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRoadmapStepChecklistRequest(string text) =>
+        RoadmapStepChecklistRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsInstallDoctorRequest(string text) =>
+        InstallDoctorRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
@@ -1250,6 +1415,116 @@ public static class CodingToolRequestParser
             null,
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseProcessEvidence(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = ProcessEvidencePrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.CollectProcessEvidence,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParsePortOwner(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = PortOwnerPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        if (!int.TryParse(query, out var port) || port is < 1 or > 65535)
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.DiagnosePortOwner,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return true;
+    }
+
+    private static bool TryParseFileLock(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = FileLockPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.DiagnoseFileLock,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseProcessStopPlan(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = ProcessStopPlanPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.PlanProcessStop,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseProcessStop(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = ProcessStopPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '#');
+        if (!int.TryParse(query, out var pid) || pid < 1)
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.ExecuteProcessStop,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: pid.ToString(System.Globalization.CultureInfo.InvariantCulture));
         return true;
     }
 

@@ -384,8 +384,8 @@ public sealed class AliCompanionToolWindowControl : UserControl
         AddContextGroup(panel);
         AddGroup(panel, "Awareness", ("VS Status", "show visual studio integration"), ("Architecture", "analyze solution architecture"));
         AddGroup(panel, "Plan", ("Next Action", "show next coding action"), ("Packet", "show execution packet"), ("Approve Packet", "approve execution packet"), ("Console", "show packet commands"), ("Ledger", "show packet ledger"), ("Progress", "show packet progress"), ("Resume", "resume build plan"), ("Active Step", "show active roadmap step"), ("Recovery", "show crash recovery status"));
-        AddGroup(panel, "Build", ("Build", "confirm dotnet build \"path\""), ("Diagnose", "diagnose last build failure"), ("Packages", "plan package lookup "), ("Scaffold", "preview project scaffold "));
-        AddGroup(panel, "Windows", ("Toolkit", "show windows troubleshooting toolkit"), ("Process Hunt", "plan rogue process hunt "));
+        AddGroup(panel, "Build", ("Build", "confirm dotnet build \"path\""), ("Diagnose", "diagnose last build failure"), ("Classify", "classify last build failure"), ("Build Lock", "diagnose build lock"), ("Step Check", "show roadmap step checklist"), ("Packages", "plan package lookup "), ("Scaffold", "preview project scaffold "));
+        AddGroup(panel, "Windows", ("Toolkit", "show windows troubleshooting toolkit"), ("Evidence", "collect process evidence "), ("Port", "diagnose port "), ("Process Hunt", "plan rogue process hunt "), ("Services", "inspect services and startup"), ("Events", "triage event logs"), ("Install", "show install doctor"));
         AddGroup(panel, "Git and Reports", ("Git Status", "git status"), ("Report", "generate coding report"), ("Morning", "generate morning report"));
         return panel;
     }

@@ -137,6 +137,12 @@ Useful commands:
 - `preview project scaffold SolidWorks BOM helper`
 - `show windows troubleshooting toolkit`
 - `plan rogue process hunt port 8765`
+- `collect process evidence dotnet`
+- `diagnose port 8765`
+- `diagnose build lock`
+- `classify last build failure`
+- `show roadmap step checklist`
+- `show install doctor`
 - `list packages`
 - `confirm dotnet add package "CommunityToolkit.Mvvm" to "C:\path\to\project.csproj"`
 - `search workspace for WidgetFactory`
@@ -227,8 +233,19 @@ Windows troubleshooting:
 
 - `show windows troubleshooting toolkit` shows read-only PowerShell and CMD recipes for process, memory, port, service, startup, event-log, disk, network, and build-lock investigation.
 - `plan rogue process hunt <target>` gives a focused plan for finding a suspicious process, locked file, or port owner.
+- `collect process evidence <name-or-pid>` lists matching local process PID/name/path/start/memory evidence without stopping anything.
+- `diagnose port <port>` runs a read-only `netstat -ano` check, maps the port to a PID when possible, and shows matching process evidence.
+- `diagnose build lock` checks common build-lock suspects such as `dotnet`, `MSBuild`, `VBCSCompiler`, `Ali.App.WebHelper`, and `devenv`.
+- `inspect services and startup` and `triage event logs` provide read-only PowerShell/CMD recipes for deeper Windows diagnosis.
+- `plan stop process <pid>` stages an approval checklist. `confirm stop process <pid>` requests a normal `taskkill /PID <pid>` without a force flag.
 - These commands are guidance only. They do not stop processes, disable services, edit startup entries, delete files, change registry/firewall/PATH/trust settings, or repair Windows.
 - Process stopping and system repair actions require explicit owner approval with a named PID/process/service and a rollback note when applicable.
+
+Build/install intelligence:
+
+- `classify last build failure` labels the last stored dotnet failure as locked file, restore/package, compiler, test, missing SDK/tool, or unknown, then suggests safe next commands.
+- `show roadmap step checklist` compares roadmap state, recent receipts, validation, and Git status before a roadmap step is marked complete.
+- `show install doctor` reports install readiness for DevRun, Visual Studio discovery, VSIX artifact, current .NET runtime, workspace state, and related manual dependency checks. It does not run installers or repair anything by itself.
 
 Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension has Project Ali branding metadata, a packaged icon, and a native `Ali Companion` tool window in Visual Studio with command buttons, command history, a command box, selected-code package preview, progress/state cues, run timing summaries, pending-approval summary, output tabs, and a Visual Studio context strip. Output is separated into Response, Diagnostics, Receipts, and Pending Patch tabs. It can read the active solution path, active document path, current line, and selected text, then fill deterministic Ali commands such as read active file, build active solution, search selection, plan from selection, and preview replace selection. The same staged commands are available from `Tools -> Ali Companion`, and the code editor context menu includes Ali entries for reading the current file, building the active solution, searching the selection, planning from the selection, and previewing a replacement for the selection. Solution Explorer context menus can stage Ali commands from selected solution, project, or file nodes: read selected file, build selected project/solution, or plan from the selected node. Visual Studio commands enable only when the needed active document, selected text, solution path, or Solution Explorer node is available. Selection-based commands show the exact packaged text, target, original length, packaged length, and trim status before the command is run. It calls Ali's loopback coding bridge at `http://127.0.0.1:8765/api/coding/*`; the helper still owns the coding command parser, workspace policy, confirmation gates, and receipts. Configure helper URL, history length, and selected-text behavior under `Tools -> Options -> Ali -> Companion`.
 

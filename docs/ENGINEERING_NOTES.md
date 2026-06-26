@@ -114,7 +114,8 @@ Current deterministic command groups:
 - File edits: confirmed create, append, and literal replace inside approved workspace.
 - Git: status/diff/log plus confirmed add/commit/merge; pull/push are blocked unless enabled.
 - Reports: simple local text PDF generation, coding session report PDF generation, and morning build report PDF generation into Ali's generated documents folder.
-- Windows troubleshooting: read-only PowerShell/CMD troubleshooting toolkit and rogue-process hunt planning for process, port, service, startup, event-log, disk, network, and build-lock investigation. These commands do not stop processes or change system settings.
+- Windows troubleshooting: read-only PowerShell/CMD troubleshooting toolkit, rogue-process hunt planning, process evidence collection, port owner diagnosis, file/build-lock diagnosis, service/startup guidance, event-log triage, and strict approved process-stop execution by numeric PID. Process stop requires confirmation and uses a normal PID taskkill without a force flag.
+- Build/install intelligence: classify the last dotnet failure, check roadmap step acceptance against receipts/Git/validation, and run an install doctor report for DevRun, Visual Studio, VSIX, runtime, and dependency readiness.
 
 The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow up to eight edits total and can apply multiple sequential edits in the same file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
 
@@ -125,6 +126,10 @@ Approved execution packets are stored as local JSON planning state. `show packet
 Package lookup and scaffold previews are deliberately non-executing. `plan package lookup <goal>` emits exploration lanes, risk cards, and approval commands but does not hit NuGet or the internet. `preview project scaffold <goal>` emits a proposed file/project/test shape but does not create files or modify solutions.
 
 Windows troubleshooting commands are read-only guidance. They include PowerShell/CMD recipes for `Get-Process`, `Get-CimInstance Win32_Process`, `Get-NetTCPConnection`, `netstat`, `tasklist`, services, startup commands, event logs, disk checks, and build-lock investigation. Process stops, service changes, startup changes, registry edits, firewall changes, PATH changes, and trust-store changes remain outside this command surface and require explicit owner approval.
+
+`collect process evidence`, `diagnose port`, and `diagnose build lock` are evidence commands. `diagnose port` uses `netstat -ano` through the command runner and maps PIDs to safe process snapshots when possible. `confirm stop process <pid>` is the only process-stop executor in this lane; it accepts numeric PID only, blocks the current Ali command process, requires confirmation in policy, and does not use a force flag.
+
+`classify last build failure` is a deterministic classifier over the stored last dotnet failure message. It labels common failure families and points to safe next commands. `show roadmap step checklist` is an advisory receipt/Git/validation checklist, not an automatic roadmap advance. `show install doctor` is a read-only install readiness report, not an installer.
 
 Visual Studio integration now has three layers: configurable Visual Studio launch/discovery, an External Tools CLI bridge, and a developer VSIX project named `Ali.App.VisualStudioExtension`.
 

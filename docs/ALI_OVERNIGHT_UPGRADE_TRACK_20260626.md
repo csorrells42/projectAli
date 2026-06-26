@@ -18,15 +18,17 @@ This is the approved build-skills path for the overnight sprint.
 12. Project installation instructions PDF: `docs\ALI_PROJECT_INSTALLATION_INSTRUCTIONS.md` and PDF.
 13. PowerShell/CMD troubleshooting toolkit: `show windows troubleshooting toolkit`.
 14. Rogue process hunt planner: `plan rogue process hunt <target>`.
+15. Process evidence collector: `collect process evidence <name-or-pid>`.
+16. Port owner diagnostic: `diagnose port <port>`.
+17. File/build lock diagnostics: `diagnose file lock <path>` and `diagnose build lock`.
+18. Service/startup inspector: `inspect services and startup`.
+19. Event-log triage: `triage event logs`.
+20. Approved process stop executor: `confirm stop process <pid>`.
+21. Build/install intelligence: `classify last build failure`, `show roadmap step checklist`, and `show install doctor`.
 
-## Approved Next Road
+## Approved Next Road Completed
 
-15. Process evidence collector: gather process, command line, parent PID, path, CPU, memory, and start time through a read-only receipt.
-16. Port owner diagnostic: map listening ports to owning processes and suggested next questions.
-17. File-lock diagnostic: detect common build locks and recommend safe process-specific actions.
-18. Service/startup inspector: read services and startup entries without changing them.
-19. Event-log triage: summarize recent System/Application errors without clearing logs.
-20. Approved repair executor: stop a named PID/service only after explicit approval, with a receipt and rollback note when applicable.
+The second approved sprint moved Windows troubleshooting and build readiness into deterministic Ali commands while preserving the same approval gates.
 
 ## Guardrails
 

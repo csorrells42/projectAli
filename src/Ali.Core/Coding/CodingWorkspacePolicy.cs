@@ -118,6 +118,16 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ResumeBuildPlan
             or CodingToolAction.ShowWindowsTroubleshootingToolkit
             or CodingToolAction.PlanRogueProcessHunt
+            or CodingToolAction.CollectProcessEvidence
+            or CodingToolAction.DiagnosePortOwner
+            or CodingToolAction.DiagnoseFileLock
+            or CodingToolAction.InspectServicesStartup
+            or CodingToolAction.TriageEventLogs
+            or CodingToolAction.PlanProcessStop
+            or CodingToolAction.DiagnoseBuildLock
+            or CodingToolAction.ClassifyLastFailure
+            or CodingToolAction.ShowRoadmapStepChecklist
+            or CodingToolAction.ShowInstallDoctor
             or CodingToolAction.AdvanceRoadmapStep
             or CodingToolAction.PauseRoadmap
             or CodingToolAction.ResumeRoadmap
@@ -159,6 +169,13 @@ public sealed class CodingWorkspacePolicy
             return request.UserConfirmed
                 ? CodingToolPermissionKind.Allow.AsPermission("Applying the last patch preview is allowed after explicit confirmation and revalidation.")
                 : CodingToolPermissionKind.RequireConfirmation.AsPermission("Applying the last patch preview changes files and needs explicit confirmation.");
+        }
+
+        if (request.Action == CodingToolAction.ExecuteProcessStop)
+        {
+            return request.UserConfirmed
+                ? CodingToolPermissionKind.Allow.AsPermission("Stopping a named local process is allowed after explicit confirmation.")
+                : CodingToolPermissionKind.RequireConfirmation.AsPermission("Stopping a process changes local system state and needs explicit confirmation.");
         }
 
         if (request.Action == CodingToolAction.PreviewPatchBundle)

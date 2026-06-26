@@ -194,6 +194,17 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ResumeBuildPlan => await ResumeBuildPlanAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowWindowsTroubleshootingToolkit => ShowWindowsTroubleshootingToolkit(),
             CodingToolAction.PlanRogueProcessHunt => PlanRogueProcessHunt(request),
+            CodingToolAction.CollectProcessEvidence => CollectProcessEvidence(request),
+            CodingToolAction.DiagnosePortOwner => await DiagnosePortOwnerAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.DiagnoseFileLock => DiagnoseFileLock(request),
+            CodingToolAction.InspectServicesStartup => InspectServicesStartup(),
+            CodingToolAction.TriageEventLogs => TriageEventLogs(),
+            CodingToolAction.PlanProcessStop => PlanProcessStop(request),
+            CodingToolAction.ExecuteProcessStop => await ExecuteProcessStopAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.DiagnoseBuildLock => DiagnoseBuildLock(),
+            CodingToolAction.ClassifyLastFailure => ClassifyLastFailure(),
+            CodingToolAction.ShowRoadmapStepChecklist => await ShowRoadmapStepChecklistAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowInstallDoctor => ShowInstallDoctor(),
             CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
             CodingToolAction.PauseRoadmap => PauseRoadmap(),
             CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
@@ -1450,6 +1461,393 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult CollectProcessEvidence(CodingToolRequest request)
+    {
+        var query = request.Query?.Trim();
+        var processes = Process.GetProcesses()
+            .Select(SnapshotProcess)
+            .Where(snapshot => ProcessSnapshotMatches(snapshot, query))
+            .OrderByDescending(snapshot => snapshot.WorkingSetBytes)
+            .ThenBy(snapshot => snapshot.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(25)
+            .ToList();
+
+        var lines = new List<string>
+        {
+            "Process evidence:",
+            string.IsNullOrWhiteSpace(query) ? "Filter: top local processes by memory" : $"Filter: {query}",
+            "No processes were stopped and no system settings were changed."
+        };
+
+        if (processes.Count == 0)
+        {
+            lines.Add("- No matching processes were found.");
+        }
+        else
+        {
+            lines.Add("Matches:");
+            foreach (var process in processes)
+            {
+                lines.Add($"- PID {process.Id}: {process.Name}; memory {process.WorkingSetMegabytes:0.0} MB; started {process.StartTimeText}; path {process.Path ?? "unavailable"}");
+            }
+        }
+
+        lines.Add("Next safe commands:");
+        lines.Add("- plan process stop <pid>");
+        lines.Add("- confirm stop process <pid>");
+        lines.Add("- diagnose port <port>");
+        lines.Add("- diagnose build lock");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Process evidence",
+            Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> DiagnosePortOwnerAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(request.Query, out var port) || port is < 1 or > 65535)
+        {
+            return new CodingToolResult(true, false, "Port diagnosis needs a port number from 1 to 65535. Example: diagnose port 8765", "Port owner", Policy.WorkspaceRoot);
+        }
+
+        var run = await _commandRunner.RunAsync(
+            "netstat",
+            ["-ano"],
+            GetReadOnlyCommandWorkingDirectory(),
+            TimeSpan.FromSeconds(15),
+            cancellationToken).ConfigureAwait(false);
+        var output = MergeCommandOutput(run);
+        var matches = ParseNetstatPortOwners(run.StandardOutput, port);
+
+        var lines = new List<string>
+        {
+            "Port owner diagnostic:",
+            $"Port: {port}",
+            "No processes were stopped and no firewall/network settings were changed.",
+            run.TimedOut ? "netstat status: timed out" : $"netstat exit code: {run.ExitCode}"
+        };
+
+        if (run.ExitCode != 0 || run.TimedOut)
+        {
+            lines.Add(TrimForChat(output, 4_000));
+        }
+        else if (matches.Count == 0)
+        {
+            lines.Add("- No listener/connection for that local port was found in netstat output.");
+        }
+        else
+        {
+            lines.Add("Matches:");
+            foreach (var match in matches)
+            {
+                var process = TrySnapshotProcess(match.ProcessId);
+                var processText = process is null
+                    ? "process details unavailable"
+                    : $"{process.Name}; memory {process.WorkingSetMegabytes:0.0} MB; path {process.Path ?? "unavailable"}";
+                lines.Add($"- {match.Protocol} {match.LocalAddress} {match.State} PID {match.ProcessId}: {processText}");
+            }
+        }
+
+        var suggestedPid = matches.Select(match => match.ProcessId).Distinct().FirstOrDefault();
+        lines.Add("Next safe commands:");
+        lines.Add(suggestedPid > 0
+            ? $"- collect process evidence {suggestedPid}"
+            : "- collect process evidence <pid>");
+        lines.Add("- plan process stop <pid>");
+        lines.Add("- confirm stop process <pid>");
+
+        return new CodingToolResult(
+            true,
+            run.ExitCode == 0 && !run.TimedOut,
+            string.Join(Environment.NewLine, lines),
+            "Port owner",
+            Policy.WorkspaceRoot,
+            ExitCode: run.ExitCode);
+    }
+
+    private CodingToolResult DiagnoseFileLock(CodingToolRequest request)
+    {
+        var target = string.IsNullOrWhiteSpace(request.Query)
+            ? "the locked file"
+            : request.Query.Trim();
+        var lines = new List<string>
+        {
+            "File lock diagnostic:",
+            $"Target: {target}",
+            "No processes were stopped and no files were changed.",
+            "Built-in evidence Ali can gather now:",
+            "- collect process evidence dotnet",
+            "- collect process evidence MSBuild",
+            "- collect process evidence VBCSCompiler",
+            "- collect process evidence Ali.App.WebHelper",
+            "- collect process evidence devenv",
+            "PowerShell/CMD commands to compare manually:",
+            "- tasklist /m",
+            "- tasklist /FI \"IMAGENAME eq dotnet.exe\" /V",
+            "- Get-Process dotnet,MSBuild,VBCSCompiler,Ali.App.WebHelper,devenv -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path",
+            "Deep lock tools:",
+            "- Sysinternals Handle or Process Explorer can identify exact file handles, but Ali should only suggest them after owner approval.",
+            "Next safe command:",
+            "- diagnose build lock"
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "File lock diagnostic",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult InspectServicesStartup()
+    {
+        var lines = new List<string>
+        {
+            "Services/startup inspector:",
+            "No services were stopped, disabled, started, or changed.",
+            "Read-only PowerShell:",
+            "- Get-Service | Sort-Object Status,Name | Select-Object Status,Name,DisplayName",
+            "- Get-CimInstance Win32_Service | Select-Object Name,State,StartMode,PathName",
+            "- Get-CimInstance Win32_StartupCommand | Select-Object Name,Command,Location,User",
+            "Read-only CMD:",
+            "- sc query state= all",
+            "- wmic startup get Caption,Command,Location,User",
+            "Approval gate:",
+            "- Any service stop/start/disable/delete action needs explicit owner approval, a named service, and a rollback note."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Services/startup inspector", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult TriageEventLogs()
+    {
+        var lines = new List<string>
+        {
+            "Event log triage:",
+            "No event logs were cleared and no system settings were changed.",
+            "Read-only PowerShell:",
+            "- Get-EventLog -LogName System -EntryType Error,Warning -Newest 50 | Select-Object TimeGenerated,EntryType,Source,EventID,Message",
+            "- Get-EventLog -LogName Application -EntryType Error,Warning -Newest 50 | Select-Object TimeGenerated,EntryType,Source,EventID,Message",
+            "- Get-WinEvent -LogName System -MaxEvents 50 | Select-Object TimeCreated,LevelDisplayName,ProviderName,Id,Message",
+            "Useful filters:",
+            "- Filter around the crash time first.",
+            "- Compare application errors, service-control-manager events, disk warnings, and .NET runtime events.",
+            "Stop rule: do not clear logs during diagnosis; they are evidence."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Event log triage", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanProcessStop(CodingToolRequest request)
+    {
+        var query = request.Query?.Trim();
+        var lines = new List<string>
+        {
+            "Approved process stop plan:",
+            string.IsNullOrWhiteSpace(query) ? "Target: not specified" : $"Target: {query}",
+            "No process was stopped.",
+            "Required before execution:",
+            "- Numeric PID.",
+            "- Evidence that the PID belongs to the intended process.",
+            "- Confirmation that stopping it is acceptable.",
+            "Safe next commands:",
+            string.IsNullOrWhiteSpace(query) ? "- collect process evidence <name-or-pid>" : $"- collect process evidence {query}",
+            "- confirm stop process <pid>",
+            "Rollback note:",
+            "- If the process is a helper/service, know how to restart it before stopping it.",
+            "Stop rule: if PID, path, parent process, or purpose is unclear, do not stop it yet."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Process stop plan", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ExecuteProcessStopAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(request.Query, out var pid) || pid < 1)
+        {
+            return new CodingToolResult(true, false, "Stopping a process requires a numeric PID. Example: confirm stop process 1234", "Process stop", Policy.WorkspaceRoot);
+        }
+
+        if (pid == Environment.ProcessId)
+        {
+            return new CodingToolResult(true, false, "Process stop blocked: Ali will not stop the process currently executing this command.", "Process stop", Policy.WorkspaceRoot);
+        }
+
+        var before = TrySnapshotProcess(pid);
+        if (before is null)
+        {
+            return new CodingToolResult(true, false, $"Process stop blocked: PID {pid} was not found.", "Process stop", Policy.WorkspaceRoot);
+        }
+
+        var run = await _commandRunner.RunAsync(
+            "taskkill",
+            ["/PID", pid.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+            GetReadOnlyCommandWorkingDirectory(),
+            TimeSpan.FromSeconds(15),
+            cancellationToken).ConfigureAwait(false);
+        var output = TrimForChat(MergeCommandOutput(run), MaxCommandOutputCharacters);
+        var message = new List<string>
+        {
+            "Process stop result:",
+            $"Requested PID: {pid}",
+            $"Before: {before.Name}; path {before.Path ?? "unavailable"}",
+            run.TimedOut ? "taskkill status: timed out" : $"taskkill exit code: {run.ExitCode}",
+            string.IsNullOrWhiteSpace(output) ? "taskkill output: none" : output,
+            "Receipt boundary: Ali requested a normal taskkill by PID. No force flag was used."
+        };
+
+        return new CodingToolResult(
+            true,
+            run.ExitCode == 0 && !run.TimedOut,
+            string.Join(Environment.NewLine, message),
+            "Process stop",
+            before.Path,
+            ExitCode: run.ExitCode);
+    }
+
+    private CodingToolResult DiagnoseBuildLock()
+    {
+        var processNames = new[] { "dotnet", "MSBuild", "VBCSCompiler", "Ali.App.WebHelper", "devenv" };
+        var snapshots = Process.GetProcesses()
+            .Select(SnapshotProcess)
+            .Where(snapshot => processNames.Any(name => snapshot.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(snapshot => snapshot.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(snapshot => snapshot.Id)
+            .ToList();
+        var lines = new List<string>
+        {
+            "Build lock diagnostic:",
+            "No processes were stopped and no build outputs were deleted.",
+            "Common lock suspects:"
+        };
+
+        if (snapshots.Count == 0)
+        {
+            lines.Add("- No common build-lock suspect processes were found.");
+        }
+        else
+        {
+            foreach (var snapshot in snapshots)
+            {
+                lines.Add($"- PID {snapshot.Id}: {snapshot.Name}; memory {snapshot.WorkingSetMegabytes:0.0} MB; path {snapshot.Path ?? "unavailable"}");
+            }
+        }
+
+        lines.Add("Recommended recovery:");
+        lines.Add("- If WebHelper is locking Ali DLLs, stop only Ali.App.WebHelper, rebuild, then restart it.");
+        lines.Add("- If compiler/build servers are stale, run: dotnet build-server shutdown");
+        lines.Add("- If Visual Studio is holding build output, close the solution or stop debugging.");
+        lines.Add("- Use confirm stop process <pid> only after verifying the PID belongs to the intended helper.");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Build lock diagnostic", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ClassifyLastFailure()
+    {
+        if (_lastDotNetRequest is null || _lastDotNetResult is not { Succeeded: false } result)
+        {
+            return new CodingToolResult(true, true, "No failed dotnet command is stored in this Ali session.", "Failure classifier", Policy.WorkspaceRoot);
+        }
+
+        var category = ClassifyFailureMessage(result.Message);
+        var lines = new List<string>
+        {
+            "Failure classifier:",
+            $"Action: {_lastDotNetRequest.Action}",
+            $"Target: {result.TargetPath ?? _lastDotNetRequest.Path ?? Policy.WorkspaceRoot}",
+            $"Category: {category}",
+            result.ExitCode is null ? "Exit code: unavailable" : $"Exit code: {result.ExitCode.Value}",
+            "Next safe commands:"
+        };
+
+        lines.AddRange(category switch
+        {
+            "locked file" => ["- diagnose build lock", "- collect process evidence Ali.App.WebHelper", "- dotnet build-server shutdown"],
+            "restore/package" => ["- plan package lookup current failure", "- confirm dotnet restore \"path\""],
+            "compiler" => ["- diagnose last build failure", "- open build error", "- suggest patch from last failure"],
+            "test" => ["- diagnose last test failure", "- read failing test file", "- plan coding task fix failing test"],
+            "missing sdk/tool" => ["- show install doctor", "- inspect services startup"],
+            _ => ["- diagnose last build failure", "- show coding receipts", "- resume build plan"]
+        });
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Failure classifier", result.TargetPath ?? Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowRoadmapStepChecklistAsync(CancellationToken cancellationToken)
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Roadmap step acceptance checklist:",
+            _roadmapState is null ? "Roadmap: none active" : $"Roadmap: {DescribeRoadmapState(_roadmapState)}",
+            _roadmapState is null ? "Step: unavailable" : $"Step: {FormatRoadmapCurrentStep(_roadmapState)}",
+            $"Git: {gitStatus.Summary}",
+            latestDotNetReceipt is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestDotNetReceipt),
+            "Checklist:",
+            $"- Read-only prep reviewed: {(receipts.Any(IsPacketPrepReceipt) ? "yes" : "not proven by receipts")}",
+            $"- Execute action recorded: {(receipts.Any(IsPacketExecutionReceipt) ? "yes" : "not proven by receipts")}",
+            $"- Validation clean: {(latestDotNetReceipt is { Succeeded: true } ? "yes" : latestDotNetReceipt is { Succeeded: false } ? "no, latest validation failed" : "not proven by receipts")}",
+            $"- Git reviewed/clean: {(gitStatus.Available && gitStatus.Clean ? "yes" : "review needed")}",
+            "Recommendation:"
+        };
+
+        if (latestDotNetReceipt is { Succeeded: false })
+        {
+            lines.Add("- Do not mark the step complete yet. Diagnose or fix the failure first.");
+        }
+        else if (gitStatus.HasUncommittedChanges)
+        {
+            lines.Add("- Review git diff/status before marking complete or committing.");
+        }
+        else
+        {
+            lines.Add("- If owner-visible behavior is complete and receipts match the step, it is reasonable to mark the step complete.");
+        }
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Roadmap checklist", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowInstallDoctor()
+    {
+        var visualStudio = CodingToolLocator.FindVisualStudio(_configuredVisualStudioPath);
+        var notepadPlusPlus = CodingToolLocator.FindNotepadPlusPlus(_configuredNotepadPlusPlusPath);
+        var devRun = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ali", "DevRun", "Ali.App.Wpf.exe");
+        var vsix = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Ali.App.VisualStudioExtension", "bin", "Debug", "net472", "Ali.App.VisualStudioExtension.vsix");
+        var lines = new List<string>
+        {
+            "Ali install doctor:",
+            "No files were changed and no installers were run.",
+            $"- Workspace root: {Policy.WorkspaceRoot}",
+            $"- Workspace exists: {Directory.Exists(Policy.WorkspaceRoot)}",
+            $"- DevRun executable: {(File.Exists(devRun) ? devRun : "missing")}",
+            $"- Visual Studio: {visualStudio ?? "not found"}",
+            $"- Notepad++: {notepadPlusPlus ?? "not found"}",
+            $"- VSIX build artifact: {(File.Exists(Path.GetFullPath(vsix)) ? Path.GetFullPath(vsix) : "not found from current app base")}",
+            $"- Current .NET runtime: {Environment.Version}",
+            $"- OS: {Environment.OSVersion}",
+            "Manual dependency checks:",
+            "- dotnet --info",
+            "- git --version",
+            "- ollama list",
+            "- show visual studio integration",
+            "- show windows troubleshooting toolkit",
+            "Repair boundary: installer, VSIX install, signing, trust-store, PATH, registry, firewall, and service changes require explicit owner approval."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Install doctor", devRun);
+    }
+
     private CodingToolResult AdvanceRoadmapStep()
     {
         LoadRoadmapStateIfNeeded();
@@ -2625,6 +3023,157 @@ public sealed class LocalCodingToolService(
             : $"Ali.{name}";
     }
 
+    private string GetReadOnlyCommandWorkingDirectory() =>
+        Directory.Exists(Policy.WorkspaceRoot)
+            ? Policy.WorkspaceRoot
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    private static ProcessSnapshot SnapshotProcess(Process process)
+    {
+        string? path = null;
+        string startTimeText = "unavailable";
+        try
+        {
+            path = process.MainModule?.FileName;
+        }
+        catch
+        {
+            path = null;
+        }
+
+        try
+        {
+            startTimeText = process.StartTime.ToString("u", System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            startTimeText = "unavailable";
+        }
+
+        long workingSet = 0;
+        try
+        {
+            workingSet = process.WorkingSet64;
+        }
+        catch
+        {
+            workingSet = 0;
+        }
+
+        return new ProcessSnapshot(
+            process.Id,
+            process.ProcessName,
+            path,
+            startTimeText,
+            workingSet);
+    }
+
+    private static ProcessSnapshot? TrySnapshotProcess(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return SnapshotProcess(process);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool ProcessSnapshotMatches(ProcessSnapshot snapshot, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return true;
+        }
+
+        return snapshot.Id.ToString(System.Globalization.CultureInfo.InvariantCulture).Equals(query.Trim(), StringComparison.OrdinalIgnoreCase)
+               || snapshot.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || (snapshot.Path?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static IReadOnlyList<NetstatPortOwner> ParseNetstatPortOwners(string output, int port)
+    {
+        var owners = new List<NetstatPortOwner>();
+        foreach (var rawLine in output.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith("Proto", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length < 4)
+            {
+                continue;
+            }
+
+            var protocol = parts[0];
+            var localAddress = parts[1];
+            var pidText = parts[^1];
+            var state = parts.Length >= 5 ? parts[^2] : "n/a";
+            if (!int.TryParse(pidText, out var pid) || !LocalAddressUsesPort(localAddress, port))
+            {
+                continue;
+            }
+
+            owners.Add(new NetstatPortOwner(protocol, localAddress, state, pid));
+        }
+
+        return owners
+            .DistinctBy(owner => (owner.Protocol, owner.LocalAddress, owner.State, owner.ProcessId))
+            .ToList();
+    }
+
+    private static bool LocalAddressUsesPort(string localAddress, int port)
+    {
+        var suffix = $":{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        return localAddress.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+               || localAddress.EndsWith($".{port.ToString(System.Globalization.CultureInfo.InvariantCulture)}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ClassifyFailureMessage(string message)
+    {
+        if (message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("locked by", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("MSB302", StringComparison.OrdinalIgnoreCase))
+        {
+            return "locked file";
+        }
+
+        if (message.Contains("NU", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("restore", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("package", StringComparison.OrdinalIgnoreCase))
+        {
+            return "restore/package";
+        }
+
+        if (message.Contains("CS", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("compiler", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("error", StringComparison.OrdinalIgnoreCase) && message.Contains(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return "compiler";
+        }
+
+        if (message.Contains("test", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Assert", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("Expected", StringComparison.OrdinalIgnoreCase))
+        {
+            return "test";
+        }
+
+        if (message.Contains("SDK", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("not found", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("is not recognized", StringComparison.OrdinalIgnoreCase))
+        {
+            return "missing sdk/tool";
+        }
+
+        return "unknown";
+    }
+
     private static void AddArchitectureRecommendationCards(
         List<string> lines,
         string goal,
@@ -2941,6 +3490,12 @@ public sealed class LocalCodingToolService(
             "- preview project scaffold <goal>",
             "- show windows troubleshooting toolkit",
             "- plan rogue process hunt <target>",
+            "- collect process evidence <name-or-pid>",
+            "- diagnose port <port>",
+            "- diagnose build lock",
+            "- classify last build failure",
+            "- show roadmap step checklist",
+            "- show install doctor",
             "- generate visual studio integration plan",
             "- show coding receipts",
             "- generate coding report",
@@ -6402,6 +6957,22 @@ public sealed class LocalCodingToolService(
         int Number,
         string Section,
         string Command);
+
+    private sealed record ProcessSnapshot(
+        int Id,
+        string Name,
+        string? Path,
+        string StartTimeText,
+        long WorkingSetBytes)
+    {
+        public double WorkingSetMegabytes => WorkingSetBytes / 1024d / 1024d;
+    }
+
+    private sealed record NetstatPortOwner(
+        string Protocol,
+        string LocalAddress,
+        string State,
+        int ProcessId);
 
     private sealed record ApprovedRoadmapExecutionPacket(
         string Goal,
