@@ -13,12 +13,12 @@ This list tracks the Visual Studio plugin polish path while keeping Ali's curren
 - Richer pending-approval view that separates requested command, risk, target path, and next confirmation command.
 - Build/test progress model that can show start time, elapsed time, outcome, and recent receipt/report cues.
 - Safer selected-code packaging with explicit preview of what context will be sent to Ali.
+- Dedicated output tabs for response, diagnostics, receipts, and pending patch.
 - Diagnostic list with double-click open for compiler-style file/line output.
 - Visual Studio options page for helper URL, command history limit, and selected-text context behavior.
 
 ## Next
 
-- Dedicated output tabs for response, diagnostics, receipts, and pending patch.
 - Real icon, branding pass, and marketplace-ready metadata.
 - Installer/update notes for Community versus future Visual Studio editions.
 

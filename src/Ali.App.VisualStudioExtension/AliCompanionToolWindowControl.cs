@@ -39,6 +39,8 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private readonly ComboBox _history = new();
     private readonly TextBox _command = new();
     private readonly TextBox _output = new();
+    private readonly TextBox _receipts = new();
+    private readonly TextBox _pendingPatch = new();
     private readonly ListBox _diagnostics = new();
     private readonly ProgressBar _progress = new();
     private readonly Button _runButton = new();
@@ -79,7 +81,6 @@ public sealed class AliCompanionToolWindowControl : UserControl
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         _context.Foreground = Brush(203, 213, 225);
         _context.Background = Brush(15, 23, 42);
@@ -140,24 +141,48 @@ public sealed class AliCompanionToolWindowControl : UserControl
         Grid.SetRow(approvalPanel, 7);
         content.Children.Add(approvalPanel);
 
-        _output.IsReadOnly = true;
-        _output.AcceptsReturn = true;
-        _output.TextWrapping = TextWrapping.Wrap;
-        _output.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        _output.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-        _output.Background = Brush(8, 13, 22);
-        _output.Foreground = Brush(203, 213, 225);
-        _output.BorderBrush = Brush(51, 65, 85);
-        _output.Text = "Ali Companion ready. Commands still use Ali's normal approval gates.";
-        Grid.SetRow(_output, 8);
-        content.Children.Add(_output);
-
-        var diagnosticsPanel = BuildDiagnosticsPanel();
-        Grid.SetRow(diagnosticsPanel, 9);
-        content.Children.Add(diagnosticsPanel);
+        var outputTabs = BuildOutputTabs();
+        Grid.SetRow(outputTabs, 8);
+        content.Children.Add(outputTabs);
 
         root.Children.Add(content);
         return root;
+    }
+
+    private UIElement BuildOutputTabs()
+    {
+        ConfigureOutputBox(_output, "Ali Companion ready. Commands still use Ali's normal approval gates.");
+        ConfigureOutputBox(_receipts, "Receipts: none detected yet.");
+        ConfigureOutputBox(_pendingPatch, "Pending patch: none detected yet.");
+
+        _diagnostics.Background = Brush(8, 13, 22);
+        _diagnostics.Foreground = Brush(203, 213, 225);
+        _diagnostics.BorderBrush = Brush(51, 65, 85);
+        _diagnostics.MouseDoubleClick += (_, _) => OpenSelectedDiagnostic();
+
+        var tabs = new TabControl
+        {
+            Background = Brush(17, 22, 29),
+            BorderBrush = Brush(51, 65, 85)
+        };
+        tabs.Items.Add(new TabItem { Header = "Response", Content = _output });
+        tabs.Items.Add(new TabItem { Header = "Diagnostics", Content = _diagnostics });
+        tabs.Items.Add(new TabItem { Header = "Receipts", Content = _receipts });
+        tabs.Items.Add(new TabItem { Header = "Pending Patch", Content = _pendingPatch });
+        return tabs;
+    }
+
+    private static void ConfigureOutputBox(TextBox textBox, string initialText)
+    {
+        textBox.IsReadOnly = true;
+        textBox.AcceptsReturn = true;
+        textBox.TextWrapping = TextWrapping.Wrap;
+        textBox.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        textBox.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+        textBox.Background = Brush(8, 13, 22);
+        textBox.Foreground = Brush(203, 213, 225);
+        textBox.BorderBrush = Brush(51, 65, 85);
+        textBox.Text = initialText;
     }
 
     private UIElement BuildHistoryPanel()
@@ -559,6 +584,8 @@ public sealed class AliCompanionToolWindowControl : UserControl
                 ?? json;
             _output.Text = message;
             UpdateDiagnostics(message);
+            UpdateReceipts(message);
+            UpdatePendingPatchTab(command, message);
             var outcome = SummarizeRun(command, message, response.IsSuccessStatusCode, stopwatch.Elapsed);
             UpdateRunSummary(outcome);
             UpdateCommandState(command, message, response.IsSuccessStatusCode);
@@ -580,6 +607,8 @@ public sealed class AliCompanionToolWindowControl : UserControl
                 Receipt: null));
             ClearApprovalState();
             _diagnostics.Items.Clear();
+            _receipts.Text = "Receipts: helper unavailable.";
+            _pendingPatch.Text = "Pending patch: helper unavailable.";
         }
         finally
         {
@@ -674,32 +703,55 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private static string? ExtractReceiptCue(string message)
     {
+        return ExtractReceiptCues(message).FirstOrDefault();
+    }
+
+    private static IEnumerable<string> ExtractReceiptCues(string message)
+    {
         var path = Regex.Match(
             message,
             "(?<path>[A-Za-z]:\\\\[^\\r\\n]+\\.(?:json|txt|md|pdf|log))",
             RegexOptions.IgnoreCase);
         if (path.Success)
         {
-            return "receipt " + Path.GetFileName(path.Groups["path"].Value.TrimEnd('.', ';', ','));
+            yield return "file " + Path.GetFileName(path.Groups["path"].Value.TrimEnd('.', ';', ','));
         }
 
-        var receiptLine = Regex.Match(message, "(?im)^\\s*(?:receipt|report|diagnostic)\\s*:\\s*(?<value>.+)$");
-        if (receiptLine.Success)
+        foreach (Match receiptLine in Regex.Matches(message, "(?im)^\\s*(?:receipt|report|diagnostic)\\s*:\\s*(?<value>.+)$"))
         {
-            return receiptLine.Groups["value"].Value.Trim();
+            yield return receiptLine.Groups["value"].Value.Trim();
         }
 
         if (message.Contains("coding receipts", StringComparison.OrdinalIgnoreCase))
         {
-            return "receipts updated";
+            yield return "receipts updated";
         }
 
         if (message.Contains("coding report", StringComparison.OrdinalIgnoreCase))
         {
-            return "report available";
+            yield return "report available";
         }
+    }
 
-        return null;
+    private static IEnumerable<string> ExtractPatchPreviewLines(string message)
+    {
+        foreach (var line in message.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            if (trimmed.Contains("patch", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Contains("replace", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Contains("file ", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("+", StringComparison.Ordinal) ||
+                trimmed.StartsWith("-", StringComparison.Ordinal))
+            {
+                yield return trimmed.Length <= 220 ? trimmed : trimmed.Substring(0, 220);
+            }
+        }
     }
 
     private static string FormatElapsed(TimeSpan elapsed) =>
@@ -796,6 +848,42 @@ public sealed class AliCompanionToolWindowControl : UserControl
         {
             _diagnostics.Items.Add(diagnostic);
         }
+    }
+
+    private void UpdateReceipts(string message)
+    {
+        var cues = ExtractReceiptCues(message).ToArray();
+        _receipts.Text = cues.Length == 0
+            ? "Receipts: none detected in the last response."
+            : "Receipts and reports:\r\n- " + string.Join("\r\n- ", cues);
+    }
+
+    private void UpdatePendingPatchTab(string command, string message)
+    {
+        var summary = DetectApprovalSummary(command, message);
+        if (summary is null && !message.Contains("patch", StringComparison.OrdinalIgnoreCase))
+        {
+            _pendingPatch.Text = "Pending patch: none detected in the last response.";
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            "Pending patch / approval:",
+            "Command: " + Blank(summary?.RequestedCommand ?? command, "unknown command"),
+            "Risk: " + Blank(summary?.Risk, "review required"),
+            "Target: " + Blank(summary?.Target, "not identified"),
+            "Next: " + Blank(summary?.ConfirmationCommand, "review Ali output for confirmation command")
+        };
+
+        var previewLines = ExtractPatchPreviewLines(message).Take(8).ToArray();
+        if (previewLines.Length > 0)
+        {
+            lines.Add("Preview:");
+            lines.AddRange(previewLines.Select(line => "- " + line));
+        }
+
+        _pendingPatch.Text = string.Join("\r\n", lines);
     }
 
     private void OpenSelectedDiagnostic()
