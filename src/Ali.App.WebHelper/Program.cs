@@ -1,4 +1,5 @@
 using System.Text;
+using Ali.Core.Coding;
 using Ali.Core.Conversations;
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
@@ -94,6 +95,23 @@ app.MapGet("/api/coding/status", async (
 
     var result = await services.LocalCodingTool.TryHandleAsync("show visual studio integration", cancellationToken).ConfigureAwait(false);
     return Results.Ok(CodingCommandResponse.FromResult(result));
+});
+
+app.MapGet("/api/coding/abilities", (HttpContext httpContext) =>
+{
+    if (!IsAuthorized(httpContext, accessToken))
+    {
+        return Results.Unauthorized();
+    }
+
+    if (!IsLoopbackRequest(httpContext))
+    {
+        return Results.Json(
+            new ErrorResponse("Coding ability catalog is loopback-only."),
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    return Results.Ok(CodingAbilityCatalogResponse.FromCatalog());
 });
 
 app.MapPost("/api/coding/command", async (
@@ -571,6 +589,41 @@ internal sealed record CodingCommandResponse(
             result.TargetPath,
             result.LineNumber,
             result.ExitCode);
+}
+
+internal sealed record CodingAbilityCatalogResponse(
+    IReadOnlyList<string> FastBuilderPath,
+    IReadOnlyList<CodingAbilityGroupResponse> BuilderGroups,
+    IReadOnlyList<CodingAbilityGroupResponse> ComputerGroups,
+    IReadOnlyList<CodingAbilityGroupResponse> PdfGroups)
+{
+    public static CodingAbilityCatalogResponse FromCatalog() =>
+        new(
+            CodingAbilityCatalog.FastBuilderPath,
+            CodingAbilityCatalog.BuilderGroups.Select(CodingAbilityGroupResponse.FromGroup).ToArray(),
+            CodingAbilityCatalog.ComputerGroups.Select(CodingAbilityGroupResponse.FromGroup).ToArray(),
+            CodingAbilityCatalog.PdfGroups.Select(CodingAbilityGroupResponse.FromGroup).ToArray());
+}
+
+internal sealed record CodingAbilityGroupResponse(
+    string Name,
+    string Summary,
+    IReadOnlyList<CodingAbilityCommandResponse> Commands)
+{
+    public static CodingAbilityGroupResponse FromGroup(CodingAbilityGroup group) =>
+        new(
+            group.Name,
+            group.Summary,
+            group.Commands.Select(CodingAbilityCommandResponse.FromCommand).ToArray());
+}
+
+internal sealed record CodingAbilityCommandResponse(
+    string Label,
+    string Command,
+    bool RequiresConfirmation)
+{
+    public static CodingAbilityCommandResponse FromCommand(CodingAbilityCommand command) =>
+        new(command.Label, command.Command, command.RequiresConfirmation);
 }
 
 internal sealed record AskHistoryItem(string Role, string Text);

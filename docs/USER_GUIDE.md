@@ -288,7 +288,7 @@ Computer assistant:
 
 Ali's source access is curated and approval-oriented. She can use approved source catalog entries when the app performs a source lookup, but this is not unrestricted browsing or autonomous web control. Spoken responses are cleaned so source appendices remain visible in text but are not read aloud by Piper.
 
-Ability-index maintenance rule: whenever a feature is added, update `show coding skill command index`, `show computer assistant commands`, relevant Web Helper/VS Companion buttons, this guide, and the engineering notes so Ali can accurately describe her own current abilities.
+Ability-index maintenance rule: whenever a feature is added, update the shared `CodingAbilityCatalog` first. The deterministic indexes (`show coding skill command index`, `show computer assistant commands`, and `show pdf commands`) render from that catalog, and Web Helper/VS Companion buttons plus this guide should stay aligned with it.
 
 `analyze solution architecture` is read-only. It reports solutions, projects, target frameworks, project roles, project references, package references, source-file counts, a project dependency graph, and an estimated build order.
 

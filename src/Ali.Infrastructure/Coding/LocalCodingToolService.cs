@@ -1694,78 +1694,7 @@ public sealed class LocalCodingToolService(
     }
 
     private CodingToolResult ShowBuilderCommandIndex()
-    {
-        var lines = new List<string>
-        {
-            "Ali coding skill command index:",
-            "No files were changed.",
-            "Fast builder path:",
-            "1. interpret build goal <goal>",
-            "2. show architecture options <goal>",
-            "3. write acceptance criteria <goal>",
-            "4. suggest tests for <goal>",
-            "5. draft implementation roadmap <goal>",
-            "6. approve last roadmap",
-            "7. start approved roadmap",
-            "8. show next coding action",
-            "9. show execution packet",
-            "10. plan post edit validation",
-            "Scout and choose:",
-            "- interpret build goal <goal>",
-            "- explore build idea <goal>",
-            "- show architecture options <goal>",
-            "- plan package lookup <goal>",
-            "- plan dependency install packet <goal>",
-            "Plan and guard:",
-            "- draft implementation roadmap <goal>",
-            "- write acceptance criteria <goal>",
-            "- suggest tests for <goal>",
-            "- detect codebase patterns",
-            "- plan feature files <goal>",
-            "- show refactor safety checklist <goal>",
-            "Execute through gates:",
-            "- preview patch bundle",
-            "- confirm apply last patch preview",
-            "- show packet commands",
-            "- confirm run packet item N",
-            "- plan post edit validation",
-            "VS and reports:",
-            "- show visual studio integration",
-            "- show coding session summary",
-            "- generate coding report",
-            "- generate morning report",
-            "PDF tools:",
-            "- show pdf tool status",
-            "- show pdf commands",
-            "- generate pdf \"name.pdf\" with text \"...\"",
-            "- inspect pdf \"path-or-name.pdf\"",
-            "- extract text from pdf \"path-or-name.pdf\"",
-            "- summarize pdf \"path-or-name.pdf\"",
-            "- convert markdown to pdf \"notes.md\" \"notes.pdf\"",
-            "- confirm combine pdfs \"one.pdf\" \"two.pdf\" \"combined.pdf\"",
-            "- confirm split pdf \"source.pdf\" \"split-output.pdf\"",
-            "- generate install report pdf",
-            "- generate troubleshooting report pdf",
-            "Computer assistant:",
-            "- show computer assistant status",
-            "- show computer assistant commands",
-            "- plan file organization \"C:\\Users\\<you>\\Downloads\"",
-            "- plan disk cleanup",
-            "- plan app install troubleshooting <app-or-error>",
-            "- plan peripheral setup <device-or-symptom>",
-            "Windows diagnostics:",
-            "- collect process evidence <name-or-pid>",
-            "- diagnose port <port>",
-            "- diagnose build lock",
-            "- show install doctor",
-            "Ability-index maintenance rule:",
-            "- Each new feature should be surfaced here, in the computer assistant index, in the helper/VS command buttons when useful, and in the user/engineering docs.",
-            "Prototype/future lane:",
-            "- Screenshot bug diagnosis can use existing temporary image attachments and local vision proof, but reliable screenshot-to-source debugging still needs a dedicated evidence/triage workflow."
-        };
-
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding skill command index", Policy.WorkspaceRoot);
-    }
+        => new(true, true, CodingAbilityCatalog.BuildBuilderCommandIndex(), "Coding skill command index", Policy.WorkspaceRoot);
 
     private async Task<CodingToolResult> ShowCodingSessionSummaryAsync(CancellationToken cancellationToken)
     {
@@ -1798,91 +1727,15 @@ public sealed class LocalCodingToolService(
     }
 
     private CodingToolResult ShowComputerAssistantStatus()
-    {
-        var lines = new List<string>
-        {
-            "Ali computer assistant status:",
-            $"Coding workspace: {Policy.WorkspaceRoot}",
-            $"PDF workspace: {_pdfWorkspaceRoot}",
-            "Visible helper lanes:",
-            "- Coding/Visual Studio companion: workspace inspection, planning, gated edits, builds, tests, packages, Git, reports.",
-            "- PDF workspace: create/export, inspect/extract/summarize, Markdown conversion, gated combine/split.",
-            "- Windows troubleshooting: processes, ports, services/startup, event logs, build locks, install readiness.",
-            "- General computer planning: file organization, disk cleanup, app install troubleshooting, peripheral setup.",
-            "- Source-backed answers: Ali can use approved curated web/source entries when the app performs a source lookup; this is not unrestricted browsing.",
-            "- Audio setup sources: Focusrite Scarlett Solo/2i2, AT2040, FetHead, and Shure SH-BROADCAST2 source links are available as reference material.",
-            "Guardrails:",
-            "- Status and planning commands are read-only.",
-            "- File moves, deletes, installers, services, startup entries, registry, firewall, PATH, drivers, and process stops require explicit approval through narrower commands.",
-            "- If Ali is uncertain, she should stop with options instead of pretending a fix is deterministic.",
-            "Fast commands:",
-            "- show computer assistant commands",
-            "- plan file organization \"<folder>\"",
-            "- plan disk cleanup",
-            "- plan app install troubleshooting <app-or-error>",
-            "- plan peripheral setup <device-or-symptom>",
-            "- show computer troubleshooting commands",
-            "- show windows troubleshooting toolkit",
-            "- show pdf commands",
-            "Truth boundary:",
-            "- Ali should not claim she has no internet/source access when approved source lookup is available.",
-            "- Ali should say source access is curated/approved-source lookup, not a free-form browser or autonomous web agent."
-        };
-
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Computer assistant status", Policy.WorkspaceRoot);
-    }
+        => new(
+            true,
+            true,
+            CodingAbilityCatalog.BuildComputerAssistantStatus(Policy.WorkspaceRoot, _pdfWorkspaceRoot),
+            "Computer assistant status",
+            Policy.WorkspaceRoot);
 
     private CodingToolResult ShowComputerAssistantCommandIndex()
-    {
-        var lines = new List<string>
-        {
-            "Ali computer assistant command index:",
-            "No files, apps, services, or settings were changed.",
-            "Start here:",
-            "- show computer assistant status",
-            "- show computer assistant commands",
-            "- show coding skill command index",
-            "Ability questions:",
-            "- what can you do",
-            "- can you tell me about your abilities",
-            "- what are your programming and data access limitations",
-            "Everyday computer planning:",
-            "- plan file organization \"C:\\Users\\<you>\\Downloads\"",
-            "- plan disk cleanup",
-            "- plan app install troubleshooting Visual Studio installer crash",
-            "- plan peripheral setup Scarlett Solo microphone gain",
-            "Troubleshooting planners:",
-            "- show computer troubleshooting commands",
-            "- plan slow computer troubleshooting",
-            "- plan network troubleshooting",
-            "- plan printer troubleshooting",
-            "- plan windows update troubleshooting",
-            "Windows diagnostics:",
-            "- show windows troubleshooting toolkit",
-            "- collect process evidence <name-or-pid>",
-            "- diagnose port <port>",
-            "- inspect services and startup",
-            "- triage event logs",
-            "- show install doctor",
-            "PDF/document work:",
-            "- show pdf commands",
-            "- generate pdf \"name.pdf\" with text \"...\"",
-            "- inspect pdf \"document.pdf\"",
-            "- summarize pdf \"document.pdf\"",
-            "Coding and Visual Studio:",
-            "- show visual studio integration",
-            "- inspect coding workspace",
-            "- interpret build goal <goal>",
-            "- draft implementation roadmap <goal>",
-            "- show execution packet",
-            "- confirm run packet item N",
-            "Future executor lane:",
-            "- File cleanup execution should be previewed as a move/copy plan first, then applied only after confirmation.",
-            "- Driver, installer, registry, trust-store, and service repairs stay owner-approved."
-        };
-
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Computer assistant command index", Policy.WorkspaceRoot);
-    }
+        => new(true, true, CodingAbilityCatalog.BuildComputerAssistantCommandIndex(), "Computer assistant command index", Policy.WorkspaceRoot);
 
     private CodingToolResult PlanFileOrganization(CodingToolRequest request)
     {
@@ -4788,34 +4641,7 @@ public sealed class LocalCodingToolService(
     }
 
     private CodingToolResult ShowPdfCommandIndex()
-    {
-        var lines = new List<string>
-        {
-            "Ali PDF command index:",
-            "No files were changed.",
-            "Create:",
-            "- generate pdf \"owner-demo.pdf\" with text \"Ali demo ready.\"",
-            "- convert markdown to pdf \"notes.md\" \"notes.pdf\"",
-            "- generate install report pdf",
-            "- generate troubleshooting report pdf",
-            "Inspect and read:",
-            "- show pdf tool status",
-            "- inspect pdf \"document.pdf\"",
-            "- extract text from pdf \"document.pdf\"",
-            "- summarize pdf \"document.pdf\"",
-            "Assemble with confirmation:",
-            "- confirm combine pdfs \"first.pdf\" \"second.pdf\" \"combined.pdf\"",
-            "- confirm split pdf \"source.pdf\" \"split-output.pdf\"",
-            "Folder rule:",
-            $"- Relative names use the configured PDF workspace: {_pdfWorkspaceRoot}",
-            "Limits:",
-            "- Ali preserves originals and writes new derived PDFs.",
-            "- Text extraction works best on Ali-generated/simple text PDFs.",
-            "- Scanned/image-only PDFs need OCR in a later phase."
-        };
-
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "PDF command index", _pdfWorkspaceRoot);
-    }
+        => new(true, true, CodingAbilityCatalog.BuildPdfCommandIndex(_pdfWorkspaceRoot), "PDF command index", _pdfWorkspaceRoot);
 
     private async Task<CodingToolResult> GenerateInstallReportAsync(
         CodingToolRequest request,

@@ -53,6 +53,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding policy can disable explicit outside file open", TestCodingPolicyCanDisableExplicitOutsideFileOpen),
     ("coding policy gates confirmed workspace edits", TestCodingPolicyGatesConfirmedWorkspaceEdits),
     ("coding settings save and load", TestCodingSettingsSaveAndLoad),
+    ("coding ability catalog backs deterministic indexes", TestCodingAbilityCatalogBacksDeterministicIndexes),
     ("coding locator uses configured tool paths", TestCodingLocatorUsesConfiguredToolPaths),
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
@@ -437,6 +438,25 @@ static Task TestCodingSettingsSaveAndLoad()
     Equal(true, loaded.ToPolicy().AllowPdfRead);
     Equal(false, loaded.ToPolicy().AllowPdfCreate);
     Equal(true, loaded.ToPolicy().AllowConfirmedPdfModify);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
+{
+    var builderIndex = CodingAbilityCatalog.BuildBuilderCommandIndex();
+    var computerIndex = CodingAbilityCatalog.BuildComputerAssistantCommandIndex();
+    var pdfIndex = CodingAbilityCatalog.BuildPdfCommandIndex(@"C:\Ali\Pdfs");
+
+    Contains("Ali coding skill command index", builderIndex);
+    Contains("show visual studio integration", builderIndex);
+    Contains("confirm run packet item N", builderIndex);
+    Contains("Ali computer assistant command index", computerIndex);
+    Contains("what can you do", computerIndex);
+    Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
+    Contains("Ali PDF command index", pdfIndex);
+    Contains(@"C:\Ali\Pdfs", pdfIndex);
+    Equal(true, CodingAbilityCatalog.BuilderGroups.Any(group => group.Commands.Any(command => command.RequiresConfirmation)));
+    Equal(true, CodingAbilityCatalog.ComputerGroups.Count >= 6);
     return Task.CompletedTask;
 }
 
