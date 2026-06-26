@@ -273,6 +273,43 @@ public static class CodingToolRequestParser
         "build execution packet"
     ];
 
+    private static readonly string[] ApproveRoadmapExecutionPacketRequests =
+    [
+        "approve execution packet",
+        "approve coding execution packet",
+        "approve roadmap execution packet",
+        "approve step packet",
+        "approve current packet",
+        "approve last packet"
+    ];
+
+    private static readonly string[] ShowApprovedRoadmapExecutionPacketRequests =
+    [
+        "show approved packet",
+        "show approved execution packet",
+        "show approved coding execution packet",
+        "show active packet",
+        "show active execution packet"
+    ];
+
+    private static readonly string[] DiscardApprovedRoadmapExecutionPacketRequests =
+    [
+        "discard approved packet",
+        "discard approved execution packet",
+        "discard active packet",
+        "clear approved packet",
+        "clear active packet"
+    ];
+
+    private static readonly string[] ShowRoadmapExecutionPacketProgressRequests =
+    [
+        "show packet progress",
+        "show execution packet progress",
+        "show approved packet progress",
+        "packet progress",
+        "execution packet progress"
+    ];
+
     private static readonly string[] AdvanceRoadmapStepRequests =
     [
         "advance roadmap step",
@@ -725,6 +762,30 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsApproveRoadmapExecutionPacketRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ApproveRoadmapExecutionPacket, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsShowApprovedRoadmapExecutionPacketRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowApprovedRoadmapExecutionPacket, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDiscardApprovedRoadmapExecutionPacketRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DiscardApprovedRoadmapExecutionPacket, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsShowRoadmapExecutionPacketProgressRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRoadmapExecutionPacketProgress, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsAdvanceRoadmapStepRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.AdvanceRoadmapStep, null, UserConfirmed: userConfirmed);
@@ -855,6 +916,18 @@ public static class CodingToolRequestParser
 
     private static bool IsShowRoadmapExecutionPacketRequest(string text) =>
         ShowRoadmapExecutionPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsApproveRoadmapExecutionPacketRequest(string text) =>
+        ApproveRoadmapExecutionPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowApprovedRoadmapExecutionPacketRequest(string text) =>
+        ShowApprovedRoadmapExecutionPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDiscardApprovedRoadmapExecutionPacketRequest(string text) =>
+        DiscardApprovedRoadmapExecutionPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowRoadmapExecutionPacketProgressRequest(string text) =>
+        ShowRoadmapExecutionPacketProgressRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsAdvanceRoadmapStepRequest(string text) =>
         AdvanceRoadmapStepRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

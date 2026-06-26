@@ -89,6 +89,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool recovers active roadmap state", TestLocalCodingToolRecoversActiveRoadmapState),
     ("local coding tool shows next roadmap action", TestLocalCodingToolShowsNextRoadmapAction),
     ("local coding tool shows roadmap execution packet", TestLocalCodingToolShowsRoadmapExecutionPacket),
+    ("local coding tool manages approved execution packet", TestLocalCodingToolManagesApprovedExecutionPacket),
     ("local coding tool diagnoses crash recovery state", TestLocalCodingToolDiagnosesCrashRecoveryState),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
@@ -571,6 +572,18 @@ static Task TestCodingParserRoutesRoadmapExecutionPacket()
 
     Equal(true, CodingToolRequestParser.TryParse("prepare next step packet", out var prepareRequest));
     Equal(CodingToolAction.ShowRoadmapExecutionPacket, prepareRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("approve execution packet", out var approveRequest));
+    Equal(CodingToolAction.ApproveRoadmapExecutionPacket, approveRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show approved packet", out var showApprovedRequest));
+    Equal(CodingToolAction.ShowApprovedRoadmapExecutionPacket, showApprovedRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("discard approved packet", out var discardRequest));
+    Equal(CodingToolAction.DiscardApprovedRoadmapExecutionPacket, discardRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show packet progress", out var progressRequest));
+    Equal(CodingToolAction.ShowRoadmapExecutionPacketProgress, progressRequest.Action);
 
     return Task.CompletedTask;
 }
@@ -1319,6 +1332,77 @@ static async Task TestLocalCodingToolShowsRoadmapExecutionPacket()
     Equal(1, runner.Runs.Count);
     Equal("git", runner.Runs[0].FileName);
     Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
+}
+
+static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var empty = await service.TryHandleAsync("show approved packet", CancellationToken.None);
+    var draft = await service.TryHandleAsync("draft implementation roadmap add package lookup", CancellationToken.None);
+    var approveRoadmap = await service.TryHandleAsync("approve last roadmap", CancellationToken.None);
+    var start = await service.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var approvePacket = await service.TryHandleAsync("approve execution packet", CancellationToken.None);
+    var packetPath = Path.Combine(directory, "Coding", "approved-step-packet.json");
+    var packetExistsAfterApproval = File.Exists(packetPath);
+
+    var recoveredService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+    var show = await recoveredService.TryHandleAsync("show approved packet", CancellationToken.None);
+    var progress = await recoveredService.TryHandleAsync("show packet progress", CancellationToken.None);
+    var discard = await recoveredService.TryHandleAsync("discard approved packet", CancellationToken.None);
+    var showAfterDiscard = await recoveredService.TryHandleAsync("show approved packet", CancellationToken.None);
+
+    Equal(true, empty.Succeeded);
+    Contains("No approved execution packet", empty.Message);
+    Equal(true, draft.Succeeded);
+    Equal(true, approveRoadmap.Succeeded);
+    Equal(true, start.Succeeded);
+    Equal(true, approvePacket.Succeeded);
+    Contains("Approved execution packet", approvePacket.Message);
+    Contains("No files were changed", approvePacket.Message);
+    Contains("local planning state only", approvePacket.Message);
+    Equal(true, packetExistsAfterApproval);
+    Equal(true, show.Succeeded);
+    Contains("Approved execution packet", show.Message);
+    Contains("Execution candidates", show.Message);
+    Contains("show packet progress", show.Message);
+    Equal(true, progress.Succeeded);
+    Contains("Execution packet progress", progress.Message);
+    Contains("Packet status: active", progress.Message);
+    Contains("Progress lanes", progress.Message);
+    Equal(true, discard.Succeeded);
+    Contains("Discarded approved execution packet", discard.Message);
+    Equal(false, File.Exists(packetPath));
+    Equal(true, showAfterDiscard.Succeeded);
+    Contains("No approved execution packet", showAfterDiscard.Message);
+    Equal(2, runner.Runs.Count);
+    Equal("git", runner.Runs[0].FileName);
+    Equal("git", runner.Runs[1].FileName);
 }
 
 static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()

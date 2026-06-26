@@ -9,7 +9,7 @@ using Microsoft.VisualStudio.Shell.Interop;
 namespace Ali.App.VisualStudioExtension;
 
 [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
-[InstalledProductRegistration("Ali Companion", "Visual Studio tool window for Ali's local programming companion.", "0.17.0")]
+[InstalledProductRegistration("Ali Companion", "Visual Studio tool window for Ali's local programming companion.", "0.18.0")]
 [ProvideMenuResource("Menus.ctmenu", 1)]
 [ProvideOptionPage(typeof(AliCompanionOptionsPage), "Ali", "Companion", 0, 0, true)]
 [ProvideToolWindow(typeof(AliCompanionToolWindow))]

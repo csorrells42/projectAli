@@ -106,6 +106,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowActiveRoadmapStep
             or CodingToolAction.ShowNextRoadmapAction
             or CodingToolAction.ShowRoadmapExecutionPacket
+            or CodingToolAction.ApproveRoadmapExecutionPacket
+            or CodingToolAction.ShowApprovedRoadmapExecutionPacket
+            or CodingToolAction.DiscardApprovedRoadmapExecutionPacket
+            or CodingToolAction.ShowRoadmapExecutionPacketProgress
             or CodingToolAction.AdvanceRoadmapStep
             or CodingToolAction.PauseRoadmap
             or CodingToolAction.ResumeRoadmap

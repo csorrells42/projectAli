@@ -110,6 +110,7 @@ public sealed class LocalCodingToolService(
     private readonly ICodingCommandRunner _commandRunner = commandRunner ?? new CodingCommandRunner();
     private readonly string _actionLogPath = Path.Combine(dataRoot, "coding-tool-actions.jsonl");
     private readonly string _roadmapStatePath = Path.Combine(dataRoot, "Coding", "roadmap-execution-state.json");
+    private readonly string _approvedPacketPath = Path.Combine(dataRoot, "Coding", "approved-step-packet.json");
     private readonly string _generatedDocumentsRoot = Path.Combine(dataRoot, "GeneratedDocuments");
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
@@ -119,6 +120,8 @@ public sealed class LocalCodingToolService(
     private bool _approvedRoadmapStarted;
     private bool _roadmapStateLoaded;
     private RoadmapExecutionState? _roadmapState;
+    private bool _approvedPacketLoaded;
+    private ApprovedRoadmapExecutionPacket? _approvedPacket;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
 
@@ -179,6 +182,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowActiveRoadmapStep => ShowActiveRoadmapStep(),
             CodingToolAction.ShowNextRoadmapAction => await ShowNextRoadmapActionAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowRoadmapExecutionPacket => await ShowRoadmapExecutionPacketAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ApproveRoadmapExecutionPacket => await ApproveRoadmapExecutionPacketAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowApprovedRoadmapExecutionPacket => ShowApprovedRoadmapExecutionPacket(),
+            CodingToolAction.DiscardApprovedRoadmapExecutionPacket => DiscardApprovedRoadmapExecutionPacket(),
+            CodingToolAction.ShowRoadmapExecutionPacketProgress => await ShowRoadmapExecutionPacketProgressAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
             CodingToolAction.PauseRoadmap => PauseRoadmap(),
             CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
@@ -886,6 +893,150 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ApproveRoadmapExecutionPacketAsync(CancellationToken cancellationToken)
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        if (!TryGetActiveRoadmapForStepChange(out var state, out var error))
+        {
+            return error with
+            {
+                ToolName = "Approved execution packet"
+            };
+        }
+
+        var packet = await BuildApprovedRoadmapExecutionPacketAsync(state, cancellationToken).ConfigureAwait(false);
+        _approvedPacket = packet;
+        SaveApprovedPacket();
+
+        var lines = new List<string>
+        {
+            "Approved execution packet:",
+            $"Goal: {packet.Goal}",
+            $"Step: {packet.StepIndex + 1}: {packet.Step}",
+            $"Packet status: {packet.PacketStatus}",
+            $"Recommended action: {packet.RecommendedAction}",
+            "No files were changed.",
+            "Truth boundary: approval stores this packet as local planning state only. It does not run edits, packages, builds, tests, run commands, or Git writes.",
+            "Next commands:",
+            "- show approved packet",
+            "- show packet progress",
+            "- run one listed command only through its normal approval gate",
+            $"Packet file: {_approvedPacketPath}"
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Approved execution packet",
+            _approvedPacketPath);
+    }
+
+    private CodingToolResult ShowApprovedRoadmapExecutionPacket()
+    {
+        LoadApprovedPacketIfNeeded();
+        if (_approvedPacket is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No approved execution packet is active. Use: approve execution packet",
+                "Approved execution packet",
+                _approvedPacketPath);
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            FormatApprovedPacket(_approvedPacket, includePath: true),
+            "Approved execution packet",
+            _approvedPacketPath);
+    }
+
+    private CodingToolResult DiscardApprovedRoadmapExecutionPacket()
+    {
+        LoadApprovedPacketIfNeeded();
+        if (_approvedPacket is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No approved execution packet was active.",
+                "Approved execution packet",
+                _approvedPacketPath);
+        }
+
+        var goal = _approvedPacket.Goal;
+        ClearApprovedPacket();
+        return new CodingToolResult(
+            true,
+            true,
+            $"Discarded approved execution packet. No files were changed.{Environment.NewLine}Goal: {goal}",
+            "Approved execution packet",
+            _approvedPacketPath);
+    }
+
+    private async Task<CodingToolResult> ShowRoadmapExecutionPacketProgressAsync(CancellationToken cancellationToken)
+    {
+        LoadApprovedPacketIfNeeded();
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        if (_approvedPacket is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No approved execution packet is active. Use: approve execution packet",
+                "Execution packet progress",
+                _approvedPacketPath);
+        }
+
+        var packet = _approvedPacket;
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var stale = _roadmapState is null
+            || !_roadmapState.Goal.Equals(packet.Goal, StringComparison.Ordinal)
+            || _roadmapState.CurrentStepIndex != packet.StepIndex
+            || _roadmapState.UpdatedAt > packet.RoadmapUpdatedAt;
+
+        var lines = new List<string>
+        {
+            "Execution packet progress:",
+            $"Goal: {packet.Goal}",
+            $"Step: {packet.StepIndex + 1}: {packet.Step}",
+            $"Packet status: {(stale ? "stale: roadmap changed after packet approval" : "active")}",
+            $"Approved: {packet.ApprovedAt:u}",
+            $"Roadmap snapshot: {packet.RoadmapUpdatedAt:u}",
+            $"Git: {gitStatus.Summary}",
+            latestReceipt is null
+                ? "Latest receipt: none"
+                : FormatReceiptSummary("Latest receipt", latestReceipt),
+            latestDotNetReceipt is null
+                ? "Latest dotnet-style receipt: none"
+                : FormatReceiptSummary("Latest dotnet-style receipt", latestDotNetReceipt),
+            "Progress lanes:",
+            "- Prep: review read-only commands and current context.",
+            "- Execute: choose one candidate command and use its normal approval gate.",
+            "- Validate: run confirmed build/test when code or packages change.",
+            "- Closeout: review receipts and Git before marking the roadmap step complete.",
+            "Next safe commands:"
+        };
+        lines.Add("- show approved packet");
+        lines.Add(stale ? "- discard approved packet" : "- show execution packet");
+        lines.Add("- show coding receipts");
+        lines.Add("- show crash recovery status");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Execution packet progress",
+            _approvedPacketPath);
+    }
+
     private CodingToolResult AdvanceRoadmapStep()
     {
         LoadRoadmapStateIfNeeded();
@@ -1199,6 +1350,53 @@ public sealed class LocalCodingToolService(
         JsonSerializer.Serialize(stream, _roadmapState, RoadmapJsonOptions);
     }
 
+    private void LoadApprovedPacketIfNeeded()
+    {
+        if (_approvedPacketLoaded)
+        {
+            return;
+        }
+
+        _approvedPacketLoaded = true;
+        if (!File.Exists(_approvedPacketPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_approvedPacketPath);
+            _approvedPacket = JsonSerializer.Deserialize<ApprovedRoadmapExecutionPacket>(stream, RoadmapJsonOptions);
+        }
+        catch
+        {
+            _approvedPacket = null;
+        }
+    }
+
+    private void SaveApprovedPacket()
+    {
+        _approvedPacketLoaded = true;
+        if (_approvedPacket is null)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_approvedPacketPath)!);
+        using var stream = File.Create(_approvedPacketPath);
+        JsonSerializer.Serialize(stream, _approvedPacket, RoadmapJsonOptions);
+    }
+
+    private void ClearApprovedPacket()
+    {
+        _approvedPacket = null;
+        _approvedPacketLoaded = true;
+        if (File.Exists(_approvedPacketPath))
+        {
+            File.Delete(_approvedPacketPath);
+        }
+    }
+
     private void ClearRoadmapState()
     {
         _lastRoadmapRequest = null;
@@ -1210,6 +1408,8 @@ public sealed class LocalCodingToolService(
         {
             File.Delete(_roadmapStatePath);
         }
+
+        ClearApprovedPacket();
     }
 
     private void SyncRoadmapFieldsFromState(RoadmapExecutionState state)
@@ -1636,6 +1836,67 @@ public sealed class LocalCodingToolService(
 
         commands.Add("generate coding report");
         return commands;
+    }
+
+    private async Task<ApprovedRoadmapExecutionPacket> BuildApprovedRoadmapExecutionPacketAsync(
+        RoadmapExecutionState state,
+        CancellationToken cancellationToken)
+    {
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var recommendation = BuildNextRoadmapRecommendation(state, gitStatus, latestDotNetReceipt, primaryTarget);
+        var currentStep = GetRoadmapCurrentStep(state);
+        return new ApprovedRoadmapExecutionPacket(
+            Goal: state.Goal,
+            StepIndex: state.CurrentStepIndex,
+            Step: currentStep,
+            RoadmapUpdatedAt: state.UpdatedAt,
+            ApprovedAt: DateTimeOffset.UtcNow,
+            PrimaryTarget: primaryTarget,
+            PacketStatus: DescribeExecutionPacketStatus(state, gitStatus, latestDotNetReceipt),
+            RecommendedAction: recommendation.Action,
+            Confidence: recommendation.Confidence,
+            PrepCommands: ["show next coding action", "show crash recovery status", "show coding receipts"],
+            ExecutionCommands: BuildExecutionCandidateCommands(state, recommendation, currentStep, primaryTarget),
+            ValidationCommands: BuildValidationCommands(state, currentStep, primaryTarget),
+            CloseoutCommands: BuildCloseoutCommands(state, currentStep));
+    }
+
+    private string FormatApprovedPacket(ApprovedRoadmapExecutionPacket packet, bool includePath)
+    {
+        var lines = new List<string>
+        {
+            "Approved execution packet:",
+            $"Goal: {packet.Goal}",
+            $"Step: {packet.StepIndex + 1}: {packet.Step}",
+            $"Approved: {packet.ApprovedAt:u}",
+            $"Primary target: {packet.PrimaryTarget}",
+            $"Packet status: {packet.PacketStatus}",
+            $"Recommended action: {packet.RecommendedAction}",
+            $"Confidence: {packet.Confidence}",
+            "Truth boundary: this is approved planning state only. Commands below still require their normal approval gates.",
+            "Read-only prep:"
+        };
+        AddUniqueCommands(lines, packet.PrepCommands);
+        lines.Add("Execution candidates:");
+        AddUniqueCommands(lines, packet.ExecutionCommands);
+        lines.Add("Validation commands:");
+        AddUniqueCommands(lines, packet.ValidationCommands);
+        lines.Add("Closeout commands:");
+        AddUniqueCommands(lines, packet.CloseoutCommands);
+        lines.Add("Next safe commands:");
+        lines.Add("- show packet progress");
+        lines.Add("- discard approved packet");
+        if (includePath)
+        {
+            lines.Add($"Packet file: {_approvedPacketPath}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private bool TryGetActiveRoadmapForStepChange(
@@ -5273,6 +5534,21 @@ public sealed class LocalCodingToolService(
         string Confidence,
         IReadOnlyList<string> Reasons,
         IReadOnlyList<string> Commands);
+
+    private sealed record ApprovedRoadmapExecutionPacket(
+        string Goal,
+        int StepIndex,
+        string Step,
+        DateTimeOffset RoadmapUpdatedAt,
+        DateTimeOffset ApprovedAt,
+        string PrimaryTarget,
+        string PacketStatus,
+        string RecommendedAction,
+        string Confidence,
+        IReadOnlyList<string> PrepCommands,
+        IReadOnlyList<string> ExecutionCommands,
+        IReadOnlyList<string> ValidationCommands,
+        IReadOnlyList<string> CloseoutCommands);
 
     private sealed record RoadmapExecutionState(
         string Goal,

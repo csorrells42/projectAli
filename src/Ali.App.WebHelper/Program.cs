@@ -1028,6 +1028,8 @@ public const string IndexHtml = """
             <button class="command-chip" type="button" data-command="draft implementation roadmap ">Roadmap</button>
             <button class="command-chip" type="button" data-command="show next coding action">Next Action</button>
             <button class="command-chip" type="button" data-command="show execution packet">Packet</button>
+            <button class="command-chip" type="button" data-command="approve execution packet">Approve Packet</button>
+            <button class="command-chip" type="button" data-command="show packet progress">Progress</button>
             <button class="command-chip" type="button" data-command="show active roadmap step">Active Step</button>
             <button class="command-chip" type="button" data-command="show crash recovery status">Recovery</button>
           </div>
