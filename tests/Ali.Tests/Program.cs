@@ -225,6 +225,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("voice transcript routing auto sends only when voice mode on", TestVoiceTranscriptRoutingAutoSendsOnlyWhenVoiceModeOn),
     ("speech player stop cancels playback", TestSpeechPlayerStopCancelsPlayback),
     ("spoken response cleaner strips clutter", TestSpokenResponseCleanerStripsClutter),
+    ("speech streaming buffer emits clean segments", TestSpeechStreamingBufferEmitsCleanSegments),
     ("voice settings persist microphone and preset", TestVoiceSettingsPersistMicrophoneAndPreset),
     ("local voice resource locator repairs DevRun paths", TestLocalVoiceResourceLocatorRepairsDevRunPaths),
     ("missing saved microphone warns and falls back", TestMissingSavedMicrophoneWarnsAndFallsBack),
@@ -5269,6 +5270,24 @@ static Task TestSpokenResponseCleanerStripsClutter()
     Contains("Code block omitted", cleaned);
     Contains("Final answer.", cleaned);
     Contains("Thanks", cleaned);
+    return Task.CompletedTask;
+}
+
+static Task TestSpeechStreamingBufferEmitsCleanSegments()
+{
+    var buffer = new SpeechStreamingBuffer(minimumSegmentCharacters: 35, maximumSegmentCharacters: 90);
+    var first = buffer.Append("This is the first streamed sentence. This second sentence is still arriving");
+    var second = buffer.Append(" and now it is complete. Sources checked:\n[1] Example Source - https://example.test/source");
+    var final = buffer.Complete();
+    var all = first.Concat(second).Concat(final).ToList();
+    var spoken = string.Join(" ", all);
+
+    Equal(true, all.Count >= 2);
+    Contains("first streamed sentence", spoken);
+    Contains("second sentence", spoken);
+    Equal(false, spoken.Contains("Sources checked", StringComparison.OrdinalIgnoreCase));
+    Equal(false, spoken.Contains("Example Source", StringComparison.OrdinalIgnoreCase));
+    Equal(false, spoken.Contains("https://", StringComparison.OrdinalIgnoreCase));
     return Task.CompletedTask;
 }
 

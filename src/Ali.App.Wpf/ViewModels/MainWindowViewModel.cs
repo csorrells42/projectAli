@@ -1589,6 +1589,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Messages.Add(assistantMessage);
 
         _activeResponse = new CancellationTokenSource();
+        var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
 
         try
@@ -1604,7 +1605,10 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 assistantMessage.Text += chunk.Text;
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
+                QueueStreamingSpeech(streamingSpeech, chunk.Text);
             }
+
+            CompleteStreamingSpeechInput(streamingSpeech);
 
             if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
             {
@@ -1627,16 +1631,23 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             assistantMessage.Text += "\n\nStopped by user.";
+            CancelStreamingSpeech(streamingSpeech);
             StatusText = "Response stopped.";
         }
         catch (HttpRequestException ex)
         {
             assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            CancelStreamingSpeech(streamingSpeech);
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
             StatusText = $"Local model communication failed: {ex.Message}";
         }
         finally
         {
+            if (!completed)
+            {
+                CancelStreamingSpeech(streamingSpeech);
+            }
+
             _activeResponse.Dispose();
             _activeResponse = null;
             IsBusy = false;
@@ -1648,14 +1659,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 StatusText = $"{StatusText} {localFoundationStatus}";
             }
         }
-
-        if (completed && inputOrigin == VoiceInputOrigin.Voice && !string.IsNullOrWhiteSpace(assistantMessage.Text))
-        {
-            await SpeakAssistantAnswerAsync(assistantMessage.Text, voiceMetadata).ConfigureAwait(true);
-        }
     }
 
-    private void Stop() => _activeResponse?.Cancel();
+    private void Stop()
+    {
+        _activeResponse?.Cancel();
+        StopSpeaking();
+    }
 
     private void StartNewChat()
     {
@@ -3131,20 +3141,18 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task SpeakAssistantAnswerAsync(string assistantText, VoiceTurnMetadata? voiceMetadata)
+    private StreamingSpeechState? StartStreamingSpeechIfNeeded(VoiceInputOrigin inputOrigin)
     {
-        var spokenText = SpeechOutputCleaner.Clean(assistantText);
-        if (string.IsNullOrWhiteSpace(spokenText))
+        if (inputOrigin != VoiceInputOrigin.Voice)
         {
-            TtsStatus = "No speakable response after cleanup.";
-            return;
+            return null;
         }
 
         if (!_services.TextToSpeech.IsConfigured)
         {
             TtsStatus = "Local TTS is not configured. Text answer is available.";
             VoiceStatus = "Speech skipped because local TTS is not configured.";
-            return;
+            return null;
         }
 
         _activeSpeech?.Cancel();
@@ -3152,26 +3160,95 @@ public sealed class MainWindowViewModel : ObservableObject
         _activeSpeech?.Dispose();
         _activeSpeech = new CancellationTokenSource();
 
-        SpeechSynthesisResult? speech = null;
+        var state = new StreamingSpeechState(_activeSpeech);
         IsSpeaking = true;
+        TtsStatus = "Waiting for streamed response...";
+        VoiceStatus = "Voice response streaming...";
+        state.ConsumerTask = ConsumeStreamingSpeechAsync(state);
+        return state;
+    }
+
+    private static void QueueStreamingSpeech(StreamingSpeechState? state, string chunkText)
+    {
+        if (state is null)
+        {
+            return;
+        }
+
+        foreach (var segment in state.Buffer.Append(chunkText))
+        {
+            state.Queue.Writer.TryWrite(segment);
+        }
+    }
+
+    private void CompleteStreamingSpeechInput(StreamingSpeechState? state)
+    {
+        if (state is null)
+        {
+            return;
+        }
+
+        foreach (var segment in state.Buffer.Complete())
+        {
+            state.Queue.Writer.TryWrite(segment);
+        }
+
+        state.Queue.Writer.TryComplete();
+        TtsStatus = "Finishing streamed speech...";
+    }
+
+    private void CancelStreamingSpeech(StreamingSpeechState? state)
+    {
+        if (state is null)
+        {
+            return;
+        }
+
+        state.Cancellation.Cancel();
+        state.Queue.Writer.TryComplete();
+        _services.SpeechPlayer.Stop();
+    }
+
+    private async Task ConsumeStreamingSpeechAsync(StreamingSpeechState state)
+    {
         try
         {
-            TtsStatus = "Synthesizing local speech...";
-            var settings = new VoiceSettings(
-                _services.TextToSpeech.VoiceId,
-                Rate: 1.0,
-                RetainAudio: false);
+            await foreach (var segment in state.Queue.Reader.ReadAllAsync(state.Cancellation.Token).ConfigureAwait(true))
+            {
+                if (string.IsNullOrWhiteSpace(segment))
+                {
+                    continue;
+                }
 
-            speech = await _services.TextToSpeech.SynthesizeAsync(
-                spokenText,
-                settings,
-                _activeSpeech.Token).ConfigureAwait(true);
+                SpeechSynthesisResult? speech = null;
+                try
+                {
+                    TtsStatus = "Synthesizing streamed speech...";
+                    var settings = new VoiceSettings(
+                        _services.TextToSpeech.VoiceId,
+                        Rate: 1.0,
+                        RetainAudio: false);
 
-            TtsStatus = "Speaking local response...";
-            await _services.SpeechPlayer.PlayAsync(speech.AudioPath, _activeSpeech.Token).ConfigureAwait(true);
+                    speech = await _services.TextToSpeech.SynthesizeAsync(
+                        segment,
+                        settings,
+                        state.Cancellation.Token).ConfigureAwait(true);
+
+                    TtsStatus = "Speaking streamed response...";
+                    await _services.SpeechPlayer.PlayAsync(speech.AudioPath, state.Cancellation.Token).ConfigureAwait(true);
+                    SaveLastSuccessfulTtsDevice();
+                }
+                finally
+                {
+                    if (speech is not null && !speech.RetainAudio && File.Exists(speech.AudioPath))
+                    {
+                        TryDeleteFile(speech.AudioPath);
+                    }
+                }
+            }
+
             TtsStatus = "Speech complete.";
             VoiceStatus = "Voice loop complete.";
-            SaveLastSuccessfulTtsDevice();
         }
         catch (OperationCanceledException)
         {
@@ -3184,13 +3261,11 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             IsSpeaking = false;
-            if (speech is not null && !speech.RetainAudio && File.Exists(speech.AudioPath))
+            if (ReferenceEquals(_activeSpeech, state.Cancellation))
             {
-                TryDeleteFile(speech.AudioPath);
+                _activeSpeech.Dispose();
+                _activeSpeech = null;
             }
-
-            _activeSpeech?.Dispose();
-            _activeSpeech = null;
         }
     }
 
@@ -5033,4 +5108,5 @@ internal sealed record RuntimeModelChoice(
         property = default;
         return false;
     }
+
 }

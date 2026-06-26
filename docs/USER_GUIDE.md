@@ -21,6 +21,8 @@ You can:
 - Stop an active response.
 - Flag an assistant answer as incorrect.
 
+Assistant text now appears as the local runtime streams chunks. Voice replies use the same streamed answer path: Ali updates the visible answer and queues cleaned sentence-sized speech segments from the same chunks, so Piper can start speaking before the full answer is finished. Source appendices remain visible in text but are not read aloud.
+
 The first runtime is a safe local bootstrap stub. It exists to prove the app flow and correction queue before a real local model is activated.
 
 ## Program Flow

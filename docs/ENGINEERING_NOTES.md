@@ -72,6 +72,7 @@ docs
 - Voice input tuning: persisted device selection, live NAudio level monitor, simple DSP presets, capture diagnostics
 - Voice safety: risky spoken commands are blocked in Phase 1C before they can be sent as action requests
 - Spoken response cleaner: removes URLs, markdown clutter, code blocks, stack traces, metadata, citation markers, and source appendices from TTS text while leaving visible answer text intact
+- Streaming voice output: WPF consumes the single `ConversationOrchestrator.StreamAnswerAsync` path, appends chunks to the assistant message, and feeds those same chunks into a speech buffer for Piper. There is no second chat/tool/source execution path for voice streaming.
 - Correction reports now carry optional voice transcript/provider metadata without retaining raw audio
 - Local coding workspace policy: limits coding file actions to the approved programming workspace unless explicitly configured
 - Local coding tool service: workspace inspection, build-idea scouting, file open/read/search, package listing, guarded build/test/run/restore, guarded Git, receipts, patch preview/apply, last-failure diagnosis, configurable PDF workspace tooling, and general computer-assistant planning/status commands
@@ -101,6 +102,8 @@ guarded task plan
 ```
 
 For explicit coding commands, Ali handles the request deterministically before calling the model.
+
+Streaming output rule: the orchestrator remains the single source of answer chunks. UI text, conversation persistence, correction metadata, and voice playback must consume the same chunks or the same final assistant text. Do not add a second answer-generation path for streaming, voice, or tool responses.
 
 Current deterministic command groups:
 
