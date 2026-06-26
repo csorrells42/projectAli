@@ -67,6 +67,8 @@ public enum CodingToolAction
     PlanDiskCleanup,
     PlanAppInstallTroubleshooting,
     PlanPeripheralSetup,
+    ShowComputerTroubleshootingCommandIndex,
+    PlanComputerTroubleshooting,
     ShowPdfToolStatus,
     ShowPdfCommandIndex,
     GeneratePdf,

@@ -40,6 +40,7 @@ This is the approved build-skills path for the overnight sprint.
 34. PDF workspace polish: configurable PDF workspace folder, PDF permission rows, polished PDF generation, PDF command/status index, inspection/extraction/summarization, Markdown conversion, confirmed derived combine/split, and install/troubleshooting report PDFs.
 35. General computer assistant front door: `show computer assistant status`, `show computer assistant commands`, natural ability-question routing, file organization planning, disk cleanup planning, app install troubleshooting planning, and peripheral setup planning.
 36. Ability and source-awareness polish: deterministic ability questions now use Ali's own command/status index, source-backed access is described as curated approved-source lookup, and spoken responses strip source appendices so Piper does not read source plumbing aloud.
+37. Lunch-sprint troubleshooting pack: `show computer troubleshooting commands` plus 19 read-only planners for slow PC, network, Wi-Fi, printer, audio, microphone, camera, Bluetooth, USB, display, Windows Update, app crash, startup cleanup, browser, OneDrive sync, backup, driver, suspicious activity, and remote support handoff triage.
 
 ## Approved Next Road Completed
 

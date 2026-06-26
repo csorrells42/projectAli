@@ -298,6 +298,93 @@ public static class CodingToolRequestParser
         "troubleshoot device setup "
     ];
 
+    private static readonly string[] ComputerTroubleshootingCommandIndexRequests =
+    [
+        "show computer troubleshooting commands",
+        "show pc troubleshooting commands",
+        "show windows help commands",
+        "computer troubleshooting commands",
+        "pc troubleshooting commands",
+        "windows help commands"
+    ];
+
+    private static readonly (string Request, string Scenario)[] ComputerTroubleshootingPlanRequests =
+    [
+        ("plan slow computer troubleshooting", "Slow computer"),
+        ("plan network troubleshooting", "Network"),
+        ("plan wifi troubleshooting", "Wi-Fi"),
+        ("plan wi-fi troubleshooting", "Wi-Fi"),
+        ("plan printer troubleshooting", "Printer"),
+        ("plan audio troubleshooting", "Audio"),
+        ("plan microphone troubleshooting", "Microphone"),
+        ("plan camera troubleshooting", "Camera"),
+        ("plan webcam troubleshooting", "Camera"),
+        ("plan bluetooth troubleshooting", "Bluetooth"),
+        ("plan usb troubleshooting", "USB device"),
+        ("plan usb device troubleshooting", "USB device"),
+        ("plan display troubleshooting", "Display"),
+        ("plan monitor troubleshooting", "Display"),
+        ("plan windows update troubleshooting", "Windows Update"),
+        ("plan app crash troubleshooting", "App crash"),
+        ("plan startup cleanup", "Startup cleanup"),
+        ("plan browser troubleshooting", "Browser"),
+        ("plan onedrive troubleshooting", "OneDrive sync"),
+        ("plan onedrive sync troubleshooting", "OneDrive sync"),
+        ("plan backup strategy", "Backup"),
+        ("plan driver troubleshooting", "Driver"),
+        ("plan suspicious activity check", "Suspicious activity"),
+        ("plan remote support handoff", "Remote support handoff")
+    ];
+
+    private static readonly (string Prefix, string Scenario)[] ComputerTroubleshootingPlanPrefixes =
+    [
+        ("plan slow computer troubleshooting ", "Slow computer"),
+        ("troubleshoot slow computer ", "Slow computer"),
+        ("plan network troubleshooting ", "Network"),
+        ("troubleshoot network ", "Network"),
+        ("plan wifi troubleshooting ", "Wi-Fi"),
+        ("plan wi-fi troubleshooting ", "Wi-Fi"),
+        ("troubleshoot wifi ", "Wi-Fi"),
+        ("troubleshoot wi-fi ", "Wi-Fi"),
+        ("plan printer troubleshooting ", "Printer"),
+        ("troubleshoot printer ", "Printer"),
+        ("plan audio troubleshooting ", "Audio"),
+        ("troubleshoot audio ", "Audio"),
+        ("plan microphone troubleshooting ", "Microphone"),
+        ("troubleshoot microphone ", "Microphone"),
+        ("plan camera troubleshooting ", "Camera"),
+        ("plan webcam troubleshooting ", "Camera"),
+        ("troubleshoot camera ", "Camera"),
+        ("troubleshoot webcam ", "Camera"),
+        ("plan bluetooth troubleshooting ", "Bluetooth"),
+        ("troubleshoot bluetooth ", "Bluetooth"),
+        ("plan usb troubleshooting ", "USB device"),
+        ("plan usb device troubleshooting ", "USB device"),
+        ("troubleshoot usb ", "USB device"),
+        ("plan display troubleshooting ", "Display"),
+        ("plan monitor troubleshooting ", "Display"),
+        ("troubleshoot display ", "Display"),
+        ("troubleshoot monitor ", "Display"),
+        ("plan windows update troubleshooting ", "Windows Update"),
+        ("troubleshoot windows update ", "Windows Update"),
+        ("plan app crash troubleshooting ", "App crash"),
+        ("troubleshoot app crash ", "App crash"),
+        ("plan startup cleanup ", "Startup cleanup"),
+        ("troubleshoot startup ", "Startup cleanup"),
+        ("plan browser troubleshooting ", "Browser"),
+        ("troubleshoot browser ", "Browser"),
+        ("plan onedrive troubleshooting ", "OneDrive sync"),
+        ("plan onedrive sync troubleshooting ", "OneDrive sync"),
+        ("troubleshoot onedrive ", "OneDrive sync"),
+        ("plan backup strategy ", "Backup"),
+        ("plan backup troubleshooting ", "Backup"),
+        ("plan driver troubleshooting ", "Driver"),
+        ("troubleshoot driver ", "Driver"),
+        ("plan suspicious activity check ", "Suspicious activity"),
+        ("troubleshoot suspicious activity ", "Suspicious activity"),
+        ("plan remote support handoff ", "Remote support handoff")
+    ];
+
     private static readonly string[] ToolIntegrationStatusRequests =
     [
         "show visual studio integration",
@@ -1606,6 +1693,9 @@ public static class CodingToolRequestParser
     private static bool IsDiskCleanupPlanRequest(string text) =>
         DiskCleanupPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsComputerTroubleshootingCommandIndexRequest(string text) =>
+        ComputerTroubleshootingCommandIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -1805,10 +1895,56 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsComputerTroubleshootingCommandIndexRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowComputerTroubleshootingCommandIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParseComputerTroubleshootingPlan(text, userConfirmed, out request))
+        {
+            return true;
+        }
+
         return TryParsePrefixedQuery(text, FileOrganizationPlanPrefixes, CodingToolAction.PlanFileOrganization, userConfirmed, out request)
             || TryParsePrefixedQuery(text, DiskCleanupPlanPrefixes, CodingToolAction.PlanDiskCleanup, userConfirmed, out request)
             || TryParsePrefixedQuery(text, AppInstallTroubleshootingPlanPrefixes, CodingToolAction.PlanAppInstallTroubleshooting, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PeripheralSetupPlanPrefixes, CodingToolAction.PlanPeripheralSetup, userConfirmed, out request);
+    }
+
+    private static bool TryParseComputerTroubleshootingPlan(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var exact = ComputerTroubleshootingPlanRequests
+            .FirstOrDefault(candidate => text.Equals(candidate.Request, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(exact.Request))
+        {
+            request = new CodingToolRequest(
+                CodingToolAction.PlanComputerTroubleshooting,
+                null,
+                UserConfirmed: userConfirmed,
+                Query: exact.Scenario);
+            return true;
+        }
+
+        var prefixed = ComputerTroubleshootingPlanPrefixes
+            .OrderByDescending(candidate => candidate.Prefix.Length)
+            .FirstOrDefault(candidate => text.StartsWith(candidate.Prefix, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(prefixed.Prefix))
+        {
+            return false;
+        }
+
+        var detail = text[prefixed.Prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        var query = string.IsNullOrWhiteSpace(detail)
+            ? prefixed.Scenario
+            : $"{prefixed.Scenario}: {detail}";
+        request = new CodingToolRequest(
+            CodingToolAction.PlanComputerTroubleshooting,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: query);
+        return true;
     }
 
     private static bool TryParseProcessEvidence(string text, bool userConfirmed, out CodingToolRequest request)

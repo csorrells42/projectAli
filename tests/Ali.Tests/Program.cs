@@ -759,6 +759,21 @@ static Task TestCodingParserRoutesComputerAssistant()
     Equal(CodingToolAction.PlanPeripheralSetup, peripheralRequest.Action);
     Equal("Scarlett Solo gain", peripheralRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("show computer troubleshooting commands", out var troubleshootingIndexRequest));
+    Equal(CodingToolAction.ShowComputerTroubleshootingCommandIndex, troubleshootingIndexRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan slow computer troubleshooting", out var slowComputerRequest));
+    Equal(CodingToolAction.PlanComputerTroubleshooting, slowComputerRequest.Action);
+    Equal("Slow computer", slowComputerRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("troubleshoot wifi dropping connection", out var wifiRequest));
+    Equal(CodingToolAction.PlanComputerTroubleshooting, wifiRequest.Action);
+    Equal("Wi-Fi: dropping connection", wifiRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan suspicious activity check unknown startup item", out var suspiciousRequest));
+    Equal(CodingToolAction.PlanComputerTroubleshooting, suspiciousRequest.Action);
+    Equal("Suspicious activity: unknown startup item", suspiciousRequest.Query);
+
     return Task.CompletedTask;
 }
 
@@ -1837,6 +1852,10 @@ static async Task TestLocalCodingToolShowsComputerAssistant()
     var cleanup = await service.TryHandleAsync("plan disk cleanup", CancellationToken.None);
     var install = await service.TryHandleAsync("plan app install troubleshooting Visual Studio installer crash", CancellationToken.None);
     var peripheral = await service.TryHandleAsync("plan peripheral setup Scarlett Solo gain", CancellationToken.None);
+    var troubleshootIndex = await service.TryHandleAsync("show computer troubleshooting commands", CancellationToken.None);
+    var slowComputer = await service.TryHandleAsync("plan slow computer troubleshooting", CancellationToken.None);
+    var wifi = await service.TryHandleAsync("troubleshoot wifi dropping connection", CancellationToken.None);
+    var suspicious = await service.TryHandleAsync("plan suspicious activity check unknown startup item", CancellationToken.None);
 
     Equal(true, status.Succeeded);
     Contains("Ali computer assistant status", status.Message);
@@ -1858,6 +1877,20 @@ static async Task TestLocalCodingToolShowsComputerAssistant()
     Contains("Peripheral setup plan", peripheral.Message);
     Contains("Scarlett Solo gain", peripheral.Message);
     Contains("AT2040", peripheral.Message);
+    Equal(true, troubleshootIndex.Succeeded);
+    Contains("20 lunch-sprint entries", troubleshootIndex.Message);
+    Contains("plan remote support handoff", troubleshootIndex.Message);
+    Equal(true, slowComputer.Succeeded);
+    Contains("Computer troubleshooting plan", slowComputer.Message);
+    Contains("Scenario: Slow computer", slowComputer.Message);
+    Contains("Task Manager", slowComputer.Message);
+    Equal(true, wifi.Succeeded);
+    Contains("Scenario: Wi-Fi", wifi.Message);
+    Contains("dropping connection", wifi.Message);
+    Equal(true, suspicious.Succeeded);
+    Contains("Scenario: Suspicious activity", suspicious.Message);
+    Contains("unknown startup item", suspicious.Message);
+    Contains("Defender", suspicious.Message);
 }
 
 static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()

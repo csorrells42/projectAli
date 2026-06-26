@@ -1125,6 +1125,31 @@ public const string IndexHtml = """
           </div>
         </div>
         <div class="command-group">
+          <h3>Troubleshoot</h3>
+          <div class="command-grid">
+            <button class="command-chip" type="button" data-command="show computer troubleshooting commands">Index</button>
+            <button class="command-chip" type="button" data-command="plan slow computer troubleshooting">Slow PC</button>
+            <button class="command-chip" type="button" data-command="plan network troubleshooting">Network</button>
+            <button class="command-chip" type="button" data-command="plan wifi troubleshooting">Wi-Fi</button>
+            <button class="command-chip" type="button" data-command="plan printer troubleshooting">Printer</button>
+            <button class="command-chip" type="button" data-command="plan audio troubleshooting">Audio</button>
+            <button class="command-chip" type="button" data-command="plan microphone troubleshooting">Mic</button>
+            <button class="command-chip" type="button" data-command="plan camera troubleshooting">Camera</button>
+            <button class="command-chip" type="button" data-command="plan bluetooth troubleshooting">Bluetooth</button>
+            <button class="command-chip" type="button" data-command="plan usb device troubleshooting">USB</button>
+            <button class="command-chip" type="button" data-command="plan display troubleshooting">Display</button>
+            <button class="command-chip" type="button" data-command="plan windows update troubleshooting">Update</button>
+            <button class="command-chip" type="button" data-command="plan app crash troubleshooting">App Crash</button>
+            <button class="command-chip" type="button" data-command="plan startup cleanup">Startup</button>
+            <button class="command-chip" type="button" data-command="plan browser troubleshooting">Browser</button>
+            <button class="command-chip" type="button" data-command="plan onedrive sync troubleshooting">OneDrive</button>
+            <button class="command-chip" type="button" data-command="plan backup strategy">Backup</button>
+            <button class="command-chip" type="button" data-command="plan driver troubleshooting">Driver</button>
+            <button class="command-chip" type="button" data-command="plan suspicious activity check">Suspicious</button>
+            <button class="command-chip" type="button" data-command="plan remote support handoff">Handoff</button>
+          </div>
+        </div>
+        <div class="command-group">
           <h3>PDF Tools</h3>
           <div class="command-grid">
             <button class="command-chip" type="button" data-command="show pdf tool status">PDF Status</button>
@@ -1149,6 +1174,7 @@ public const string IndexHtml = """
             <li><strong>Diagnose</strong>Guides Windows process, port, service, startup, and build-lock investigation.</li>
             <li><strong>PDF</strong>Creates polished PDFs, inspects/extracts text, summarizes, converts Markdown, and assembles derived PDFs through gates.</li>
             <li><strong>Computer</strong>Plans file organization, disk cleanup, app install troubleshooting, and peripheral setup without changing the PC.</li>
+            <li><strong>Troubleshoot</strong>Plans slow-PC, network, printer, audio, device, update, browser, sync, backup, driver, and suspicious-activity triage.</li>
             <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>
           </ul>
         </div>

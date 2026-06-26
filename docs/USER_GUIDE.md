@@ -162,6 +162,26 @@ Useful commands:
 - `plan disk cleanup`
 - `plan app install troubleshooting Visual Studio installer crash`
 - `plan peripheral setup Scarlett Solo gain`
+- `show computer troubleshooting commands`
+- `plan slow computer troubleshooting`
+- `plan network troubleshooting`
+- `plan wifi troubleshooting`
+- `plan printer troubleshooting`
+- `plan audio troubleshooting`
+- `plan microphone troubleshooting`
+- `plan camera troubleshooting`
+- `plan bluetooth troubleshooting`
+- `plan usb device troubleshooting`
+- `plan display troubleshooting`
+- `plan windows update troubleshooting`
+- `plan app crash troubleshooting`
+- `plan startup cleanup`
+- `plan browser troubleshooting`
+- `plan onedrive sync troubleshooting`
+- `plan backup strategy`
+- `plan driver troubleshooting`
+- `plan suspicious activity check`
+- `plan remote support handoff`
 - `show windows troubleshooting toolkit`
 - `plan rogue process hunt port 8765`
 - `collect process evidence dotnet`
@@ -259,6 +279,8 @@ Computer assistant:
 - `plan disk cleanup` creates a read-only cleanup path and drive-space snapshot. It does not delete files or change Windows settings.
 - `plan app install troubleshooting <app-or-error>` creates an installer troubleshooting plan without running installers, uninstallers, registry edits, driver installs, service changes, PATH changes, signing changes, or trust-store changes.
 - `plan peripheral setup <device-or-symptom>` creates a setup plan for devices such as audio interfaces, microphones, and boom arms without changing drivers, firmware, default devices, exclusive-mode settings, services, or registry entries.
+- `show computer troubleshooting commands` lists 20 read-only troubleshooting entry points for slow PCs, network/Wi-Fi, printers, audio/microphones/cameras, Bluetooth/USB/display, Windows Update, app crashes, startup cleanup, browser issues, OneDrive sync, backup, drivers, suspicious activity, and remote-support handoffs.
+- `plan <scenario> troubleshooting` creates a scenario-specific evidence checklist and stop rules. These planners do not change Windows settings, install drivers, clear browser data, unlink sync providers, stop processes, or run repair tools.
 
 Ali's source access is curated and approval-oriented. She can use approved source catalog entries when the app performs a source lookup, but this is not unrestricted browsing or autonomous web control. Spoken responses are cleaned so source appendices remain visible in text but are not read aloud by Piper.
 
