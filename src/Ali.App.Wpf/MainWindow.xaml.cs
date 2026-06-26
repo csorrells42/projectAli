@@ -97,8 +97,7 @@ public partial class MainWindow : Window
     {
         if (e.IsRepeat
             || DataContext is not MainWindowViewModel viewModel
-            || !viewModel.IsPushToTalkKey(e.Key)
-            || IsTextEntryFocus())
+            || !viewModel.IsPushToTalkKey(e.Key))
         {
             return;
         }
