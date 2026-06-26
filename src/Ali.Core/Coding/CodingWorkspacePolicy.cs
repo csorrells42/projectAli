@@ -12,7 +12,10 @@ public sealed class CodingWorkspacePolicy
         bool allowGitReadInsideWorkspace = true,
         bool allowConfirmedGitWriteInsideWorkspace = true,
         bool allowConfirmedGitMergeInsideWorkspace = true,
-        bool allowGitNetworkOperations = false)
+        bool allowGitNetworkOperations = false,
+        bool allowPdfRead = true,
+        bool allowPdfCreate = true,
+        bool allowConfirmedPdfModify = true)
     {
         if (string.IsNullOrWhiteSpace(workspaceRoot))
         {
@@ -27,6 +30,9 @@ public sealed class CodingWorkspacePolicy
         AllowConfirmedGitWriteInsideWorkspace = allowConfirmedGitWriteInsideWorkspace;
         AllowConfirmedGitMergeInsideWorkspace = allowConfirmedGitMergeInsideWorkspace;
         AllowGitNetworkOperations = allowGitNetworkOperations;
+        AllowPdfRead = allowPdfRead;
+        AllowPdfCreate = allowPdfCreate;
+        AllowConfirmedPdfModify = allowConfirmedPdfModify;
     }
 
     public string WorkspaceRoot { get; }
@@ -44,6 +50,12 @@ public sealed class CodingWorkspacePolicy
     public bool AllowConfirmedGitMergeInsideWorkspace { get; }
 
     public bool AllowGitNetworkOperations { get; }
+
+    public bool AllowPdfRead { get; }
+
+    public bool AllowPdfCreate { get; }
+
+    public bool AllowConfirmedPdfModify { get; }
 
     public static CodingWorkspacePolicy CreateDefault()
     {
@@ -155,6 +167,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Showing recent coding receipts is read-only and allowed.");
         }
 
+        if (request.Action is CodingToolAction.ShowPdfToolStatus or CodingToolAction.ShowPdfCommandIndex)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Showing PDF tool status and commands is read-only and allowed.");
+        }
+
         if (request.Action == CodingToolAction.ShowToolIntegrationStatus)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Showing coding tool integration status is read-only and allowed.");
@@ -167,13 +184,42 @@ public sealed class CodingWorkspacePolicy
 
         if (request.Action == CodingToolAction.GeneratePdf)
         {
-            return CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed.");
+            return AllowPdfCreate
+                ? CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed by PDF permissions.")
+                : CodingToolPermissionKind.Deny.AsPermission("PDF creation is disabled in PDF permissions.");
         }
 
         if (request.Action == CodingToolAction.GenerateCodingReport
-            || request.Action == CodingToolAction.GenerateMorningReport)
+            || request.Action == CodingToolAction.GenerateMorningReport
+            || request.Action == CodingToolAction.GenerateInstallReport
+            || request.Action == CodingToolAction.GenerateTroubleshootingReport
+            || request.Action == CodingToolAction.ConvertMarkdownToPdf)
         {
-            return CodingToolPermissionKind.Allow.AsPermission("Generating a coding session report PDF in Ali's local generated documents folder is allowed.");
+            return AllowPdfCreate
+                ? CodingToolPermissionKind.Allow.AsPermission("Generating a report PDF in Ali's local generated documents folder is allowed by PDF permissions.")
+                : CodingToolPermissionKind.Deny.AsPermission("PDF creation is disabled in PDF permissions.");
+        }
+
+        if (request.Action is CodingToolAction.CombinePdfs or CodingToolAction.SplitPdf)
+        {
+            if (!AllowConfirmedPdfModify)
+            {
+                return CodingToolPermissionKind.Deny.AsPermission("PDF combine/split actions are disabled in PDF permissions.");
+            }
+
+            return request.UserConfirmed
+                ? CodingToolPermissionKind.Allow.AsPermission("Confirmed PDF combine/split action is allowed and writes only to Ali's generated documents folder.")
+                : CodingToolPermissionKind.RequireConfirmation.AsPermission("PDF combine/split creates derived files and needs explicit confirmation.");
+        }
+
+        if (request.Action is CodingToolAction.InspectPdf or CodingToolAction.ExtractPdfText or CodingToolAction.SummarizePdf)
+        {
+            if (!AllowPdfRead)
+            {
+                return CodingToolPermissionKind.Deny.AsPermission("PDF read/inspect actions are disabled in PDF permissions.");
+            }
+
+            return CodingToolPermissionKind.Allow.AsPermission("PDF read/inspect actions are allowed by PDF permissions.");
         }
 
         if (request.Action == CodingToolAction.ApplyLastPatchPreview)

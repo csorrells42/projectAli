@@ -74,6 +74,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes last failure diagnosis", TestCodingParserRoutesLastFailureDiagnosis),
     ("coding parser routes last failure patch suggestion", TestCodingParserRoutesLastFailurePatchSuggestion),
     ("coding parser routes PDF generation", TestCodingParserRoutesPdfGeneration),
+    ("coding parser routes PDF tools", TestCodingParserRoutesPdfTools),
     ("coding parser routes coding report generation", TestCodingParserRoutesCodingReportGeneration),
     ("coding parser routes package and restore commands", TestCodingParserRoutesPackageAndRestoreCommands),
     ("coding parser routes workspace intelligence and confirmed build", TestCodingParserRoutesWorkspaceIntelligenceAndConfirmedBuild),
@@ -100,6 +101,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
     ("local coding tool generates PDF", TestLocalCodingToolGeneratesPdf),
     ("local coding tool generates coding report PDF", TestLocalCodingToolGeneratesCodingReportPdf),
+    ("local coding tool handles PDF workspace tools", TestLocalCodingToolHandlesPdfWorkspaceTools),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
@@ -373,11 +375,13 @@ static Task TestCodingSettingsSaveAndLoad()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Projects");
+    var pdfWorkspace = Path.Combine(directory, "Pdfs");
     var notepadPlusPlus = Path.Combine(directory, "Tools", "Notepad++", "notepad++.exe");
     var visualStudio = Path.Combine(directory, "VS", "Common7", "IDE", "devenv.exe");
     var settings = new CodingToolSettings
     {
         WorkspaceRoot = workspace,
+        PdfWorkspaceRoot = pdfWorkspace,
         AllowExplicitOutsideFileOpen = true,
         WorkspaceAccessMode = CodingPermissionModes.Allowed,
         ExplicitOutsideFileOpenMode = CodingPermissionModes.Disabled,
@@ -391,6 +395,9 @@ static Task TestCodingSettingsSaveAndLoad()
         GitWriteMode = CodingPermissionModes.ConfirmEachTime,
         GitMergeMode = CodingPermissionModes.ExtraConfirmation,
         GitNetworkMode = CodingPermissionModes.Blocked,
+        PdfReadMode = CodingPermissionModes.Allowed,
+        PdfCreateMode = CodingPermissionModes.Disabled,
+        PdfModifyMode = CodingPermissionModes.ConfirmEachTime,
         NotepadPlusPlusPath = notepadPlusPlus,
         VisualStudioPath = visualStudio
     };
@@ -399,6 +406,7 @@ static Task TestCodingSettingsSaveAndLoad()
     var loaded = CodingToolSettingsStore.LoadOrDefault(directory);
 
     Equal(workspace, loaded.WorkspaceRoot);
+    Equal(pdfWorkspace, loaded.PdfWorkspaceRoot);
     Equal(true, loaded.AllowExplicitOutsideFileOpen);
     Equal(CodingPermissionModes.Allowed, loaded.WorkspaceAccessMode);
     Equal(CodingPermissionModes.Disabled, loaded.ExplicitOutsideFileOpenMode);
@@ -412,11 +420,17 @@ static Task TestCodingSettingsSaveAndLoad()
     Equal(CodingPermissionModes.ConfirmEachTime, loaded.GitWriteMode);
     Equal(CodingPermissionModes.ExtraConfirmation, loaded.GitMergeMode);
     Equal(CodingPermissionModes.Blocked, loaded.GitNetworkMode);
+    Equal(CodingPermissionModes.Allowed, loaded.PdfReadMode);
+    Equal(CodingPermissionModes.Disabled, loaded.PdfCreateMode);
+    Equal(CodingPermissionModes.ConfirmEachTime, loaded.PdfModifyMode);
     Equal(notepadPlusPlus, loaded.NotepadPlusPlusPath);
     Equal(visualStudio, loaded.VisualStudioPath);
     Equal(false, loaded.ToPolicy().AllowExplicitOutsideFileOpen);
     Equal(false, loaded.ToPolicy().AllowConfirmedEditInsideWorkspace);
     Equal(false, loaded.ToPolicy().AllowGitNetworkOperations);
+    Equal(true, loaded.ToPolicy().AllowPdfRead);
+    Equal(false, loaded.ToPolicy().AllowPdfCreate);
+    Equal(true, loaded.ToPolicy().AllowConfirmedPdfModify);
     return Task.CompletedTask;
 }
 
@@ -788,6 +802,50 @@ static Task TestCodingParserRoutesPdfGeneration()
     Equal(CodingToolAction.GeneratePdf, nameOnlyRequest.Action);
     Equal("handoff", nameOnlyRequest.Path);
     Equal("One page summary.", nameOnlyRequest.Content);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesPdfTools()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show pdf tool status", out var statusRequest));
+    Equal(CodingToolAction.ShowPdfToolStatus, statusRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show pdf commands", out var indexRequest));
+    Equal(CodingToolAction.ShowPdfCommandIndex, indexRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("inspect pdf \"demo.pdf\"", out var inspectRequest));
+    Equal(CodingToolAction.InspectPdf, inspectRequest.Action);
+    Equal("demo.pdf", inspectRequest.Path);
+
+    Equal(true, CodingToolRequestParser.TryParse("extract text from pdf \"demo.pdf\"", out var extractRequest));
+    Equal(CodingToolAction.ExtractPdfText, extractRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("summarize pdf \"demo.pdf\"", out var summarizeRequest));
+    Equal(CodingToolAction.SummarizePdf, summarizeRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("convert markdown to pdf \"notes.md\" \"notes.pdf\"", out var convertRequest));
+    Equal(CodingToolAction.ConvertMarkdownToPdf, convertRequest.Action);
+    Equal("notes.md", convertRequest.Path);
+    Equal("notes.pdf", convertRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("confirm combine pdfs \"a.pdf\" \"b.pdf\" \"combined.pdf\"", out var combineRequest));
+    Equal(CodingToolAction.CombinePdfs, combineRequest.Action);
+    Equal(true, combineRequest.UserConfirmed);
+    Equal("combined.pdf", combineRequest.Path);
+    Equal(2, combineRequest.AdditionalPaths?.Count);
+
+    Equal(true, CodingToolRequestParser.TryParse("confirm split pdf \"combined.pdf\" \"split.pdf\"", out var splitRequest));
+    Equal(CodingToolAction.SplitPdf, splitRequest.Action);
+    Equal(true, splitRequest.UserConfirmed);
+    Equal("combined.pdf", splitRequest.Path);
+    Equal("split.pdf", splitRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("generate install report pdf", out var installReportRequest));
+    Equal(CodingToolAction.GenerateInstallReport, installReportRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("generate troubleshooting report pdf \"trouble.pdf\"", out var troubleshootingRequest));
+    Equal(CodingToolAction.GenerateTroubleshootingReport, troubleshootingRequest.Action);
+    Equal("trouble.pdf", troubleshootingRequest.Path);
     return Task.CompletedTask;
 }
 
@@ -1876,6 +1934,53 @@ static async Task TestLocalCodingToolGeneratesCodingReportPdf()
     Contains("Recent Coding Receipts", text);
     Contains("InspectWorkspace", text);
     Contains("%%EOF", text);
+}
+
+static async Task TestLocalCodingToolHandlesPdfWorkspaceTools()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var pdfWorkspace = Path.Combine(directory, "Pdf Workspace");
+    Directory.CreateDirectory(workspace);
+    Directory.CreateDirectory(pdfWorkspace);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        pdfWorkspaceRoot: pdfWorkspace);
+
+    var status = await service.TryHandleAsync("show pdf tool status", CancellationToken.None);
+    var first = await service.TryHandleAsync("generate pdf \"alpha.pdf\" with text \"Alpha PDF ready. This is extractable.\"", CancellationToken.None);
+    var second = await service.TryHandleAsync("generate pdf \"beta.pdf\" with text \"Beta PDF ready. This is also extractable.\"", CancellationToken.None);
+    var inspect = await service.TryHandleAsync("inspect pdf \"alpha.pdf\"", CancellationToken.None);
+    var extract = await service.TryHandleAsync("extract text from pdf \"alpha.pdf\"", CancellationToken.None);
+    var summary = await service.TryHandleAsync("summarize pdf \"alpha.pdf\"", CancellationToken.None);
+    var markdownPath = Path.Combine(pdfWorkspace, "notes.md");
+    await File.WriteAllTextAsync(markdownPath, "# Notes\n- One\n- Two");
+    var converted = await service.TryHandleAsync("convert markdown to pdf \"notes.md\" \"notes.pdf\"", CancellationToken.None);
+    var combineNeedsConfirmation = await service.TryHandleAsync("combine pdfs \"alpha.pdf\" \"beta.pdf\" \"combined.pdf\"", CancellationToken.None);
+    var combined = await service.TryHandleAsync("confirm combine pdfs \"alpha.pdf\" \"beta.pdf\" \"combined.pdf\"", CancellationToken.None);
+
+    Equal(true, status.Succeeded);
+    Contains(pdfWorkspace, status.Message);
+    Equal(true, first.Succeeded);
+    Equal(true, second.Succeeded);
+    NotNull(first.TargetPath, "Generated PDF should report a path.");
+    Contains(pdfWorkspace, first.TargetPath!);
+    Equal(true, File.Exists(Path.Combine(pdfWorkspace, "alpha.pdf")));
+    Equal(true, inspect.Succeeded);
+    Contains("Page count estimate", inspect.Message);
+    Equal(true, extract.Succeeded);
+    Contains("Alpha PDF ready", extract.Message);
+    Equal(true, summary.Succeeded);
+    Contains("Extractive summary", summary.Message);
+    Equal(true, converted.Succeeded);
+    Equal(true, File.Exists(Path.Combine(pdfWorkspace, "notes.pdf")));
+    Equal(true, combineNeedsConfirmation.Handled);
+    Equal(false, combineNeedsConfirmation.Succeeded);
+    Contains("needs confirmation", combineNeedsConfirmation.Message);
+    Equal(true, combined.Succeeded);
+    Equal(true, File.Exists(Path.Combine(pdfWorkspace, "combined.pdf")));
 }
 
 static async Task TestLocalCodingToolReadsAndSearchesWorkspace()

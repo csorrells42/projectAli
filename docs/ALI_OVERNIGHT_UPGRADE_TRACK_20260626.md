@@ -37,6 +37,7 @@ This is the approved build-skills path for the overnight sprint.
 31. Phase 1 coding companion stopping-point polish: WebHelper and VSIX command groups now surface the guided builder flow first, then deeper planning, execution, diagnostics, and reports.
 32. Start Here discoverability lane: WebHelper and VSIX now surface What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, and Windows Help before the deeper command groups.
 33. Audio setup source catalog: official Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure SH-BROADCAST2 sources are cataloged for source-backed setup guidance.
+34. PDF workspace polish: configurable PDF workspace folder, PDF permission rows, polished PDF generation, PDF command/status index, inspection/extraction/summarization, Markdown conversion, confirmed derived combine/split, and install/troubleshooting report PDFs.
 
 ## Approved Next Road Completed
 

@@ -1046,6 +1046,27 @@
                                            Foreground="{StaticResource SubtleTextBrush}"
                                            Margin="0,0,0,10" />
 
+                                <TextBlock Text="PDF workspace folder" Style="{StaticResource FieldLabel}" />
+                                <Grid Margin="0,2,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="120" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding CodingPdfWorkspaceRootText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0" />
+                                    <Button Grid.Column="2"
+                                            Content="Choose Folder"
+                                            Command="{Binding BrowseCodingPdfWorkspaceRootCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                </Grid>
+                                <TextBlock Text="Ali creates, inspects, combines, and splits PDFs from this folder by default. Leave the default if you want Ali-owned generated documents."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,10" />
+
                                 <TextBlock Text="Notepad++ executable or install folder" Style="{StaticResource FieldLabel}" />
                                 <Grid Margin="0,2,0,4">
                                     <Grid.ColumnDefinitions>
@@ -1341,6 +1362,80 @@
                                     <TextBlock Grid.Row="3"
                                                Grid.Column="2"
                                                Text="Default is blocked. If enabled, network Git actions still require confirmation."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,0" />
+                                </Grid>
+
+                                <TextBlock Text="PDF Controls"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}"
+                                           Margin="0,4,0,4" />
+                                <TextBlock Text="PDF reads are separate from PDF creation and assembly. Combine/split/modify creates derived files in the PDF workspace and requires confirmation by default."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,8" />
+                                <Grid Margin="0,2,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="230" />
+                                        <ColumnDefinition Width="190" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                               Text="Inspect and extract text"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="0"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingPdfReadModeChoices}"
+                                              SelectedItem="{Binding CodingPdfReadMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="0"
+                                               Grid.Column="2"
+                                               Text="Read-only PDF inspection, text extraction, and summaries."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="1"
+                                               Text="Create and export"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,8" />
+                                    <ComboBox Grid.Row="1"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingPdfCreateModeChoices}"
+                                              SelectedItem="{Binding CodingPdfCreateMode, Mode=TwoWay}"
+                                              Margin="0,0,12,8" />
+                                    <TextBlock Grid.Row="1"
+                                               Grid.Column="2"
+                                               Text="Creates new PDFs and report PDFs in the selected PDF workspace."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,2,0,8" />
+
+                                    <TextBlock Grid.Row="2"
+                                               Text="Combine, split, and modify"
+                                               Style="{StaticResource FieldLabel}"
+                                               Margin="0,0,12,0" />
+                                    <ComboBox Grid.Row="2"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding CodingPdfModifyModeChoices}"
+                                              SelectedItem="{Binding CodingPdfModifyMode, Mode=TwoWay}"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="2"
+                                               Text="Requires confirmation by default and writes derived files instead of changing originals."
                                                TextWrapping="Wrap"
                                                FontSize="11"
                                                Foreground="{StaticResource SubtleTextBrush}"

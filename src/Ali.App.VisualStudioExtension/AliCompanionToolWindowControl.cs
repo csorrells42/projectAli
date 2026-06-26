@@ -382,13 +382,14 @@ public sealed class AliCompanionToolWindowControl : UserControl
     {
         var panel = new StackPanel();
         AddContextGroup(panel);
-        AddGroup(panel, "Start Here", ("What Can Ali Do?", "show coding skill command index"), ("Plan A Build", "interpret build goal "), ("Fix A Build", "diagnose last build failure"), ("Install Check", "show install doctor"), ("VS Setup", "show visual studio integration"), ("Windows Help", "show windows troubleshooting toolkit"));
+        AddGroup(panel, "Start Here", ("What Can Ali Do?", "show coding skill command index"), ("Plan A Build", "interpret build goal "), ("Fix A Build", "diagnose last build failure"), ("Install Check", "show install doctor"), ("VS Setup", "show visual studio integration"), ("Windows Help", "show windows troubleshooting toolkit"), ("PDF Tools", "show pdf commands"));
         AddGroup(panel, "Awareness", ("VS Status", "show visual studio integration"), ("Workspace", "inspect coding workspace"), ("Architecture", "analyze solution architecture"), ("Patterns", "detect codebase patterns"));
         AddGroup(panel, "Guided Flow", ("Goal", "interpret build goal "), ("Options", "show architecture options "), ("Criteria", "write acceptance criteria "), ("Tests", "suggest tests for "), ("Roadmap", "draft implementation roadmap "), ("Next", "show next coding action"), ("Packet", "show execution packet"), ("Validate", "plan post edit validation"));
         AddGroup(panel, "Plan Tools", ("Files", "plan feature files "), ("Safety", "show refactor safety checklist "), ("Packages", "plan package lookup "), ("Install Packet", "plan dependency install packet "), ("Scaffold", "preview project scaffold "), ("Scaffold Apply", "plan scaffold apply "));
         AddGroup(panel, "Execute", ("Approve Packet", "approve execution packet"), ("Console", "show packet commands"), ("Ledger", "show packet ledger"), ("Progress", "show packet progress"), ("Resume", "resume build plan"), ("Step Check", "show roadmap step checklist"));
         AddGroup(panel, "Diagnostics", ("Build", "confirm dotnet build \"path\""), ("Diagnose", "diagnose last build failure"), ("Classify", "classify last build failure"), ("Build Lock", "diagnose build lock"), ("Toolkit", "show windows troubleshooting toolkit"), ("Install", "show install doctor"));
         AddGroup(panel, "Reports", ("Git Status", "git status"), ("Session", "show coding session summary"), ("Index", "show coding skill command index"), ("Report", "generate coding report"), ("Morning", "generate morning report"));
+        AddGroup(panel, "PDF Tools", ("Status", "show pdf tool status"), ("Index", "show pdf commands"), ("Create", "generate pdf \"owner-demo.pdf\" with text \"Ali demo ready.\""), ("Inspect", "inspect pdf \"document.pdf\""), ("Extract", "extract text from pdf \"document.pdf\""), ("Summary", "summarize pdf \"document.pdf\""), ("Markdown", "convert markdown to pdf \"notes.md\" \"notes.pdf\""), ("Combine", "confirm combine pdfs \"first.pdf\" \"second.pdf\" \"combined.pdf\""), ("Install PDF", "generate install report pdf"), ("Trouble PDF", "generate troubleshooting report pdf"));
         return panel;
     }
 

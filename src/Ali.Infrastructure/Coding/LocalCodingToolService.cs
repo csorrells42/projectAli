@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using Ali.Core.Coding;
@@ -11,7 +12,8 @@ public sealed class LocalCodingToolService(
     ICodingProcessLauncher? processLauncher = null,
     ICodingCommandRunner? commandRunner = null,
     string? configuredNotepadPlusPlusPath = null,
-    string? configuredVisualStudioPath = null) : ILocalCodingTool
+    string? configuredVisualStudioPath = null,
+    string? pdfWorkspaceRoot = null) : ILocalCodingTool
 {
     private static readonly JsonSerializerOptions RoadmapJsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -111,7 +113,9 @@ public sealed class LocalCodingToolService(
     private readonly string _actionLogPath = Path.Combine(dataRoot, "coding-tool-actions.jsonl");
     private readonly string _roadmapStatePath = Path.Combine(dataRoot, "Coding", "roadmap-execution-state.json");
     private readonly string _approvedPacketPath = Path.Combine(dataRoot, "Coding", "approved-step-packet.json");
-    private readonly string _generatedDocumentsRoot = Path.Combine(dataRoot, "GeneratedDocuments");
+    private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
+        ? Path.Combine(dataRoot, "GeneratedDocuments")
+        : Path.GetFullPath(pdfWorkspaceRoot.Trim().Trim('"'));
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
     private CodingToolRequest? _lastPatchPreviewRequest;
@@ -137,6 +141,7 @@ public sealed class LocalCodingToolService(
         Policy = settings.ToPolicy();
         _configuredNotepadPlusPlusPath = settings.NotepadPlusPlusPath;
         _configuredVisualStudioPath = settings.VisualStudioPath;
+        _pdfWorkspaceRoot = settings.ResolvePdfWorkspaceRoot(dataRoot);
     }
 
     public async Task<CodingToolResult> TryHandleAsync(
@@ -224,11 +229,21 @@ public sealed class LocalCodingToolService(
             CodingToolAction.RecoverRoadmapState => RecoverRoadmapState(),
             CodingToolAction.DiagnoseRecoveryState => await DiagnoseRecoveryStateAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
+            CodingToolAction.ShowPdfToolStatus => ShowPdfToolStatus(),
+            CodingToolAction.ShowPdfCommandIndex => ShowPdfCommandIndex(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GenerateCodingReport => await GenerateCodingReportAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GenerateMorningReport => await GenerateMorningReportAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.GenerateInstallReport => await GenerateInstallReportAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.GenerateTroubleshootingReport => await GenerateTroubleshootingReportAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.InspectPdf => await InspectPdfAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ExtractPdfText => await ExtractPdfTextAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.SummarizePdf => await SummarizePdfAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ConvertMarkdownToPdf => await ConvertMarkdownToPdfAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.CombinePdfs => await CombinePdfsAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.SplitPdf => await SplitPdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DiagnoseLastFailure => await DiagnoseLastFailureAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.SuggestLastFailurePatch => await SuggestLastFailurePatchAsync(cancellationToken).ConfigureAwait(false),
@@ -1711,6 +1726,18 @@ public sealed class LocalCodingToolService(
             "- show coding session summary",
             "- generate coding report",
             "- generate morning report",
+            "PDF tools:",
+            "- show pdf tool status",
+            "- show pdf commands",
+            "- generate pdf \"name.pdf\" with text \"...\"",
+            "- inspect pdf \"path-or-name.pdf\"",
+            "- extract text from pdf \"path-or-name.pdf\"",
+            "- summarize pdf \"path-or-name.pdf\"",
+            "- convert markdown to pdf \"notes.md\" \"notes.pdf\"",
+            "- confirm combine pdfs \"one.pdf\" \"two.pdf\" \"combined.pdf\"",
+            "- confirm split pdf \"source.pdf\" \"split-output.pdf\"",
+            "- generate install report pdf",
+            "- generate troubleshooting report pdf",
             "Windows diagnostics:",
             "- collect process evidence <name-or-pid>",
             "- diagnose port <port>",
@@ -4087,7 +4114,7 @@ public sealed class LocalCodingToolService(
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryBuildGeneratedPdfPath(request.Path, out var pdfPath, out var pathError))
         {
-            return new CodingToolResult(true, false, pathError, "PDF generator", _generatedDocumentsRoot);
+            return new CodingToolResult(true, false, pathError, "PDF generator", _pdfWorkspaceRoot);
         }
 
         if (!ValidatePdfContent(request.Content, out var contentError))
@@ -4095,7 +4122,7 @@ public sealed class LocalCodingToolService(
             return new CodingToolResult(true, false, contentError, "PDF generator", pdfPath);
         }
 
-        Directory.CreateDirectory(_generatedDocumentsRoot);
+        Directory.CreateDirectory(_pdfWorkspaceRoot);
         var uniquePath = BuildUniquePath(pdfPath);
         var title = Path.GetFileNameWithoutExtension(uniquePath);
         var bytes = SimplePdfWriter.BuildTextPdf(title, request.Content!);
@@ -4116,11 +4143,11 @@ public sealed class LocalCodingToolService(
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryBuildGeneratedPdfPath(request.Path, out var pdfPath, out var pathError))
         {
-            return new CodingToolResult(true, false, pathError, "Coding report", _generatedDocumentsRoot);
+            return new CodingToolResult(true, false, pathError, "Coding report", _pdfWorkspaceRoot);
         }
 
         var reportText = await BuildCodingSessionReportAsync(cancellationToken).ConfigureAwait(false);
-        Directory.CreateDirectory(_generatedDocumentsRoot);
+        Directory.CreateDirectory(_pdfWorkspaceRoot);
         var uniquePath = BuildUniquePath(pdfPath);
         var title = Path.GetFileNameWithoutExtension(uniquePath);
         var bytes = SimplePdfWriter.BuildTextPdf(title, reportText);
@@ -4141,11 +4168,11 @@ public sealed class LocalCodingToolService(
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryBuildGeneratedPdfPath(request.Path, out var pdfPath, out var pathError))
         {
-            return new CodingToolResult(true, false, pathError, "Morning report", _generatedDocumentsRoot);
+            return new CodingToolResult(true, false, pathError, "Morning report", _pdfWorkspaceRoot);
         }
 
         var reportText = await BuildMorningReportAsync(cancellationToken).ConfigureAwait(false);
-        Directory.CreateDirectory(_generatedDocumentsRoot);
+        Directory.CreateDirectory(_pdfWorkspaceRoot);
         var uniquePath = BuildUniquePath(pdfPath);
         var title = Path.GetFileNameWithoutExtension(uniquePath);
         var bytes = SimplePdfWriter.BuildTextPdf(title, reportText);
@@ -4157,6 +4184,276 @@ public sealed class LocalCodingToolService(
             $"Generated morning build report PDF: {uniquePath}{Environment.NewLine}Wrote {bytes.Length} byte(s).",
             "Morning report",
             uniquePath);
+    }
+
+    private CodingToolResult ShowPdfToolStatus()
+    {
+        var lines = new List<string>
+        {
+            "Ali PDF tool status:",
+            $"PDF workspace: {_pdfWorkspaceRoot}",
+            $"Workspace exists: {Directory.Exists(_pdfWorkspaceRoot)}",
+            "Permission gates:",
+            $"- Inspect/extract/summarize: {(Policy.AllowPdfRead ? "allowed" : "disabled")}",
+            $"- Create/export PDFs: {(Policy.AllowPdfCreate ? "allowed" : "disabled")}",
+            $"- Combine/split/modify: {(Policy.AllowConfirmedPdfModify ? "available with confirmation" : "disabled")}",
+            "Current capabilities:",
+            "- Create polished text/report PDFs with title, section styling, wrapping, footer, and page numbers.",
+            "- Inspect page markers, file size, metadata hints, text availability, and likely scanned/image-only PDFs.",
+            "- Extract and summarize text from PDFs that expose simple text drawing commands.",
+            "- Convert Markdown/text files into polished PDFs.",
+            "- Combine/split by creating derived text-based PDFs when source text can be extracted.",
+            "Truth boundary:",
+            "- Ali is not a full Acrobat replacement yet.",
+            "- Scanned PDFs, image-only PDFs, encrypted PDFs, complex forms, redaction, OCR, annotations, and layout-preserving visual edits are future work."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "PDF tool status", _pdfWorkspaceRoot);
+    }
+
+    private CodingToolResult ShowPdfCommandIndex()
+    {
+        var lines = new List<string>
+        {
+            "Ali PDF command index:",
+            "No files were changed.",
+            "Create:",
+            "- generate pdf \"owner-demo.pdf\" with text \"Ali demo ready.\"",
+            "- convert markdown to pdf \"notes.md\" \"notes.pdf\"",
+            "- generate install report pdf",
+            "- generate troubleshooting report pdf",
+            "Inspect and read:",
+            "- show pdf tool status",
+            "- inspect pdf \"document.pdf\"",
+            "- extract text from pdf \"document.pdf\"",
+            "- summarize pdf \"document.pdf\"",
+            "Assemble with confirmation:",
+            "- confirm combine pdfs \"first.pdf\" \"second.pdf\" \"combined.pdf\"",
+            "- confirm split pdf \"source.pdf\" \"split-output.pdf\"",
+            "Folder rule:",
+            $"- Relative names use the configured PDF workspace: {_pdfWorkspaceRoot}",
+            "Limits:",
+            "- Ali preserves originals and writes new derived PDFs.",
+            "- Text extraction works best on Ali-generated/simple text PDFs.",
+            "- Scanned/image-only PDFs need OCR in a later phase."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "PDF command index", _pdfWorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> GenerateInstallReportAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        var doctor = ShowInstallDoctor();
+        var body = string.Join(
+            Environment.NewLine,
+            [
+                "Ali Install Readiness Report",
+                $"Generated: {DateTimeOffset.Now:u}",
+                $"Workspace root: {Policy.WorkspaceRoot}",
+                $"PDF workspace: {_pdfWorkspaceRoot}",
+                string.Empty,
+                "Install Doctor",
+                TrimForChat(doctor.Message, 12_000),
+                string.Empty,
+                "Manual Checks",
+                "- Verify Visual Studio Community is installed before installing the VSIX.",
+                "- Verify WebHelper is running before using the browser companion or Visual Studio tool window.",
+                "- Verify model-backed chat separately from deterministic local tools.",
+                "- Keep installer, repair, signing, trust-store, registry, firewall, and PATH changes owner-approved."
+            ]);
+
+        return await WriteGeneratedPdfAsync(request.Path, "Ali install report", "Install report", body, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CodingToolResult> GenerateTroubleshootingReportAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        var body = string.Join(
+            Environment.NewLine,
+            [
+                "Ali Troubleshooting Report",
+                $"Generated: {DateTimeOffset.Now:u}",
+                $"Workspace root: {Policy.WorkspaceRoot}",
+                $"PDF workspace: {_pdfWorkspaceRoot}",
+                string.Empty,
+                "Windows Troubleshooting Toolkit",
+                TrimForChat(ShowWindowsTroubleshootingToolkit().Message, 12_000),
+                string.Empty,
+                "Install Doctor",
+                TrimForChat(ShowInstallDoctor().Message, 8_000),
+                string.Empty,
+                "Safe Next Commands",
+                "- collect process evidence <name-or-pid>",
+                "- diagnose port <port>",
+                "- diagnose build lock",
+                "- inspect services and startup",
+                "- triage event logs",
+                "- show install doctor",
+                string.Empty,
+                "Approval Boundary",
+                "- Read-only diagnostics first.",
+                "- Process stop, service changes, startup changes, registry edits, firewall changes, PATH changes, repair actions, and deletes require explicit approval."
+            ]);
+
+        return await WriteGeneratedPdfAsync(request.Path, "Ali troubleshooting report", "Troubleshooting report", body, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CodingToolResult> InspectPdfAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryResolvePdfInputPath(request.Path, out var pdfPath, out var error))
+        {
+            return new CodingToolResult(true, false, error, "PDF inspector", _pdfWorkspaceRoot);
+        }
+
+        var bytes = await File.ReadAllBytesAsync(pdfPath, cancellationToken).ConfigureAwait(false);
+        var text = SimplePdfInspector.ExtractText(bytes);
+        var info = SimplePdfInspector.Inspect(bytes, text);
+        var lines = new List<string>
+        {
+            "PDF inspection:",
+            $"Path: {pdfPath}",
+            $"Size: {bytes.Length} byte(s)",
+            $"Page count estimate: {info.PageCount}",
+            $"PDF version: {info.Version}",
+            $"Encrypted marker: {(info.HasEncryptMarker ? "yes" : "no")}",
+            $"Form marker: {(info.HasAcroFormMarker ? "yes" : "no")}",
+            $"Image marker: {(info.HasImageMarker ? "yes" : "no")}",
+            $"Text characters extracted: {text.Length}",
+            $"Likely scanned/image-only: {(info.LikelyImageOnly ? "yes" : "no")}",
+            "Notes:",
+            info.LikelyImageOnly
+                ? "- This PDF does not expose enough text for Ali's current local extractor. OCR is future work."
+                : "- This PDF exposes extractable text for summarize/extract commands.",
+            "- This inspection is read-only."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "PDF inspector", pdfPath);
+    }
+
+    private async Task<CodingToolResult> ExtractPdfTextAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryResolvePdfInputPath(request.Path, out var pdfPath, out var error))
+        {
+            return new CodingToolResult(true, false, error, "PDF text extractor", _pdfWorkspaceRoot);
+        }
+
+        var text = SimplePdfInspector.ExtractText(await File.ReadAllBytesAsync(pdfPath, cancellationToken).ConfigureAwait(false));
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "PDF text extraction found no readable text. This may be scanned, image-only, encrypted, or encoded in a complex font stream. OCR/advanced extraction is future work.",
+                "PDF text extractor",
+                pdfPath);
+        }
+
+        var outputPath = BuildUniquePath(Path.Combine(_pdfWorkspaceRoot, $"{Path.GetFileNameWithoutExtension(pdfPath)}-extracted.txt"));
+        Directory.CreateDirectory(_pdfWorkspaceRoot);
+        await File.WriteAllTextAsync(outputPath, text, cancellationToken).ConfigureAwait(false);
+        return new CodingToolResult(
+            true,
+            true,
+            $"Extracted PDF text: {outputPath}{Environment.NewLine}Characters: {text.Length}{Environment.NewLine}{TrimForChat(text, 2_000)}",
+            "PDF text extractor",
+            outputPath);
+    }
+
+    private async Task<CodingToolResult> SummarizePdfAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryResolvePdfInputPath(request.Path, out var pdfPath, out var error))
+        {
+            return new CodingToolResult(true, false, error, "PDF summary", _pdfWorkspaceRoot);
+        }
+
+        var text = SimplePdfInspector.ExtractText(await File.ReadAllBytesAsync(pdfPath, cancellationToken).ConfigureAwait(false));
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new CodingToolResult(true, false, "PDF summary needs extractable text. This PDF may need OCR or advanced extraction.", "PDF summary", pdfPath);
+        }
+
+        var summary = BuildExtractiveSummary(text);
+        return new CodingToolResult(
+            true,
+            true,
+            $"PDF summary: {pdfPath}{Environment.NewLine}{summary}",
+            "PDF summary",
+            pdfPath);
+    }
+
+    private async Task<CodingToolResult> ConvertMarkdownToPdfAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryResolveTextInputPath(request.Path, out var inputPath, out var error))
+        {
+            return new CodingToolResult(true, false, error, "Markdown to PDF", _pdfWorkspaceRoot);
+        }
+
+        var outputName = string.IsNullOrWhiteSpace(request.Query)
+            ? $"{Path.GetFileNameWithoutExtension(inputPath)}.pdf"
+            : request.Query;
+        var content = await File.ReadAllTextAsync(inputPath, cancellationToken).ConfigureAwait(false);
+        if (!ValidatePdfContent(content, out var contentError))
+        {
+            return new CodingToolResult(true, false, contentError, "Markdown to PDF", inputPath);
+        }
+
+        return await WriteGeneratedPdfAsync(outputName, Path.GetFileNameWithoutExtension(inputPath), "Markdown to PDF", content, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CodingToolResult> CombinePdfsAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request.AdditionalPaths is null || request.AdditionalPaths.Count < 2)
+        {
+            return new CodingToolResult(true, false, "PDF combine needs at least two source PDFs and one output name.", "PDF combiner", _pdfWorkspaceRoot);
+        }
+
+        var sections = new List<string>();
+        foreach (var source in request.AdditionalPaths)
+        {
+            if (!TryResolvePdfInputPath(source, out var sourcePath, out var error))
+            {
+                return new CodingToolResult(true, false, error, "PDF combiner", _pdfWorkspaceRoot);
+            }
+
+            var text = SimplePdfInspector.ExtractText(await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false));
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return new CodingToolResult(true, false, $"PDF combine blocked: {sourcePath} has no extractable text. Layout-preserving binary PDF merge is future work.", "PDF combiner", sourcePath);
+            }
+
+            sections.Add($"# {Path.GetFileName(sourcePath)}{Environment.NewLine}{text}");
+        }
+
+        return await WriteGeneratedPdfAsync(request.Path, "Combined PDF", "PDF combiner", string.Join(Environment.NewLine + Environment.NewLine, sections), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<CodingToolResult> SplitPdfAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryResolvePdfInputPath(request.Path, out var sourcePath, out var error))
+        {
+            return new CodingToolResult(true, false, error, "PDF splitter", _pdfWorkspaceRoot);
+        }
+
+        var text = SimplePdfInspector.ExtractText(await File.ReadAllBytesAsync(sourcePath, cancellationToken).ConfigureAwait(false));
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new CodingToolResult(true, false, "PDF split needs extractable text in this phase. Layout-preserving page split is future work.", "PDF splitter", sourcePath);
+        }
+
+        var outputName = string.IsNullOrWhiteSpace(request.Query)
+            ? $"{Path.GetFileNameWithoutExtension(sourcePath)}-split.pdf"
+            : request.Query;
+        var body = $"# Split extract from {Path.GetFileName(sourcePath)}{Environment.NewLine}{text}";
+        return await WriteGeneratedPdfAsync(outputName, "Split PDF extract", "PDF splitter", body, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> BuildMorningReportAsync(CancellationToken cancellationToken)
@@ -7310,7 +7607,7 @@ public sealed class LocalCodingToolService(
             fileName += ".pdf";
         }
 
-        path = Path.Combine(_generatedDocumentsRoot, fileName);
+        path = Path.Combine(_pdfWorkspaceRoot, fileName);
         return true;
     }
 
@@ -7330,6 +7627,168 @@ public sealed class LocalCodingToolService(
         }
 
         return true;
+    }
+
+    private async Task<CodingToolResult> WriteGeneratedPdfAsync(
+        string? requestedName,
+        string title,
+        string toolName,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryBuildGeneratedPdfPath(requestedName, out var pdfPath, out var pathError))
+        {
+            return new CodingToolResult(true, false, pathError, toolName, _pdfWorkspaceRoot);
+        }
+
+        if (!ValidatePdfContent(body, out var contentError))
+        {
+            return new CodingToolResult(true, false, contentError, toolName, pdfPath);
+        }
+
+        Directory.CreateDirectory(_pdfWorkspaceRoot);
+        var uniquePath = BuildUniquePath(pdfPath);
+        var document = new SimplePdfDocument(
+            title,
+            $"Generated by Ali on {DateTimeOffset.Now:yyyy-MM-dd HH:mm}",
+            body,
+            DateTimeOffset.Now,
+            "Ali PDF");
+        var bytes = SimplePdfWriter.BuildTextPdf(document);
+        await File.WriteAllBytesAsync(uniquePath, bytes, cancellationToken).ConfigureAwait(false);
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"{toolName}: {uniquePath}{Environment.NewLine}Wrote {bytes.Length} byte(s).",
+            toolName,
+            uniquePath);
+    }
+
+    private bool TryResolvePdfInputPath(string? requestedPath, out string fullPath, out string error)
+    {
+        fullPath = string.Empty;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(requestedPath))
+        {
+            error = "PDF command needs a PDF file name or full path.";
+            return false;
+        }
+
+        if (!TryResolveDocumentPath(requestedPath, ".pdf", out fullPath, out error))
+        {
+            return false;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            error = $"PDF command blocked: file was not found: {fullPath}";
+            return false;
+        }
+
+        if (!fullPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "PDF command blocked: target must be a .pdf file.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryResolveTextInputPath(string? requestedPath, out string fullPath, out string error)
+    {
+        fullPath = string.Empty;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(requestedPath))
+        {
+            error = "Markdown to PDF needs a .md or .txt file name or full path.";
+            return false;
+        }
+
+        if (!TryResolveDocumentPath(requestedPath, null, out fullPath, out error))
+        {
+            return false;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            error = $"Markdown to PDF blocked: file was not found: {fullPath}";
+            return false;
+        }
+
+        var extension = Path.GetExtension(fullPath);
+        if (!extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".markdown", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Markdown to PDF blocked: input must be .md, .markdown, or .txt.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryResolveDocumentPath(string requestedPath, string? defaultExtension, out string fullPath, out string error)
+    {
+        fullPath = string.Empty;
+        error = string.Empty;
+        var cleaned = requestedPath.Trim().Trim('"');
+        try
+        {
+            if (Path.IsPathFullyQualified(cleaned))
+            {
+                fullPath = Path.GetFullPath(cleaned);
+            }
+            else
+            {
+                var fileName = Path.GetFileName(cleaned);
+                if (string.IsNullOrWhiteSpace(fileName) || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                {
+                    error = "Document command blocked: file name is not valid.";
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(defaultExtension)
+                    && string.IsNullOrWhiteSpace(Path.GetExtension(fileName)))
+                {
+                    fileName += defaultExtension;
+                }
+
+                fullPath = Path.Combine(_pdfWorkspaceRoot, fileName);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = "Document command blocked: path is not a valid local path.";
+            return false;
+        }
+    }
+
+    private static string BuildExtractiveSummary(string text)
+    {
+        var normalized = text.ReplaceLineEndings("\n").Trim();
+        var sentences = normalized
+            .Split(['.', '!', '?', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(sentence => sentence.Length > 20)
+            .Take(6)
+            .Select(sentence => "- " + TrimForChat(sentence, 260))
+            .ToList();
+
+        if (sentences.Count == 0)
+        {
+            return TrimForChat(normalized, 1_500);
+        }
+
+        var lines = new List<string>
+        {
+            "Extractive summary:",
+            "This is a deterministic text summary from extractable PDF text; no model interpretation was used."
+        };
+        lines.AddRange(sentences);
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string BuildUniquePath(string path)
@@ -7661,3 +8120,198 @@ public sealed class CodingProcessLauncher : ICodingProcessLauncher
         Process.Start(startInfo);
     }
 }
+
+internal static class SimplePdfInspector
+{
+    public static SimplePdfInfo Inspect(byte[] bytes, string extractedText)
+    {
+        var raw = Encoding.ASCII.GetString(bytes);
+        var pageCount = CountMarkers(raw, "/Type /Page");
+        if (pageCount > 0 && raw.Contains("/Type /Pages", StringComparison.Ordinal))
+        {
+            pageCount--;
+        }
+
+        var version = raw.StartsWith("%PDF-", StringComparison.Ordinal)
+            ? raw.Split('\n', 2)[0].Trim()
+            : "unknown";
+        var hasImage = raw.Contains("/Subtype /Image", StringComparison.Ordinal)
+            || raw.Contains("/Image", StringComparison.Ordinal);
+        var hasTextOperators = raw.Contains(" Tj", StringComparison.Ordinal)
+            || raw.Contains(" TJ", StringComparison.Ordinal);
+        var hasExtractedText = !string.IsNullOrWhiteSpace(extractedText);
+        return new SimplePdfInfo(
+            version,
+            Math.Max(pageCount, 1),
+            raw.Contains("/Encrypt", StringComparison.Ordinal),
+            raw.Contains("/AcroForm", StringComparison.Ordinal),
+            hasImage,
+            hasImage && (!hasTextOperators || !hasExtractedText));
+    }
+
+    public static string ExtractText(byte[] bytes)
+    {
+        var raw = Encoding.ASCII.GetString(bytes);
+        var builder = new StringBuilder();
+        var index = 0;
+        while (index < raw.Length)
+        {
+            var open = raw.IndexOf('(', index);
+            if (open < 0)
+            {
+                break;
+            }
+
+            if (!LooksLikeTextOperand(raw, open))
+            {
+                index = open + 1;
+                continue;
+            }
+
+            if (!TryReadPdfLiteral(raw, open, out var literal, out var end))
+            {
+                index = open + 1;
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(literal))
+            {
+                if (builder.Length > 0)
+                {
+                    builder.AppendLine();
+                }
+
+                builder.Append(literal.Trim());
+            }
+
+            index = end + 1;
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static bool LooksLikeTextOperand(string raw, int openIndex)
+    {
+        var close = FindLiteralClose(raw, openIndex);
+        if (close < 0)
+        {
+            return false;
+        }
+
+        var after = raw.Substring(close + 1, Math.Min(16, raw.Length - close - 1));
+        return after.Contains("Tj", StringComparison.Ordinal)
+            || after.Contains("'", StringComparison.Ordinal)
+            || after.Contains("\"", StringComparison.Ordinal);
+    }
+
+    private static bool TryReadPdfLiteral(string raw, int openIndex, out string literal, out int endIndex)
+    {
+        literal = string.Empty;
+        endIndex = -1;
+        var builder = new StringBuilder();
+        var escaped = false;
+        var depth = 0;
+        for (var i = openIndex + 1; i < raw.Length; i++)
+        {
+            var ch = raw[i];
+            if (escaped)
+            {
+                builder.Append(ch switch
+                {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    'b' => '\b',
+                    'f' => '\f',
+                    _ => ch
+                });
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '(')
+            {
+                depth++;
+                builder.Append(ch);
+                continue;
+            }
+
+            if (ch == ')')
+            {
+                if (depth == 0)
+                {
+                    endIndex = i;
+                    literal = NormalizeExtractedText(builder.ToString());
+                    return true;
+                }
+
+                depth--;
+                builder.Append(ch);
+                continue;
+            }
+
+            builder.Append(ch);
+        }
+
+        return false;
+    }
+
+    private static int FindLiteralClose(string raw, int openIndex)
+    {
+        if (!TryReadPdfLiteral(raw, openIndex, out _, out var endIndex))
+        {
+            return -1;
+        }
+
+        return endIndex;
+    }
+
+    private static string NormalizeExtractedText(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var ch in text)
+        {
+            builder.Append(ch switch
+            {
+                >= ' ' and <= '~' => ch,
+                '\n' or '\r' or '\t' => ' ',
+                _ => ' '
+            });
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static int CountMarkers(string text, string marker)
+    {
+        var count = 0;
+        var index = 0;
+        while (index < text.Length)
+        {
+            var found = text.IndexOf(marker, index, StringComparison.Ordinal);
+            if (found < 0)
+            {
+                break;
+            }
+
+            count++;
+            index = found + marker.Length;
+        }
+
+        return count;
+    }
+}
+
+internal sealed record SimplePdfInfo(
+    string Version,
+    int PageCount,
+    bool HasEncryptMarker,
+    bool HasAcroFormMarker,
+    bool HasImageMarker,
+    bool LikelyImageOnly);

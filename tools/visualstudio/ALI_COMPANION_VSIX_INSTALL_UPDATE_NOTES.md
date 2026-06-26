@@ -59,11 +59,14 @@ Plan Tools
 Execute
 Diagnostics
 Reports
+PDF Tools
 ```
 
-Start Here surfaces What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, and Windows Help so the first useful commands are visible without reading the manual first.
+Start Here surfaces What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, Windows Help, and PDF Tools so the first useful commands are visible without reading the manual first.
 
 The first guided workflow is Goal -> Options -> Criteria -> Tests -> Roadmap -> Next -> Packet -> Validate.
+
+The PDF Tools group stages PDF status, command index, create, inspect, extract, summarize, Markdown conversion, combine, install report, and troubleshooting report commands. PDF writes still route through Ali's local PDF workspace and permission gates.
 
 ## How Updates Work
 

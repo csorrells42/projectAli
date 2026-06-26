@@ -7,6 +7,8 @@ public sealed record CodingToolSettings
 {
     public string WorkspaceRoot { get; init; } = CodingWorkspacePolicy.CreateDefault().WorkspaceRoot;
 
+    public string PdfWorkspaceRoot { get; init; } = string.Empty;
+
     public bool AllowExplicitOutsideFileOpen { get; init; } = true;
 
     public string WorkspaceAccessMode { get; init; } = CodingPermissionModes.Allowed;
@@ -33,9 +35,25 @@ public sealed record CodingToolSettings
 
     public string GitNetworkMode { get; init; } = CodingPermissionModes.Blocked;
 
+    public string PdfReadMode { get; init; } = CodingPermissionModes.Allowed;
+
+    public string PdfCreateMode { get; init; } = CodingPermissionModes.Allowed;
+
+    public string PdfModifyMode { get; init; } = CodingPermissionModes.ConfirmEachTime;
+
     public string NotepadPlusPlusPath { get; init; } = string.Empty;
 
     public string VisualStudioPath { get; init; } = string.Empty;
+
+    public string ResolvePdfWorkspaceRoot(string dataRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(PdfWorkspaceRoot))
+        {
+            return Path.GetFullPath(PdfWorkspaceRoot.Trim().Trim('"'));
+        }
+
+        return Path.Combine(dataRoot, "GeneratedDocuments");
+    }
 
     public CodingWorkspacePolicy ToPolicy() =>
         new(
@@ -46,7 +64,10 @@ public sealed record CodingToolSettings
             !CodingPermissionModes.IsDisabled(GitReadMode),
             !CodingPermissionModes.IsDisabled(GitWriteMode),
             !CodingPermissionModes.IsDisabled(GitMergeMode),
-            !CodingPermissionModes.IsDisabled(GitNetworkMode));
+            !CodingPermissionModes.IsDisabled(GitNetworkMode),
+            !CodingPermissionModes.IsDisabled(PdfReadMode),
+            !CodingPermissionModes.IsDisabled(PdfCreateMode),
+            !CodingPermissionModes.IsDisabled(PdfModifyMode));
 }
 
 public static class CodingPermissionModes

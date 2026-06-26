@@ -61,8 +61,18 @@ public enum CodingToolAction
     RecoverRoadmapState,
     DiagnoseRecoveryState,
     ShowReceipts,
+    ShowPdfToolStatus,
+    ShowPdfCommandIndex,
     GeneratePdf,
     GenerateCodingReport,
+    GenerateInstallReport,
+    GenerateTroubleshootingReport,
+    InspectPdf,
+    ExtractPdfText,
+    SummarizePdf,
+    ConvertMarkdownToPdf,
+    CombinePdfs,
+    SplitPdf,
     ShowToolIntegrationStatus,
     GenerateVisualStudioHandoff,
     OpenLastDiagnostic,
@@ -111,7 +121,8 @@ public sealed record CodingToolRequest(
     string? Query = null,
     string? Content = null,
     string? Replacement = null,
-    IReadOnlyList<CodingPatchEdit>? PatchEdits = null);
+    IReadOnlyList<CodingPatchEdit>? PatchEdits = null,
+    IReadOnlyList<string>? AdditionalPaths = null);
 
 public sealed record CodingPatchEdit(
     string Path,

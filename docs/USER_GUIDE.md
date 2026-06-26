@@ -169,6 +169,14 @@ Useful commands:
 - `show coding receipts`
 - `suggest patch from last failure`
 - `generate pdf "owner-demo.pdf" with text "Ali demo ready."`
+- `show pdf commands`
+- `inspect pdf "document.pdf"`
+- `extract text from pdf "document.pdf"`
+- `summarize pdf "document.pdf"`
+- `convert markdown to pdf "notes.md" "notes.pdf"`
+- `confirm combine pdfs "first.pdf" "second.pdf" "combined.pdf"`
+- `generate install report pdf`
+- `generate troubleshooting report pdf`
 - `generate coding report`
 - `generate morning report`
 
@@ -217,7 +225,22 @@ Git workflow:
 
 Ali does not silently change files, run builds, restore packages, or write Git history. Tool results are recorded as coding receipts so Ali can report what actually happened.
 
-Use `generate coding report` to export a local PDF summary of the current coding workspace, recent coding receipts, pending patch preview state, and last failed dotnet command if one is stored. The report is saved in Ali's generated documents folder.
+Use `generate coding report` to export a local PDF summary of the current coding workspace, recent coding receipts, pending patch preview state, and last failed dotnet command if one is stored. The report is saved in Ali's configured PDF workspace.
+
+PDF tools:
+
+- `show pdf tool status` reports the configured PDF workspace, whether it exists, PDF permission gates, current capabilities, and current limits.
+- `show pdf commands` lists the owner-facing PDF commands.
+- `generate pdf "name.pdf" with text "..."` creates a polished local PDF with title styling, wrapped text, footer, timestamp, and page numbers.
+- `inspect pdf "document.pdf"` reports file size, PDF version marker, page-count estimate, encryption/form/image markers, and text availability.
+- `extract text from pdf "document.pdf"` writes extracted text to a `.txt` file in the PDF workspace when simple text is available.
+- `summarize pdf "document.pdf"` produces a deterministic extractive summary from readable PDF text.
+- `convert markdown to pdf "notes.md" "notes.pdf"` creates a polished PDF from a `.md`, `.markdown`, or `.txt` file.
+- `confirm combine pdfs "first.pdf" "second.pdf" "combined.pdf"` creates a derived combined PDF from extractable text. It preserves originals and requires confirmation.
+- `confirm split pdf "source.pdf" "split-output.pdf"` creates a derived split/extract PDF from extractable text. It preserves originals and requires confirmation.
+- `generate install report pdf` and `generate troubleshooting report pdf` create focused owner-facing report PDFs.
+
+PDF workspace and permission controls live under Settings -> Coding / Permissions. The PDF workspace has its own textbox and Choose Folder button. PDF inspect/extract, create/export, and combine/split/modify each have their own permission row. Ali is not a full Acrobat replacement yet; scanned/image-only PDFs, OCR, redaction, form editing, annotations, and layout-preserving arbitrary PDF editing are future work.
 
 `analyze solution architecture` is read-only. It reports solutions, projects, target frameworks, project roles, project references, package references, source-file counts, a project dependency graph, and an estimated build order.
 
@@ -277,7 +300,7 @@ Build/install intelligence:
 - `show roadmap step checklist` compares roadmap state, recent receipts, validation, and Git status before a roadmap step is marked complete.
 - `show install doctor` reports install readiness for DevRun, Visual Studio discovery, VSIX artifact, current .NET runtime, workspace state, and related manual dependency checks. It does not run installers or repair anything by itself.
 
-Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension has Project Ali branding metadata, a packaged icon, and a native `Ali Companion` tool window in Visual Studio with command groups for Start Here, Awareness, Guided Flow, Plan Tools, Execute, Diagnostics, and Reports. The Start Here buttons are What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, and Windows Help. The Guided Flow buttons are Goal, Options, Criteria, Tests, Roadmap, Next, Packet, and Validate. The tool window also includes command history, a command box, selected-code package preview, progress/state cues, run timing summaries, pending-approval summary, output tabs, and a Visual Studio context strip. Output is separated into Response, Diagnostics, Receipts, and Pending Patch tabs. It can read the active solution path, active document path, current line, and selected text, then fill deterministic Ali commands such as read active file, build active solution, search selection, plan from selection, and preview replace selection. The same staged commands are available from `Tools -> Ali Companion`, and the code editor context menu includes Ali entries for reading the current file, building the active solution, searching the selection, planning from the selection, and previewing a replacement for the selection. Solution Explorer context menus can stage Ali commands from selected solution, project, or file nodes: read selected file, build selected project/solution, or plan from the selected node. Visual Studio commands enable only when the needed active document, selected text, solution path, or Solution Explorer node is available. Selection-based commands show the exact packaged text, target, original length, packaged length, and trim status before the command is run. It calls Ali's loopback coding bridge at `http://127.0.0.1:8765/api/coding/*`; the helper still owns the coding command parser, workspace policy, confirmation gates, and receipts. Configure helper URL, history length, and selected-text behavior under `Tools -> Options -> Ali -> Companion`.
+Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension has Project Ali branding metadata, a packaged icon, and a native `Ali Companion` tool window in Visual Studio with command groups for Start Here, Awareness, Guided Flow, Plan Tools, Execute, Diagnostics, Reports, and PDF Tools. The Start Here buttons are What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, Windows Help, and PDF Tools. The Guided Flow buttons are Goal, Options, Criteria, Tests, Roadmap, Next, Packet, and Validate. The PDF Tools group surfaces PDF status, command index, create, inspect, extract, summarize, Markdown conversion, combine, install report, and troubleshooting report commands. The tool window also includes command history, a command box, selected-code package preview, progress/state cues, run timing summaries, pending-approval summary, output tabs, and a Visual Studio context strip. Output is separated into Response, Diagnostics, Receipts, and Pending Patch tabs. It can read the active solution path, active document path, current line, and selected text, then fill deterministic Ali commands such as read active file, build active solution, search selection, plan from selection, and preview replace selection. The same staged commands are available from `Tools -> Ali Companion`, and the code editor context menu includes Ali entries for reading the current file, building the active solution, searching the selection, planning from the selection, and previewing a replacement for the selection. Solution Explorer context menus can stage Ali commands from selected solution, project, or file nodes: read selected file, build selected project/solution, or plan from the selected node. Visual Studio commands enable only when the needed active document, selected text, solution path, or Solution Explorer node is available. Selection-based commands show the exact packaged text, target, original length, packaged length, and trim status before the command is run. It calls Ali's loopback coding bridge at `http://127.0.0.1:8765/api/coding/*`; the helper still owns the coding command parser, workspace policy, confirmation gates, and receipts. Configure helper URL, history length, and selected-text behavior under `Tools -> Options -> Ali -> Companion`.
 
 Use `generate visual studio integration plan` to produce a deterministic handoff for deeper phases. The handoff reports the current workspace, launcher discovery, architecture snapshot, and the minimum guarded contract the VSIX must keep following.
 

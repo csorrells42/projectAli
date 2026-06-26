@@ -44,6 +44,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly string[] CodingBlockedModeChoiceValues = [CodingPermissionModes.Blocked];
     private static readonly string[] CodingGitReadModeChoiceValues = [CodingPermissionModes.Allowed, CodingPermissionModes.Disabled];
     private static readonly string[] CodingGitNetworkModeChoiceValues = [CodingPermissionModes.Blocked, CodingPermissionModes.ConfirmEachTime];
+    private static readonly string[] CodingPdfReadCreateModeChoiceValues = [CodingPermissionModes.Allowed, CodingPermissionModes.Disabled];
+    private static readonly string[] CodingPdfModifyModeChoiceValues = [CodingPermissionModes.ConfirmEachTime, CodingPermissionModes.Disabled];
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private readonly SystemResourceMonitor _resourceMonitor = new();
@@ -157,6 +159,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _codingGitWriteMode = CodingPermissionModes.ConfirmEachTime;
     private string _codingGitMergeMode = CodingPermissionModes.ExtraConfirmation;
     private string _codingGitNetworkMode = CodingPermissionModes.Blocked;
+    private string _codingPdfWorkspaceRootText = string.Empty;
+    private string _codingPdfReadMode = CodingPermissionModes.Allowed;
+    private string _codingPdfCreateMode = CodingPermissionModes.Allowed;
+    private string _codingPdfModifyMode = CodingPermissionModes.ConfirmEachTime;
     private string _codingNotepadPlusPlusPathText = string.Empty;
     private string _codingVisualStudioPathText = string.Empty;
     private string _codingPermissionsStatusText = "Coding permissions not loaded yet.";
@@ -207,6 +213,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SaveCodingPermissionsCommand = CreateCommand(_ => SaveCodingPermissions());
         ResetCodingPermissionsCommand = CreateCommand(_ => ResetCodingPermissionsToDefault());
         BrowseCodingWorkspaceRootCommand = CreateCommand(_ => BrowseCodingWorkspaceRoot());
+        BrowseCodingPdfWorkspaceRootCommand = CreateCommand(_ => BrowseCodingPdfWorkspaceRoot());
         BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
 
@@ -253,6 +260,9 @@ public sealed class MainWindowViewModel : ObservableObject
         ReplaceChoices(CodingGitWriteModeChoices, CodingConfirmOrDisabledModeChoiceValues);
         ReplaceChoices(CodingGitMergeModeChoices, CodingDestructiveActionModeChoiceValues);
         ReplaceChoices(CodingGitNetworkModeChoices, CodingGitNetworkModeChoiceValues);
+        ReplaceChoices(CodingPdfReadModeChoices, CodingPdfReadCreateModeChoiceValues);
+        ReplaceChoices(CodingPdfCreateModeChoices, CodingPdfReadCreateModeChoiceValues);
+        ReplaceChoices(CodingPdfModifyModeChoices, CodingPdfModifyModeChoiceValues);
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
@@ -433,6 +443,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> CodingGitNetworkModeChoices { get; } = new();
 
+    public ObservableCollection<string> CodingPdfReadModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingPdfCreateModeChoices { get; } = new();
+
+    public ObservableCollection<string> CodingPdfModifyModeChoices { get; } = new();
+
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
@@ -509,6 +525,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand BrowseCodingWorkspaceRootCommand { get; }
 
+    public ICommand BrowseCodingPdfWorkspaceRootCommand { get; }
+
     public ICommand BrowseNotepadPlusPlusPathCommand { get; }
 
     public ICommand BrowseVisualStudioPathCommand { get; }
@@ -523,6 +541,18 @@ public sealed class MainWindowViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _codingWorkspaceRootText, value))
+            {
+                OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            }
+        }
+    }
+
+    public string CodingPdfWorkspaceRootText
+    {
+        get => _codingPdfWorkspaceRootText;
+        set
+        {
+            if (SetProperty(ref _codingPdfWorkspaceRootText, value))
             {
                 OnPropertyChanged(nameof(CodingPermissionSummaryText));
             }
@@ -631,6 +661,24 @@ public sealed class MainWindowViewModel : ObservableObject
         set => SetCodingPermissionMode(ref _codingGitNetworkMode, value);
     }
 
+    public string CodingPdfReadMode
+    {
+        get => _codingPdfReadMode;
+        set => SetCodingPermissionMode(ref _codingPdfReadMode, value);
+    }
+
+    public string CodingPdfCreateMode
+    {
+        get => _codingPdfCreateMode;
+        set => SetCodingPermissionMode(ref _codingPdfCreateMode, value);
+    }
+
+    public string CodingPdfModifyMode
+    {
+        get => _codingPdfModifyMode;
+        set => SetCodingPermissionMode(ref _codingPdfModifyMode, value);
+    }
+
     public string CodingNotepadPlusPlusPathText
     {
         get => _codingNotepadPlusPlusPathText;
@@ -679,7 +727,11 @@ public sealed class MainWindowViewModel : ObservableObject
                 $"Git status/diff/log: {CodingGitReadMode}.",
                 $"Git add/commit: {CodingGitWriteMode}.",
                 $"Git merge: {CodingGitMergeMode}.",
-                $"Git pull/push: {CodingGitNetworkMode}."
+                $"Git pull/push: {CodingGitNetworkMode}.",
+                $"PDF workspace: {CodingPdfWorkspaceRootText}.",
+                $"PDF inspect/extract: {CodingPdfReadMode}.",
+                $"PDF create/export: {CodingPdfCreateMode}.",
+                $"PDF combine/split/modify: {CodingPdfModifyMode}."
             ]);
 
     public string MicButtonText => IsRecording ? "Stop Mic" : IsTranscribing ? "Transcribing" : "Mic";
@@ -1920,6 +1972,12 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        if (!CodingWorkspacePolicy.TryNormalizePath(CodingPdfWorkspaceRootText, out var pdfWorkspaceRoot))
+        {
+            CodingPermissionsStatusText = "PDF workspace must be a fully-qualified local folder path.";
+            return;
+        }
+
         var explicitOutsideFileOpenMode = PickChoice(
             CodingExplicitOutsideFileOpenModeChoices,
             CodingExplicitOutsideFileOpenMode,
@@ -1941,12 +1999,16 @@ public sealed class MainWindowViewModel : ObservableObject
             GitWriteMode = PickChoice(CodingGitWriteModeChoices, CodingGitWriteMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false),
             GitMergeMode = PickChoice(CodingGitMergeModeChoices, CodingGitMergeMode, CodingPermissionModes.ExtraConfirmation, resetToSmallest: false),
             GitNetworkMode = PickChoice(CodingGitNetworkModeChoices, CodingGitNetworkMode, CodingPermissionModes.Blocked, resetToSmallest: false),
+            PdfWorkspaceRoot = pdfWorkspaceRoot,
+            PdfReadMode = PickChoice(CodingPdfReadModeChoices, CodingPdfReadMode, CodingPermissionModes.Allowed, resetToSmallest: false),
+            PdfCreateMode = PickChoice(CodingPdfCreateModeChoices, CodingPdfCreateMode, CodingPermissionModes.Allowed, resetToSmallest: false),
+            PdfModifyMode = PickChoice(CodingPdfModifyModeChoices, CodingPdfModifyMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false),
             NotepadPlusPlusPath = NormalizeOptionalCodingToolPath(CodingNotepadPlusPlusPathText),
             VisualStudioPath = NormalizeOptionalCodingToolPath(CodingVisualStudioPathText)
         };
         _services.SaveCodingToolSettings(settings);
         ApplyCodingToolSettings(settings);
-        CodingPermissionsStatusText = $"Saved coding permissions. Workspace: {workspaceRoot}";
+        CodingPermissionsStatusText = $"Saved coding permissions. Workspace: {workspaceRoot}. PDF workspace: {pdfWorkspaceRoot}";
     }
 
     private void ResetCodingPermissionsToDefault()
@@ -1974,6 +2036,10 @@ public sealed class MainWindowViewModel : ObservableObject
         CodingGitWriteMode = PickChoice(CodingGitWriteModeChoices, settings.GitWriteMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false);
         CodingGitMergeMode = PickChoice(CodingGitMergeModeChoices, settings.GitMergeMode, CodingPermissionModes.ExtraConfirmation, resetToSmallest: false);
         CodingGitNetworkMode = PickChoice(CodingGitNetworkModeChoices, settings.GitNetworkMode, CodingPermissionModes.Blocked, resetToSmallest: false);
+        CodingPdfWorkspaceRootText = settings.ResolvePdfWorkspaceRoot(_services.DataRoot);
+        CodingPdfReadMode = PickChoice(CodingPdfReadModeChoices, settings.PdfReadMode, CodingPermissionModes.Allowed, resetToSmallest: false);
+        CodingPdfCreateMode = PickChoice(CodingPdfCreateModeChoices, settings.PdfCreateMode, CodingPermissionModes.Allowed, resetToSmallest: false);
+        CodingPdfModifyMode = PickChoice(CodingPdfModifyModeChoices, settings.PdfModifyMode, CodingPermissionModes.ConfirmEachTime, resetToSmallest: false);
         CodingAllowExplicitOutsideFileOpen = !CodingPermissionModes.IsDisabled(CodingExplicitOutsideFileOpenMode);
         CodingNotepadPlusPlusPathText = settings.NotepadPlusPlusPath;
         CodingVisualStudioPathText = settings.VisualStudioPath;
@@ -2008,6 +2074,25 @@ public sealed class MainWindowViewModel : ObservableObject
         if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
         {
             CodingWorkspaceRootText = dialog.SelectedPath;
+        }
+    }
+
+    private void BrowseCodingPdfWorkspaceRoot()
+    {
+        var selectedPath = Directory.Exists(CodingPdfWorkspaceRootText)
+            ? CodingPdfWorkspaceRootText
+            : Path.Combine(_services.DataRoot, "GeneratedDocuments");
+
+        using var dialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "Choose Ali's PDF workspace folder",
+            SelectedPath = selectedPath,
+            ShowNewFolderButton = true
+        };
+
+        if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            CodingPdfWorkspaceRootText = dialog.SelectedPath;
         }
     }
 

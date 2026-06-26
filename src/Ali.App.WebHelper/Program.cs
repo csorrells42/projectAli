@@ -1031,6 +1031,7 @@ public const string IndexHtml = """
             <button class="command-chip primary" type="button" data-command="show install doctor">Install Check</button>
             <button class="command-chip primary" type="button" data-command="show visual studio integration">VS Setup</button>
             <button class="command-chip primary" type="button" data-command="show windows troubleshooting toolkit">Windows Help</button>
+            <button class="command-chip primary" type="button" data-command="show pdf commands">PDF Tools</button>
           </div>
         </div>
         <div class="command-group">
@@ -1112,6 +1113,21 @@ public const string IndexHtml = """
           </div>
         </div>
         <div class="command-group">
+          <h3>PDF Tools</h3>
+          <div class="command-grid">
+            <button class="command-chip" type="button" data-command="show pdf tool status">PDF Status</button>
+            <button class="command-chip" type="button" data-command="show pdf commands">PDF Index</button>
+            <button class="command-chip" type="button" data-command="generate pdf &quot;owner-demo.pdf&quot; with text &quot;Ali demo ready.&quot;">Create</button>
+            <button class="command-chip" type="button" data-command="inspect pdf &quot;document.pdf&quot;">Inspect</button>
+            <button class="command-chip" type="button" data-command="extract text from pdf &quot;document.pdf&quot;">Extract</button>
+            <button class="command-chip" type="button" data-command="summarize pdf &quot;document.pdf&quot;">Summary</button>
+            <button class="command-chip" type="button" data-command="convert markdown to pdf &quot;notes.md&quot; &quot;notes.pdf&quot;">Markdown</button>
+            <button class="command-chip" type="button" data-command="confirm combine pdfs &quot;first.pdf&quot; &quot;second.pdf&quot; &quot;combined.pdf&quot;">Combine</button>
+            <button class="command-chip" type="button" data-command="generate install report pdf">Install PDF</button>
+            <button class="command-chip" type="button" data-command="generate troubleshooting report pdf">Troubleshoot PDF</button>
+          </div>
+        </div>
+        <div class="command-group">
           <h3>Skills</h3>
           <ul class="skill-list">
             <li><strong>Scout</strong>Maps solutions, packages, files, and architecture.</li>
@@ -1119,6 +1135,7 @@ public const string IndexHtml = """
             <li><strong>Build</strong>Runs confirmed dotnet build/test/restore/package commands.</li>
             <li><strong>Recover</strong>Compares roadmap, receipts, and Git state after interruption.</li>
             <li><strong>Diagnose</strong>Guides Windows process, port, service, startup, and build-lock investigation.</li>
+            <li><strong>PDF</strong>Creates polished PDFs, inspects/extracts text, summarizes, converts Markdown, and assembles derived PDFs through gates.</li>
             <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>
           </ul>
         </div>

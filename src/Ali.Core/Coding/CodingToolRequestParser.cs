@@ -115,6 +115,73 @@ public static class CodingToolRequestParser
         "write a pdf "
     ];
 
+    private static readonly string[] PdfToolStatusRequests =
+    [
+        "show pdf tool status",
+        "show pdf status",
+        "pdf tool status",
+        "pdf status"
+    ];
+
+    private static readonly string[] PdfCommandIndexRequests =
+    [
+        "show pdf command index",
+        "show pdf commands",
+        "pdf command index",
+        "pdf commands",
+        "what can ali do with pdfs",
+        "what can ali do with pdf"
+    ];
+
+    private static readonly string[] InspectPdfPrefixes =
+    [
+        "inspect pdf ",
+        "inspect the pdf ",
+        "analyze pdf ",
+        "analyze the pdf ",
+        "check pdf ",
+        "check the pdf "
+    ];
+
+    private static readonly string[] ExtractPdfTextPrefixes =
+    [
+        "extract text from pdf ",
+        "extract pdf text ",
+        "read pdf text ",
+        "read text from pdf "
+    ];
+
+    private static readonly string[] SummarizePdfPrefixes =
+    [
+        "summarize pdf ",
+        "summarize the pdf ",
+        "summary of pdf ",
+        "summarize document pdf "
+    ];
+
+    private static readonly string[] ConvertMarkdownToPdfPrefixes =
+    [
+        "convert markdown to pdf ",
+        "convert md to pdf ",
+        "make pdf from markdown ",
+        "generate pdf from markdown "
+    ];
+
+    private static readonly string[] CombinePdfPrefixes =
+    [
+        "combine pdfs ",
+        "merge pdfs ",
+        "assemble pdfs "
+    ];
+
+    private static readonly string[] SplitPdfPrefixes =
+    [
+        "split pdf ",
+        "split the pdf ",
+        "separate pdf ",
+        "separate the pdf "
+    ];
+
     private static readonly string[] GenerateCodingReportRequests =
     [
         "generate coding report",
@@ -126,6 +193,25 @@ public static class CodingToolRequestParser
         "export coding report",
         "export coding session report",
         "write coding report"
+    ];
+
+    private static readonly string[] GenerateInstallReportRequests =
+    [
+        "generate install report pdf",
+        "generate installation report pdf",
+        "create install report pdf",
+        "create installation report pdf",
+        "generate project install report",
+        "create project install report"
+    ];
+
+    private static readonly string[] GenerateTroubleshootingReportRequests =
+    [
+        "generate troubleshooting report pdf",
+        "create troubleshooting report pdf",
+        "generate windows troubleshooting report",
+        "create windows troubleshooting report",
+        "generate computer troubleshooting report"
     ];
 
     private static readonly string[] ToolIntegrationStatusRequests =
@@ -989,6 +1075,11 @@ public static class CodingToolRequestParser
         }
 
         if (TryParseGenerateCodingReport(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParsePdfCommand(trimmed, userConfirmed, out request))
         {
             return true;
         }
@@ -1866,6 +1957,151 @@ public static class CodingToolRequestParser
         return true;
     }
 
+    private static bool TryParsePdfCommand(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (PdfToolStatusRequests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPdfToolStatus, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (PdfCommandIndexRequests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPdfCommandIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePdfPathCommand(text, InspectPdfPrefixes, CodingToolAction.InspectPdf, userConfirmed, out request)
+            || TryParsePdfPathCommand(text, ExtractPdfTextPrefixes, CodingToolAction.ExtractPdfText, userConfirmed, out request)
+            || TryParsePdfPathCommand(text, SummarizePdfPrefixes, CodingToolAction.SummarizePdf, userConfirmed, out request)
+            || TryParsePdfPathCommand(text, SplitPdfPrefixes, CodingToolAction.SplitPdf, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParseConvertMarkdownToPdf(text, userConfirmed, out request)
+            || TryParseCombinePdfs(text, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParseNamedReport(text, GenerateInstallReportRequests, CodingToolAction.GenerateInstallReport, "ali-install-report.pdf", userConfirmed, out request)
+            || TryParseNamedReport(text, GenerateTroubleshootingReportRequests, CodingToolAction.GenerateTroubleshootingReport, "ali-troubleshooting-report.pdf", userConfirmed, out request))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParsePdfPathCommand(
+        string text,
+        IReadOnlyList<string> prefixes,
+        CodingToolAction action,
+        bool userConfirmed,
+        out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (!StartsWithAny(text, prefixes))
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count == 0 || string.IsNullOrWhiteSpace(segments[0]))
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            action,
+            segments[0].Trim(),
+            ExplicitUserPath: IsFullyQualifiedLocalPath(segments[0]),
+            UserConfirmed: userConfirmed,
+            Query: segments.Count > 1 ? segments[1].Trim() : null);
+        return true;
+    }
+
+    private static bool TryParseConvertMarkdownToPdf(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (!StartsWithAny(text, ConvertMarkdownToPdfPrefixes))
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count < 1 || string.IsNullOrWhiteSpace(segments[0]))
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.ConvertMarkdownToPdf,
+            segments[0].Trim(),
+            ExplicitUserPath: IsFullyQualifiedLocalPath(segments[0]),
+            UserConfirmed: userConfirmed,
+            Query: segments.Count > 1 && !string.IsNullOrWhiteSpace(segments[1]) ? segments[1].Trim() : null);
+        return true;
+    }
+
+    private static bool TryParseCombinePdfs(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (!StartsWithAny(text, CombinePdfPrefixes))
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count < 3 || string.IsNullOrWhiteSpace(segments[^1]))
+        {
+            return false;
+        }
+
+        var sourcePaths = segments.Take(segments.Count - 1)
+            .Select(segment => segment.Trim())
+            .Where(segment => segment.Length > 0)
+            .ToArray();
+        if (sourcePaths.Length < 2)
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.CombinePdfs,
+            segments[^1].Trim(),
+            ExplicitUserPath: false,
+            UserConfirmed: userConfirmed,
+            AdditionalPaths: sourcePaths);
+        return true;
+    }
+
+    private static bool TryParseNamedReport(
+        string text,
+        IReadOnlyList<string> requests,
+        CodingToolAction action,
+        string defaultName,
+        bool userConfirmed,
+        out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var matched = requests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+            || requests.Any(candidate => text.StartsWith(candidate + " ", StringComparison.OrdinalIgnoreCase));
+        if (!matched)
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        var fileName = segments.Count > 0 && !string.IsNullOrWhiteSpace(segments[0])
+            ? segments[0].Trim()
+            : defaultName;
+        request = new CodingToolRequest(action, fileName, ExplicitUserPath: false, UserConfirmed: userConfirmed);
+        return true;
+    }
+
     private static bool TryParseGenerateCodingReport(string text, bool userConfirmed, out CodingToolRequest request)
     {
         request = new CodingToolRequest(CodingToolAction.OpenFile, null);
@@ -2264,6 +2500,10 @@ public static class CodingToolRequestParser
         path = text.Substring(firstQuote + 1, secondQuote - firstQuote - 1).Trim();
         return path.Length > 0;
     }
+
+    private static bool IsFullyQualifiedLocalPath(string path) =>
+        !string.IsNullOrWhiteSpace(path)
+        && System.IO.Path.IsPathFullyQualified(path.Trim().Trim('"'));
 
     private static IReadOnlyList<string> ExtractQuotedSegments(string text)
     {

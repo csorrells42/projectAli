@@ -159,7 +159,8 @@ public sealed class AliServices
             codingSettings.ToPolicy(),
             dataRoot,
             configuredNotepadPlusPlusPath: codingSettings.NotepadPlusPlusPath,
-            configuredVisualStudioPath: codingSettings.VisualStudioPath);
+            configuredVisualStudioPath: codingSettings.VisualStudioPath,
+            pdfWorkspaceRoot: codingSettings.ResolvePdfWorkspaceRoot(dataRoot));
         var orchestrator = new ConversationOrchestrator(
             runtime,
             permissions,
