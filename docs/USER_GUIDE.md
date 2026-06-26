@@ -193,11 +193,23 @@ Roadmap execution state is saved under Ali's local coding data. Use `show active
 
 Use `show crash recovery status` after a crash or interrupted build. Ali reloads the roadmap state, checks recent coding receipts, runs a read-only Git status check, compares the active roadmap step against receipts, and suggests safe continue/fix/rollback paths. If the evidence supports a concrete fix, Ali can suggest a guarded patch preview for approval; if the evidence is unclear, she should pause and show options before editing.
 
-Visual Studio integration in this build is launch/configuration integration, not an in-Visual-Studio extension. Ali can open the configured solution in Visual Studio and inspect the project architecture from chat commands. A graphical Visual Studio panel or sidebar is a future extension phase.
+Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension adds an `Ali Companion` tool window in Visual Studio and loads Ali's local helper page at `http://127.0.0.1:8765/`. The helper still owns the coding command parser, workspace policy, confirmation gates, and receipts.
 
-Use `generate visual studio integration plan` to produce a deterministic handoff for that future phase. The handoff reports the current workspace, launcher discovery, architecture snapshot, and the minimum guarded contract a VS extension or local companion window must follow. It does not install an extension or claim an in-IDE panel exists.
+Use `generate visual studio integration plan` to produce a deterministic handoff for deeper phases. The handoff reports the current workspace, launcher discovery, architecture snapshot, and the minimum guarded contract the VSIX must keep following.
 
 The HTML helper's Programming Companion panel is the first local companion surface for that direction. It can submit deterministic coding commands to Ali on loopback, but all writes/builds/tests/Git actions still follow the same confirmation gates.
+
+The VSIX build output is:
+
+```text
+src\Ali.App.VisualStudioExtension\bin\Debug\net472\Ali.App.VisualStudioExtension.vsix
+```
+
+Install it into Visual Studio Community with Visual Studio's VSIX Installer, then open `View -> Ali Companion`. Start the WebHelper before using the window:
+
+```powershell
+dotnet run --project .\src\Ali.App.WebHelper\Ali.App.WebHelper.csproj --no-build
+```
 
 Visual Studio can also call the current bridge through `Ali.App.VisualStudioBridge.exe`, which is designed for Visual Studio External Tools. Build the solution, start the WebHelper on loopback, then add an External Tool that points at:
 
@@ -218,7 +230,7 @@ Example External Tools arguments:
 --command "read file \"{file}\" at line {line}" --file "$(ItemPath)" --line "$(CurLine)"
 ```
 
-This is still not a Visual Studio extension. It is a guarded local bridge that lets Visual Studio invoke Ali's current deterministic coding abilities.
+The External Tools bridge remains useful for one-click commands, even with the VSIX installed.
 
 The full External Tools setup guide is at:
 

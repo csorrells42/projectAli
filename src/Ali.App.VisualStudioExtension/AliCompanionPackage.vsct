@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidAliCompanionPackage">
+    <Groups>
+      <Group guid="guidAliCompanionCommandSet" id="AliCompanionGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_VIEW" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0100" type="Button">
+        <Parent guid="guidAliCompanionCommandSet" id="AliCompanionGroup" />
+        <Strings>
+          <ButtonText>Ali Companion</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidAliCompanionPackage" value="{af94ca1b-cbb3-4c03-bd44-9ed0654e6931}" />
+    <GuidSymbol name="guidAliCompanionCommandSet" value="{1c60cf1b-8401-43c2-baf1-1636f492dd04}">
+      <IDSymbol name="AliCompanionGroup" value="0x1020" />
+      <IDSymbol name="OpenAliCompanionCommand" value="0x0100" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

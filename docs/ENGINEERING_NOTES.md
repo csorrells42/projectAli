@@ -119,7 +119,7 @@ The patch loop remains deliberately narrow. It applies only exact literal replac
 
 The `suggest patch from last failure` command is preview-only. It currently supports one deterministic compiler-repair case: `CS1002 ; expected` with an openable source file/line inside the approved workspace. The command stores a pending patch preview only when the exact line replacement can be validated through the normal patch preview path.
 
-Visual Studio integration is currently external process launch plus configurable tool discovery. Ali does not yet install a Visual Studio extension, in-IDE tool window, or graphical architecture panel.
+Visual Studio integration now has three layers: configurable Visual Studio launch/discovery, an External Tools CLI bridge, and a developer VSIX project named `Ali.App.VisualStudioExtension`.
 
 The `generate visual studio integration plan` command is a read-only bridge toward deeper integration. It reports the current launcher/workspace state, includes an architecture snapshot, and defines the minimum contract for a future VSIX tool window or local companion window: show status, submit deterministic Ali coding commands, pass current file/line context only on user action, and keep edits/builds/tests/Git writes inside the existing confirmation gates.
 
@@ -130,9 +130,11 @@ GET  /api/coding/status
 POST /api/coding/command { "command": "show visual studio integration" }
 ```
 
-Both endpoints honor the helper access token when configured and reject non-loopback callers. The built-in helper page includes a compact Coding Bridge panel that uses these endpoints as the first local companion surface for future Visual Studio integration.
+Both endpoints honor the helper access token when configured and reject non-loopback callers. The built-in helper page includes the Programming Companion panel, with history on the left, chat in the center, and coding commands on the right.
 
-`Ali.App.VisualStudioBridge` is a buildable CLI bridge for Visual Studio External Tools. It accepts solution/file/line context, expands command templates such as `{file}` and `{line}`, and sends the resulting deterministic command to the loopback coding bridge. This gives Visual Studio a usable integration path without taking a dependency on Visual Studio SDK or VSIX packaging yet.
+`Ali.App.VisualStudioBridge` is a buildable CLI bridge for Visual Studio External Tools. It accepts solution/file/line context, expands command templates such as `{file}` and `{line}`, and sends the resulting deterministic command to the loopback coding bridge.
+
+`Ali.App.VisualStudioExtension` is a buildable VSIX. It registers an `Ali Companion` tool window and opens the local helper URL inside Visual Studio. The VSIX does not add direct file/build/Git authority; those actions still route through the local helper and Ali's normal confirmation gates.
 
 The bridge can auto-start `Ali.App.WebHelper` on loopback when the helper is offline, using `ALI_HELPER_URL` or the default `http://127.0.0.1:8765`. Pass `--no-start-helper` for fail-fast behavior. The current setup guide lives in `tools\visualstudio\ALI_VISUAL_STUDIO_EXTERNAL_TOOLS.md`.
 

@@ -885,7 +885,7 @@ static async Task TestLocalCodingToolShowsToolIntegrationStatus()
     Contains(solutionPath, result.Message);
     Contains(visualStudioPath, result.Message);
     Contains(notepadPlusPlus, result.Message);
-    Contains("Visual Studio in-IDE panel: not installed", result.Message);
+    Contains("Visual Studio in-IDE panel: Ali Companion VSIX is included", result.Message);
     Contains("Git pull/push: blocked", result.Message);
     Contains("generate visual studio integration plan", result.Message);
 }
@@ -922,10 +922,11 @@ static async Task TestLocalCodingToolGeneratesVisualStudioHandoff()
     Equal(true, result.Handled);
     Equal(true, result.Succeeded);
     Contains("Visual Studio integration handoff", result.Message);
-    Contains("no Visual Studio extension or in-IDE panel is installed", result.Message);
+    Contains("Ali Companion VSIX is included", result.Message);
     Contains(solutionPath, result.Message);
     Contains(visualStudioPath, result.Message);
     Contains("Minimum integration contract", result.Message);
+    Contains("Next implementation slices", result.Message);
     Contains("Workspace architecture snapshot", result.Message);
     Contains("Demo.App.csproj", result.Message);
 }
