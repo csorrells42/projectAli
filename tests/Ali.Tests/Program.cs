@@ -1036,6 +1036,10 @@ static async Task TestLocalCodingToolExploresBuildIdea()
     Contains("Truth boundary", result.Message);
     Contains("Workspace fit", result.Message);
     Contains("Possible implementation paths", result.Message);
+    Contains("Architecture recommendation cards", result.Message);
+    Contains("Card 1 - App shape", result.Message);
+    Contains("Card 3 - Candidate libraries/tools", result.Message);
+    Contains("Card 5 - Approval and risk", result.Message);
     Contains("Library/software areas to explore for approval", result.Message);
     Contains("SOLIDWORKS API via COM interop", result.Message);
     Contains("Approval checkpoints", result.Message);

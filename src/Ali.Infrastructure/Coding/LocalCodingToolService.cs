@@ -461,6 +461,7 @@ public sealed class LocalCodingToolService(
         }
 
         AddImplementationPaths(lines, goal);
+        AddArchitectureRecommendationCards(lines, goal, summaries);
         AddLibraryExploration(lines, goal);
         AddApprovalCheckpoints(lines);
         AddBuildIdeaNextCommands(lines, goal);
@@ -2107,6 +2108,82 @@ public sealed class LocalCodingToolService(
         }
 
         lines.Add("- Version/source check: approve an internet or package-registry lookup before treating any library/version as current.");
+    }
+
+    private static void AddArchitectureRecommendationCards(
+        List<string> lines,
+        string goal,
+        IReadOnlyList<ProjectSummary> summaries)
+    {
+        var hasApp = summaries.Any(summary => summary.ProjectRole.Contains("app", StringComparison.OrdinalIgnoreCase));
+        var hasLibrary = summaries.Any(summary => summary.ProjectRole.Equals("library", StringComparison.OrdinalIgnoreCase));
+        var hasTests = summaries.Any(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase));
+        var isCad = MentionsAny(goal, "solidworks", "cad", "drawing", "model", "assembly", "part", "bom");
+        var isVisualStudio = MentionsAny(goal, "visual studio", "vsix", "ide", "extension", "tool window");
+        var isWeb = MentionsAny(goal, "web", "api", "dashboard", "site", "portal", "server");
+        var isAi = MentionsAny(goal, "ai", "assistant", "rag", "chat", "agent", "llm", "model");
+
+        lines.Add("Architecture recommendation cards:");
+        lines.Add("- Card 1 - App shape:");
+        if (isVisualStudio)
+        {
+            lines.Add("  Recommendation: thin Visual Studio surface over Ali's existing guarded bridge and local helper.");
+        }
+        else if (isCad)
+        {
+            lines.Add("  Recommendation: small external adapter or macro proof first, then decide whether a full add-in is justified.");
+        }
+        else if (isWeb)
+        {
+            lines.Add("  Recommendation: ASP.NET Core service boundary with a narrow UI/API slice and explicit auth/data decisions.");
+        }
+        else if (isAi)
+        {
+            lines.Add("  Recommendation: separate prompt/retrieval/tool orchestration from UI and persistence so receipts stay inspectable.");
+        }
+        else
+        {
+            lines.Add("  Recommendation: start with one owner-visible workflow inside the existing app before extracting libraries.");
+        }
+
+        lines.Add("- Card 2 - Local fit:");
+        lines.Add($"  Existing app/UI project: {(hasApp ? "yes" : "not detected")}; library project: {(hasLibrary ? "yes" : "not detected")}; test project: {(hasTests ? "yes" : "not detected")}.");
+        lines.Add(hasTests
+            ? "  Fit note: add focused service/parser tests around the new behavior."
+            : "  Fit note: include a small harness or test project before broadening the workflow.");
+
+        lines.Add("- Card 3 - Candidate libraries/tools:");
+        lines.Add("  Common: Microsoft.Extensions.Hosting, dependency injection, logging/options, and focused test harnesses.");
+        if (isCad)
+        {
+            lines.Add("  CAD: SOLIDWORKS API via COM interop, macro prototypes, Document Manager API, ClosedXML, and PDF/export tooling.");
+        }
+        else if (isVisualStudio)
+        {
+            lines.Add("  Visual Studio: VSIX tool window, external tool bridge, loopback helper endpoints, and command context handoff.");
+        }
+        else if (isWeb)
+        {
+            lines.Add("  Web/API: ASP.NET Core Minimal APIs, OpenAPI/Swagger, Blazor or a small static UI, and auth middleware.");
+        }
+        else if (isAi)
+        {
+            lines.Add("  AI: local Ollama/OpenAI adapters, Semantic Kernel or Microsoft.Extensions.AI as candidates, vector search, and prompt receipt logging.");
+        }
+        else
+        {
+            lines.Add("  General: CommunityToolkit.Mvvm for WPF, Open XML/ClosedXML/QuestPDF for documents, and embedded/local stores when data is small.");
+        }
+
+        lines.Add("- Card 4 - First prototype path:");
+        lines.Add("  1. Define one visible outcome and one non-goal.");
+        lines.Add("  2. Map the smallest existing project/file surface.");
+        lines.Add("  3. Add or reuse one service boundary.");
+        lines.Add("  4. Validate with a focused build/test receipt before widening.");
+
+        lines.Add("- Card 5 - Approval and risk:");
+        lines.Add("  Approval needed before live lookup/install: package versions, internet sources, external SDKs, and tool downloads.");
+        lines.Add("  Risk: do not claim external app integration, installed packages, or current library versions without receipts.");
     }
 
     private static void AddRoadmapArchitectureFit(List<string> lines, IReadOnlyList<ProjectSummary> summaries)
