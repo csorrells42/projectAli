@@ -13,6 +13,10 @@ public sealed class LocalCodingToolService(
     string? configuredNotepadPlusPlusPath = null,
     string? configuredVisualStudioPath = null) : ILocalCodingTool
 {
+    private static readonly JsonSerializerOptions RoadmapJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
     private const int MaxListedEntries = 120;
     private const int MaxSearchMatches = 30;
     private const int MaxReadCharacters = 12_000;
@@ -105,6 +109,7 @@ public sealed class LocalCodingToolService(
     private readonly ICodingProcessLauncher _processLauncher = processLauncher ?? new CodingProcessLauncher();
     private readonly ICodingCommandRunner _commandRunner = commandRunner ?? new CodingCommandRunner();
     private readonly string _actionLogPath = Path.Combine(dataRoot, "coding-tool-actions.jsonl");
+    private readonly string _roadmapStatePath = Path.Combine(dataRoot, "Coding", "roadmap-execution-state.json");
     private readonly string _generatedDocumentsRoot = Path.Combine(dataRoot, "GeneratedDocuments");
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
@@ -112,6 +117,8 @@ public sealed class LocalCodingToolService(
     private CodingToolRequest? _lastRoadmapRequest;
     private bool _lastRoadmapApproved;
     private bool _approvedRoadmapStarted;
+    private bool _roadmapStateLoaded;
+    private RoadmapExecutionState? _roadmapState;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
 
@@ -169,6 +176,12 @@ public sealed class LocalCodingToolService(
             CodingToolAction.DiscardLastRoadmap => DiscardLastRoadmap(),
             CodingToolAction.ApproveLastRoadmap => ApproveLastRoadmap(),
             CodingToolAction.StartApprovedRoadmap => StartApprovedRoadmap(),
+            CodingToolAction.ShowActiveRoadmapStep => ShowActiveRoadmapStep(),
+            CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
+            CodingToolAction.PauseRoadmap => PauseRoadmap(),
+            CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
+            CodingToolAction.FinishRoadmap => FinishRoadmap(),
+            CodingToolAction.RecoverRoadmapState => RecoverRoadmapState(),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
@@ -500,6 +513,7 @@ public sealed class LocalCodingToolService(
 
     private CodingToolResult ShowLastRoadmap()
     {
+        LoadRoadmapStateIfNeeded();
         if (_lastRoadmapRequest is null)
         {
             return new CodingToolResult(
@@ -511,24 +525,36 @@ public sealed class LocalCodingToolService(
         }
 
         var roadmap = DraftImplementationRoadmap(_lastRoadmapRequest);
-        var status = _lastRoadmapApproved
-            ? _approvedRoadmapStarted
-                ? "Roadmap status: approved and started."
-                : "Roadmap status: approved and ready to start."
-            : "Roadmap status: pending approval.";
-        var next = _lastRoadmapApproved
-            ? "Next command: start approved roadmap"
-            : "Next command: approve last roadmap";
+        var status = _roadmapState is { Finished: true }
+            ? "Roadmap status: finished."
+            : _roadmapState is { Paused: true }
+                ? "Roadmap status: paused."
+                : _lastRoadmapApproved
+                    ? _approvedRoadmapStarted
+                        ? "Roadmap status: approved and started."
+                        : "Roadmap status: approved and ready to start."
+                    : "Roadmap status: pending approval.";
+        var next = _roadmapState is { Finished: true }
+            ? "Next command: draft implementation roadmap <goal>"
+            : _roadmapState is { Paused: true }
+                ? "Next command: resume roadmap"
+                : _lastRoadmapApproved
+                    ? "Next command: start approved roadmap"
+                    : "Next command: approve last roadmap";
+        var step = _roadmapState is null
+            ? string.Empty
+            : $"{Environment.NewLine}Active step: {FormatRoadmapCurrentStep(_roadmapState)}";
 
         return roadmap with
         {
-            Message = $"{status}{Environment.NewLine}{next}{Environment.NewLine}{Environment.NewLine}{roadmap.Message}",
+            Message = $"{status}{Environment.NewLine}{next}{step}{Environment.NewLine}{Environment.NewLine}{roadmap.Message}",
             ToolName = "Implementation roadmap"
         };
     }
 
     private CodingToolResult DiscardLastRoadmap()
     {
+        LoadRoadmapStateIfNeeded();
         if (_lastRoadmapRequest is null)
         {
             return new CodingToolResult(
@@ -540,9 +566,7 @@ public sealed class LocalCodingToolService(
         }
 
         var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
-        _lastRoadmapRequest = null;
-        _lastRoadmapApproved = false;
-        _approvedRoadmapStarted = false;
+        ClearRoadmapState();
 
         return new CodingToolResult(
             true,
@@ -554,6 +578,7 @@ public sealed class LocalCodingToolService(
 
     private CodingToolResult ApproveLastRoadmap()
     {
+        LoadRoadmapStateIfNeeded();
         if (_lastRoadmapRequest is null)
         {
             return new CodingToolResult(
@@ -564,9 +589,21 @@ public sealed class LocalCodingToolService(
                 Policy.WorkspaceRoot);
         }
 
+        var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
         _lastRoadmapApproved = true;
         _approvedRoadmapStarted = false;
-        var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
+        _roadmapState = (_roadmapState ?? CreateRoadmapState(goal)) with
+        {
+            Goal = goal,
+            Approved = true,
+            Started = false,
+            Paused = false,
+            Finished = false,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastReceiptSummary = "Roadmap approved. No files were changed."
+        };
+        SaveRoadmapState();
+
         return new CodingToolResult(
             true,
             true,
@@ -577,6 +614,7 @@ public sealed class LocalCodingToolService(
 
     private CodingToolResult StartApprovedRoadmap()
     {
+        LoadRoadmapStateIfNeeded();
         if (_lastRoadmapRequest is null)
         {
             return new CodingToolResult(
@@ -599,18 +637,28 @@ public sealed class LocalCodingToolService(
 
         _approvedRoadmapStarted = true;
         var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
+        _roadmapState = (_roadmapState ?? CreateRoadmapState(goal)) with
+        {
+            Goal = goal,
+            Approved = true,
+            Started = true,
+            Paused = false,
+            Finished = false,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastReceiptSummary = "Roadmap execution started. No files were changed."
+        };
+        SaveRoadmapState();
+
         var lines = new List<string>
         {
             "Approved roadmap execution started:",
             $"Goal: {goal}",
             "No files were changed.",
             "Current execution mode: guided phase loop. Ali will propose the next safe action, then stop at write/build/package/Git approval boundaries.",
-            "Phase 1: clarify owner-visible behavior and non-goals.",
-            "Phase 1 checklist:",
-            "- Restate the exact behavior to build.",
-            "- Name what is intentionally out of scope for this pass.",
-            "- Identify the first read-only inspection command.",
+            "Phase 1: active roadmap step tracking.",
+            $"Current step: {FormatRoadmapCurrentStep(_roadmapState)}",
             "Recommended next Ali commands:",
+            "- show active roadmap step",
             "- analyze solution architecture",
             "- inspect coding workspace",
             $"- plan coding task {goal}",
@@ -626,7 +674,8 @@ public sealed class LocalCodingToolService(
             "- Package lookup/install needs explicit approval.",
             "- File edits must go through preview/apply confirmation.",
             "- Build/test/run commands need confirmation.",
-            "- Git write/network actions remain behind Git permission gates."
+            "- Git write/network actions remain behind Git permission gates.",
+            $"Recovery file: {_roadmapStatePath}"
         };
 
         return new CodingToolResult(
@@ -635,6 +684,365 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Roadmap execution",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowActiveRoadmapStep()
+    {
+        LoadRoadmapStateIfNeeded();
+        if (_roadmapState is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No active roadmap state was found. Draft and start a roadmap first.",
+                "Roadmap execution",
+                Policy.WorkspaceRoot);
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true),
+            "Roadmap execution",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult AdvanceRoadmapStep()
+    {
+        LoadRoadmapStateIfNeeded();
+        if (!TryGetActiveRoadmapForStepChange(out var state, out var error))
+        {
+            return error;
+        }
+
+        var nextIndex = state.CurrentStepIndex + 1;
+        if (nextIndex >= state.Steps.Count)
+        {
+            _roadmapState = state with
+            {
+                Finished = true,
+                Paused = false,
+                CurrentStepIndex = Math.Max(0, state.Steps.Count - 1),
+                UpdatedAt = DateTimeOffset.UtcNow,
+                LastReceiptSummary = $"Completed final roadmap step: {FormatRoadmapCurrentStep(state)}"
+            };
+            SyncRoadmapFieldsFromState(_roadmapState);
+            SaveRoadmapState();
+            return new CodingToolResult(
+                true,
+                true,
+                $"Roadmap finished. No files were changed by this state update.{Environment.NewLine}{FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true)}",
+                "Roadmap execution",
+                Policy.WorkspaceRoot);
+        }
+
+        _roadmapState = state with
+        {
+            CurrentStepIndex = nextIndex,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastReceiptSummary = $"Advanced from step {state.CurrentStepIndex + 1} to step {nextIndex + 1}."
+        };
+        SyncRoadmapFieldsFromState(_roadmapState);
+        SaveRoadmapState();
+        return new CodingToolResult(
+            true,
+            true,
+            $"Roadmap step advanced. No files were changed by this state update.{Environment.NewLine}{FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true)}",
+            "Roadmap execution",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PauseRoadmap()
+    {
+        LoadRoadmapStateIfNeeded();
+        if (_roadmapState is null)
+        {
+            return new CodingToolResult(true, false, "No roadmap state is available to pause.", "Roadmap execution", Policy.WorkspaceRoot);
+        }
+
+        _roadmapState = _roadmapState with
+        {
+            Paused = true,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastReceiptSummary = "Roadmap paused. No files were changed."
+        };
+        SyncRoadmapFieldsFromState(_roadmapState);
+        SaveRoadmapState();
+        return new CodingToolResult(
+            true,
+            true,
+            $"Paused roadmap execution. No files were changed.{Environment.NewLine}{FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true)}",
+            "Roadmap execution",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ResumeRoadmap()
+    {
+        LoadRoadmapStateIfNeeded();
+        if (_roadmapState is null)
+        {
+            return new CodingToolResult(true, false, "No roadmap state is available to resume.", "Roadmap execution", Policy.WorkspaceRoot);
+        }
+
+        _roadmapState = _roadmapState with
+        {
+            Paused = false,
+            Finished = false,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastReceiptSummary = "Roadmap resumed. No files were changed."
+        };
+        SyncRoadmapFieldsFromState(_roadmapState);
+        SaveRoadmapState();
+        return new CodingToolResult(
+            true,
+            true,
+            $"Resumed roadmap execution. No files were changed.{Environment.NewLine}{FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true)}",
+            "Roadmap execution",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult FinishRoadmap()
+    {
+        LoadRoadmapStateIfNeeded();
+        if (_roadmapState is null)
+        {
+            return new CodingToolResult(true, false, "No roadmap state is available to finish.", "Roadmap execution", Policy.WorkspaceRoot);
+        }
+
+        _roadmapState = _roadmapState with
+        {
+            Finished = true,
+            Paused = false,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LastReceiptSummary = "Roadmap manually marked finished. No files were changed."
+        };
+        SyncRoadmapFieldsFromState(_roadmapState);
+        SaveRoadmapState();
+        return new CodingToolResult(
+            true,
+            true,
+            $"Finished roadmap execution state. No files were changed.{Environment.NewLine}{FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true)}",
+            "Roadmap execution",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult RecoverRoadmapState()
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        if (_roadmapState is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                $"No saved roadmap state was found at: {_roadmapStatePath}",
+                "Roadmap recovery",
+                _roadmapStatePath);
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Recovered roadmap state from disk.{Environment.NewLine}{FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true)}",
+            "Roadmap recovery",
+            _roadmapStatePath);
+    }
+
+    private void LoadRoadmapStateIfNeeded()
+    {
+        if (_roadmapStateLoaded)
+        {
+            return;
+        }
+
+        _roadmapStateLoaded = true;
+        if (!File.Exists(_roadmapStatePath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_roadmapStatePath);
+            _roadmapState = JsonSerializer.Deserialize<RoadmapExecutionState>(stream, RoadmapJsonOptions);
+            if (_roadmapState is not null)
+            {
+                SyncRoadmapFieldsFromState(_roadmapState);
+            }
+        }
+        catch
+        {
+            _roadmapState = null;
+        }
+    }
+
+    private void SaveRoadmapState()
+    {
+        _roadmapStateLoaded = true;
+        if (_roadmapState is null)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_roadmapStatePath)!);
+        using var stream = File.Create(_roadmapStatePath);
+        JsonSerializer.Serialize(stream, _roadmapState, RoadmapJsonOptions);
+    }
+
+    private void ClearRoadmapState()
+    {
+        _lastRoadmapRequest = null;
+        _lastRoadmapApproved = false;
+        _approvedRoadmapStarted = false;
+        _roadmapState = null;
+        _roadmapStateLoaded = true;
+        if (File.Exists(_roadmapStatePath))
+        {
+            File.Delete(_roadmapStatePath);
+        }
+    }
+
+    private void SyncRoadmapFieldsFromState(RoadmapExecutionState state)
+    {
+        _lastRoadmapRequest = new CodingToolRequest(
+            CodingToolAction.DraftImplementationRoadmap,
+            null,
+            Query: state.Goal);
+        _lastRoadmapApproved = state.Approved;
+        _approvedRoadmapStarted = state.Started;
+    }
+
+    private RoadmapExecutionState CreateRoadmapState(string goal) =>
+        new(
+            Goal: goal,
+            Approved: false,
+            Started: false,
+            Paused: false,
+            Finished: false,
+            CurrentStepIndex: 0,
+            Steps: BuildRoadmapExecutionSteps(goal),
+            LastReceiptSummary: "Roadmap drafted. No files were changed.",
+            UpdatedAt: DateTimeOffset.UtcNow);
+
+    private static IReadOnlyList<string> BuildRoadmapExecutionSteps(string goal)
+    {
+        var steps = new List<string>
+        {
+            "Clarify owner-visible behavior and non-goals.",
+            "Inspect workspace architecture and identify the smallest impact surface.",
+            "Plan the exact next code/package/build action.",
+            "Preview or execute the approved action through Ali's guarded command.",
+            "Run confirmed validation for the changed surface.",
+            "Review receipts and decide whether the step is complete.",
+            "Stage and commit the completed phase when Chris approves."
+        };
+
+        if (MentionsAny(goal, "package", "library", "dependency", "nuget", "install"))
+        {
+            steps.Insert(3, "Approve and run any required package lookup or package install.");
+        }
+
+        return steps;
+    }
+
+    private static string FormatRoadmapCurrentStep(RoadmapExecutionState state)
+    {
+        if (state.Steps.Count == 0)
+        {
+            return "no steps recorded";
+        }
+
+        var index = Math.Clamp(state.CurrentStepIndex, 0, state.Steps.Count - 1);
+        return $"{index + 1}/{state.Steps.Count}: {state.Steps[index]}";
+    }
+
+    private string FormatRoadmapStatus(RoadmapExecutionState state, bool includeRecoveryPath)
+    {
+        var status = state.Finished
+            ? "finished"
+            : state.Paused
+                ? "paused"
+                : state.Started
+                    ? "active"
+                    : state.Approved
+                        ? "approved"
+                        : "pending approval";
+        var lines = new List<string>
+        {
+            "Roadmap execution state:",
+            $"Goal: {state.Goal}",
+            $"Status: {status}",
+            $"Current step: {FormatRoadmapCurrentStep(state)}",
+            $"Updated: {state.UpdatedAt:u}",
+            $"Last receipt snapshot: {state.LastReceiptSummary}",
+            "Next safe commands:"
+        };
+
+        if (!state.Approved)
+        {
+            lines.Add("- approve last roadmap");
+        }
+        else if (!state.Started)
+        {
+            lines.Add("- start approved roadmap");
+        }
+        else if (state.Paused)
+        {
+            lines.Add("- resume roadmap");
+        }
+        else if (state.Finished)
+        {
+            lines.Add("- generate coding report");
+        }
+        else
+        {
+            lines.Add("- plan coding task <current step>");
+            lines.Add("- preview patch bundle");
+            lines.Add("- confirm dotnet build \"path\"");
+            lines.Add("- mark roadmap step complete");
+            lines.Add("- pause roadmap");
+        }
+
+        if (includeRecoveryPath)
+        {
+            lines.Add($"Recovery file: {_roadmapStatePath}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private bool TryGetActiveRoadmapForStepChange(
+        out RoadmapExecutionState state,
+        out CodingToolResult error)
+    {
+        state = _roadmapState!;
+        error = CodingToolResult.NotHandled;
+        if (_roadmapState is null)
+        {
+            error = new CodingToolResult(true, false, "No active roadmap state is available.", "Roadmap execution", Policy.WorkspaceRoot);
+            return false;
+        }
+
+        state = _roadmapState;
+        if (!state.Approved || !state.Started)
+        {
+            error = new CodingToolResult(true, false, "Roadmap must be approved and started before steps can advance.", "Roadmap execution", Policy.WorkspaceRoot);
+            return false;
+        }
+
+        if (state.Paused)
+        {
+            error = new CodingToolResult(true, false, "Roadmap is paused. Use: resume roadmap", "Roadmap execution", Policy.WorkspaceRoot);
+            return false;
+        }
+
+        if (state.Finished)
+        {
+            error = new CodingToolResult(true, true, "Roadmap is already finished.", "Roadmap execution", Policy.WorkspaceRoot);
+            return false;
+        }
+
+        return true;
     }
 
     private static void AddBuildIdeaWorkspaceFit(List<string> lines, IReadOnlyList<ProjectSummary> summaries)
@@ -1121,18 +1529,18 @@ public sealed class LocalCodingToolService(
 
         lines.Add(string.Empty);
         lines.Add("Implementation Roadmap");
-        if (_lastRoadmapRequest is null)
+        LoadRoadmapStateIfNeeded();
+        if (_roadmapState is null)
         {
             lines.Add("No implementation roadmap is pending in this Ali session.");
         }
         else
         {
-            lines.Add(_lastRoadmapApproved
-                ? _approvedRoadmapStarted
-                    ? "Status: approved and started."
-                    : "Status: approved and ready to start."
-                : "Status: pending approval.");
-            lines.Add(TrimForChat(DraftImplementationRoadmap(_lastRoadmapRequest).Message, 8_000));
+            lines.Add(TrimForChat(FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true), 8_000));
+            if (_lastRoadmapRequest is not null)
+            {
+                lines.Add(TrimForChat(DraftImplementationRoadmap(_lastRoadmapRequest).Message, 8_000));
+            }
         }
 
         lines.Add(string.Empty);
@@ -1156,8 +1564,13 @@ public sealed class LocalCodingToolService(
         lines.Add("- plan coding task <goal>");
         lines.Add("- draft implementation roadmap <goal>");
         lines.Add("- show pending roadmap");
+        lines.Add("- show active roadmap step");
+        lines.Add("- recover roadmap state");
         lines.Add("- approve last roadmap");
         lines.Add("- start approved roadmap");
+        lines.Add("- mark roadmap step complete");
+        lines.Add("- pause roadmap");
+        lines.Add("- resume roadmap");
         lines.Add("- preview replace in file \"path\" \"old text\" with \"new text\"");
         lines.Add("- preview patch bundle");
         lines.Add("- show pending patch preview");
@@ -3521,15 +3934,17 @@ public sealed class LocalCodingToolService(
 
         if (!result.Succeeded)
         {
-            _lastRoadmapRequest = null;
-            _lastRoadmapApproved = false;
-            _approvedRoadmapStarted = false;
+            ClearRoadmapState();
             return;
         }
 
         _lastRoadmapRequest = request;
         _lastRoadmapApproved = false;
         _approvedRoadmapStarted = false;
+        var goal = request.Query ?? "unspecified implementation";
+        _roadmapState = CreateRoadmapState(goal);
+        _roadmapStateLoaded = true;
+        SaveRoadmapState();
     }
 
     private bool ShouldBuildCodingContext(string userText)
@@ -4143,6 +4558,17 @@ public sealed class LocalCodingToolService(
     private sealed record DiagnosticFileReference(
         string Path,
         int? LineNumber);
+
+    private sealed record RoadmapExecutionState(
+        string Goal,
+        bool Approved,
+        bool Started,
+        bool Paused,
+        bool Finished,
+        int CurrentStepIndex,
+        IReadOnlyList<string> Steps,
+        string LastReceiptSummary,
+        DateTimeOffset UpdatedAt);
 
     private sealed record CodingReceipt(
         DateTimeOffset Timestamp,

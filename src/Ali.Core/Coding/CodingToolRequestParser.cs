@@ -239,6 +239,57 @@ public static class CodingToolRequestParser
         "let's do the approved roadmap"
     ];
 
+    private static readonly string[] ShowActiveRoadmapStepRequests =
+    [
+        "show active roadmap step",
+        "show current roadmap step",
+        "show roadmap step",
+        "where are we in the roadmap",
+        "roadmap status"
+    ];
+
+    private static readonly string[] AdvanceRoadmapStepRequests =
+    [
+        "advance roadmap step",
+        "advance the roadmap step",
+        "mark roadmap step complete",
+        "mark current roadmap step complete",
+        "complete roadmap step",
+        "complete current roadmap step",
+        "next roadmap step"
+    ];
+
+    private static readonly string[] PauseRoadmapRequests =
+    [
+        "pause roadmap",
+        "pause active roadmap",
+        "pause roadmap execution"
+    ];
+
+    private static readonly string[] ResumeRoadmapRequests =
+    [
+        "resume roadmap",
+        "resume active roadmap",
+        "resume roadmap execution"
+    ];
+
+    private static readonly string[] FinishRoadmapRequests =
+    [
+        "finish roadmap",
+        "finish active roadmap",
+        "complete roadmap",
+        "complete active roadmap"
+    ];
+
+    private static readonly string[] RecoverRoadmapStateRequests =
+    [
+        "recover roadmap",
+        "recover roadmap state",
+        "recover active roadmap",
+        "restore roadmap state",
+        "show recovered roadmap"
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -619,6 +670,42 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsShowActiveRoadmapStepRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowActiveRoadmapStep, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsAdvanceRoadmapStepRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.AdvanceRoadmapStep, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPauseRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.PauseRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsResumeRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ResumeRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFinishRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.FinishRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRecoverRoadmapStateRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.RecoverRoadmapState, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
@@ -704,6 +791,24 @@ public static class CodingToolRequestParser
 
     private static bool IsStartApprovedRoadmapRequest(string text) =>
         StartApprovedRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowActiveRoadmapStepRequest(string text) =>
+        ShowActiveRoadmapStepRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsAdvanceRoadmapStepRequest(string text) =>
+        AdvanceRoadmapStepRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPauseRoadmapRequest(string text) =>
+        PauseRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsResumeRoadmapRequest(string text) =>
+        ResumeRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFinishRoadmapRequest(string text) =>
+        FinishRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRecoverRoadmapStateRequest(string text) =>
+        RecoverRoadmapStateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

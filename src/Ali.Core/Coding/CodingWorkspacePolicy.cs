@@ -102,7 +102,13 @@ public sealed class CodingWorkspacePolicy
         if (request.Action is CodingToolAction.ShowLastRoadmap
             or CodingToolAction.DiscardLastRoadmap
             or CodingToolAction.ApproveLastRoadmap
-            or CodingToolAction.StartApprovedRoadmap)
+            or CodingToolAction.StartApprovedRoadmap
+            or CodingToolAction.ShowActiveRoadmapStep
+            or CodingToolAction.AdvanceRoadmapStep
+            or CodingToolAction.PauseRoadmap
+            or CodingToolAction.ResumeRoadmap
+            or CodingToolAction.FinishRoadmap
+            or CodingToolAction.RecoverRoadmapState)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Managing an implementation roadmap is local planning state and does not change files.");
         }

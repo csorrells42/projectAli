@@ -61,6 +61,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
     ("coding parser routes roadmap state", TestCodingParserRoutesRoadmapState),
+    ("coding parser routes active roadmap steps", TestCodingParserRoutesActiveRoadmapSteps),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -82,6 +83,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool explores build idea", TestLocalCodingToolExploresBuildIdea),
     ("local coding tool drafts implementation roadmap", TestLocalCodingToolDraftsImplementationRoadmap),
     ("local coding tool manages approved roadmap", TestLocalCodingToolManagesApprovedRoadmap),
+    ("local coding tool recovers active roadmap state", TestLocalCodingToolRecoversActiveRoadmapState),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
     ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
@@ -510,6 +512,28 @@ static Task TestCodingParserRoutesRoadmapState()
 
     Equal(true, CodingToolRequestParser.TryParse("start approved roadmap", out var startRequest));
     Equal(CodingToolAction.StartApprovedRoadmap, startRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesActiveRoadmapSteps()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show active roadmap step", out var showStepRequest));
+    Equal(CodingToolAction.ShowActiveRoadmapStep, showStepRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("mark roadmap step complete", out var advanceRequest));
+    Equal(CodingToolAction.AdvanceRoadmapStep, advanceRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("pause roadmap", out var pauseRequest));
+    Equal(CodingToolAction.PauseRoadmap, pauseRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("resume roadmap", out var resumeRequest));
+    Equal(CodingToolAction.ResumeRoadmap, resumeRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("finish roadmap", out var finishRequest));
+    Equal(CodingToolAction.FinishRoadmap, finishRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("recover roadmap state", out var recoverRequest));
+    Equal(CodingToolAction.RecoverRoadmapState, recoverRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -1083,6 +1107,66 @@ static async Task TestLocalCodingToolManagesApprovedRoadmap()
     Contains("Discarded implementation roadmap", discard.Message);
     Equal(true, showAfterDiscard.Succeeded);
     Contains("No implementation roadmap is pending", showAfterDiscard.Message);
+    Equal(0, runner.Runs.Count);
+}
+
+static async Task TestLocalCodingToolRecoversActiveRoadmapState()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(projectDirectory, "MainWindow.xaml"), "<Window />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false));
+    var firstService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var draft = await firstService.TryHandleAsync("draft implementation roadmap add package lookup", CancellationToken.None);
+    var approve = await firstService.TryHandleAsync("approve last roadmap", CancellationToken.None);
+    var start = await firstService.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var advance = await firstService.TryHandleAsync("mark roadmap step complete", CancellationToken.None);
+    var pause = await firstService.TryHandleAsync("pause roadmap", CancellationToken.None);
+    var statePath = Path.Combine(directory, "Coding", "roadmap-execution-state.json");
+
+    var recoveredService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+    var recovered = await recoveredService.TryHandleAsync("recover roadmap state", CancellationToken.None);
+    var active = await recoveredService.TryHandleAsync("show active roadmap step", CancellationToken.None);
+    var resumed = await recoveredService.TryHandleAsync("resume roadmap", CancellationToken.None);
+
+    Equal(true, draft.Succeeded);
+    Equal(true, approve.Succeeded);
+    Equal(true, start.Succeeded);
+    Equal(true, advance.Succeeded);
+    Equal(true, pause.Succeeded);
+    Equal(true, File.Exists(statePath));
+    Equal(true, recovered.Succeeded);
+    Contains("Recovered roadmap state from disk", recovered.Message);
+    Contains("Status: paused", recovered.Message);
+    Contains("Current step: 2/", recovered.Message);
+    Contains(statePath, recovered.Message);
+    Equal(true, active.Succeeded);
+    Contains("Status: paused", active.Message);
+    Equal(true, resumed.Succeeded);
+    Contains("Status: active", resumed.Message);
     Equal(0, runner.Runs.Count);
 }
 
