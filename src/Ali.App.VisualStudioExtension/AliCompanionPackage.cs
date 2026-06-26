@@ -9,7 +9,7 @@ using Microsoft.VisualStudio.Shell.Interop;
 namespace Ali.App.VisualStudioExtension;
 
 [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
-[InstalledProductRegistration("Ali Companion", "Visual Studio tool window for Ali's local programming companion.", "0.10.0")]
+[InstalledProductRegistration("Ali Companion", "Visual Studio tool window for Ali's local programming companion.", "0.11.0")]
 [ProvideMenuResource("Menus.ctmenu", 1)]
 [ProvideOptionPage(typeof(AliCompanionOptionsPage), "Ali", "Companion", 0, 0, true)]
 [ProvideToolWindow(typeof(AliCompanionToolWindow))]
@@ -46,5 +46,22 @@ public sealed class AliCompanionPackage : AsyncPackage
         }
 
         ErrorHandler.ThrowOnFailure(frame.Show());
+    }
+
+    internal async Task StageToolWindowCommandAsync(AliCompanionAction action, CancellationToken cancellationToken)
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+        var window = FindToolWindow(typeof(AliCompanionToolWindow), id: 0, create: true)
+            ?? throw new InvalidOperationException("Could not create Ali Companion tool window.");
+        if (window.Frame is not IVsWindowFrame frame)
+        {
+            throw new InvalidOperationException("Could not create Ali Companion tool window frame.");
+        }
+
+        ErrorHandler.ThrowOnFailure(frame.Show());
+        if (window.Content is AliCompanionToolWindowControl control)
+        {
+            control.StageCommand(action);
+        }
     }
 }

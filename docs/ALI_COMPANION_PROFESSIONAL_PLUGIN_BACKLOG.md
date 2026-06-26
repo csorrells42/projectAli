@@ -18,6 +18,7 @@ This list tracks the Visual Studio plugin polish path while keeping Ali's curren
 - Visual Studio options page for helper URL, command history limit, and selected-text context behavior.
 - Real icon, Project Ali branding metadata, and packaged extension identity polish.
 - Installer/update notes for Community versus future Visual Studio editions.
+- Code editor context-menu commands that stage Ali actions from the current file or selection.
 
 ## Next
 

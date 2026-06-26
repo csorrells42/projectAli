@@ -59,6 +59,32 @@ public sealed class AliCompanionToolWindowControl : UserControl
         };
     }
 
+    internal void StageCommand(AliCompanionAction action)
+    {
+        RefreshVisualStudioContext();
+        switch (action)
+        {
+            case AliCompanionAction.ReadActiveFile:
+                FillReadFileCommand();
+                break;
+            case AliCompanionAction.BuildActiveSolution:
+                FillBuildSolutionCommand();
+                break;
+            case AliCompanionAction.SearchSelection:
+                FillSearchSelectionCommand();
+                break;
+            case AliCompanionAction.PlanSelection:
+                FillPlanSelectionCommand();
+                break;
+            case AliCompanionAction.PreviewReplaceSelection:
+                FillPatchSelectionCommand();
+                break;
+            default:
+                SetCommand("show visual studio integration");
+                break;
+        }
+    }
+
     private UIElement BuildLayout()
     {
         var root = new DockPanel

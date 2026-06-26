@@ -12,6 +12,41 @@
           <ButtonText>Ali Companion</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidAliCompanionCommandSet" id="ReadActiveFileCommand" priority="0x0200" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_CODEWIN_ADVANCED" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Read Current File</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidAliCompanionCommandSet" id="BuildActiveSolutionCommand" priority="0x0210" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_CODEWIN_ADVANCED" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Build Active Solution</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidAliCompanionCommandSet" id="SearchSelectionCommand" priority="0x0220" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_CODEWIN_ADVANCED" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Search Selection</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidAliCompanionCommandSet" id="PlanSelectionCommand" priority="0x0230" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_CODEWIN_ADVANCED" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Plan From Selection</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidAliCompanionCommandSet" id="PreviewReplaceSelectionCommand" priority="0x0240" type="Button">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_CODEWIN_ADVANCED" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Preview Replace Selection</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
 
     <Bitmaps>
@@ -23,6 +58,11 @@
     <GuidSymbol name="guidAliCompanionPackage" value="{af94ca1b-cbb3-4c03-bd44-9ed0654e6931}" />
     <GuidSymbol name="guidAliCompanionCommandSet" value="{1c60cf1b-8401-43c2-baf1-1636f492dd04}">
       <IDSymbol name="OpenAliCompanionCommand" value="0x0100" />
+      <IDSymbol name="ReadActiveFileCommand" value="0x0101" />
+      <IDSymbol name="BuildActiveSolutionCommand" value="0x0102" />
+      <IDSymbol name="SearchSelectionCommand" value="0x0103" />
+      <IDSymbol name="PlanSelectionCommand" value="0x0104" />
+      <IDSymbol name="PreviewReplaceSelectionCommand" value="0x0105" />
     </GuidSymbol>
     <GuidSymbol name="guidAliCompanionImages" value="{d7de1e3b-871f-45bb-9a53-37d050b39d74}">
       <IDSymbol name="AliCompanionCommandIcon" value="1" />
