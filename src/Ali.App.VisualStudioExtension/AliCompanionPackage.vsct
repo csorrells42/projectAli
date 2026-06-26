@@ -100,6 +100,9 @@
   </Commands>
 
   <CommandPlacements>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0740">
+      <Parent guid="guidSHLMainMenu" id="IDG_VS_VIEW_WINDOWS" />
+    </CommandPlacement>
     <CommandPlacement guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0100">
       <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
     </CommandPlacement>
