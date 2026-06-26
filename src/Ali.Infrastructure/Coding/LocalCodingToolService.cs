@@ -3836,18 +3836,6 @@ public sealed class LocalCodingToolService(
                 Policy.WorkspaceRoot);
         }
 
-        if (!lastDotNetResult.Message.Contains("CS1002", StringComparison.OrdinalIgnoreCase)
-            || !lastDotNetResult.Message.Contains("; expected", StringComparison.OrdinalIgnoreCase))
-        {
-            return new CodingToolResult(
-                true,
-                false,
-                "No deterministic patch suggestion is available for this diagnostic yet. Ali can currently preview simple CS1002 semicolon fixes only.",
-                "Last failure patch suggestion",
-                diagnostic.Path,
-                diagnostic.LineNumber);
-        }
-
         var lines = await File.ReadAllLinesAsync(diagnostic.Path, cancellationToken).ConfigureAwait(false);
         if (diagnostic.LineNumber is null || diagnostic.LineNumber.Value > lines.Length)
         {
@@ -3860,31 +3848,32 @@ public sealed class LocalCodingToolService(
                 diagnostic.LineNumber);
         }
 
-        var oldLine = lines[diagnostic.LineNumber.Value - 1];
-        var trimmedEnd = oldLine.TrimEnd();
-        if (trimmedEnd.EndsWith(";", StringComparison.Ordinal)
-            || trimmedEnd.EndsWith("{", StringComparison.Ordinal)
-            || trimmedEnd.EndsWith("}", StringComparison.Ordinal))
+        if (!TryBuildDeterministicFailurePatch(
+                lastDotNetResult.Message,
+                lines,
+                diagnostic.LineNumber.Value,
+                out var diagnosticLabel,
+                out var oldText,
+                out var newText,
+                out var refusal))
         {
             return new CodingToolResult(
                 true,
                 false,
-                "No deterministic patch suggestion is available because the diagnostic line does not look like a simple missing semicolon case.",
+                refusal,
                 "Last failure patch suggestion",
                 diagnostic.Path,
                 diagnostic.LineNumber);
         }
 
-        var trailingWhitespace = oldLine[trimmedEnd.Length..];
-        var newLine = trimmedEnd + ";" + trailingWhitespace;
         var previewRequest = new CodingToolRequest(
             CodingToolAction.PreviewReplaceText,
             diagnostic.Path,
             diagnostic.LineNumber,
             ExplicitUserPath: false,
             UserConfirmed: false,
-            Content: oldLine,
-            Replacement: newLine);
+            Content: oldText,
+            Replacement: newText);
         var preview = await PreviewReplaceTextAsync(previewRequest, cancellationToken).ConfigureAwait(false);
         if (preview.Succeeded)
         {
@@ -3894,10 +3883,113 @@ public sealed class LocalCodingToolService(
         return preview with
         {
             Message = preview.Succeeded
-                ? $"Suggested patch from last failure. No files were changed.{Environment.NewLine}Diagnostic: CS1002 ; expected{Environment.NewLine}To apply this pending preview after review, use: confirm apply last patch preview{Environment.NewLine}{preview.Message}"
+                ? $"Suggested patch from last failure. No files were changed.{Environment.NewLine}Diagnostic: {diagnosticLabel}{Environment.NewLine}To apply this pending preview after review, use: confirm apply last patch preview{Environment.NewLine}{preview.Message}"
                 : $"No deterministic patch suggestion was stored. No files were changed.{Environment.NewLine}{preview.Message}",
             ToolName = "Last failure patch suggestion"
         };
+    }
+
+    private static bool TryBuildDeterministicFailurePatch(
+        string diagnosticText,
+        IReadOnlyList<string> lines,
+        int lineNumber,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText,
+        out string refusal)
+    {
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        refusal = "No deterministic patch suggestion is available for this diagnostic yet. Ali can currently preview simple CS1002 semicolon and CS1513 closing-brace fixes only.";
+
+        var lineIndex = lineNumber - 1;
+        if (lineIndex < 0 || lineIndex >= lines.Count)
+        {
+            refusal = "No deterministic patch suggestion is available because the diagnostic line is outside the current file.";
+            return false;
+        }
+
+        if (diagnosticText.Contains("CS1002", StringComparison.OrdinalIgnoreCase)
+            && diagnosticText.Contains("; expected", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryBuildMissingSemicolonPatch(lines[lineIndex], out diagnosticLabel, out oldText, out newText, out refusal);
+        }
+
+        if (diagnosticText.Contains("CS1513", StringComparison.OrdinalIgnoreCase)
+            && diagnosticText.Contains("} expected", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryBuildMissingClosingBracePatch(lines, lineIndex, out diagnosticLabel, out oldText, out newText, out refusal);
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildMissingSemicolonPatch(
+        string oldLine,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText,
+        out string refusal)
+    {
+        diagnosticLabel = "CS1002 ; expected";
+        oldText = oldLine;
+        newText = string.Empty;
+        refusal = string.Empty;
+        var trimmedEnd = oldLine.TrimEnd();
+        if (trimmedEnd.EndsWith(";", StringComparison.Ordinal)
+            || trimmedEnd.EndsWith("{", StringComparison.Ordinal)
+            || trimmedEnd.EndsWith("}", StringComparison.Ordinal))
+        {
+            refusal = "No deterministic patch suggestion is available because the diagnostic line does not look like a simple missing semicolon case.";
+            return false;
+        }
+
+        var trailingWhitespace = oldLine[trimmedEnd.Length..];
+        newText = trimmedEnd + ";" + trailingWhitespace;
+        return true;
+    }
+
+    private static bool TryBuildMissingClosingBracePatch(
+        IReadOnlyList<string> lines,
+        int lineIndex,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText,
+        out string refusal)
+    {
+        diagnosticLabel = "CS1513 } expected";
+        oldText = lines[lineIndex];
+        newText = string.Empty;
+        refusal = string.Empty;
+
+        var lastNonEmptyIndex = lines
+            .Select((line, index) => new { line, index })
+            .LastOrDefault(item => !string.IsNullOrWhiteSpace(item.line))
+            ?.index;
+        if (lastNonEmptyIndex != lineIndex)
+        {
+            refusal = "No deterministic patch suggestion is available because the closing-brace diagnostic is not on the last non-empty line.";
+            return false;
+        }
+
+        var openBraces = lines.Sum(line => line.Count(character => character == '{'));
+        var closeBraces = lines.Sum(line => line.Count(character => character == '}'));
+        if (openBraces - closeBraces != 1)
+        {
+            refusal = "No deterministic patch suggestion is available because the file does not appear to be missing exactly one closing brace.";
+            return false;
+        }
+
+        if (oldText.Trim().Equals("}", StringComparison.Ordinal))
+        {
+            refusal = "No deterministic patch suggestion is available because the diagnostic line already contains only a closing brace.";
+            return false;
+        }
+
+        var indent = oldText[..(oldText.Length - oldText.TrimStart().Length)];
+        newText = oldText + Environment.NewLine + indent + "}";
+        return true;
     }
 
     private Task<CodingToolResult> OpenSolutionAsync(

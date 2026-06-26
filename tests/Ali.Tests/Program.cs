@@ -105,6 +105,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens last diagnostic", TestLocalCodingToolOpensLastDiagnostic),
     ("local coding tool diagnoses last failure", TestLocalCodingToolDiagnosesLastFailure),
     ("local coding tool suggests last failure patch", TestLocalCodingToolSuggestsLastFailurePatch),
+    ("local coding tool suggests closing brace patch", TestLocalCodingToolSuggestsClosingBracePatch),
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
     ("local coding tool requires confirmation before package install", TestLocalCodingToolRequiresConfirmationBeforePackageInstall),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
@@ -1935,6 +1936,51 @@ static async Task TestLocalCodingToolSuggestsLastFailurePatch()
     Equal(true, applied.Succeeded);
     Contains("Applied last patch preview", applied.Message);
     Contains("var value = 1;", await File.ReadAllTextAsync(sourcePath));
+}
+
+static async Task TestLocalCodingToolSuggestsClosingBracePatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var sourcePath = Path.Combine(workspace, "Widget.cs");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(
+        sourcePath,
+        string.Join(
+            Environment.NewLine,
+            Enumerable.Range(1, 12).Select(line => line switch
+            {
+                1 => "class Widget",
+                2 => "{",
+                12 => "    void Run() { }",
+                _ => $"    // line {line}"
+            })));
+    var diagnosticLine = $"{sourcePath}(12,5): error CS1513: }} expected [{projectPath}]";
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(1, string.Empty, diagnosticLine, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var build = await service.TryHandleAsync($"confirm dotnet build \"{projectPath}\"", CancellationToken.None);
+    var suggestion = await service.TryHandleAsync("suggest patch from last failure", CancellationToken.None);
+    var afterSuggestion = await File.ReadAllTextAsync(sourcePath);
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(false, build.Succeeded);
+    Equal(true, suggestion.Handled);
+    Equal(true, suggestion.Succeeded);
+    Contains("Diagnostic: CS1513 } expected", suggestion.Message);
+    Contains("void Run() { }", suggestion.Message);
+    Contains("confirm apply last patch preview", suggestion.Message);
+    Equal(false, afterSuggestion.TrimEnd().EndsWith("}", StringComparison.Ordinal) && afterSuggestion.Contains(Environment.NewLine + "    }", StringComparison.Ordinal));
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview", applied.Message);
+    Contains(Environment.NewLine + "    }", await File.ReadAllTextAsync(sourcePath));
 }
 
 static async Task TestLocalCodingToolRequiresConfirmationBeforeRestore()
