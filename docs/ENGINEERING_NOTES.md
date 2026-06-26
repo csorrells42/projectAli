@@ -180,7 +180,7 @@ Keep these simple:
 - Backup: zip Ali's local data folder plus settings/export metadata.
 - Restore: stop Ali, validate backup manifest, restore local data, restart.
 - Documentation: update user and engineering notes as features land.
-- Current developer install path: build from source, refresh `%LOCALAPPDATA%\Ali\DevRun`, install the local VSIX into Visual Studio Community, start `Ali.App.WebHelper` on loopback, and keep voice/model assets under Ali-owned local folders.
+- Current developer install path: build from source, refresh `%LOCALAPPDATA%\Ali\DevRun`, install the local VSIX into Visual Studio Community, start `Ali.App.WebHelper` on loopback, and keep voice/model assets under Ali-owned local folders. `show install doctor` is the read-only dependency checker for DevRun, VSIX, Visual Studio discovery, WebHelper bridge URL, runtime settings, selected model, PDF workspace, .NET runtime, and OS. The current saved coding/chat model is `ali-deepseek-coder-v2:16b-low`; Qwen VL models are optional vision assets.
 - Installer completion status and step-by-step dependency instructions live in `docs\ALI_PROJECT_INSTALLER_COMPLETION.md` and `docs\ALI_PROJECT_INSTALLATION_INSTRUCTIONS.md`.
 
 ## Package Rule

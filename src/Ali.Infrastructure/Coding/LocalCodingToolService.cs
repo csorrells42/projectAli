@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using Ali.Core.Coding;
+using Ali.Infrastructure.Runtime;
 
 namespace Ali.Infrastructure.Coding;
 
@@ -2565,6 +2566,9 @@ public sealed class LocalCodingToolService(
         var notepadPlusPlus = CodingToolLocator.FindNotepadPlusPlus(_configuredNotepadPlusPlusPath);
         var devRun = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ali", "DevRun", "Ali.App.Wpf.exe");
         var vsix = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Ali.App.VisualStudioExtension", "bin", "Debug", "net472", "Ali.App.VisualStudioExtension.vsix");
+        var runtimeSettingsPath = RuntimeSettingsStore.GetSettingsPath(dataRoot);
+        var runtimeSettings = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot);
+        var helperUrl = Environment.GetEnvironmentVariable("ALI_HELPER_URL") ?? "http://127.0.0.1:8765/";
         var lines = new List<string>
         {
             "Ali install doctor:",
@@ -2572,17 +2576,30 @@ public sealed class LocalCodingToolService(
             $"- Workspace root: {Policy.WorkspaceRoot}",
             $"- Workspace exists: {Directory.Exists(Policy.WorkspaceRoot)}",
             $"- DevRun executable: {(File.Exists(devRun) ? devRun : "missing")}",
+            $"- PDF workspace: {_pdfWorkspaceRoot}",
             $"- Visual Studio: {visualStudio ?? "not found"}",
             $"- Notepad++: {notepadPlusPlus ?? "not found"}",
             $"- VSIX build artifact: {(File.Exists(Path.GetFullPath(vsix)) ? Path.GetFullPath(vsix) : "not found from current app base")}",
+            $"- WebHelper bridge URL: {helperUrl}",
+            $"- Runtime settings: {(File.Exists(runtimeSettingsPath) ? runtimeSettingsPath : "missing")}",
+            $"- Saved runtime model: {runtimeSettings?.Model ?? "not configured"}",
             $"- Current .NET runtime: {Environment.Version}",
             $"- OS: {Environment.OSVersion}",
             "Manual dependency checks:",
             "- dotnet --info",
             "- git --version",
             "- ollama list",
+            "- Confirm `ali-deepseek-coder-v2:16b-low` is installed for coding chat.",
+            "- Confirm `qwen3-vl:8b` or `ali-qwen3-vl:8b-low` is installed only if vision/image reasoning is needed.",
             "- show visual studio integration",
+            "- show pdf tool status",
             "- show windows troubleshooting toolkit",
+            "Safe install/repair sequence:",
+            "- Build: dotnet build .\\Ali.sln --no-restore -p:UseSharedCompilation=false -nr:false",
+            "- Test: dotnet run --project .\\tests\\Ali.Tests\\Ali.Tests.csproj --no-build",
+            "- Refresh only `%LOCALAPPDATA%\\Ali\\DevRun`; do not create DevRun-* folders.",
+            "- Install/update the VSIX into the selected Visual Studio Community instance.",
+            "- Start WebHelper on loopback before using VS Companion commands.",
             "Repair boundary: installer, VSIX install, signing, trust-store, PATH, registry, firewall, and service changes require explicit owner approval."
         };
 
@@ -4338,7 +4355,7 @@ public sealed class LocalCodingToolService(
         var lines = new List<string>
         {
             "Visual Studio integration handoff:",
-            "Current truth: Ali Companion VSIX is included in this build. It hosts the local helper page inside Visual Studio and still routes commands through Ali's guarded bridge.",
+            "Current truth: Ali Companion VSIX is included in this build. It uses native Visual Studio/WPF controls and routes commands through Ali's guarded loopback bridge.",
             $"Workspace root: {Policy.WorkspaceRoot}",
             $"Workspace exists: {hasWorkspace}",
             $"Primary solution/project: {primarySolution ?? "not found"}",

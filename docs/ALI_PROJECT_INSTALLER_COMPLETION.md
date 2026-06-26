@@ -14,6 +14,8 @@ Developer install path is ready for tomorrow's manual install pass:
 - Install the local Ali Companion VSIX into Visual Studio Community.
 - Start `Ali.App.WebHelper` on `http://127.0.0.1:8765/` for browser/VS companion commands.
 - Keep Ollama running when desired; Ali should not need to stop/start it during ordinary coding updates.
+- Use `ali-deepseek-coder-v2:16b-low` as the current saved coding/chat model.
+- Treat `qwen3-vl:8b` or `ali-qwen3-vl:8b-low` as optional vision assets, not the default coding model.
 - Keep voice resources under Ali-owned local folders.
 
 This is not yet a production installer. It is a repeatable developer install/repair checklist.
@@ -55,9 +57,12 @@ Out of scope without explicit approval:
 - .NET SDK `10.0.301` or compatible current SDK for this repo.
 - Visual Studio Community 2026 / Visual Studio 18 Community with .NET desktop and extension tooling installed.
 - Git for Windows.
-- Ollama for local model runtime, with `qwen3-vl:8b` installed for the current certified local proof path.
+- Ollama for local model runtime, with `ali-deepseek-coder-v2:16b-low` installed for the current coding/chat path.
+- Optional Ollama vision model: `qwen3-vl:8b` or `ali-qwen3-vl:8b-low`.
 - Local voice assets under Ali's `lib\voice` folder when voice testing resumes.
 - Optional Notepad++ for file-opening convenience.
+- PDF workspace configured under Ali Settings -> Coding / Permissions.
+- WebHelper loopback bridge available at `http://127.0.0.1:8765/` before using VS companion commands.
 
 ## Install Receipts
 
@@ -70,12 +75,14 @@ The installer/repair path should write a receipt that includes:
 - Copied file count.
 - VSIX path and install result.
 - WebHelper launch/status result when requested.
+- Runtime settings path and selected model.
+- PDF workspace path.
 - Skipped actions and why they were skipped.
 
 ## Open Work
 
 - Build a scriptable install/repair command.
 - Add a signed production packaging path.
-- Add a dependency checker command inside Ali.
+- Keep `show install doctor` as the read-only dependency checker and extend it as dependencies are added.
 - Add a repair command that can explain exactly what it plans to do before doing it.
 - Add backup/restore after install/repair is stable.

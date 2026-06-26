@@ -16,7 +16,8 @@ These instructions cover the current developer installation path. They are inten
   - ASP.NET and web development is useful for the WebHelper project.
 - Git for Windows.
 - Ollama installed locally if model-backed chat will be used.
-- Current local proof model: `qwen3-vl:8b`.
+- Current saved coding/chat model: `ali-deepseek-coder-v2:16b-low`.
+- Optional vision model for image reasoning: `qwen3-vl:8b` or `ali-qwen3-vl:8b-low`.
 - Optional Notepad++.
 - Voice dependencies only when voice work resumes:
   - Ali-owned `lib\voice\python-venv`.
@@ -125,16 +126,43 @@ Tools -> Ali Companion
 
 The extension is installed per Visual Studio instance. If Community is reinstalled later, reinstall the same VSIX into that new instance.
 
-## Runtime Model
+## Runtime Models
 
-Ali's current certified local proof path uses Ollama:
+Ali's current saved coding/chat runtime uses Ollama:
 
 ```text
 Endpoint: http://127.0.0.1:11434/v1/
-Model: qwen3-vl:8b
+Model: ali-deepseek-coder-v2:16b-low
+Display name: Ali tuned DeepSeek-Coder-V2 16B low
+Context: 4096
+Output: 768
+Temperature: 0.1
+Top-p: 0.9
+Streaming: enabled
 ```
 
-Ali should not claim model-backed chat is active unless the runtime check passes.
+Vision-capable models such as `qwen3-vl:8b` and `ali-qwen3-vl:8b-low` are optional install assets for image reasoning. They are not the current saved coding runtime. Ali should not claim model-backed chat is active unless the runtime check passes.
+
+Verify installed Ollama models with:
+
+```powershell
+ollama list
+```
+
+The install target is healthy when `ali-deepseek-coder-v2:16b-low` is listed for coding/chat. Vision models can be added later if screenshot or image reasoning is part of the installed feature set.
+
+## Install Doctor
+
+Inside Ali or the helper/VS companion, run:
+
+```text
+show install doctor
+show pdf tool status
+show visual studio integration
+show coding skill command index
+```
+
+The install doctor is read-only. It checks DevRun, Visual Studio discovery, VSIX build artifact, WebHelper bridge URL, runtime settings, saved model, PDF workspace, .NET runtime, OS, and manual dependency commands. It does not install, repair, sign, edit registry, change firewall, change PATH, or modify trust stores.
 
 ## Audio Setup Sources
 
