@@ -1,12 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using EnvDTE;
 using EnvDTE80;
@@ -22,12 +25,21 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private static readonly Uri HelperUri = new("http://127.0.0.1:8765/");
     private static readonly Uri CodingStatusUri = new("http://127.0.0.1:8765/api/coding/status");
     private static readonly Uri CodingCommandUri = new("http://127.0.0.1:8765/api/coding/command");
+    private static readonly string HistoryPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Ali",
+        "VisualStudioCompanion",
+        "command-history.txt");
 
     private readonly HttpClient _http = new();
     private readonly TextBlock _status = new();
     private readonly TextBlock _context = new();
+    private readonly TextBlock _state = new();
+    private readonly ComboBox _history = new();
     private readonly TextBox _command = new();
     private readonly TextBox _output = new();
+    private readonly ListBox _diagnostics = new();
+    private readonly ProgressBar _progress = new();
     private readonly Button _runButton = new();
     private VsContext _lastContext = VsContext.Empty;
 
@@ -35,6 +47,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
     {
         _http.Timeout = TimeSpan.FromSeconds(30);
         Content = BuildLayout();
+        LoadCommandHistory();
         Loaded += async (_, _) =>
         {
             RefreshVisualStudioContext();
@@ -59,7 +72,10 @@ public sealed class AliCompanionToolWindowControl : UserControl
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         _context.Foreground = Brush(203, 213, 225);
         _context.Background = Brush(15, 23, 42);
@@ -73,6 +89,10 @@ public sealed class AliCompanionToolWindowControl : UserControl
         Grid.SetRow(commandGroups, 1);
         content.Children.Add(commandGroups);
 
+        var historyPanel = BuildHistoryPanel();
+        Grid.SetRow(historyPanel, 2);
+        content.Children.Add(historyPanel);
+
         _command.MinHeight = 58;
         _command.Margin = new Thickness(0, 10, 0, 8);
         _command.Text = "show visual studio integration";
@@ -81,7 +101,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _command.Background = Brush(15, 23, 42);
         _command.Foreground = Brushes.White;
         _command.BorderBrush = Brush(71, 85, 105);
-        Grid.SetRow(_command, 2);
+        Grid.SetRow(_command, 3);
         content.Children.Add(_command);
 
         var actions = new StackPanel
@@ -96,8 +116,12 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _runButton.Click += async (_, _) => await RunCommandAsync();
         actions.Children.Add(_runButton);
         actions.Children.Add(Button("Clear", () => _command.Clear()));
-        Grid.SetRow(actions, 3);
+        Grid.SetRow(actions, 4);
         content.Children.Add(actions);
+
+        var statePanel = BuildStatePanel();
+        Grid.SetRow(statePanel, 5);
+        content.Children.Add(statePanel);
 
         _output.IsReadOnly = true;
         _output.AcceptsReturn = true;
@@ -108,11 +132,98 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _output.Foreground = Brush(203, 213, 225);
         _output.BorderBrush = Brush(51, 65, 85);
         _output.Text = "Ali Companion ready. Commands still use Ali's normal approval gates.";
-        Grid.SetRow(_output, 4);
+        Grid.SetRow(_output, 6);
         content.Children.Add(_output);
+
+        var diagnosticsPanel = BuildDiagnosticsPanel();
+        Grid.SetRow(diagnosticsPanel, 7);
+        content.Children.Add(diagnosticsPanel);
 
         root.Children.Add(content);
         return root;
+    }
+
+    private UIElement BuildHistoryPanel()
+    {
+        var panel = new DockPanel
+        {
+            LastChildFill = true,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "History",
+            Foreground = Brush(226, 232, 240),
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 4, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        _history.MinHeight = 28;
+        _history.Background = Brush(15, 23, 42);
+        _history.Foreground = Brushes.White;
+        _history.BorderBrush = Brush(71, 85, 105);
+        _history.SelectionChanged += (_, _) =>
+        {
+            if (_history.SelectedItem is string command)
+            {
+                SetCommand(command);
+            }
+        };
+        panel.Children.Add(_history);
+        return panel;
+    }
+
+    private UIElement BuildStatePanel()
+    {
+        var panel = new DockPanel
+        {
+            LastChildFill = true,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+
+        _progress.Width = 96;
+        _progress.Height = 14;
+        _progress.IsIndeterminate = true;
+        _progress.Visibility = Visibility.Collapsed;
+        _progress.Margin = new Thickness(0, 3, 8, 0);
+        DockPanel.SetDock(_progress, Dock.Left);
+        panel.Children.Add(_progress);
+
+        _state.Text = "State: idle.";
+        _state.Foreground = Brush(148, 163, 184);
+        _state.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_state);
+        return panel;
+    }
+
+    private UIElement BuildDiagnosticsPanel()
+    {
+        var panel = new DockPanel
+        {
+            LastChildFill = true,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+
+        var label = new TextBlock
+        {
+            Text = "Diagnostics",
+            Foreground = Brush(226, 232, 240),
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        DockPanel.SetDock(label, Dock.Left);
+        panel.Children.Add(label);
+
+        _diagnostics.Height = 64;
+        _diagnostics.Background = Brush(8, 13, 22);
+        _diagnostics.Foreground = Brush(203, 213, 225);
+        _diagnostics.BorderBrush = Brush(51, 65, 85);
+        _diagnostics.MouseDoubleClick += (_, _) => OpenSelectedDiagnostic();
+        panel.Children.Add(_diagnostics);
+        return panel;
     }
 
     private UIElement BuildToolbar()
@@ -225,6 +336,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
             return;
         }
 
+        SaveCommandToHistory(command);
         await SendAsync(
             CodingCommandUri,
             "{\"command\":\"" + EscapeJson(command) + "\"}",
@@ -342,17 +454,21 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private async Task SendAsync(Uri uri, string? body, string statusPrefix)
     {
-        _runButton.IsEnabled = false;
+        SetBusy(true, statusPrefix);
         _status.Text = statusPrefix;
+        var command = body is null ? string.Empty : _command.Text.Trim();
         try
         {
             HttpResponseMessage response = body is null
                 ? await _http.GetAsync(uri)
                 : await _http.PostAsync(uri, new StringContent(body, Encoding.UTF8, "application/json"));
             var json = await response.Content.ReadAsStringAsync();
-            _output.Text = ExtractJsonString(json, "message")
+            var message = ExtractJsonString(json, "message")
                 ?? ExtractJsonString(json, "error")
                 ?? json;
+            _output.Text = message;
+            UpdateDiagnostics(message);
+            UpdateCommandState(command, message, response.IsSuccessStatusCode);
             _status.Text = response.IsSuccessStatusCode
                 ? "Ali bridge responded."
                 : $"Ali bridge returned HTTP {(int)response.StatusCode}.";
@@ -361,11 +477,127 @@ public sealed class AliCompanionToolWindowControl : UserControl
         {
             _status.Text = "Ali bridge unavailable.";
             _output.Text = "Could not reach Ali WebHelper at http://127.0.0.1:8765/.\r\nStart it, then press Status.";
+            _state.Text = "State: helper unavailable.";
+            _diagnostics.Items.Clear();
         }
         finally
         {
-            _runButton.IsEnabled = true;
+            SetBusy(false, null);
         }
+    }
+
+    private void SetBusy(bool busy, string? status)
+    {
+        _runButton.IsEnabled = !busy;
+        _progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            _state.Text = "State: " + status;
+        }
+    }
+
+    private void UpdateCommandState(string command, string message, bool succeeded)
+    {
+        if (!succeeded)
+        {
+            _state.Text = "State: command failed or was refused.";
+            return;
+        }
+
+        var lowerCommand = command.ToLowerInvariant();
+        var lowerMessage = message.ToLowerInvariant();
+        if (lowerMessage.Contains("pending patch") || lowerMessage.Contains("confirm apply last patch preview"))
+        {
+            _state.Text = "State: patch preview pending owner approval.";
+        }
+        else if (lowerCommand.StartsWith("confirm ", StringComparison.OrdinalIgnoreCase))
+        {
+            _state.Text = "State: confirmed command completed through Ali's gate.";
+        }
+        else if (lowerMessage.Contains("requires confirmation") || lowerMessage.Contains("needs confirmation"))
+        {
+            _state.Text = "State: approval needed before Ali can continue.";
+        }
+        else if (lowerMessage.Contains("build succeeded") || lowerMessage.Contains("0 error"))
+        {
+            _state.Text = "State: build/test output looks successful.";
+        }
+        else
+        {
+            _state.Text = "State: command completed.";
+        }
+    }
+
+    private void UpdateDiagnostics(string message)
+    {
+        _diagnostics.Items.Clear();
+        foreach (var diagnostic in ParseDiagnostics(message).Take(12))
+        {
+            _diagnostics.Items.Add(diagnostic);
+        }
+    }
+
+    private void OpenSelectedDiagnostic()
+    {
+        if (_diagnostics.SelectedItem is not DiagnosticEntry diagnostic)
+        {
+            return;
+        }
+
+        try
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var dte = Package.GetGlobalService(typeof(SDTE)) as DTE2;
+            if (dte is null)
+            {
+                _state.Text = "State: Visual Studio automation service is unavailable.";
+                return;
+            }
+
+            dte.ItemOperations.OpenFile(diagnostic.FilePath);
+            if (dte.ActiveDocument?.Selection is TextSelection selection)
+            {
+                selection.MoveToLineAndOffset(diagnostic.Line, Math.Max(1, diagnostic.Column), false);
+            }
+
+            _state.Text = "State: opened diagnostic location.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotImplementedException or System.Runtime.InteropServices.COMException)
+        {
+            _state.Text = "State: could not open diagnostic. " + ex.Message;
+        }
+    }
+
+    private void LoadCommandHistory()
+    {
+        _history.Items.Clear();
+        foreach (var command in ReadHistory().Take(20))
+        {
+            _history.Items.Add(command);
+        }
+    }
+
+    private void SaveCommandToHistory(string command)
+    {
+        var history = new List<string> { command };
+        history.AddRange(ReadHistory().Where(item => !string.Equals(item, command, StringComparison.OrdinalIgnoreCase)));
+        Directory.CreateDirectory(Path.GetDirectoryName(HistoryPath)!);
+        File.WriteAllLines(HistoryPath, history.Take(20), Encoding.UTF8);
+        LoadCommandHistory();
+    }
+
+    private static IReadOnlyList<string> ReadHistory()
+    {
+        if (!File.Exists(HistoryPath))
+        {
+            return Array.Empty<string>();
+        }
+
+        return File.ReadAllLines(HistoryPath, Encoding.UTF8)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static Button Button(string text, Action action)
@@ -468,6 +700,59 @@ public sealed class AliCompanionToolWindowControl : UserControl
         return match.Success
             ? Regex.Unescape(match.Groups["value"].Value)
             : null;
+    }
+
+    private static IEnumerable<DiagnosticEntry> ParseDiagnostics(string message)
+    {
+        var matches = Regex.Matches(
+            message,
+            "(?<file>[A-Za-z]:\\\\[^\\r\\n]+?)\\((?<line>\\d+)(?:,(?<column>\\d+))?\\):\\s*(?<kind>error|warning)\\s+(?<code>[A-Za-z]+\\d+)",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match match in matches)
+        {
+            if (!match.Success || !int.TryParse(match.Groups["line"].Value, out var line))
+            {
+                continue;
+            }
+
+            var column = 1;
+            if (match.Groups["column"].Success)
+            {
+                int.TryParse(match.Groups["column"].Value, out column);
+                column = Math.Max(1, column);
+            }
+
+            var filePath = match.Groups["file"].Value;
+            var kind = match.Groups["kind"].Value;
+            var code = match.Groups["code"].Value;
+            yield return new DiagnosticEntry(filePath, line, column, kind, code);
+        }
+    }
+
+    private sealed class DiagnosticEntry
+    {
+        public DiagnosticEntry(string filePath, int line, int column, string kind, string code)
+        {
+            FilePath = filePath;
+            Line = line;
+            Column = column;
+            Kind = kind;
+            Code = code;
+        }
+
+        public string FilePath { get; }
+
+        public int Line { get; }
+
+        public int Column { get; }
+
+        public string Kind { get; }
+
+        public string Code { get; }
+
+        public override string ToString() =>
+            $"{Kind} {Code}: {Path.GetFileName(FilePath)}:{Line}";
     }
 
     private sealed class VsContext
