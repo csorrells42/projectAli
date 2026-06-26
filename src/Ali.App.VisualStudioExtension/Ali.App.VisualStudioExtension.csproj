@@ -16,7 +16,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <VSCTCompile Include="AliCompanionPackage.vsct" />
+    <VSCTCompile Include="AliCompanionPackage.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
   </ItemGroup>
 
   <ItemGroup>
