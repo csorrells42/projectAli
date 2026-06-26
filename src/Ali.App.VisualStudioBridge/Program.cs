@@ -10,6 +10,12 @@ if (options.ShowHelp)
     return 0;
 }
 
+if (options.ListExternalTools)
+{
+    Console.WriteLine(VisualStudioExternalToolsGuide.Build());
+    return 0;
+}
+
 if (!Uri.TryCreate(options.HelperUrl, UriKind.Absolute, out var helperUri)
     || !IsLoopbackHttp(helperUri))
 {
@@ -240,8 +246,10 @@ internal sealed record BridgeOptions(
     bool StartHelper,
     bool StatusOnly,
     bool Handoff,
+    string? Preset,
     bool ReadCurrentFile,
     bool OpenCurrentFile,
+    bool ListExternalTools,
     bool ShowHelp)
 {
     public static BridgeOptions Parse(IReadOnlyList<string> args)
@@ -254,8 +262,10 @@ internal sealed record BridgeOptions(
         int? line = null;
         var status = false;
         var handoff = false;
+        string? preset = null;
         var readCurrentFile = false;
         var openCurrentFile = false;
+        var listExternalTools = false;
         var startHelper = true;
         string? helperProjectPath = null;
         var showHelp = args.Count == 0;
@@ -304,6 +314,13 @@ internal sealed record BridgeOptions(
                 case "--handoff":
                     handoff = true;
                     break;
+                case "--preset":
+                    preset = ReadValue(args, ref index, arg);
+                    break;
+                case "--list-external-tools":
+                case "--external-tools":
+                    listExternalTools = true;
+                    break;
                 case "--read-current-file":
                     readCurrentFile = true;
                     break;
@@ -332,8 +349,10 @@ internal sealed record BridgeOptions(
             startHelper,
             status,
             handoff,
+            preset,
             readCurrentFile,
             openCurrentFile,
+            listExternalTools,
             showHelp);
     }
 
@@ -342,6 +361,11 @@ internal sealed record BridgeOptions(
         if (Handoff)
         {
             return "generate visual studio integration plan";
+        }
+
+        if (!string.IsNullOrWhiteSpace(Preset))
+        {
+            return BuildPresetCommand(Preset);
         }
 
         if (ReadCurrentFile)
@@ -372,6 +396,49 @@ internal sealed record BridgeOptions(
             ? $"open solution \"{SolutionPath}\""
             : null;
     }
+
+    private string? BuildPresetCommand(string preset)
+    {
+        var normalized = NormalizePreset(preset);
+        return normalized switch
+        {
+            "status" => "show visual studio integration",
+            "architecture" => "analyze solution architecture",
+            "map" => "show project map",
+            "packages" => "list packages",
+            "roadmap" => "show active roadmap step",
+            "recovery" => "show crash recovery status",
+            "receipts" => "show coding receipts",
+            "report" => "generate coding report",
+            "git-status" => "git status",
+            "git-diff" => "git diff",
+            "build" => string.IsNullOrWhiteSpace(SolutionPath) ? null : $"confirm dotnet build \"{SolutionPath}\"",
+            "test" => string.IsNullOrWhiteSpace(SolutionPath) ? null : $"confirm dotnet test \"{SolutionPath}\"",
+            "read-file" => string.IsNullOrWhiteSpace(FilePath) ? null : WithLine($"read file \"{FilePath}\""),
+            "open-file" => string.IsNullOrWhiteSpace(FilePath) ? null : WithLine($"open file \"{FilePath}\""),
+            _ => null
+        };
+    }
+
+    private static string NormalizePreset(string preset) =>
+        preset.Trim().ToLowerInvariant() switch
+        {
+            "analyze" or "analyze-solution" or "architecture" => "architecture",
+            "project-map" or "workspace-map" or "map" => "map",
+            "package" or "packages" => "packages",
+            "active-step" or "roadmap-step" or "roadmap" => "roadmap",
+            "crash-recovery" or "recovery" => "recovery",
+            "coding-receipts" or "receipts" => "receipts",
+            "coding-report" or "report" => "report",
+            "gitstatus" or "git-status" => "git-status",
+            "gitdiff" or "git-diff" => "git-diff",
+            "build-solution" or "build" => "build",
+            "test-solution" or "test" => "test",
+            "read-current-file" or "read-file" => "read-file",
+            "open-current-file" or "open-file" => "open-file",
+            "status" => "status",
+            var value => value
+        };
 
     private string WithLine(string command) =>
         LineNumber is > 0
@@ -425,6 +492,9 @@ Ali must have the WebHelper running on loopback, for example:
 Examples:
   Ali.App.VisualStudioBridge.exe --status
   Ali.App.VisualStudioBridge.exe --handoff
+  Ali.App.VisualStudioBridge.exe --list-external-tools
+  Ali.App.VisualStudioBridge.exe --preset recovery
+  Ali.App.VisualStudioBridge.exe --preset build --solution "$(SolutionPath)"
   Ali.App.VisualStudioBridge.exe --command "analyze solution architecture"
   Ali.App.VisualStudioBridge.exe --read-current-file --file "$(ItemPath)" --line "$(CurLine)"
   Ali.App.VisualStudioBridge.exe --command "search workspace for WidgetFactory"
@@ -437,6 +507,8 @@ Options:
   --no-start-helper         Do not auto-start the local WebHelper if it is offline.
   --status                  Show Ali coding tool status.
   --handoff                 Generate the Visual Studio integration handoff.
+  --preset <name>           Run a named Visual Studio preset.
+  --list-external-tools     Print recommended Visual Studio External Tools entries.
   --command <command>       Send a deterministic Ali coding command.
   --solution <path>         Visual Studio solution path for token expansion.
   --file <path>             Current file path for token expansion.
@@ -444,4 +516,58 @@ Options:
   --read-current-file       Read the current Visual Studio file through Ali.
   --open-current-file       Open the current Visual Studio file through Ali.
 """;
+}
+
+internal static class VisualStudioExternalToolsGuide
+{
+    private static readonly ExternalToolPreset[] Presets =
+    [
+        new("Ali Status", "--status", "Show workspace, tool discovery, and permission gates."),
+        new("Ali Architecture", "--preset architecture --solution \"$(SolutionPath)\"", "Analyze the active solution architecture."),
+        new("Ali Project Map", "--preset map --solution \"$(SolutionPath)\"", "Show the coding workspace project map."),
+        new("Ali Packages", "--preset packages --solution \"$(SolutionPath)\"", "List package references in the approved workspace."),
+        new("Ali Build Solution", "--preset build --solution \"$(SolutionPath)\"", "Run a confirmed guarded dotnet build for the active solution."),
+        new("Ali Test Solution", "--preset test --solution \"$(SolutionPath)\"", "Run a confirmed guarded dotnet test for the active solution."),
+        new("Ali Roadmap Step", "--preset roadmap --solution \"$(SolutionPath)\"", "Show the active roadmap step."),
+        new("Ali Crash Recovery", "--preset recovery --solution \"$(SolutionPath)\"", "Diagnose roadmap, receipts, interrupted validation, and Git state after a crash."),
+        new("Ali Read Current File", "--preset read-file --file \"$(ItemPath)\" --line \"$(CurLine)\"", "Read the current file through Ali."),
+        new("Ali Open Current File", "--preset open-file --file \"$(ItemPath)\" --line \"$(CurLine)\"", "Open the current file through Ali's configured launcher."),
+        new("Ali Git Status", "--preset git-status --solution \"$(SolutionPath)\"", "Run guarded read-only git status."),
+        new("Ali Coding Report", "--preset report --solution \"$(SolutionPath)\"", "Generate a local coding session report PDF.")
+    ];
+
+    public static string Build()
+    {
+        var bridgePath = Environment.ProcessPath ?? "Ali.App.VisualStudioBridge.exe";
+        var lines = new List<string>
+        {
+            "Ali Visual Studio External Tools setup:",
+            "Add these entries in Visual Studio: Tools > External Tools...",
+            $"Command for each entry: {bridgePath}",
+            "Initial directory: $(SolutionDir)",
+            "Check 'Use Output window' so Ali's response appears inside Visual Studio.",
+            "Leave 'Close on exit' unchecked while testing.",
+            string.Empty
+        };
+
+        for (var index = 0; index < Presets.Length; index++)
+        {
+            var preset = Presets[index];
+            lines.Add($"{index + 1}. {preset.Title}");
+            lines.Add($"   Arguments: {preset.Arguments}");
+            lines.Add($"   Purpose: {preset.Description}");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Notes:");
+        lines.Add("- The bridge talks only to Ali's loopback WebHelper and uses Ali's existing confirmation gates.");
+        lines.Add("- Build/test/package/git-write commands still require Ali-side confirmation policy approval.");
+        lines.Add("- This is External Tools integration, not a Visual Studio extension or in-IDE panel.");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private sealed record ExternalToolPreset(
+        string Title,
+        string Arguments,
+        string Description);
 }

@@ -713,7 +713,7 @@ public const string IndexHtml = """
     main {
       min-height: 0;
       display: grid;
-      grid-template-columns: 280px 1fr;
+      grid-template-columns: 340px 1fr;
     }
 
     aside {
@@ -744,17 +744,96 @@ public const string IndexHtml = """
       margin-top: 12px;
       padding-top: 12px;
       display: grid;
-      gap: 8px;
+      gap: 10px;
     }
 
     #codingBridge h2 {
       margin: 0;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 700;
     }
 
+    .bridge-kicker {
+      margin: 0;
+      color: #a7b0bc;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .command-group {
+      display: grid;
+      gap: 6px;
+    }
+
+    .command-group h3 {
+      margin: 6px 0 0;
+      color: #d7dde7;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .command-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .command-chip {
+      min-width: 0;
+      min-height: 34px;
+      padding: 7px 8px;
+      border-color: #405063;
+      background: #131820;
+      color: #eef2f7;
+      font-size: 11px;
+      font-weight: 700;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .command-chip:hover {
+      border-color: #4ade80;
+      background: #142019;
+    }
+
+    .command-chip.confirm {
+      border-color: #a16207;
+      background: #211807;
+    }
+
+    .command-chip.confirm:hover {
+      border-color: #f59e0b;
+    }
+
+    .skill-list {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .skill-list li {
+      border: 1px solid #2a3038;
+      border-radius: 8px;
+      padding: 7px 8px;
+      background: #0e1218;
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .skill-list strong {
+      display: block;
+      color: #eef2f7;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+
     #codingCommand {
-      min-height: 70px;
+      min-height: 58px;
       resize: vertical;
       background: #11161d;
       color: #eef2f7;
@@ -768,6 +847,19 @@ public const string IndexHtml = """
     #codingRun {
       height: 36px;
       min-width: 0;
+    }
+
+    .command-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    #codingClear {
+      height: 36px;
+      min-width: 0;
+      border-color: #405063;
+      background: #151a22;
     }
 
     #codingOutput {
@@ -878,6 +970,18 @@ public const string IndexHtml = """
     button:disabled {
       opacity: .55;
     }
+
+    @media (max-width: 980px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        border-right: 0;
+        border-bottom: 1px solid #2a3038;
+        max-height: 48vh;
+      }
+    }
   </style>
 </head>
 <body>
@@ -893,9 +997,59 @@ public const string IndexHtml = """
       <button id="newChat" type="button">New Chat</button>
       <div id="history"></div>
       <section id="codingBridge">
-        <h2>Coding Bridge</h2>
+        <h2>Programming Companion</h2>
+        <p class="bridge-kicker">Pick a command, review it, then run it through Ali's normal approval gates.</p>
+        <div class="command-group">
+          <h3>Awareness</h3>
+          <div class="command-grid">
+            <button class="command-chip" type="button" data-command="show visual studio integration">VS Status</button>
+            <button class="command-chip" type="button" data-command="inspect coding workspace">Workspace</button>
+            <button class="command-chip" type="button" data-command="analyze solution architecture">Architecture</button>
+            <button class="command-chip" type="button" data-command="list packages">Packages</button>
+          </div>
+        </div>
+        <div class="command-group">
+          <h3>Plan</h3>
+          <div class="command-grid">
+            <button class="command-chip" type="button" data-command="explore build idea ">Explore Idea</button>
+            <button class="command-chip" type="button" data-command="draft implementation roadmap ">Roadmap</button>
+            <button class="command-chip" type="button" data-command="show active roadmap step">Active Step</button>
+            <button class="command-chip" type="button" data-command="show crash recovery status">Recovery</button>
+          </div>
+        </div>
+        <div class="command-group">
+          <h3>Build</h3>
+          <div class="command-grid">
+            <button class="command-chip confirm" type="button" data-command="confirm dotnet build &quot;path&quot;">Build</button>
+            <button class="command-chip confirm" type="button" data-command="confirm dotnet test &quot;path&quot;">Test</button>
+            <button class="command-chip" type="button" data-command="diagnose last build failure">Diagnose</button>
+            <button class="command-chip" type="button" data-command="suggest patch from last failure">Patch Preview</button>
+          </div>
+        </div>
+        <div class="command-group">
+          <h3>Git and Reports</h3>
+          <div class="command-grid">
+            <button class="command-chip" type="button" data-command="git status">Git Status</button>
+            <button class="command-chip" type="button" data-command="git diff">Git Diff</button>
+            <button class="command-chip" type="button" data-command="show coding receipts">Receipts</button>
+            <button class="command-chip" type="button" data-command="generate coding report">Report</button>
+          </div>
+        </div>
+        <div class="command-group">
+          <h3>Skills</h3>
+          <ul class="skill-list">
+            <li><strong>Scout</strong>Maps solutions, packages, files, and architecture.</li>
+            <li><strong>Plan</strong>Drafts roadmaps and approval checkpoints.</li>
+            <li><strong>Build</strong>Runs confirmed dotnet build/test/restore/package commands.</li>
+            <li><strong>Recover</strong>Compares roadmap, receipts, and Git state after interruption.</li>
+            <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>
+          </ul>
+        </div>
         <textarea id="codingCommand" placeholder="show visual studio integration"></textarea>
-        <button id="codingRun" type="button">Run</button>
+        <div class="command-actions">
+          <button id="codingRun" type="button">Run</button>
+          <button id="codingClear" type="button">Clear</button>
+        </div>
         <pre id="codingOutput">Checking coding bridge...</pre>
       </section>
     </aside>
@@ -916,7 +1070,9 @@ public const string IndexHtml = """
     const token = document.getElementById('token');
     const codingCommand = document.getElementById('codingCommand');
     const codingRun = document.getElementById('codingRun');
+    const codingClear = document.getElementById('codingClear');
     const codingOutput = document.getElementById('codingOutput');
+    const commandChips = Array.from(document.querySelectorAll('.command-chip'));
     let conversationId = crypto.randomUUID();
     const history = [];
     token.value = localStorage.getItem('aliHelperToken') || '';
@@ -1036,6 +1192,18 @@ public const string IndexHtml = """
         codingOutput.textContent = error.message || 'Coding bridge unavailable';
       }
     }
+
+    commandChips.forEach((button) => {
+      button.addEventListener('click', () => {
+        codingCommand.value = button.dataset.command || '';
+        codingCommand.focus();
+      });
+    });
+
+    codingClear.addEventListener('click', () => {
+      codingCommand.value = '';
+      codingCommand.focus();
+    });
 
     codingRun.addEventListener('click', async () => {
       const command = codingCommand.value.trim() || 'show visual studio integration';

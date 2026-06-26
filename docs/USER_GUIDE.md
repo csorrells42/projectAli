@@ -92,7 +92,7 @@ The helper serves one HTML page for basic chat, recent history, and runtime erro
 
 The helper lists the last 20 conversations from the current local Ali profile. This is not a personal-account or multi-user system; anyone with access to the same helper/profile can see the same helper history. If `ALI_HELPER_TOKEN` is configured, ask and history endpoints require that token.
 
-The helper includes a local Coding Bridge panel for deterministic Ali coding commands. The bridge endpoints are loopback-only and still route through Ali's existing coding parser, workspace policy, confirmation gates, and receipts. This is a local companion surface for future Visual Studio integration, not a Visual Studio extension.
+The helper includes a local Programming Companion panel for deterministic Ali coding commands. It lists common programming skills, fills a command line from grouped command buttons, and sends commands through the loopback coding bridge. The bridge endpoints are loopback-only and still route through Ali's existing coding parser, workspace policy, confirmation gates, and receipts. This is a local companion surface for future Visual Studio integration, not a Visual Studio extension.
 
 The helper does not add cloud fallback, voice, user-isolated accounts, or direct ungated file authority. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 
@@ -197,7 +197,7 @@ Visual Studio integration in this build is launch/configuration integration, not
 
 Use `generate visual studio integration plan` to produce a deterministic handoff for that future phase. The handoff reports the current workspace, launcher discovery, architecture snapshot, and the minimum guarded contract a VS extension or local companion window must follow. It does not install an extension or claim an in-IDE panel exists.
 
-The HTML helper's Coding Bridge panel is the first local companion surface for that direction. It can submit deterministic coding commands to Ali on loopback, but all writes/builds/tests/Git actions still follow the same confirmation gates.
+The HTML helper's Programming Companion panel is the first local companion surface for that direction. It can submit deterministic coding commands to Ali on loopback, but all writes/builds/tests/Git actions still follow the same confirmation gates.
 
 Visual Studio can also call the current bridge through `Ali.App.VisualStudioBridge.exe`, which is designed for Visual Studio External Tools. Build the solution, start the WebHelper on loopback, then add an External Tool that points at:
 
@@ -210,6 +210,9 @@ Example External Tools arguments:
 ```text
 --status
 --handoff
+--list-external-tools
+--preset recovery
+--preset build --solution "$(SolutionPath)"
 --command "analyze solution architecture"
 --read-current-file --file "$(ItemPath)" --line "$(CurLine)"
 --command "read file \"{file}\" at line {line}" --file "$(ItemPath)" --line "$(CurLine)"
