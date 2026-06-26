@@ -92,7 +92,7 @@ The helper serves one HTML page for basic chat, recent history, and runtime erro
 
 The helper lists the last 20 conversations from the current local Ali profile. This is not a personal-account or multi-user system; anyone with access to the same helper/profile can see the same helper history. If `ALI_HELPER_TOKEN` is configured, ask and history endpoints require that token.
 
-The helper includes a local Programming Companion panel for deterministic Ali coding commands. It lists common programming skills, fills a command line from grouped command buttons, and sends commands through the loopback coding bridge. The bridge endpoints are loopback-only and still route through Ali's existing coding parser, workspace policy, confirmation gates, and receipts. This is a local companion surface for future Visual Studio integration, not a Visual Studio extension.
+The helper includes a local Programming Companion panel for deterministic Ali coding commands. The helper keeps recent chat history on the left, chat in the center, and the Programming Companion on the right. It lists common programming skills, fills a command line from grouped command buttons, and sends commands through the loopback coding bridge. The bridge endpoints are loopback-only and still route through Ali's existing coding parser, workspace policy, confirmation gates, and receipts. This is a local companion surface for future Visual Studio integration, not a Visual Studio extension.
 
 The helper does not add cloud fallback, voice, user-isolated accounts, or direct ungated file authority. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 

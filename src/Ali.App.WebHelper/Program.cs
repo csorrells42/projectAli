@@ -713,11 +713,18 @@ public const string IndexHtml = """
     main {
       min-height: 0;
       display: grid;
-      grid-template-columns: 340px 1fr;
+      grid-template-columns: 260px minmax(0, 1fr) 360px;
     }
 
     aside {
       border-right: 1px solid #2a3038;
+      padding: 12px;
+      overflow: auto;
+      background: #080a0d;
+    }
+
+    #programmingRail {
+      border-left: 1px solid #2a3038;
       padding: 12px;
       overflow: auto;
       background: #080a0d;
@@ -740,9 +747,6 @@ public const string IndexHtml = """
     }
 
     #codingBridge {
-      border-top: 1px solid #2a3038;
-      margin-top: 12px;
-      padding-top: 12px;
       display: grid;
       gap: 10px;
     }
@@ -979,7 +983,13 @@ public const string IndexHtml = """
       aside {
         border-right: 0;
         border-bottom: 1px solid #2a3038;
-        max-height: 48vh;
+        max-height: 28vh;
+      }
+
+      #programmingRail {
+        border-left: 0;
+        border-top: 1px solid #2a3038;
+        max-height: 46vh;
       }
     }
   </style>
@@ -996,6 +1006,9 @@ public const string IndexHtml = """
     <aside>
       <button id="newChat" type="button">New Chat</button>
       <div id="history"></div>
+    </aside>
+    <section id="chat"></section>
+    <section id="programmingRail">
       <section id="codingBridge">
         <h2>Programming Companion</h2>
         <p class="bridge-kicker">Pick a command, review it, then run it through Ali's normal approval gates.</p>
@@ -1052,8 +1065,7 @@ public const string IndexHtml = """
         </div>
         <pre id="codingOutput">Checking coding bridge...</pre>
       </section>
-    </aside>
-    <section id="chat"></section>
+    </section>
   </main>
   <form id="form">
     <textarea id="message" placeholder="Ask Ali..." autofocus></textarea>
