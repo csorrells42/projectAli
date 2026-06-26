@@ -1017,13 +1017,17 @@ public sealed class LocalCodingToolService(
             latestDotNetReceipt is null
                 ? "Latest dotnet-style receipt: none"
                 : FormatReceiptSummary("Latest dotnet-style receipt", latestDotNetReceipt),
+            "Packet receipt match:"
+        };
+        lines.AddRange(BuildPacketReceiptMatchLines(packet, receipts, gitStatus, stale));
+        lines.AddRange([
             "Progress lanes:",
             "- Prep: review read-only commands and current context.",
             "- Execute: choose one candidate command and use its normal approval gate.",
             "- Validate: run confirmed build/test when code or packages change.",
             "- Closeout: review receipts and Git before marking the roadmap step complete.",
             "Next safe commands:"
-        };
+        ]);
         lines.Add("- show approved packet");
         lines.Add(stale ? "- discard approved packet" : "- show execution packet");
         lines.Add("- show coding receipts");
@@ -1714,6 +1718,89 @@ public sealed class LocalCodingToolService(
         var exit = receipt.ExitCode is null ? string.Empty : $" exit={receipt.ExitCode.Value}";
         return $"{label}: {receipt.Timestamp:u} {receipt.Action} {(receipt.Succeeded ? "succeeded" : "failed")}{exit}{target}";
     }
+
+    private static IReadOnlyList<string> BuildPacketReceiptMatchLines(
+        ApprovedRoadmapExecutionPacket packet,
+        IReadOnlyList<CodingReceipt> receipts,
+        GitWorkingTreeStatus gitStatus,
+        bool stale)
+    {
+        var packetReceipts = receipts
+            .Where(receipt => receipt.Timestamp >= packet.ApprovedAt)
+            .OrderBy(receipt => receipt.Timestamp)
+            .ToList();
+        var latestDotNet = packetReceipts.LastOrDefault(IsDotNetReceipt);
+        var prepDone = packetReceipts.Any(IsPacketPrepReceipt);
+        var executionDone = packetReceipts.Any(IsPacketExecutionReceipt);
+        var validationDone = packetReceipts.Any(IsPacketValidationReceipt);
+        var validationFailed = latestDotNet is { Succeeded: false };
+        var closeoutDone = packetReceipts.Any(IsPacketCloseoutReceipt);
+
+        var lines = new List<string>
+        {
+            $"- Receipts since approval: {packetReceipts.Count}",
+            $"- Prep: {(prepDone ? "done" : "waiting")} (read-only context or packet review)",
+            $"- Execute: {(executionDone ? "done" : "waiting")} (candidate command through normal approval gate)"
+        };
+
+        if (validationFailed)
+        {
+            lines.Add("- Validate: blocked (latest dotnet-style receipt failed)");
+        }
+        else
+        {
+            lines.Add($"- Validate: {(validationDone ? "done" : "waiting")} (confirmed build/test/package receipt)");
+        }
+
+        if (stale)
+        {
+            lines.Add("- Closeout: blocked (packet is stale against roadmap state)");
+        }
+        else if (gitStatus.HasUncommittedChanges)
+        {
+            lines.Add("- Closeout: review-first (Git has uncommitted changes)");
+        }
+        else
+        {
+            lines.Add($"- Closeout: {(closeoutDone ? "done" : "waiting")} (receipt review, roadmap advance, report, or commit)");
+        }
+
+        return lines;
+    }
+
+    private static bool IsPacketPrepReceipt(CodingReceipt receipt) =>
+        receipt.Succeeded
+        && receipt.Action is nameof(CodingToolAction.ShowNextRoadmapAction)
+            or nameof(CodingToolAction.ShowRoadmapExecutionPacket)
+            or nameof(CodingToolAction.ShowApprovedRoadmapExecutionPacket)
+            or nameof(CodingToolAction.ShowReceipts)
+            or nameof(CodingToolAction.DiagnoseRecoveryState);
+
+    private static bool IsPacketExecutionReceipt(CodingReceipt receipt) =>
+        receipt.Succeeded
+        && receipt.Action is nameof(CodingToolAction.PreviewPatchBundle)
+            or nameof(CodingToolAction.ApplyLastPatchPreview)
+            or nameof(CodingToolAction.CreateFile)
+            or nameof(CodingToolAction.AppendFile)
+            or nameof(CodingToolAction.ReplaceText)
+            or nameof(CodingToolAction.Restore)
+            or nameof(CodingToolAction.AddPackage)
+            or nameof(CodingToolAction.RunProject);
+
+    private static bool IsPacketValidationReceipt(CodingReceipt receipt) =>
+        receipt.Succeeded
+        && (IsDotNetReceipt(receipt)
+            || receipt.Action is nameof(CodingToolAction.ShowLastPatchPreview)
+                or nameof(CodingToolAction.GitStatus)
+                or nameof(CodingToolAction.GitDiff));
+
+    private static bool IsPacketCloseoutReceipt(CodingReceipt receipt) =>
+        receipt.Succeeded
+        && receipt.Action is nameof(CodingToolAction.AdvanceRoadmapStep)
+            or nameof(CodingToolAction.ShowRoadmapExecutionPacketProgress)
+            or nameof(CodingToolAction.GenerateCodingReport)
+            or nameof(CodingToolAction.GitAdd)
+            or nameof(CodingToolAction.GitCommit);
 
     private static void AddUniqueCommands(List<string> lines, IEnumerable<string> commands)
     {

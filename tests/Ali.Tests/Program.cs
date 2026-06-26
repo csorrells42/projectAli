@@ -1003,7 +1003,8 @@ static async Task TestLocalCodingToolExploresBuildIdea()
     Directory.CreateDirectory(workspace);
     var projectDirectory = Path.Combine(workspace, "Demo.App");
     Directory.CreateDirectory(projectDirectory);
-    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
     await File.WriteAllTextAsync(
         Path.Combine(projectDirectory, "Demo.App.csproj"),
         """
@@ -1109,7 +1110,8 @@ static async Task TestLocalCodingToolManagesApprovedRoadmap()
     Directory.CreateDirectory(workspace);
     var projectDirectory = Path.Combine(workspace, "Demo.App");
     Directory.CreateDirectory(projectDirectory);
-    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
     await File.WriteAllTextAsync(
         Path.Combine(projectDirectory, "Demo.App.csproj"),
         """
@@ -1169,7 +1171,8 @@ static async Task TestLocalCodingToolRecoversActiveRoadmapState()
     Directory.CreateDirectory(workspace);
     var projectDirectory = Path.Combine(workspace, "Demo.App");
     Directory.CreateDirectory(projectDirectory);
-    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
     await File.WriteAllTextAsync(
         Path.Combine(projectDirectory, "Demo.App.csproj"),
         """
@@ -1341,7 +1344,8 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     Directory.CreateDirectory(workspace);
     var projectDirectory = Path.Combine(workspace, "Demo.App");
     Directory.CreateDirectory(projectDirectory);
-    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
     await File.WriteAllTextAsync(
         Path.Combine(projectDirectory, "Demo.App.csproj"),
         """
@@ -1366,6 +1370,7 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     var approvePacket = await service.TryHandleAsync("approve execution packet", CancellationToken.None);
     var packetPath = Path.Combine(directory, "Coding", "approved-step-packet.json");
     var packetExistsAfterApproval = File.Exists(packetPath);
+    var validation = await service.TryHandleAsync($"confirm dotnet build \"{solutionPath}\"", CancellationToken.None);
 
     var recoveredService = new LocalCodingToolService(
         new CodingWorkspacePolicy(workspace),
@@ -1383,6 +1388,7 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     Equal(true, approveRoadmap.Succeeded);
     Equal(true, start.Succeeded);
     Equal(true, approvePacket.Succeeded);
+    Equal(true, validation.Succeeded);
     Contains("Approved execution packet", approvePacket.Message);
     Contains("No files were changed", approvePacket.Message);
     Contains("local planning state only", approvePacket.Message);
@@ -1394,15 +1400,20 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     Equal(true, progress.Succeeded);
     Contains("Execution packet progress", progress.Message);
     Contains("Packet status: active", progress.Message);
+    Contains("Packet receipt match", progress.Message);
+    Contains("Prep: done", progress.Message);
+    Contains("Execute: waiting", progress.Message);
+    Contains("Validate: done", progress.Message);
     Contains("Progress lanes", progress.Message);
     Equal(true, discard.Succeeded);
     Contains("Discarded approved execution packet", discard.Message);
     Equal(false, File.Exists(packetPath));
     Equal(true, showAfterDiscard.Succeeded);
     Contains("No approved execution packet", showAfterDiscard.Message);
-    Equal(2, runner.Runs.Count);
+    Equal(3, runner.Runs.Count);
     Equal("git", runner.Runs[0].FileName);
-    Equal("git", runner.Runs[1].FileName);
+    Equal("dotnet", runner.Runs[1].FileName);
+    Equal("git", runner.Runs[2].FileName);
 }
 
 static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()
