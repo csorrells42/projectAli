@@ -455,6 +455,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
     Contains("Ali PDF command index", pdfIndex);
     Contains(@"C:\Ali\Pdfs", pdfIndex);
+    Contains("plan slow computer troubleshooting", ComputerTroubleshootingCatalog.BuildCommandIndex());
+    Contains("Check Task Manager", string.Join(" ", ComputerTroubleshootingCatalog.BuildScenarioChecklist("slow computer")));
     Equal(true, CodingAbilityCatalog.BuilderGroups.Any(group => group.Commands.Any(command => command.RequiresConfirmation)));
     Equal(true, CodingAbilityCatalog.ComputerGroups.Count >= 6);
     return Task.CompletedTask;
