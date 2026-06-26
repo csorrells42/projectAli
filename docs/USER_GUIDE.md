@@ -133,8 +133,20 @@ Useful commands:
 - `show crash recovery status`
 - `show visual studio integration`
 - `generate visual studio integration plan`
+- `interpret build goal screenshot bug helper`
+- `show architecture options Visual Studio assistant`
+- `write acceptance criteria package installer`
+- `suggest tests for VS companion`
+- `detect codebase patterns`
+- `plan feature files screenshot triage`
+- `show refactor safety checklist command parser`
 - `plan package lookup Visual Studio tool window`
+- `plan dependency install packet QuestPDF`
 - `preview project scaffold SolidWorks BOM helper`
+- `plan scaffold apply SolidWorks BOM helper`
+- `plan post edit validation`
+- `show coding skill command index`
+- `show coding session summary`
 - `show windows troubleshooting toolkit`
 - `plan rogue process hunt port 8765`
 - `collect process evidence dotnet`
@@ -222,10 +234,22 @@ Approved packet workflow:
 5. Use `confirm run packet item N` only when you deliberately want Ali to run a gated build, package, edit, run, or Git command from the packet.
 6. Use `show packet ledger` and `show packet progress` to compare receipts against the approved packet.
 
-Package and scaffold planning:
+Builder, package, and scaffold planning:
 
+- `interpret build goal <goal>` classifies the requested build, identifies a likely first milestone, shows architecture option cards, and lists approval checkpoints.
+- `show architecture options <goal>` compares several architecture paths before a build starts.
+- `write acceptance criteria <goal>` drafts a "done means..." checklist for the feature.
+- `suggest tests for <goal>` recommends focused parser, service, policy, UI, package, or screenshot/vision tests based on the goal.
+- `detect codebase patterns` reports local project roles, package patterns, and implementation conventions so suggestions fit the repo.
+- `plan feature files <goal>` lists likely files/classes to inspect or modify.
+- `show refactor safety checklist <goal>` highlights contract, persistence, permission, UI, migration, and validation risks before edits.
 - `plan package lookup <goal>` lists package/library exploration lanes, dependency risk cards, and the approval path for restore/outdated/package-install commands. It does not run internet or package-registry lookups by itself.
+- `plan dependency install packet <goal>` turns dependency work into prep, approval commands, validation commands, and rollback notes. It does not install anything.
 - `preview project scaffold <goal>` drafts a folder/file/test-project shape for a new feature. It does not create files or add solution entries by itself.
+- `plan scaffold apply <goal>` shows how to move from scaffold preview to confirmed file creation and validation. It does not create solution entries by itself.
+- `plan post edit validation` shows the next safe build/test/Git validation loop after approved edits.
+- `show coding skill command index` lists Ali's programming powers, limits, and safest next commands.
+- `show coding session summary` summarizes recent receipts, active roadmap/packet state, and useful next actions.
 - `resume build plan` combines roadmap state, approved packet state, recent receipts, last dotnet failure, and Git status into the safest next step after a crash or interruption.
 - `generate morning report` exports a PDF summary of packet commands, ledger state, resume guidance, dependency planning, scaffold planning, and install readiness.
 

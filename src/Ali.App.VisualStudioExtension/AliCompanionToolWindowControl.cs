@@ -382,11 +382,11 @@ public sealed class AliCompanionToolWindowControl : UserControl
     {
         var panel = new StackPanel();
         AddContextGroup(panel);
-        AddGroup(panel, "Awareness", ("VS Status", "show visual studio integration"), ("Architecture", "analyze solution architecture"));
-        AddGroup(panel, "Plan", ("Next Action", "show next coding action"), ("Packet", "show execution packet"), ("Approve Packet", "approve execution packet"), ("Console", "show packet commands"), ("Ledger", "show packet ledger"), ("Progress", "show packet progress"), ("Resume", "resume build plan"), ("Active Step", "show active roadmap step"), ("Recovery", "show crash recovery status"));
-        AddGroup(panel, "Build", ("Build", "confirm dotnet build \"path\""), ("Diagnose", "diagnose last build failure"), ("Classify", "classify last build failure"), ("Build Lock", "diagnose build lock"), ("Step Check", "show roadmap step checklist"), ("Packages", "plan package lookup "), ("Scaffold", "preview project scaffold "));
+        AddGroup(panel, "Awareness", ("VS Status", "show visual studio integration"), ("Architecture", "analyze solution architecture"), ("Patterns", "detect codebase patterns"), ("Index", "show coding skill command index"));
+        AddGroup(panel, "Plan", ("Goal", "interpret build goal "), ("Options", "show architecture options "), ("Criteria", "write acceptance criteria "), ("Tests", "suggest tests for "), ("Files", "plan feature files "), ("Safety", "show refactor safety checklist "), ("Next Action", "show next coding action"), ("Packet", "show execution packet"), ("Approve Packet", "approve execution packet"), ("Console", "show packet commands"), ("Ledger", "show packet ledger"), ("Progress", "show packet progress"), ("Resume", "resume build plan"), ("Active Step", "show active roadmap step"), ("Recovery", "show crash recovery status"));
+        AddGroup(panel, "Build", ("Build", "confirm dotnet build \"path\""), ("Diagnose", "diagnose last build failure"), ("Classify", "classify last build failure"), ("Validate", "plan post edit validation"), ("Build Lock", "diagnose build lock"), ("Step Check", "show roadmap step checklist"), ("Packages", "plan package lookup "), ("Install Packet", "plan dependency install packet "), ("Scaffold", "preview project scaffold "), ("Scaffold Apply", "plan scaffold apply "));
         AddGroup(panel, "Windows", ("Toolkit", "show windows troubleshooting toolkit"), ("Evidence", "collect process evidence "), ("Port", "diagnose port "), ("Process Hunt", "plan rogue process hunt "), ("Services", "inspect services and startup"), ("Events", "triage event logs"), ("Install", "show install doctor"));
-        AddGroup(panel, "Git and Reports", ("Git Status", "git status"), ("Report", "generate coding report"), ("Morning", "generate morning report"));
+        AddGroup(panel, "Git and Reports", ("Git Status", "git status"), ("Session", "show coding session summary"), ("Report", "generate coding report"), ("Morning", "generate morning report"));
         return panel;
     }
 

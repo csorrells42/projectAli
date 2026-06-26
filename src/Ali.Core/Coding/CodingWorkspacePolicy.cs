@@ -100,6 +100,13 @@ public sealed class CodingWorkspacePolicy
         }
 
         if (request.Action is CodingToolAction.ShowLastRoadmap
+            or CodingToolAction.InterpretBuildGoal
+            or CodingToolAction.ShowArchitectureOptions
+            or CodingToolAction.WriteAcceptanceCriteria
+            or CodingToolAction.SuggestFeatureTests
+            or CodingToolAction.DetectCodebasePatterns
+            or CodingToolAction.PlanFeatureFiles
+            or CodingToolAction.ShowRefactorSafetyChecklist
             or CodingToolAction.DiscardLastRoadmap
             or CodingToolAction.ApproveLastRoadmap
             or CodingToolAction.StartApprovedRoadmap
@@ -114,8 +121,13 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.RunApprovedPacketItem
             or CodingToolAction.ShowPacketRunLedger
             or CodingToolAction.PlanPackageLookup
+            or CodingToolAction.PlanDependencyInstallPacket
+            or CodingToolAction.PlanPostEditValidation
             or CodingToolAction.PreviewProjectScaffold
+            or CodingToolAction.PlanScaffoldApply
             or CodingToolAction.ResumeBuildPlan
+            or CodingToolAction.ShowBuilderCommandIndex
+            or CodingToolAction.ShowCodingSessionSummary
             or CodingToolAction.ShowWindowsTroubleshootingToolkit
             or CodingToolAction.PlanRogueProcessHunt
             or CodingToolAction.CollectProcessEvidence

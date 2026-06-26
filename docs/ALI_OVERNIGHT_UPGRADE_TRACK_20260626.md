@@ -25,10 +25,19 @@ This is the approved build-skills path for the overnight sprint.
 19. Event-log triage: `triage event logs`.
 20. Approved process stop executor: `confirm stop process <pid>`.
 21. Build/install intelligence: `classify last build failure`, `show roadmap step checklist`, and `show install doctor`.
+22. Builder goal interpreter: `interpret build goal <goal>`.
+23. Architecture option cards: `show architecture options <goal>`.
+24. Acceptance/test planning: `write acceptance criteria <goal>` and `suggest tests for <goal>`.
+25. Codebase pattern and feature file planning: `detect codebase patterns` and `plan feature files <goal>`.
+26. Refactor safety review: `show refactor safety checklist <goal>`.
+27. Dependency install planning: `plan dependency install packet <goal>`.
+28. Scaffold apply planning: `plan scaffold apply <goal>`.
+29. Post-edit validation loop: `plan post edit validation`.
+30. Builder command surfaces: `show coding skill command index` and `show coding session summary`.
 
 ## Approved Next Road Completed
 
-The second approved sprint moved Windows troubleshooting and build readiness into deterministic Ali commands while preserving the same approval gates.
+The second approved sprint moved Windows troubleshooting and build readiness into deterministic Ali commands while preserving the same approval gates. The third approved sprint moved builder planning into deterministic Ali commands without adding uncontrolled execution authority.
 
 ## Guardrails
 

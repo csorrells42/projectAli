@@ -351,6 +351,89 @@ public static class CodingToolRequestParser
         "dependency risk cards"
     ];
 
+    private static readonly string[] BuildGoalInterpreterPrefixes =
+    [
+        "interpret build goal",
+        "interpret coding goal",
+        "understand build goal",
+        "understand coding goal",
+        "i want to build",
+        "help me build",
+        "what should i build for"
+    ];
+
+    private static readonly string[] ArchitectureOptionPrefixes =
+    [
+        "show architecture options",
+        "compare architecture options",
+        "architecture options for",
+        "option cards for",
+        "show option cards for",
+        "compare build paths for"
+    ];
+
+    private static readonly string[] AcceptanceCriteriaPrefixes =
+    [
+        "write acceptance criteria",
+        "draft acceptance criteria",
+        "define done for",
+        "done means",
+        "acceptance checklist for"
+    ];
+
+    private static readonly string[] FeatureTestPrefixes =
+    [
+        "suggest tests for",
+        "test plan for",
+        "recommend tests for",
+        "what tests for"
+    ];
+
+    private static readonly string[] CodebasePatternRequests =
+    [
+        "detect codebase patterns",
+        "show codebase patterns",
+        "inspect codebase patterns",
+        "detect project patterns",
+        "show project patterns"
+    ];
+
+    private static readonly string[] FeatureFilePlanPrefixes =
+    [
+        "plan feature files",
+        "plan files for",
+        "which files for",
+        "new feature files for",
+        "file plan for"
+    ];
+
+    private static readonly string[] RefactorSafetyPrefixes =
+    [
+        "show refactor safety checklist",
+        "refactor safety checklist",
+        "refactor safety for",
+        "risk checklist for",
+        "safety checklist for"
+    ];
+
+    private static readonly string[] DependencyInstallPacketPrefixes =
+    [
+        "plan dependency install packet",
+        "dependency install packet",
+        "package install packet",
+        "plan package install",
+        "plan dependency install"
+    ];
+
+    private static readonly string[] PostEditValidationRequests =
+    [
+        "plan post edit validation",
+        "post edit validation",
+        "after edit validation",
+        "show validation after edits",
+        "show post edit build loop"
+    ];
+
     private static readonly string[] ProjectScaffoldPrefixes =
     [
         "preview project scaffold",
@@ -359,6 +442,15 @@ public static class CodingToolRequestParser
         "plan scaffold",
         "scaffold project",
         "draft scaffold"
+    ];
+
+    private static readonly string[] ScaffoldApplyPrefixes =
+    [
+        "plan scaffold apply",
+        "show scaffold apply flow",
+        "scaffold apply flow",
+        "apply scaffold plan",
+        "scaffold apply"
     ];
 
     private static readonly string[] ResumeBuildPlanRequests =
@@ -378,6 +470,26 @@ public static class CodingToolRequestParser
         "create morning report",
         "export morning report",
         "write morning report"
+    ];
+
+    private static readonly string[] BuilderCommandIndexRequests =
+    [
+        "show coding skill command index",
+        "show builder command index",
+        "show programming powers",
+        "show ali programming powers",
+        "show coding powers",
+        "coding skill command index",
+        "builder command index"
+    ];
+
+    private static readonly string[] CodingSessionSummaryRequests =
+    [
+        "show coding session summary",
+        "show session summary",
+        "summarize coding session",
+        "what changed this session",
+        "morning session summary"
     ];
 
     private static readonly string[] WindowsTroubleshootingToolkitRequests =
@@ -811,6 +923,11 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParseBuilderPlanningCommand(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (IsOpenSolutionRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.OpenSolution, null, UserConfirmed: userConfirmed);
@@ -1040,6 +1157,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParseDependencyInstallPacket(trimmed, userConfirmed, out request)
+            || TryParseScaffoldApply(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (TryParseProjectScaffold(trimmed, userConfirmed, out request))
         {
             return true;
@@ -1053,6 +1176,24 @@ public static class CodingToolRequestParser
 
         if (TryParseGenerateMorningReport(trimmed, userConfirmed, out request))
         {
+            return true;
+        }
+
+        if (IsPostEditValidationRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.PlanPostEditValidation, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBuilderCommandIndexRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBuilderCommandIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCodingSessionSummaryRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCodingSessionSummary, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -1246,6 +1387,15 @@ public static class CodingToolRequestParser
     private static bool IsResumeBuildPlanRequest(string text) =>
         ResumeBuildPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsPostEditValidationRequest(string text) =>
+        PostEditValidationRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBuilderCommandIndexRequest(string text) =>
+        BuilderCommandIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCodingSessionSummaryRequest(string text) =>
+        CodingSessionSummaryRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsWindowsTroubleshootingToolkitRequest(string text) =>
         WindowsTroubleshootingToolkitRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -1287,6 +1437,52 @@ public static class CodingToolRequestParser
         var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
         request = new CodingToolRequest(
             CodingToolAction.PlanTask,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseBuilderPlanningCommand(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        if (TryParsePrefixedQuery(text, BuildGoalInterpreterPrefixes, CodingToolAction.InterpretBuildGoal, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ArchitectureOptionPrefixes, CodingToolAction.ShowArchitectureOptions, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, AcceptanceCriteriaPrefixes, CodingToolAction.WriteAcceptanceCriteria, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureTestPrefixes, CodingToolAction.SuggestFeatureTests, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureFilePlanPrefixes, CodingToolAction.PlanFeatureFiles, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, RefactorSafetyPrefixes, CodingToolAction.ShowRefactorSafetyChecklist, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (CodebasePatternRequests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            request = new CodingToolRequest(CodingToolAction.DetectCodebasePatterns, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParsePrefixedQuery(
+        string text,
+        IReadOnlyList<string> prefixes,
+        CodingToolAction action,
+        bool userConfirmed,
+        out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = prefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            action,
             null,
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);
@@ -1360,42 +1556,22 @@ public static class CodingToolRequestParser
 
     private static bool TryParsePackageLookup(string text, bool userConfirmed, out CodingToolRequest request)
     {
-        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
-        var prefix = PackageLookupPrefixes
-            .OrderByDescending(prefix => prefix.Length)
-            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-        if (prefix is null)
-        {
-            return false;
-        }
+        return TryParsePrefixedQuery(text, PackageLookupPrefixes, CodingToolAction.PlanPackageLookup, userConfirmed, out request);
+    }
 
-        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
-        request = new CodingToolRequest(
-            CodingToolAction.PlanPackageLookup,
-            null,
-            UserConfirmed: userConfirmed,
-            Query: string.IsNullOrWhiteSpace(query) ? null : query);
-        return true;
+    private static bool TryParseDependencyInstallPacket(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        return TryParsePrefixedQuery(text, DependencyInstallPacketPrefixes, CodingToolAction.PlanDependencyInstallPacket, userConfirmed, out request);
     }
 
     private static bool TryParseProjectScaffold(string text, bool userConfirmed, out CodingToolRequest request)
     {
-        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
-        var prefix = ProjectScaffoldPrefixes
-            .OrderByDescending(prefix => prefix.Length)
-            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-        if (prefix is null)
-        {
-            return false;
-        }
+        return TryParsePrefixedQuery(text, ProjectScaffoldPrefixes, CodingToolAction.PreviewProjectScaffold, userConfirmed, out request);
+    }
 
-        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
-        request = new CodingToolRequest(
-            CodingToolAction.PreviewProjectScaffold,
-            null,
-            UserConfirmed: userConfirmed,
-            Query: string.IsNullOrWhiteSpace(query) ? null : query);
-        return true;
+    private static bool TryParseScaffoldApply(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        return TryParsePrefixedQuery(text, ScaffoldApplyPrefixes, CodingToolAction.PlanScaffoldApply, userConfirmed, out request);
     }
 
     private static bool TryParseRogueProcessHunt(string text, bool userConfirmed, out CodingToolRequest request)

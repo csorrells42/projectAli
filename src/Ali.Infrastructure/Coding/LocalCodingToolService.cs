@@ -173,6 +173,13 @@ public sealed class LocalCodingToolService(
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
+            CodingToolAction.ShowArchitectureOptions => ShowArchitectureOptions(request),
+            CodingToolAction.WriteAcceptanceCriteria => WriteAcceptanceCriteria(request),
+            CodingToolAction.SuggestFeatureTests => SuggestFeatureTests(request),
+            CodingToolAction.DetectCodebasePatterns => DetectCodebasePatterns(),
+            CodingToolAction.PlanFeatureFiles => PlanFeatureFiles(request),
+            CodingToolAction.ShowRefactorSafetyChecklist => ShowRefactorSafetyChecklist(request),
             CodingToolAction.ExploreBuildIdea => ExploreBuildIdea(request),
             CodingToolAction.DraftImplementationRoadmap => DraftImplementationRoadmap(request),
             CodingToolAction.ShowLastRoadmap => ShowLastRoadmap(),
@@ -190,8 +197,13 @@ public sealed class LocalCodingToolService(
             CodingToolAction.RunApprovedPacketItem => await RunApprovedPacketItemAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPacketRunLedger => await ShowPacketRunLedgerAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanPackageLookup => PlanPackageLookup(request),
+            CodingToolAction.PlanDependencyInstallPacket => PlanDependencyInstallPacket(request),
+            CodingToolAction.PlanPostEditValidation => await PlanPostEditValidationAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.PreviewProjectScaffold => PreviewProjectScaffold(request),
+            CodingToolAction.PlanScaffoldApply => PlanScaffoldApply(request),
             CodingToolAction.ResumeBuildPlan => await ResumeBuildPlanAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowBuilderCommandIndex => ShowBuilderCommandIndex(),
+            CodingToolAction.ShowCodingSessionSummary => await ShowCodingSessionSummaryAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowWindowsTroubleshootingToolkit => ShowWindowsTroubleshootingToolkit(),
             CodingToolAction.PlanRogueProcessHunt => PlanRogueProcessHunt(request),
             CodingToolAction.CollectProcessEvidence => CollectProcessEvidence(request),
@@ -436,6 +448,256 @@ public sealed class LocalCodingToolService(
             plan.HasPlan ? plan.Text : "Coding task planner needs a clearer coding goal.",
             "Coding task planner",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult InterpretBuildGoal(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "unspecified build goal");
+        var summaries = GetWorkspaceProjectSummaries();
+        var primaryTarget = GetPrimaryTarget();
+        var lines = new List<string>
+        {
+            "Build goal interpreter:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Interpretation:",
+            $"- Project type: {ClassifyGoalType(goal)}",
+            $"- Likely first milestone: one owner-visible workflow with a narrow validation receipt.",
+            $"- Primary solution/project: {primaryTarget ?? "not found"}",
+            $"- Current workspace fit: {summaries.Count} project file(s) detected."
+        };
+
+        AddArchitectureRecommendationCards(lines, goal, summaries);
+        lines.Add("Approval checkpoints:");
+        lines.Add("- Choose one architecture option before edits.");
+        lines.Add("- Approve package/library lookup before treating candidates as current.");
+        lines.Add("- Approve dependency install, file edits, build/test, and Git writes through their normal gates.");
+        lines.Add("Suggested next commands:");
+        lines.Add($"- show architecture options {goal}");
+        lines.Add($"- write acceptance criteria {goal}");
+        lines.Add($"- suggest tests for {goal}");
+        lines.Add($"- draft implementation roadmap {goal}");
+        lines.Add($"- plan package lookup {goal}");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Build goal interpreter", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowArchitectureOptions(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current build goal");
+        var summaries = GetWorkspaceProjectSummaries();
+        var lines = new List<string>
+        {
+            "Architecture option cards:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Truth boundary: these are design options, not implementation proof."
+        };
+
+        AddArchitectureRecommendationCards(lines, goal, summaries);
+        lines.Add("Decision guide:");
+        lines.Add("- Prefer the path that gives a visible result with the fewest new dependencies.");
+        lines.Add("- Use a library boundary when logic must be shared by WPF, WebHelper, CLI, or VSIX.");
+        lines.Add("- Use an adapter/bridge boundary when talking to Visual Studio, SolidWorks, browsers, shells, or external processes.");
+        lines.Add("Next commands:");
+        lines.Add($"- plan feature files {goal}");
+        lines.Add($"- show refactor safety checklist {goal}");
+        lines.Add($"- draft implementation roadmap {goal}");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Architecture options", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult WriteAcceptanceCriteria(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current feature");
+        var lines = new List<string>
+        {
+            "Acceptance criteria:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Done means:",
+            "- The owner-facing command or UI path is named and deterministic.",
+            "- The happy path produces a visible result or receipt.",
+            "- Failure paths say what happened and what safe command comes next.",
+            "- Permission gates are unchanged or explicitly documented.",
+            "- Focused parser/service tests cover the new behavior.",
+            "- Build/test validation has a passing receipt.",
+            "- User/engineering docs describe the capability and the boundary."
+        };
+
+        if (MentionsAny(goal, "package", "library", "dependency", "nuget", "install"))
+        {
+            lines.Add("- Dependency changes include restore/build validation and rollback notes.");
+        }
+
+        if (MentionsAny(goal, "visual studio", "vsix", "ide", "tool window"))
+        {
+            lines.Add("- Visual Studio changes preserve Ali helper approval gates and do not create direct write authority inside VS.");
+        }
+
+        if (MentionsAny(goal, "screenshot", "image", "bug", "vision"))
+        {
+            lines.Add("- Screenshot analysis separates visible evidence, inferred cause, and required code/log confirmation.");
+        }
+
+        lines.Add("Next commands:");
+        lines.Add($"- suggest tests for {goal}");
+        lines.Add("- plan post edit validation");
+        lines.Add("- show roadmap step checklist");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Acceptance criteria", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult SuggestFeatureTests(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current feature");
+        var lines = new List<string>
+        {
+            "Feature test suggestions:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Focused tests:",
+            "- Parser route test for every new owner phrase.",
+            "- Service output test for key sections and truth boundaries.",
+            "- Policy test if permission behavior changes.",
+            "- Regression test for the bug or workflow being improved.",
+            "- Full harness after command-surface or shared-service changes."
+        };
+
+        if (MentionsAny(goal, "ui", "visual studio", "vsix", "webhelper", "companion", "screen"))
+        {
+            lines.Add("- UI smoke check for button visibility, command staging, and non-overlapping output.");
+        }
+
+        if (MentionsAny(goal, "package", "dependency", "restore", "build", "test"))
+        {
+            lines.Add("- Package/build tests must prove confirmation is required before restore/install/build/test execution.");
+        }
+
+        if (MentionsAny(goal, "screenshot", "image", "vision"))
+        {
+            lines.Add("- Vision/screenshot test should use a tiny deterministic fixture first, then a manual real-model certification.");
+        }
+
+        lines.Add("Validation commands:");
+        lines.Add("- plan post edit validation");
+        lines.Add("- confirm dotnet build \"path-to-solution-or-project\"");
+        lines.Add("- confirm dotnet test \"path-to-test-project-or-solution\"");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature test suggestions", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult DetectCodebasePatterns()
+    {
+        var summaries = GetWorkspaceProjectSummaries();
+        var files = Directory.Exists(Policy.WorkspaceRoot)
+            ? EnumerateWorkspaceFiles().Take(10_000).ToList()
+            : [];
+        var lines = new List<string>
+        {
+            "Codebase pattern detector:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            "No files were changed.",
+            $"Projects scanned: {summaries.Count}",
+            $"C# files detected: {files.Count(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))}",
+            $"XAML files detected: {files.Count(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))}",
+            $"JSON files detected: {files.Count(file => file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))}"
+        };
+
+        var packages = summaries.SelectMany(summary => summary.PackageReferences).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).Take(18).ToList();
+        lines.Add("Observed package patterns:");
+        lines.Add(packages.Count == 0 ? "- none detected" : $"- {string.Join(", ", packages)}");
+        lines.Add("Observed project roles:");
+        foreach (var group in summaries.GroupBy(summary => summary.ProjectRole, StringComparer.OrdinalIgnoreCase).OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            lines.Add($"- {group.Key}: {group.Count()}");
+        }
+
+        lines.Add("Implementation pattern guidance:");
+        lines.Add("- Keep command parsing in Ali.Core and local execution in Ali.Infrastructure.");
+        lines.Add("- Keep WPF/WebHelper/VSIX as thin surfaces over deterministic commands.");
+        lines.Add("- Add tests beside existing Ali.Tests harness patterns before widening behavior.");
+        lines.Add("- Update docs when the owner command surface changes.");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Codebase patterns", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanFeatureFiles(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current feature");
+        var lines = new List<string>
+        {
+            "Feature file planner:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Likely files to inspect or touch:"
+        };
+
+        if (MentionsAny(goal, "command", "coding", "builder", "package", "roadmap", "plan", "test", "git", "build"))
+        {
+            lines.Add("- src/Ali.Core/Coding/CodingToolContracts.cs");
+            lines.Add("- src/Ali.Core/Coding/CodingToolRequestParser.cs");
+            lines.Add("- src/Ali.Core/Coding/CodingWorkspacePolicy.cs");
+            lines.Add("- src/Ali.Infrastructure/Coding/LocalCodingToolService.cs");
+            lines.Add("- tests/Ali.Tests/Program.cs");
+        }
+
+        if (MentionsAny(goal, "visual studio", "vsix", "tool window", "ide"))
+        {
+            lines.Add("- src/Ali.App.VisualStudioExtension/AliCompanionToolWindowControl.cs");
+            lines.Add("- src/Ali.App.VisualStudioBridge/Program.cs");
+            lines.Add("- src/Ali.App.WebHelper/Program.cs");
+        }
+
+        if (MentionsAny(goal, "manual", "docs", "pdf", "report"))
+        {
+            lines.Add("- docs/USER_GUIDE.md");
+            lines.Add("- docs/ENGINEERING_NOTES.md");
+        }
+
+        if (MentionsAny(goal, "voice", "piper", "whisper", "microphone", "speech"))
+        {
+            lines.Add("- src/Ali.App.Wpf/ViewModels/MainWindowViewModel.cs");
+            lines.Add("- local voice adapter/settings classes under src/Ali.Infrastructure");
+        }
+
+        if (MentionsAny(goal, "screenshot", "image", "vision", "attachment"))
+        {
+            lines.Add("- src/Ali.App.Wpf/ViewModels/MainWindowViewModel.cs");
+            lines.Add("- src/Ali.Core/Orchestration/ConversationOrchestrator.cs");
+            lines.Add("- src/Ali.Infrastructure/Runtime/OpenAiCompatibleLocalModelRuntime.cs");
+            lines.Add("- tests/Ali.Tests/Program.cs");
+        }
+
+        lines.Add("Planning commands:");
+        lines.Add($"- show refactor safety checklist {goal}");
+        lines.Add($"- write acceptance criteria {goal}");
+        lines.Add($"- suggest tests for {goal}");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature file planner", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowRefactorSafetyChecklist(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current change");
+        var lines = new List<string>
+        {
+            "Refactor safety checklist:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Review before editing:",
+            "- Does this cross a public interface, serialized state, settings file, or receipt schema?",
+            "- Does this alter permission gates, command parsing, model prompts, or external process execution?",
+            "- Does this affect WPF/WebHelper/VSIX behavior differently?",
+            "- Does this need migration, backward compatibility, or crash recovery?",
+            "- Are tests narrow enough to catch the intended behavior without blessing unrelated churn?",
+            "Stop and compare options when:",
+            "- The requested change requires a new package, internet lookup, installer, registry, PATH, signing, or trust-store change.",
+            "- The model would have to guess code behavior without reading the relevant files.",
+            "- The safest fix is not an exact previewable edit."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Refactor safety", Policy.WorkspaceRoot);
     }
 
     private CodingToolResult ExploreBuildIdea(CodingToolRequest request)
@@ -1306,6 +1568,170 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Project scaffold preview",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanDependencyInstallPacket(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current dependency goal");
+        var primaryTarget = GetPrimaryTarget() ?? Policy.WorkspaceRoot;
+        var lines = new List<string>
+        {
+            "Dependency install packet:",
+            $"Goal: {goal}",
+            $"Primary target: {primaryTarget}",
+            "No package lookup, restore, install, build, or test was run.",
+            "Truth boundary: this packet is an approval plan. Versions, licenses, and package health require approved live lookup.",
+            "Prep:",
+            $"1. plan package lookup {goal}",
+            $"2. list packages \"{primaryTarget}\"",
+            $"3. show refactor safety checklist {goal}",
+            "Approval commands:",
+            $"- confirm dotnet restore \"{primaryTarget}\"",
+            $"- confirm dotnet add package \"Package.Id\" to \"{primaryTarget}\"",
+            $"- confirm dotnet build \"{primaryTarget}\"",
+            $"- confirm dotnet test \"{primaryTarget}\"",
+            "Rollback notes:",
+            "- Use git status/diff before install.",
+            "- If install changes project files unexpectedly, stop and compare options.",
+            "- Revert by removing the PackageReference through an approved patch/edit or git reset only when the owner explicitly requests it."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Dependency install packet", primaryTarget);
+    }
+
+    private async Task<CodingToolResult> PlanPostEditValidationAsync(CancellationToken cancellationToken)
+    {
+        var primaryTarget = GetPrimaryTarget() ?? Policy.WorkspaceRoot;
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Post-edit build loop:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Primary target: {primaryTarget}",
+            $"Git: {gitStatus.Summary}",
+            latestReceipt is null ? "Latest receipt: none" : FormatReceiptSummary("Latest receipt", latestReceipt),
+            latestDotNetReceipt is null ? "Latest dotnet-style receipt: none" : FormatReceiptSummary("Latest dotnet-style receipt", latestDotNetReceipt),
+            "Recommended validation order:",
+            "- show pending patch preview",
+            "- confirm apply last patch preview",
+            $"- confirm dotnet build \"{primaryTarget}\"",
+            $"- confirm dotnet test \"{primaryTarget}\"",
+            "- git status",
+            "- git diff",
+            "- confirm git add all",
+            "- confirm git commit \"message\"",
+            "Failure loop:",
+            "- classify last build failure",
+            "- diagnose last build failure",
+            "- suggest patch from last failure",
+            "- If Ali is unsure, stop and compare options before applying edits."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Post-edit validation", primaryTarget);
+    }
+
+    private CodingToolResult PlanScaffoldApply(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "new project feature");
+        var safeName = BuildSafeScaffoldName(goal);
+        var primaryTarget = GetPrimaryTarget() ?? Policy.WorkspaceRoot;
+        var lines = new List<string>
+        {
+            "Scaffold apply flow:",
+            $"Goal: {goal}",
+            $"Safe name: {safeName}",
+            $"Primary target: {primaryTarget}",
+            "No directories, files, projects, packages, or solution entries were created.",
+            "Current implementation boundary: Ali can preview scaffold shape and can create/append/replace files only through existing confirmed file-edit commands.",
+            "Recommended packets:",
+            $"1. preview project scaffold {goal}",
+            $"2. write acceptance criteria {goal}",
+            $"3. suggest tests for {goal}",
+            "4. Use confirmed create-file commands for each approved file, or prepare a small literal patch bundle when replacing known text.",
+            "5. Approve restore/build/test validation only after reviewing the file plan.",
+            "Example approval commands:",
+            $"- confirm create file \"<workspace>\\src\\{safeName}\\README.md\" with \"<approved content>\"",
+            $"- confirm create file \"<workspace>\\src\\{safeName}\\{safeName}Service.cs\" with \"<approved content>\"",
+            $"- confirm dotnet build \"{primaryTarget}\"",
+            "Stop rule: solution/project creation is not automatic in this flow yet; use explicit confirmed file/project commands when that executor is added."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Scaffold apply flow", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowBuilderCommandIndex()
+    {
+        var lines = new List<string>
+        {
+            "Ali coding skill command index:",
+            "No files were changed.",
+            "Scout and choose:",
+            "- interpret build goal <goal>",
+            "- explore build idea <goal>",
+            "- show architecture options <goal>",
+            "- plan package lookup <goal>",
+            "- plan dependency install packet <goal>",
+            "Plan and guard:",
+            "- draft implementation roadmap <goal>",
+            "- write acceptance criteria <goal>",
+            "- suggest tests for <goal>",
+            "- detect codebase patterns",
+            "- plan feature files <goal>",
+            "- show refactor safety checklist <goal>",
+            "Execute through gates:",
+            "- preview patch bundle",
+            "- confirm apply last patch preview",
+            "- show packet commands",
+            "- confirm run packet item N",
+            "- plan post edit validation",
+            "VS and reports:",
+            "- show visual studio integration",
+            "- show coding session summary",
+            "- generate coding report",
+            "- generate morning report",
+            "Windows diagnostics:",
+            "- collect process evidence <name-or-pid>",
+            "- diagnose port <port>",
+            "- diagnose build lock",
+            "- show install doctor",
+            "Prototype/future lane:",
+            "- Screenshot bug diagnosis can use existing temporary image attachments and local vision proof, but reliable screenshot-to-source debugging still needs a dedicated evidence/triage workflow."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding skill command index", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowCodingSessionSummaryAsync(CancellationToken cancellationToken)
+    {
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Coding session summary:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Git: {gitStatus.Summary}",
+            $"Receipts inspected: {receipts.Count}",
+            latestReceipt is null ? "Latest receipt: none" : FormatReceiptSummary("Latest receipt", latestReceipt),
+            latestDotNetReceipt is null ? "Latest dotnet-style receipt: none" : FormatReceiptSummary("Latest dotnet-style receipt", latestDotNetReceipt),
+            _roadmapState is null
+                ? "Roadmap: none active"
+                : $"Roadmap: {DescribeRoadmapState(_roadmapState)}; step {FormatRoadmapCurrentStep(_roadmapState)}",
+            _approvedPacket is null
+                ? "Approved packet: none active"
+                : $"Approved packet: step {_approvedPacket.StepIndex + 1}, approved {_approvedPacket.ApprovedAt:u}",
+            "Next useful commands:",
+            "- show next coding action",
+            "- show roadmap step checklist",
+            "- plan post edit validation",
+            "- show coding skill command index"
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session summary", Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> ResumeBuildPlanAsync(CancellationToken cancellationToken)
@@ -3174,6 +3600,66 @@ public sealed class LocalCodingToolService(
         return "unknown";
     }
 
+    private static string CleanGoal(string? query, string fallback) =>
+        string.IsNullOrWhiteSpace(query)
+            ? fallback
+            : query.Trim();
+
+    private string? GetPrimaryTarget() =>
+        Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : null;
+
+    private IReadOnlyList<ProjectSummary> GetWorkspaceProjectSummaries()
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return [];
+        }
+
+        return EnumerateWorkspaceFiles()
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadProjectSummary)
+            .ToList();
+    }
+
+    private static string ClassifyGoalType(string goal)
+    {
+        if (MentionsAny(goal, "visual studio", "vsix", "ide", "extension", "tool window"))
+        {
+            return "Visual Studio integration/tooling";
+        }
+
+        if (MentionsAny(goal, "solidworks", "cad", "drawing", "model", "assembly", "part", "bom"))
+        {
+            return "CAD/SolidWorks automation";
+        }
+
+        if (MentionsAny(goal, "web", "api", "dashboard", "site", "portal", "server"))
+        {
+            return "web/API workflow";
+        }
+
+        if (MentionsAny(goal, "ai", "assistant", "rag", "chat", "agent", "llm", "model", "vision", "screenshot"))
+        {
+            return "AI assistant workflow";
+        }
+
+        if (MentionsAny(goal, "package", "library", "dependency", "nuget", "sdk"))
+        {
+            return "dependency/library integration";
+        }
+
+        if (MentionsAny(goal, "pdf", "word", "excel", "document", "spreadsheet", "report"))
+        {
+            return "document/report automation";
+        }
+
+        return "application feature or tooling workflow";
+    }
+
     private static void AddArchitectureRecommendationCards(
         List<string> lines,
         string goal,
@@ -3480,6 +3966,13 @@ public sealed class LocalCodingToolService(
             "Useful commands:",
             "- open solution",
             "- analyze solution architecture",
+            "- interpret build goal <goal>",
+            "- show architecture options <goal>",
+            "- write acceptance criteria <goal>",
+            "- suggest tests for <goal>",
+            "- detect codebase patterns",
+            "- plan feature files <goal>",
+            "- show refactor safety checklist <goal>",
             "- show next coding action",
             "- show execution packet",
             "- approve execution packet",
@@ -3487,7 +3980,12 @@ public sealed class LocalCodingToolService(
             "- show packet ledger",
             "- resume build plan",
             "- plan package lookup <goal>",
+            "- plan dependency install packet <goal>",
             "- preview project scaffold <goal>",
+            "- plan scaffold apply <goal>",
+            "- plan post edit validation",
+            "- show coding skill command index",
+            "- show coding session summary",
             "- show windows troubleshooting toolkit",
             "- plan rogue process hunt <target>",
             "- collect process evidence <name-or-pid>",

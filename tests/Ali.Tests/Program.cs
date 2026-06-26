@@ -595,6 +595,28 @@ static Task TestCodingParserRoutesRoadmapExecutionPacket()
 
 static Task TestCodingParserRoutesPacketConsoleAndBuildPlanning()
 {
+    Equal(true, CodingToolRequestParser.TryParse("interpret build goal screenshot bug helper", out var goalRequest));
+    Equal(CodingToolAction.InterpretBuildGoal, goalRequest.Action);
+    Equal("screenshot bug helper", goalRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("show architecture options Visual Studio assistant", out var optionsRequest));
+    Equal(CodingToolAction.ShowArchitectureOptions, optionsRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("write acceptance criteria package installer", out var acceptanceRequest));
+    Equal(CodingToolAction.WriteAcceptanceCriteria, acceptanceRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("suggest tests for VS companion", out var testsRequest));
+    Equal(CodingToolAction.SuggestFeatureTests, testsRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("detect codebase patterns", out var patternsRequest));
+    Equal(CodingToolAction.DetectCodebasePatterns, patternsRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan feature files screenshot triage", out var filesRequest));
+    Equal(CodingToolAction.PlanFeatureFiles, filesRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show refactor safety checklist command parser", out var safetyRequest));
+    Equal(CodingToolAction.ShowRefactorSafetyChecklist, safetyRequest.Action);
+
     Equal(true, CodingToolRequestParser.TryParse("show packet commands", out var commandsRequest));
     Equal(CodingToolAction.ShowApprovedPacketCommands, commandsRequest.Action);
 
@@ -610,12 +632,29 @@ static Task TestCodingParserRoutesPacketConsoleAndBuildPlanning()
     Equal(CodingToolAction.PlanPackageLookup, packageRequest.Action);
     Equal("Visual Studio tool window", packageRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("plan dependency install packet QuestPDF", out var installPacketRequest));
+    Equal(CodingToolAction.PlanDependencyInstallPacket, installPacketRequest.Action);
+    Equal("QuestPDF", installPacketRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("preview project scaffold SolidWorks BOM helper", out var scaffoldRequest));
     Equal(CodingToolAction.PreviewProjectScaffold, scaffoldRequest.Action);
     Equal("SolidWorks BOM helper", scaffoldRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("plan scaffold apply SolidWorks BOM helper", out var scaffoldApplyRequest));
+    Equal(CodingToolAction.PlanScaffoldApply, scaffoldApplyRequest.Action);
+    Equal("SolidWorks BOM helper", scaffoldApplyRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("resume build plan", out var resumeRequest));
     Equal(CodingToolAction.ResumeBuildPlan, resumeRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan post edit validation", out var validationRequest));
+    Equal(CodingToolAction.PlanPostEditValidation, validationRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show coding skill command index", out var indexRequest));
+    Equal(CodingToolAction.ShowBuilderCommandIndex, indexRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show coding session summary", out var sessionRequest));
+    Equal(CodingToolAction.ShowCodingSessionSummary, sessionRequest.Action);
 
     Equal(true, CodingToolRequestParser.TryParse("generate morning report \"morning.pdf\"", out var reportRequest));
     Equal(CodingToolAction.GenerateMorningReport, reportRequest.Action);
@@ -1545,9 +1584,21 @@ static async Task TestLocalCodingToolRunsPacketConsoleAndBuildPlanning()
     var runReadOnly = await service.TryHandleAsync("run packet item 1", CancellationToken.None);
     var runNeedsConfirmation = await service.TryHandleAsync($"run packet item {gatedItemNumber}", CancellationToken.None);
     var ledger = await service.TryHandleAsync("show packet ledger", CancellationToken.None);
+    var goal = await service.TryHandleAsync("interpret build goal screenshot bug helper", CancellationToken.None);
+    var options = await service.TryHandleAsync("show architecture options Visual Studio assistant", CancellationToken.None);
+    var acceptance = await service.TryHandleAsync("write acceptance criteria package installer", CancellationToken.None);
+    var tests = await service.TryHandleAsync("suggest tests for VS companion", CancellationToken.None);
+    var patterns = await service.TryHandleAsync("detect codebase patterns", CancellationToken.None);
+    var files = await service.TryHandleAsync("plan feature files screenshot triage", CancellationToken.None);
+    var safety = await service.TryHandleAsync("show refactor safety checklist command parser", CancellationToken.None);
     var packagePlan = await service.TryHandleAsync("plan package lookup Visual Studio tool window", CancellationToken.None);
+    var installPacket = await service.TryHandleAsync("plan dependency install packet QuestPDF", CancellationToken.None);
     var scaffold = await service.TryHandleAsync("preview project scaffold SolidWorks BOM helper", CancellationToken.None);
+    var scaffoldApply = await service.TryHandleAsync("plan scaffold apply SolidWorks BOM helper", CancellationToken.None);
     var resume = await service.TryHandleAsync("resume build plan", CancellationToken.None);
+    var validation = await service.TryHandleAsync("plan post edit validation", CancellationToken.None);
+    var commandIndex = await service.TryHandleAsync("show coding skill command index", CancellationToken.None);
+    var sessionSummary = await service.TryHandleAsync("show coding session summary", CancellationToken.None);
     var morning = await service.TryHandleAsync("generate morning report \"morning.pdf\"", CancellationToken.None);
 
     Equal(true, draft.Succeeded);
@@ -1565,15 +1616,44 @@ static async Task TestLocalCodingToolRunsPacketConsoleAndBuildPlanning()
     Equal(true, ledger.Succeeded);
     Contains("Packet run ledger", ledger.Message);
     Contains("Receipts since approval", ledger.Message);
+    Equal(true, goal.Succeeded);
+    Contains("Build goal interpreter", goal.Message);
+    Contains("Architecture recommendation cards", goal.Message);
+    Equal(true, options.Succeeded);
+    Contains("Architecture option cards", options.Message);
+    Equal(true, acceptance.Succeeded);
+    Contains("Acceptance criteria", acceptance.Message);
+    Contains("Done means", acceptance.Message);
+    Equal(true, tests.Succeeded);
+    Contains("Feature test suggestions", tests.Message);
+    Equal(true, patterns.Succeeded);
+    Contains("Codebase pattern detector", patterns.Message);
+    Equal(true, files.Succeeded);
+    Contains("Feature file planner", files.Message);
+    Contains("OpenAiCompatibleLocalModelRuntime", files.Message);
+    Equal(true, safety.Succeeded);
+    Contains("Refactor safety checklist", safety.Message);
     Equal(true, packagePlan.Succeeded);
     Contains("Package/library lookup plan", packagePlan.Message);
     Contains("Dependency risk cards", packagePlan.Message);
     Contains("Visual Studio", packagePlan.Message);
+    Equal(true, installPacket.Succeeded);
+    Contains("Dependency install packet", installPacket.Message);
+    Contains("No package lookup, restore, install, build, or test was run", installPacket.Message);
     Equal(true, scaffold.Succeeded);
     Contains("Project scaffold preview", scaffold.Message);
     Contains("No directories, files, projects, packages, or solution entries were created", scaffold.Message);
+    Equal(true, scaffoldApply.Succeeded);
+    Contains("Scaffold apply flow", scaffoldApply.Message);
+    Contains("Current implementation boundary", scaffoldApply.Message);
     Equal(true, resume.Succeeded);
     Contains("Build resume plan", resume.Message);
+    Equal(true, validation.Succeeded);
+    Contains("Post-edit build loop", validation.Message);
+    Equal(true, commandIndex.Succeeded);
+    Contains("Ali coding skill command index", commandIndex.Message);
+    Equal(true, sessionSummary.Succeeded);
+    Contains("Coding session summary", sessionSummary.Message);
     Equal(true, morning.Succeeded);
     Contains("Generated morning build report PDF", morning.Message);
     Equal(true, File.Exists(Path.Combine(directory, "GeneratedDocuments", "morning.pdf")));

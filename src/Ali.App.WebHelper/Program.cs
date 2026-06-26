@@ -1026,6 +1026,13 @@ public const string IndexHtml = """
           <div class="command-grid">
             <button class="command-chip" type="button" data-command="explore build idea ">Explore Idea</button>
             <button class="command-chip" type="button" data-command="draft implementation roadmap ">Roadmap</button>
+            <button class="command-chip" type="button" data-command="interpret build goal ">Goal</button>
+            <button class="command-chip" type="button" data-command="show architecture options ">Options</button>
+            <button class="command-chip" type="button" data-command="write acceptance criteria ">Criteria</button>
+            <button class="command-chip" type="button" data-command="suggest tests for ">Tests</button>
+            <button class="command-chip" type="button" data-command="detect codebase patterns">Patterns</button>
+            <button class="command-chip" type="button" data-command="plan feature files ">Files</button>
+            <button class="command-chip" type="button" data-command="show refactor safety checklist ">Safety</button>
             <button class="command-chip" type="button" data-command="show next coding action">Next Action</button>
             <button class="command-chip" type="button" data-command="show execution packet">Packet</button>
             <button class="command-chip" type="button" data-command="approve execution packet">Approve Packet</button>
@@ -1036,7 +1043,9 @@ public const string IndexHtml = """
             <button class="command-chip" type="button" data-command="show active roadmap step">Active Step</button>
             <button class="command-chip" type="button" data-command="show crash recovery status">Recovery</button>
             <button class="command-chip" type="button" data-command="plan package lookup ">Package Lookup</button>
+            <button class="command-chip" type="button" data-command="plan dependency install packet ">Install Packet</button>
             <button class="command-chip" type="button" data-command="preview project scaffold ">Scaffold</button>
+            <button class="command-chip" type="button" data-command="plan scaffold apply ">Scaffold Apply</button>
           </div>
         </div>
         <div class="command-group">
@@ -1047,6 +1056,7 @@ public const string IndexHtml = """
             <button class="command-chip" type="button" data-command="diagnose last build failure">Diagnose</button>
             <button class="command-chip" type="button" data-command="classify last build failure">Classify</button>
             <button class="command-chip" type="button" data-command="suggest patch from last failure">Patch Preview</button>
+            <button class="command-chip" type="button" data-command="plan post edit validation">Validate</button>
             <button class="command-chip" type="button" data-command="diagnose build lock">Build Lock</button>
             <button class="command-chip" type="button" data-command="show roadmap step checklist">Step Check</button>
             <button class="command-chip" type="button" data-command="show install doctor">Install Doctor</button>
@@ -1064,6 +1074,8 @@ public const string IndexHtml = """
             <button class="command-chip" type="button" data-command="git status">Git Status</button>
             <button class="command-chip" type="button" data-command="git diff">Git Diff</button>
             <button class="command-chip" type="button" data-command="show coding receipts">Receipts</button>
+            <button class="command-chip" type="button" data-command="show coding session summary">Session</button>
+            <button class="command-chip" type="button" data-command="show coding skill command index">Skill Index</button>
             <button class="command-chip" type="button" data-command="generate coding report">Report</button>
             <button class="command-chip" type="button" data-command="generate morning report">Morning</button>
           </div>
