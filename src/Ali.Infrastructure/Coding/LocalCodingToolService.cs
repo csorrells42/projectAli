@@ -5245,7 +5245,7 @@ public sealed class LocalCodingToolService(
             return new CodingToolResult(true, false, "Coding tool blocked: invalid edit file path.", "File edit");
         }
 
-        if (!Policy.IsInsideWorkspace(fullPath))
+        if (!Policy.IsInsideWorkspace(fullPath) && !Policy.AllowConfirmedOutsideEditRun)
         {
             return new CodingToolResult(
                 true,
@@ -5284,7 +5284,7 @@ public sealed class LocalCodingToolService(
             return new CodingToolResult(true, false, "Coding tool blocked: invalid preview file path.", "Patch preview");
         }
 
-        if (!Policy.IsInsideWorkspace(fullPath))
+        if (!Policy.IsInsideWorkspace(fullPath) && !Policy.AllowConfirmedOutsideEditRun)
         {
             return new CodingToolResult(
                 true,
@@ -5570,7 +5570,7 @@ public sealed class LocalCodingToolService(
                 return false;
             }
 
-            if (!Policy.IsInsideWorkspace(fullPath))
+            if (!Policy.IsInsideWorkspace(fullPath) && !Policy.AllowConfirmedOutsideEditRun)
             {
                 error = new CodingToolResult(
                     true,

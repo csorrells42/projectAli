@@ -15,7 +15,9 @@ public sealed class CodingWorkspacePolicy
         bool allowGitNetworkOperations = false,
         bool allowPdfRead = true,
         bool allowPdfCreate = true,
-        bool allowConfirmedPdfModify = true)
+        bool allowConfirmedPdfModify = true,
+        bool allowConfirmedOutsideEditRun = false,
+        bool allowConfirmedSystemAdminActions = true)
     {
         if (string.IsNullOrWhiteSpace(workspaceRoot))
         {
@@ -33,6 +35,8 @@ public sealed class CodingWorkspacePolicy
         AllowPdfRead = allowPdfRead;
         AllowPdfCreate = allowPdfCreate;
         AllowConfirmedPdfModify = allowConfirmedPdfModify;
+        AllowConfirmedOutsideEditRun = allowConfirmedOutsideEditRun;
+        AllowConfirmedSystemAdminActions = allowConfirmedSystemAdminActions;
     }
 
     public string WorkspaceRoot { get; }
@@ -56,6 +60,10 @@ public sealed class CodingWorkspacePolicy
     public bool AllowPdfCreate { get; }
 
     public bool AllowConfirmedPdfModify { get; }
+
+    public bool AllowConfirmedOutsideEditRun { get; }
+
+    public bool AllowConfirmedSystemAdminActions { get; }
 
     public static CodingWorkspacePolicy CreateDefault()
     {
@@ -239,6 +247,12 @@ public sealed class CodingWorkspacePolicy
 
         if (request.Action == CodingToolAction.ExecuteProcessStop)
         {
+            if (!AllowConfirmedSystemAdminActions)
+            {
+                return CodingToolPermissionKind.Deny.AsPermission(
+                    "System/admin actions are blocked in coding permissions.");
+            }
+
             return request.UserConfirmed
                 ? CodingToolPermissionKind.Allow.AsPermission("Stopping a named local process is allowed after explicit confirmation.")
                 : CodingToolPermissionKind.RequireConfirmation.AsPermission("Stopping a process changes local system state and needs explicit confirmation.");
@@ -337,19 +351,21 @@ public sealed class CodingWorkspacePolicy
                 EvaluateBuildTestRun(fullPath, request),
 
             CodingToolAction.AddPackage =>
-                CodingToolPermissionKind.Deny.AsPermission("Package install is limited to the approved coding workspace."),
+                EvaluateBuildTestRun(fullPath, request),
 
             _ when IsEditAction(request.Action) && insideWorkspace =>
-                EvaluateEdit(request),
+                EvaluateEdit(request, insideWorkspace: true),
 
             _ when IsEditAction(request.Action) =>
-                CodingToolPermissionKind.Deny.AsPermission("Edit/write actions are limited to the approved coding workspace."),
+                EvaluateEdit(request, insideWorkspace: false),
 
             CodingToolAction.PreviewReplaceText when insideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Previewing a literal replacement inside the approved coding workspace is read-only and allowed."),
 
             CodingToolAction.PreviewReplaceText =>
-                CodingToolPermissionKind.Deny.AsPermission("Patch previews are limited to the approved coding workspace."),
+                AllowConfirmedOutsideEditRun
+                    ? CodingToolPermissionKind.Allow.AsPermission("Owner settings allow patch previews outside the approved workspace.")
+                    : CodingToolPermissionKind.Deny.AsPermission("Patch previews are limited to the approved coding workspace."),
 
             CodingToolAction.OpenSolution when insideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Opening solutions inside the coding workspace is allowed."),
@@ -397,8 +413,16 @@ public sealed class CodingWorkspacePolicy
     {
         if (!IsInsideWorkspace(fullPath))
         {
-            return CodingToolPermissionKind.RequireConfirmation.AsPermission(
-                "Build, test, restore, package install, and run actions are limited to the approved coding workspace.");
+            if (!AllowConfirmedOutsideEditRun)
+            {
+                return CodingToolPermissionKind.Deny.AsPermission(
+                    "Build, test, restore, package install, and run actions outside the approved workspace are blocked in coding permissions.");
+            }
+
+            return request.UserConfirmed
+                ? CodingToolPermissionKind.Allow.AsPermission("Owner settings allow confirmed build/test/restore/package-install/run actions outside the approved workspace.")
+                : CodingToolPermissionKind.RequireConfirmation.AsPermission(
+                    "Owner settings allow outside-workspace build/test/restore/package-install/run actions, but explicit confirmation is still required.");
         }
 
         if (!AllowConfirmedBuildTestRunInsideWorkspace)
@@ -421,8 +445,22 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.AddPackage
             or CodingToolAction.RunProject;
 
-    private CodingToolPermission EvaluateEdit(CodingToolRequest request)
+    private CodingToolPermission EvaluateEdit(CodingToolRequest request, bool insideWorkspace)
     {
+        if (!insideWorkspace)
+        {
+            if (!AllowConfirmedOutsideEditRun)
+            {
+                return CodingToolPermissionKind.Deny.AsPermission(
+                    "Edit/write actions outside the approved workspace are blocked in coding permissions.");
+            }
+
+            return request.UserConfirmed
+                ? CodingToolPermissionKind.Allow.AsPermission("Owner settings allow confirmed edit/write actions outside the approved workspace.")
+                : CodingToolPermissionKind.RequireConfirmation.AsPermission(
+                    "Owner settings allow outside-workspace edit/write actions, but explicit confirmation is still required.");
+        }
+
         if (!AllowConfirmedEditInsideWorkspace)
         {
             return CodingToolPermissionKind.Deny.AsPermission(

@@ -19,8 +19,8 @@ internal sealed class SystemResourceMonitor
         var gpuCounters = GetGpuCounters();
         var memory = SampleMemory();
         var hardwareVramLimit = GetHardwareVramLimit();
-        var vram = gpuCounters?.SampleVram(hardwareVramLimit)
-                   ?? _nvidiaSmiVramReader.Sample();
+        var vram = _nvidiaSmiVramReader.Sample()
+                   ?? gpuCounters?.SampleVram(hardwareVramLimit);
         return new SystemResourceSnapshot(
             CpuPercent: SampleCpuPercent(),
             RamPercent: memory?.Percent,

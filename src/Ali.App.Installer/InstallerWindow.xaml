@@ -150,8 +150,21 @@
                                   Unchecked="ModelCheckBoxChanged" />
                         <TextBox x:Name="VisionModelTextBox"
                                  Style="{StaticResource InputBox}"
-                                 Margin="24,0,0,0"
+                                 Margin="24,0,0,16"
                                  TextChanged="InstallerOptionChanged" />
+                        <CheckBox x:Name="VoiceResourcesCheckBox"
+                                  Content="Install local voice resources if available"
+                                  Margin="0,0,0,6"
+                                  Checked="VoiceResourcesCheckBoxChanged"
+                                  Unchecked="VoiceResourcesCheckBoxChanged" />
+                        <TextBox x:Name="VoiceResourcesPathTextBox"
+                                 Style="{StaticResource InputBox}"
+                                 Margin="24,0,0,6"
+                                 TextChanged="InstallerOptionChanged" />
+                        <TextBlock Text="Optional. Leave blank to use Ali.VoicePack.zip or lib\voice beside setup."
+                                   Foreground="#6B7280"
+                                   TextWrapping="Wrap"
+                                   Margin="24,-2,0,0" />
                     </StackPanel>
 
                     <StackPanel x:Name="VisualStudioStepPanel" Visibility="Collapsed">

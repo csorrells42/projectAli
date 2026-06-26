@@ -64,6 +64,7 @@ internal sealed record InstallerArguments(
           Ali.Setup.exe [--payload <folder-or-zip>] [--local-root <path>] [--assistant-name <name>]
                         [--pull-runtime-model] [--runtime-model <model>]
                         [--pull-vision-model] [--vision-model <model>]
+                        [--install-voice-resources] [--voice-resources <folder-or-zip>]
                         [--install-ollama] [--ollama-installer <path>] [--ollama-installer-url <url>]
                         [--install-vsix] [--vsix <path-to-vsix>] [--vsix-installer <path-to-VSIXInstaller.exe>]
                         [--install-vsix-only]
@@ -79,10 +80,15 @@ internal sealed record InstallerArguments(
           Model pulls: skipped unless explicitly requested
           Ollama install: skipped unless explicitly requested
           Visual Studio Companion VSIX: skipped unless explicitly requested
+          Voice resources: skipped unless explicitly requested on the command line
 
         Payload:
           If --payload is omitted, the installer looks for ali-payload.zip or payload\ beside itself,
           then for an embedded Payload\ali-payload.zip resource in packaged single-file builds.
+
+        Voice resources:
+          Place Ali.VoicePack.zip or lib\voice beside setup, or pass --voice-resources.
+          Voice assets are sidecar files because local Piper/Whisper assets can be multi-GB.
         """;
 
     public static InstallerArguments TryParse(IReadOnlyList<string> args)
@@ -145,6 +151,19 @@ internal sealed record InstallerArguments(
                     options = options with { PullVisionModel = true };
                     break;
 
+                case "--install-voice-resources":
+                    options = options with { InstallVoiceResources = true };
+                    break;
+
+                case "--voice-resources":
+                    if (!TryReadValue(args, ref index, out var voiceResources))
+                    {
+                        return Fail("--voice-resources requires a folder or zip path.", options);
+                    }
+
+                    options = options with { VoiceResourcesPath = voiceResources, InstallVoiceResources = true };
+                    break;
+
                 case "--vision-model":
                     if (!TryReadValue(args, ref index, out var visionModel))
                     {
@@ -195,6 +214,8 @@ internal sealed record InstallerArguments(
                         InstallOllamaIfMissing = false,
                         LaunchAfterInstall = false,
                         AssistantName = null,
+                        InstallVoiceResources = false,
+                        VoiceResourcesPath = null,
                         CreateDesktopShortcut = false,
                         CreateStartMenuShortcut = false
                     };

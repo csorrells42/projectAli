@@ -87,6 +87,7 @@ Running it with no arguments opens the GUI setup wizard. The wizard walks throug
 - optional Ollama install if missing
 - optional runtime model pull
 - optional vision model pull
+- optional local voice resource install from a sidecar voice pack
 - optional Visual Studio Companion VSIX install
 - desktop and Start menu shortcut choices
 - readiness review before install
@@ -107,6 +108,8 @@ The user-facing assistant name has one persisted source of truth:
 By default, setup does not create that file. First launch asks the user to name the assistant. If setup is run with an explicit assistant name, it seeds only that profile file and does not duplicate the name into chats, memories, runtime settings, or installer settings.
 
 Repair mode refreshes app binaries and selected optional components while preserving user data. Visual Studio Companion-only mode can install the VSIX later without reinstalling Ali or touching profile data.
+
+Local Piper/Whisper voice assets are not embedded inside `Ali.Setup.exe` because the full local voice cache is multi-GB. To install voices during setup, place `Ali.VoicePack.zip` or a `lib\voice` folder beside `Ali.Setup.exe`, or choose a voice resource path in the Dependencies step. The GUI option is safe to leave on: if no sidecar voice pack is present, setup reports that and continues without installing voice resources.
 
 Ollama installation and model pulls are explicit. If requested, setup can install Ollama from the official Windows installer path and then pull selected models. If a selected model is already installed, setup reports that instead of pulling it again. Restore and backup are not yet implemented in the app UI; the planned backup shape is a single zip file containing a manifest plus Ali's important local state.
 

@@ -67,7 +67,9 @@ public sealed record CodingToolSettings
             !CodingPermissionModes.IsDisabled(GitNetworkMode),
             !CodingPermissionModes.IsDisabled(PdfReadMode),
             !CodingPermissionModes.IsDisabled(PdfCreateMode),
-            !CodingPermissionModes.IsDisabled(PdfModifyMode));
+            !CodingPermissionModes.IsDisabled(PdfModifyMode),
+            !CodingPermissionModes.IsDisabled(OutsideEditRunMode),
+            !CodingPermissionModes.IsDisabled(SystemAdminActionMode));
 }
 
 public static class CodingPermissionModes

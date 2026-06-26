@@ -62,6 +62,14 @@ public sealed class AliDesktopInstaller
                 Directory.CreateDirectory(targetDirectory);
                 CopyPayload(payloadRoot!, targetDirectory, installedFiles, warnings);
                 VerifyInstalledApp(targetDirectory, dependencyMessages);
+                await HandleVoiceResourcesAsync(
+                        normalizedOptions,
+                        stagingRoot,
+                        targetDirectory,
+                        installedFiles,
+                        dependencyMessages,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 if (!string.IsNullOrWhiteSpace(normalizedOptions.AssistantName)
                     && !AssistantProfileStore.Exists(dataRoot))
@@ -287,6 +295,76 @@ public sealed class AliDesktopInstaller
         dependencyMessages.Add(File.Exists(appPath)
             ? $"Installed app verified: {appPath}"
             : $"Installed app verification failed; Ali.App.Wpf.exe was not found at {appPath}");
+    }
+
+    private static async Task HandleVoiceResourcesAsync(
+        AliDesktopInstallOptions options,
+        string stagingRoot,
+        string targetDirectory,
+        List<string> installedFiles,
+        List<string> dependencyMessages,
+        CancellationToken cancellationToken)
+    {
+        if (!options.InstallVoiceResources)
+        {
+            dependencyMessages.Add("Local voice resources install was not requested.");
+            return;
+        }
+
+        var source = AliDesktopInstallDiscovery.ResolveVoiceResourcesSource(options.VoiceResourcesPath);
+        if (source is null)
+        {
+            dependencyMessages.Add("Local voice resources install was requested, but no sidecar voice pack was found.");
+            return;
+        }
+
+        var voiceCount = AliDesktopInstallDiscovery.CountPiperVoices(source);
+        if (voiceCount == 0)
+        {
+            dependencyMessages.Add($"Local voice resources skipped; no Piper .onnx voices were found in {source}.");
+            return;
+        }
+
+        var voiceRoot = await MaterializeVoiceResourcesAsync(source, stagingRoot, cancellationToken).ConfigureAwait(false);
+        var targetVoiceRoot = Path.Combine(targetDirectory, "lib", "voice");
+        CopyDirectory(voiceRoot, targetVoiceRoot, installedFiles);
+        dependencyMessages.Add($"Local voice resources installed: {voiceCount} Piper voice(s) from {source}.");
+    }
+
+    private static async Task<string> MaterializeVoiceResourcesAsync(
+        string source,
+        string stagingRoot,
+        CancellationToken cancellationToken)
+    {
+        if (Directory.Exists(source))
+        {
+            return AliDesktopInstallDiscovery.ResolveVoiceRootFromDirectory(source)
+                ?? throw new InvalidOperationException($"Voice resource folder does not contain a lib\\voice or voice root: {source}");
+        }
+
+        if (!File.Exists(source))
+        {
+            throw new InvalidOperationException($"Voice resources path was not found: {source}");
+        }
+
+        var extractRoot = Path.Combine(stagingRoot, "voice-resources");
+        Directory.CreateDirectory(extractRoot);
+        await Task.Run(() => ZipFile.ExtractToDirectory(source, extractRoot, overwriteFiles: true), cancellationToken)
+            .ConfigureAwait(false);
+        return AliDesktopInstallDiscovery.ResolveVoiceRootFromDirectory(extractRoot)
+            ?? throw new InvalidOperationException($"Voice resource zip does not contain a lib\\voice or voice root: {source}");
+    }
+
+    private static void CopyDirectory(string sourceRoot, string targetRoot, List<string> installedFiles)
+    {
+        foreach (var sourcePath in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(sourceRoot, sourcePath);
+            var targetPath = Path.Combine(targetRoot, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            File.Copy(sourcePath, targetPath, overwrite: true);
+            installedFiles.Add(targetPath);
+        }
     }
 
     private static async Task HandleOllamaAsync(
@@ -624,6 +702,8 @@ public sealed class AliDesktopInstaller
             installVisualStudioExtension = options.InstallVisualStudioExtension,
             vsixPath = options.VsixPath,
             vsixInstallerPath = options.VsixInstallerPath,
+            installVoiceResources = options.InstallVoiceResources,
+            voiceResourcesPath = options.VoiceResourcesPath,
             createDesktopShortcut = options.CreateDesktopShortcut,
             createStartMenuShortcut = options.CreateStartMenuShortcut,
             repairExistingInstall = options.RepairExistingInstall,

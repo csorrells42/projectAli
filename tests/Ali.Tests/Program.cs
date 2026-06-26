@@ -55,6 +55,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding policy allows explicit file open outside workspace", TestCodingPolicyAllowsExplicitFileOpenOutsideWorkspace),
     ("coding policy can disable explicit outside file open", TestCodingPolicyCanDisableExplicitOutsideFileOpen),
     ("coding policy gates confirmed workspace edits", TestCodingPolicyGatesConfirmedWorkspaceEdits),
+    ("coding policy honors owner outside edit run setting", TestCodingPolicyHonorsOwnerOutsideEditRunSetting),
+    ("coding settings policy honors owner high risk settings", TestCodingSettingsPolicyHonorsOwnerHighRiskSettings),
     ("coding settings save and load", TestCodingSettingsSaveAndLoad),
     ("coding ability catalog backs deterministic indexes", TestCodingAbilityCatalogBacksDeterministicIndexes),
     ("coding locator uses configured tool paths", TestCodingLocatorUsesConfiguredToolPaths),
@@ -145,7 +147,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer supports Visual Studio extension only mode", TestDesktopInstallerSupportsVisualStudioExtensionOnlyMode),
     ("desktop installer skips Ollama installer when executable exists", TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists),
     ("desktop installer repair preserves profile data", TestDesktopInstallerRepairPreservesProfileData),
+    ("desktop installer installs sidecar voice resources", TestDesktopInstallerInstallsSidecarVoiceResources),
     ("desktop installer readiness reports payload and first launch profile", TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile),
+    ("desktop installer readiness reports voice resources", TestDesktopInstallerReadinessReportsVoiceResources),
     ("desktop installer readiness reports missing VSIX installer", TestDesktopInstallerReadinessReportsMissingVsixInstaller),
     ("runtime optimizer uses selected model and hardware", TestRuntimeOptimizerUsesSelectedModelAndHardware),
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
@@ -387,9 +391,84 @@ static Task TestCodingPolicyGatesConfirmedWorkspaceEdits()
     Contains("explicit confirmation", needsConfirmation.Reason);
     Equal(CodingToolPermissionKind.Allow, confirmed.Kind);
     Equal(CodingToolPermissionKind.Deny, outside.Kind);
-    Contains("approved coding workspace", outside.Reason);
+    Contains("blocked in coding permissions", outside.Reason);
     Equal(CodingToolPermissionKind.Deny, disabled.Kind);
     Contains("disabled", disabled.Reason);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingPolicyHonorsOwnerOutsideEditRunSetting()
+{
+    var workspace = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"), "Programming Projects");
+    var outsideFile = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"), "outside.cs");
+    var defaultPolicy = new CodingWorkspacePolicy(workspace);
+    var ownerAllowedPolicy = new CodingWorkspacePolicy(workspace, allowConfirmedOutsideEditRun: true);
+
+    var blocked = defaultPolicy.Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        outsideFile,
+        UserConfirmed: true,
+        Content: "class Demo { }"));
+    var needsConfirmation = ownerAllowedPolicy.Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        outsideFile,
+        Content: "class Demo { }"));
+    var allowed = ownerAllowedPolicy.Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        outsideFile,
+        UserConfirmed: true,
+        Content: "class Demo { }"));
+
+    Equal(CodingToolPermissionKind.Deny, blocked.Kind);
+    Contains("blocked in coding permissions", blocked.Reason);
+    Equal(CodingToolPermissionKind.RequireConfirmation, needsConfirmation.Kind);
+    Contains("explicit confirmation", needsConfirmation.Reason);
+    Equal(CodingToolPermissionKind.Allow, allowed.Kind);
+    Contains("Owner settings allow", allowed.Reason);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingSettingsPolicyHonorsOwnerHighRiskSettings()
+{
+    var workspace = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"), "Programming Projects");
+    var blockedSettings = new CodingToolSettings
+    {
+        WorkspaceRoot = workspace,
+        OutsideEditRunMode = CodingPermissionModes.Blocked,
+        SystemAdminActionMode = CodingPermissionModes.Blocked
+    };
+    var ownerAllowedSettings = blockedSettings with
+    {
+        OutsideEditRunMode = CodingPermissionModes.ExtraConfirmation,
+        SystemAdminActionMode = CodingPermissionModes.ConfirmEachTime
+    };
+    var outsideFile = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"), "outside.cs");
+
+    var blockedOutside = blockedSettings.ToPolicy().Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        outsideFile,
+        UserConfirmed: true,
+        Content: "class Demo { }"));
+    var blockedAdmin = blockedSettings.ToPolicy().Evaluate(new CodingToolRequest(
+        CodingToolAction.ExecuteProcessStop,
+        null,
+        UserConfirmed: true,
+        Query: "1234"));
+    var allowedOutside = ownerAllowedSettings.ToPolicy().Evaluate(new CodingToolRequest(
+        CodingToolAction.CreateFile,
+        outsideFile,
+        UserConfirmed: true,
+        Content: "class Demo { }"));
+    var allowedAdmin = ownerAllowedSettings.ToPolicy().Evaluate(new CodingToolRequest(
+        CodingToolAction.ExecuteProcessStop,
+        null,
+        UserConfirmed: true,
+        Query: "1234"));
+
+    Equal(CodingToolPermissionKind.Deny, blockedOutside.Kind);
+    Equal(CodingToolPermissionKind.Deny, blockedAdmin.Kind);
+    Equal(CodingToolPermissionKind.Allow, allowedOutside.Kind);
+    Equal(CodingToolPermissionKind.Allow, allowedAdmin.Kind);
     return Task.CompletedTask;
 }
 
@@ -3409,6 +3488,32 @@ static async Task TestDesktopInstallerRepairPreservesProfileData()
     Contains("already exists; installer did not overwrite", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
+static async Task TestDesktopInstallerInstallsSidecarVoiceResources()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var voiceRoot = Path.Combine(root, "voice-sidecar", "lib", "voice");
+    Directory.CreateDirectory(payload);
+    Directory.CreateDirectory(Path.Combine(voiceRoot, "piper"));
+    Directory.CreateDirectory(Path.Combine(voiceRoot, "python-venv", "Scripts"));
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(Path.Combine(voiceRoot, "piper", "en_US-test-medium.onnx"), "fake voice");
+    await File.WriteAllTextAsync(Path.Combine(voiceRoot, "python-venv", "Scripts", "python.exe"), "fake python");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        InstallVoiceResources: true,
+        VoiceResourcesPath: Path.Combine(root, "voice-sidecar")));
+
+    Equal(true, result.Succeeded);
+    Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "lib", "voice", "piper", "en_US-test-medium.onnx")));
+    Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "lib", "voice", "python-venv", "Scripts", "python.exe")));
+    Contains("Local voice resources installed: 1 Piper voice", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
 static async Task TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile()
 {
     var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -3424,6 +3529,30 @@ static async Task TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfi
     Equal(true, readiness.IsReadyForSelectedActions);
     Contains("Payload found", text);
     Contains("First Ali launch will ask", text);
+}
+
+static async Task TestDesktopInstallerReadinessReportsVoiceResources()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var voiceRoot = Path.Combine(root, "lib", "voice");
+    Directory.CreateDirectory(payload);
+    Directory.CreateDirectory(Path.Combine(voiceRoot, "piper"));
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(Path.Combine(voiceRoot, "piper", "en_US-test-medium.onnx"), "fake voice");
+
+    var service = new AliDesktopInstallReadinessService();
+    var readiness = await service.EvaluateAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        InstallVoiceResources: true,
+        VoiceResourcesPath: voiceRoot));
+    var text = string.Join(Environment.NewLine, readiness.Items.Select(item => item.Message));
+
+    Equal(true, readiness.IsReadyForSelectedActions);
+    Contains("Voice resources found", text);
+    Contains("1 Piper voice", text);
 }
 
 static async Task TestDesktopInstallerReadinessReportsMissingVsixInstaller()

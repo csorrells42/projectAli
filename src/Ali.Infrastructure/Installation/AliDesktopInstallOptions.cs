@@ -19,7 +19,9 @@ public sealed record AliDesktopInstallOptions(
     string? VsixInstallerPath = null,
     bool CreateDesktopShortcut = false,
     bool CreateStartMenuShortcut = false,
-    bool RepairExistingInstall = false)
+    bool RepairExistingInstall = false,
+    bool InstallVoiceResources = false,
+    string? VoiceResourcesPath = null)
 {
     public static AliDesktopInstallOptions CreateDefault(string? payloadPath = null) =>
         new(

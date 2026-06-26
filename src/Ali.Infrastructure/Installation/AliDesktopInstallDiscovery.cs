@@ -15,6 +15,15 @@ public static class AliDesktopInstallDiscovery
         "Ali.App.VisualStudioExtension.vsix"
     ];
 
+    private static readonly string[] VoiceResourceRelativePaths =
+    [
+        "Ali.VoicePack.zip",
+        "ali-voice-pack.zip",
+        "voice-pack.zip",
+        Path.Combine("lib", "voice"),
+        "voice"
+    ];
+
     public static AliDesktopInstallOptions NormalizeOptions(AliDesktopInstallOptions options) =>
         options with
         {
@@ -30,7 +39,8 @@ public static class AliDesktopInstallDiscovery
             OllamaInstallerPath = string.IsNullOrWhiteSpace(options.OllamaInstallerPath) ? null : Path.GetFullPath(options.OllamaInstallerPath.Trim()),
             OllamaInstallerUri = options.OllamaInstallerUri ?? OfficialOllamaInstallerUri,
             VsixPath = string.IsNullOrWhiteSpace(options.VsixPath) ? null : Path.GetFullPath(options.VsixPath.Trim()),
-            VsixInstallerPath = string.IsNullOrWhiteSpace(options.VsixInstallerPath) ? null : Path.GetFullPath(options.VsixInstallerPath.Trim())
+            VsixInstallerPath = string.IsNullOrWhiteSpace(options.VsixInstallerPath) ? null : Path.GetFullPath(options.VsixInstallerPath.Trim()),
+            VoiceResourcesPath = string.IsNullOrWhiteSpace(options.VoiceResourcesPath) ? null : Path.GetFullPath(options.VoiceResourcesPath.Trim())
         };
 
     public static string? ResolvePayloadSource(string? payloadPath)
@@ -164,6 +174,75 @@ public static class AliDesktopInstallDiscovery
         return candidatePaths.FirstOrDefault(File.Exists);
     }
 
+    public static string? ResolveVoiceResourcesSource(string? configuredPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            var fullPath = Path.GetFullPath(configuredPath.Trim());
+            return Directory.Exists(fullPath) || File.Exists(fullPath) ? fullPath : null;
+        }
+
+        foreach (var root in EnumerateSidecarRoots())
+        {
+            foreach (var relativePath in VoiceResourceRelativePaths)
+            {
+                var candidate = Path.Combine(root, relativePath);
+                if (Directory.Exists(candidate) || File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public static int CountPiperVoices(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return 0;
+        }
+
+        if (Directory.Exists(source))
+        {
+            var voiceRoot = ResolveVoiceRootFromDirectory(source);
+            return voiceRoot is null ? 0 : CountPiperVoicesInDirectory(voiceRoot);
+        }
+
+        if (!File.Exists(source))
+        {
+            return 0;
+        }
+
+        try
+        {
+            using var archive = ZipFile.OpenRead(source);
+            return archive.Entries.Count(IsPiperVoiceEntry);
+        }
+        catch (InvalidDataException)
+        {
+            return 0;
+        }
+    }
+
+    public static string? ResolveVoiceRootFromDirectory(string directory)
+    {
+        var fullPath = Path.GetFullPath(directory);
+        if (Directory.Exists(Path.Combine(fullPath, "piper")))
+        {
+            return fullPath;
+        }
+
+        var nested = Path.Combine(fullPath, "lib", "voice");
+        if (Directory.Exists(Path.Combine(nested, "piper")))
+        {
+            return nested;
+        }
+
+        return null;
+    }
+
     public static async Task<IReadOnlySet<string>?> TryListOllamaModelsAsync(
         string ollamaExecutable,
         TimeSpan timeout,
@@ -212,6 +291,35 @@ public static class AliDesktopInstallDiscovery
     private static bool HasEmbeddedPayload() =>
         Assembly.GetEntryAssembly()?.GetManifestResourceInfo(EmbeddedPayloadResourceName) is not null
         || Assembly.GetExecutingAssembly().GetManifestResourceInfo(EmbeddedPayloadResourceName) is not null;
+
+    private static IEnumerable<string> EnumerateSidecarRoots()
+    {
+        yield return AppContext.BaseDirectory;
+
+        var currentDirectory = Environment.CurrentDirectory;
+        if (!string.IsNullOrWhiteSpace(currentDirectory)
+            && !currentDirectory.Equals(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return currentDirectory;
+        }
+    }
+
+    private static int CountPiperVoicesInDirectory(string voiceRoot)
+    {
+        var piperRoot = Path.Combine(voiceRoot, "piper");
+        return Directory.Exists(piperRoot)
+            ? Directory.EnumerateFiles(piperRoot, "en_US-*.onnx", SearchOption.TopDirectoryOnly).Count()
+            : 0;
+    }
+
+    private static bool IsPiperVoiceEntry(ZipArchiveEntry entry)
+    {
+        var name = entry.FullName.Replace('\\', '/');
+        return !string.IsNullOrWhiteSpace(entry.Name)
+            && name.Contains("/piper/", StringComparison.OrdinalIgnoreCase)
+            && entry.Name.StartsWith("en_US-", StringComparison.OrdinalIgnoreCase)
+            && entry.Name.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool ZipContainsVsix(string zipPath)
     {

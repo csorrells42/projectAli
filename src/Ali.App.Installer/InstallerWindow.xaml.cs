@@ -36,6 +36,7 @@ public partial class InstallerWindow : Window
         RuntimeModelTextBox.Text = defaults.RuntimeModel;
         VisionModelTextBox.Text = defaults.VisionModel;
         InstallModeRadio.IsChecked = true;
+        VoiceResourcesCheckBox.IsChecked = true;
 
         _readinessRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
         _readinessRefreshTimer.Tick += async (_, _) =>
@@ -109,6 +110,8 @@ public partial class InstallerWindow : Window
             RuntimeModel = RuntimeModelTextBox.Text,
             PullVisionModel = installApplication && VisionModelCheckBox.IsChecked == true,
             VisionModel = VisionModelTextBox.Text,
+            InstallVoiceResources = installApplication && VoiceResourcesCheckBox.IsChecked == true,
+            VoiceResourcesPath = installApplication ? NullIfWhiteSpace(VoiceResourcesPathTextBox.Text) : null,
             LaunchAfterInstall = installApplication && LaunchAfterInstallCheckBox.IsChecked == true,
             InstallApplication = installApplication,
             InstallVisualStudioExtension = installVsix,
@@ -154,6 +157,12 @@ public partial class InstallerWindow : Window
     }
 
     private void ModelCheckBoxChanged(object sender, RoutedEventArgs e)
+    {
+        UpdateComponentState();
+        QueueReadinessRefresh();
+    }
+
+    private void VoiceResourcesCheckBoxChanged(object sender, RoutedEventArgs e)
     {
         UpdateComponentState();
         QueueReadinessRefresh();
@@ -227,7 +236,7 @@ public partial class InstallerWindow : Window
         {
             InstallerStep.Mode => "Choose a normal install, repair pass, or Visual Studio-only install.",
             InstallerStep.Assistant => "Choose where Ali installs and optionally seed the assistant name.",
-            InstallerStep.Dependencies => "Select Ollama and model actions.",
+            InstallerStep.Dependencies => "Select Ollama, model, and local voice resource actions.",
             InstallerStep.VisualStudio => "Choose whether to install the optional Visual Studio Companion extension.",
             InstallerStep.Shortcuts => "Choose launch and shortcut options.",
             InstallerStep.Review => "Review readiness before setup changes anything.",
@@ -252,6 +261,8 @@ public partial class InstallerWindow : Window
         RuntimeModelTextBox.IsEnabled = installApplication && RuntimeModelCheckBox.IsChecked == true;
         VisionModelCheckBox.IsEnabled = installApplication;
         VisionModelTextBox.IsEnabled = installApplication && VisionModelCheckBox.IsChecked == true;
+        VoiceResourcesCheckBox.IsEnabled = installApplication;
+        VoiceResourcesPathTextBox.IsEnabled = installApplication && VoiceResourcesCheckBox.IsChecked == true;
         LaunchAfterInstallCheckBox.IsEnabled = installApplication;
         DesktopShortcutCheckBox.IsEnabled = installApplication;
         StartMenuShortcutCheckBox.IsEnabled = installApplication;

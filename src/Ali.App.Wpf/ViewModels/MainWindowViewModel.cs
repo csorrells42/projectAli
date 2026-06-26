@@ -41,7 +41,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly string[] CodingSearchOutsideWorkspaceModeChoiceValues = [CodingPermissionModes.AskFirst, CodingPermissionModes.Disabled];
     private static readonly string[] CodingConfirmOrDisabledModeChoiceValues = [CodingPermissionModes.ConfirmEachTime, CodingPermissionModes.Disabled];
     private static readonly string[] CodingDestructiveActionModeChoiceValues = [CodingPermissionModes.ExtraConfirmation, CodingPermissionModes.Disabled];
-    private static readonly string[] CodingBlockedModeChoiceValues = [CodingPermissionModes.Blocked];
+    private static readonly string[] CodingHighRiskModeChoiceValues =
+    [
+        CodingPermissionModes.Blocked,
+        CodingPermissionModes.ExtraConfirmation,
+        CodingPermissionModes.ConfirmEachTime,
+        CodingPermissionModes.Disabled
+    ];
     private static readonly string[] CodingGitReadModeChoiceValues = [CodingPermissionModes.Allowed, CodingPermissionModes.Disabled];
     private static readonly string[] CodingGitNetworkModeChoiceValues = [CodingPermissionModes.Blocked, CodingPermissionModes.ConfirmEachTime];
     private static readonly string[] CodingPdfReadCreateModeChoiceValues = [CodingPermissionModes.Allowed, CodingPermissionModes.Disabled];
@@ -259,8 +265,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ReplaceChoices(CodingEditInsideWorkspaceModeChoices, CodingConfirmOrDisabledModeChoiceValues);
         ReplaceChoices(CodingBuildTestRunInsideWorkspaceModeChoices, CodingConfirmOrDisabledModeChoiceValues);
         ReplaceChoices(CodingDestructiveActionModeChoices, CodingDestructiveActionModeChoiceValues);
-        ReplaceChoices(CodingOutsideEditRunModeChoices, CodingBlockedModeChoiceValues);
-        ReplaceChoices(CodingSystemAdminActionModeChoices, CodingBlockedModeChoiceValues);
+        ReplaceChoices(CodingOutsideEditRunModeChoices, CodingHighRiskModeChoiceValues);
+        ReplaceChoices(CodingSystemAdminActionModeChoices, CodingHighRiskModeChoiceValues);
         ReplaceChoices(CodingGitReadModeChoices, CodingGitReadModeChoiceValues);
         ReplaceChoices(CodingGitWriteModeChoices, CodingConfirmOrDisabledModeChoiceValues);
         ReplaceChoices(CodingGitMergeModeChoices, CodingDestructiveActionModeChoiceValues);

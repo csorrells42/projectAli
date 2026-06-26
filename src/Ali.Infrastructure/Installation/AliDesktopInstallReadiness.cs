@@ -38,6 +38,7 @@ public sealed class AliDesktopInstallReadinessService
         AddDevRunStatus(items, targetDirectory);
         AddAssistantProfileStatus(items, normalizedOptions, dataRoot);
         AddShortcutStatus(items, normalizedOptions);
+        AddVoiceResourcesStatus(items, normalizedOptions);
 
         var ollama = AliDesktopInstallDiscovery.ResolveOllamaExecutable(normalizedOptions.OllamaExecutablePath);
         IReadOnlySet<string>? installedModels = null;
@@ -153,6 +154,33 @@ public sealed class AliDesktopInstallReadinessService
         }
 
         items.Add(new("Shortcuts", AliInstallReadinessStatus.Ready, $"Installer will create: {string.Join(", ", targets)}."));
+    }
+
+    private static void AddVoiceResourcesStatus(List<AliInstallReadinessItem> items, AliDesktopInstallOptions options)
+    {
+        if (!options.InstallApplication)
+        {
+            items.Add(new("Local voice resources", AliInstallReadinessStatus.Skipped, "Voice resources are skipped in component-only mode."));
+            return;
+        }
+
+        if (!options.InstallVoiceResources)
+        {
+            items.Add(new("Local voice resources", AliInstallReadinessStatus.Skipped, "Voice resource install is not selected."));
+            return;
+        }
+
+        var source = AliDesktopInstallDiscovery.ResolveVoiceResourcesSource(options.VoiceResourcesPath);
+        if (source is null)
+        {
+            items.Add(new("Local voice resources", AliInstallReadinessStatus.Warning, "No sidecar voice pack was found. Place Ali.VoicePack.zip or lib\\voice beside setup, or choose a voice resource path."));
+            return;
+        }
+
+        var voiceCount = AliDesktopInstallDiscovery.CountPiperVoices(source);
+        items.Add(voiceCount > 0
+            ? new("Local voice resources", AliInstallReadinessStatus.Ready, $"Voice resources found: {source} ({voiceCount} Piper voice(s)).")
+            : new("Local voice resources", AliInstallReadinessStatus.Warning, $"Voice resource source was found but no Piper .onnx voices were detected: {source}"));
     }
 
     private static void AddOllamaStatus(

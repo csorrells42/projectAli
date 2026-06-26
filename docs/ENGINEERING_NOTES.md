@@ -65,7 +65,7 @@ docs
 - `LocalEndpointPolicy`: refuses public/cloud endpoints in local-only mode
 - `SafeActivatingLocalRuntime`: keeps the fallback active until health passes
 - Runtime settings UI: load/save/check/activate/revert without a model library
-- Runtime recommendation advisor: deterministic low/medium/aggressive setting estimates from the selected runtime model, quantization, context/output settings, current resource meters, and detected local CPU/RAM/GPU/VRAM. VRAM sampling uses Windows GPU adapter counters when available, hardware dedicated-memory totals from DXGI/CIM, and an NVIDIA live-usage fallback through `nvidia-smi`; AMD cards should use the Windows/DXGI path. It is advisory only and does not benchmark, install, activate, or mutate runtime settings.
+- Runtime recommendation advisor: deterministic low/medium/aggressive setting estimates from the selected runtime model, quantization, context/output settings, current resource meters, and detected local CPU/RAM/GPU/VRAM. VRAM sampling prefers NVIDIA live usage through `nvidia-smi`, then falls back to Windows GPU adapter counters and hardware dedicated-memory totals from DXGI/CIM for AMD and other adapters. It is advisory only and does not benchmark, install, activate, or mutate runtime settings.
 - Image attachment contract: temporary-by-default PNG data passed only through the current chat request
 - WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
 - Voice contracts: recorder, STT provider, TTS provider, speech player
@@ -189,6 +189,7 @@ The installer lane is now a GUI-first setup executable backed by deterministic i
 - Repair mode refreshes binaries and selected optional components while preserving profile data.
 - Visual Studio Companion-only mode can install the VSIX later without reinstalling the Ali app payload.
 - The packaged payload includes the Ali Companion VSIX under `extras\visualstudio\Ali.App.VisualStudioExtension.vsix`.
+- Local voice resources install from an optional sidecar `Ali.VoicePack.zip` or `lib\voice` folder instead of being embedded in `Ali.Setup.exe`, because full local Piper/Whisper assets are multi-GB.
 - Ollama install is explicit through `Install Ollama if missing` or CLI flags. Model pulls are explicit and check `ollama list` first so already-installed model IDs are not pulled again.
 - Shortcut creation is explicit in the engine and selected by default in the GUI for desktop and Start menu shortcuts.
 - Receipts include target paths, assistant profile path/existence, selected actions, shortcut/repair/model/Ollama/VSIX settings, installed file count, warnings, dependency messages, and a readiness snapshot.
@@ -202,6 +203,7 @@ CLI automation remains available:
 .\Ali.Setup.exe --install-ollama --pull-runtime-model --runtime-model "ali-deepseek-coder-v2:16b-low"
 .\Ali.Setup.exe --install-vsix
 .\Ali.Setup.exe --install-vsix-only
+.\Ali.Setup.exe --install-voice-resources --voice-resources "C:\path\to\Ali.VoicePack.zip"
 .\Ali.Setup.exe --desktop-shortcut --start-menu-shortcut
 ```
 
