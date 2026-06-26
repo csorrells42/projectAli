@@ -106,18 +106,25 @@ Current deterministic command groups:
 
 - Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis, project role classification, project dependency graphing, coding tool integration status, and Visual Studio integration handoff planning.
 - Read/search: open file, read file, search workspace.
-- Planning: build a guarded coding task plan, scout proposed build ideas with implementation paths and library exploration candidates, draft read-only implementation roadmaps, and manage persisted pending/approved roadmap execution state through a guided step loop that stops at write/build/package/Git approval boundaries.
+- Planning: build a guarded coding task plan, scout proposed build ideas with implementation paths and library exploration candidates, draft read-only implementation roadmaps, manage persisted pending/approved roadmap execution state through a guided step loop, approve numbered execution packets, show a packet command console, run packet items through normal gates, track packet ledgers, plan package lookups with dependency risk cards, preview project scaffolds, and resume interrupted build plans from receipts.
 - Packages: list package references, confirmed package installs, and confirmed outdated checks.
 - Build/test/run: confirmed `dotnet build`, `dotnet test`, `dotnet restore`, `dotnet run`.
 - Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line, and suggest narrow preview-only patches from supported diagnostics.
 - Patch loop: preview literal replacement or a small literal patch bundle, show pending preview, discard pending preview, confirm apply last preview.
 - File edits: confirmed create, append, and literal replace inside approved workspace.
 - Git: status/diff/log plus confirmed add/commit/merge; pull/push are blocked unless enabled.
-- Reports: simple local text PDF generation and coding session report PDF generation into Ali's generated documents folder.
+- Reports: simple local text PDF generation, coding session report PDF generation, and morning build report PDF generation into Ali's generated documents folder.
+- Windows troubleshooting: read-only PowerShell/CMD troubleshooting toolkit and rogue-process hunt planning for process, port, service, startup, event-log, disk, network, and build-lock investigation. These commands do not stop processes or change system settings.
 
 The patch loop remains deliberately narrow. It applies only exact literal replacements and requires preview plus confirmation. Patch bundles allow up to eight edits total and can apply multiple sequential edits in the same file. Showing or applying a pending preview revalidates the current file contents so stale previews are not applied.
 
 The `suggest patch from last failure` command is preview-only. It currently supports one deterministic compiler-repair case: `CS1002 ; expected` with an openable source file/line inside the approved workspace. The command stores a pending patch preview only when the exact line replacement can be validated through the normal patch preview path.
+
+Approved execution packets are stored as local JSON planning state. `show packet commands` flattens prep, execute, validate, and closeout commands into a numbered console. Read-only commands can be run by number. Commands that are mutating or already carry a confirmation prefix require `confirm run packet item N`; the selected command then flows back through the normal parser, policy, execution, and receipt path. `show packet ledger` filters receipts since packet approval and compares them against prep/execute/validate/closeout lanes.
+
+Package lookup and scaffold previews are deliberately non-executing. `plan package lookup <goal>` emits exploration lanes, risk cards, and approval commands but does not hit NuGet or the internet. `preview project scaffold <goal>` emits a proposed file/project/test shape but does not create files or modify solutions.
+
+Windows troubleshooting commands are read-only guidance. They include PowerShell/CMD recipes for `Get-Process`, `Get-CimInstance Win32_Process`, `Get-NetTCPConnection`, `netstat`, `tasklist`, services, startup commands, event logs, disk checks, and build-lock investigation. Process stops, service changes, startup changes, registry edits, firewall changes, PATH changes, and trust-store changes remain outside this command surface and require explicit owner approval.
 
 Visual Studio integration now has three layers: configurable Visual Studio launch/discovery, an External Tools CLI bridge, and a developer VSIX project named `Ali.App.VisualStudioExtension`.
 
@@ -153,6 +160,8 @@ Keep these simple:
 - Backup: zip Ali's local data folder plus settings/export metadata.
 - Restore: stop Ali, validate backup manifest, restore local data, restart.
 - Documentation: update user and engineering notes as features land.
+- Current developer install path: build from source, refresh `%LOCALAPPDATA%\Ali\DevRun`, install the local VSIX into Visual Studio Community, start `Ali.App.WebHelper` on loopback, and keep voice/model assets under Ali-owned local folders.
+- Installer completion status and step-by-step dependency instructions live in `docs\ALI_PROJECT_INSTALLER_COMPLETION.md` and `docs\ALI_PROJECT_INSTALLATION_INSTRUCTIONS.md`.
 
 ## Package Rule
 

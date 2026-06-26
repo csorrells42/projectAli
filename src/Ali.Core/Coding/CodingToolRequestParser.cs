@@ -310,6 +310,100 @@ public static class CodingToolRequestParser
         "execution packet progress"
     ];
 
+    private static readonly string[] ShowApprovedPacketCommandsRequests =
+    [
+        "show packet commands",
+        "show approved packet commands",
+        "list packet commands",
+        "list approved packet commands",
+        "show packet console",
+        "packet console"
+    ];
+
+    private static readonly string[] ShowPacketRunLedgerRequests =
+    [
+        "show packet ledger",
+        "show packet run ledger",
+        "packet ledger",
+        "packet run ledger",
+        "show execution ledger"
+    ];
+
+    private static readonly string[] RunApprovedPacketItemPrefixes =
+    [
+        "run packet item",
+        "run approved packet item",
+        "run packet command",
+        "run approved packet command",
+        "execute packet item",
+        "execute approved packet item"
+    ];
+
+    private static readonly string[] PackageLookupPrefixes =
+    [
+        "plan package lookup",
+        "plan library lookup",
+        "lookup package candidates",
+        "lookup library candidates",
+        "suggest package candidates for",
+        "suggest library candidates for",
+        "show dependency risk cards",
+        "dependency risk cards"
+    ];
+
+    private static readonly string[] ProjectScaffoldPrefixes =
+    [
+        "preview project scaffold",
+        "plan project scaffold",
+        "preview scaffold",
+        "plan scaffold",
+        "scaffold project",
+        "draft scaffold"
+    ];
+
+    private static readonly string[] ResumeBuildPlanRequests =
+    [
+        "resume build plan",
+        "resume last build plan",
+        "resume approved packet",
+        "resume packet",
+        "recover and resume build",
+        "recover and resume packet"
+    ];
+
+    private static readonly string[] GenerateMorningReportRequests =
+    [
+        "generate morning report",
+        "generate morning build report",
+        "create morning report",
+        "export morning report",
+        "write morning report"
+    ];
+
+    private static readonly string[] WindowsTroubleshootingToolkitRequests =
+    [
+        "show windows troubleshooting toolkit",
+        "show powershell troubleshooting toolkit",
+        "show computer troubleshooting toolkit",
+        "show powershell cookbook",
+        "show cmd cookbook",
+        "windows troubleshooting toolkit",
+        "powershell troubleshooting toolkit",
+        "computer troubleshooting toolkit"
+    ];
+
+    private static readonly string[] RogueProcessHuntPrefixes =
+    [
+        "plan rogue process hunt",
+        "plan process hunt",
+        "find rogue process",
+        "hunt rogue process",
+        "troubleshoot rogue process",
+        "troubleshoot locked process",
+        "find process locking",
+        "find port owner"
+    ];
+
     private static readonly string[] AdvanceRoadmapStepRequests =
     [
         "advance roadmap step",
@@ -786,6 +880,23 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsShowApprovedPacketCommandsRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowApprovedPacketCommands, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParseRunApprovedPacketItem(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsShowPacketRunLedgerRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPacketRunLedger, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsAdvanceRoadmapStepRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.AdvanceRoadmapStep, null, UserConfirmed: userConfirmed);
@@ -819,6 +930,38 @@ public static class CodingToolRequestParser
         if (IsDiagnoseRecoveryStateRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.DiagnoseRecoveryState, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePackageLookup(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParseProjectScaffold(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsResumeBuildPlanRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ResumeBuildPlan, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParseGenerateMorningReport(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsWindowsTroubleshootingToolkitRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWindowsTroubleshootingToolkit, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParseRogueProcessHunt(trimmed, userConfirmed, out request))
+        {
             return true;
         }
 
@@ -929,6 +1072,12 @@ public static class CodingToolRequestParser
     private static bool IsShowRoadmapExecutionPacketProgressRequest(string text) =>
         ShowRoadmapExecutionPacketProgressRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsShowApprovedPacketCommandsRequest(string text) =>
+        ShowApprovedPacketCommandsRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowPacketRunLedgerRequest(string text) =>
+        ShowPacketRunLedgerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsAdvanceRoadmapStepRequest(string text) =>
         AdvanceRoadmapStepRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -946,6 +1095,12 @@ public static class CodingToolRequestParser
 
     private static bool IsDiagnoseRecoveryStateRequest(string text) =>
         DiagnoseRecoveryStateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsResumeBuildPlanRequest(string text) =>
+        ResumeBuildPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWindowsTroubleshootingToolkitRequest(string text) =>
+        WindowsTroubleshootingToolkitRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
@@ -1007,6 +1162,91 @@ public static class CodingToolRequestParser
         var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
         request = new CodingToolRequest(
             CodingToolAction.ExploreBuildIdea,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseRunApprovedPacketItem(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = RunApprovedPacketItemPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var itemText = text[prefix.Length..].Trim().Trim(':', '-', ' ', '#');
+        if (!int.TryParse(itemText, out var itemNumber) || itemNumber < 1)
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.RunApprovedPacketItem,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: itemNumber.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return true;
+    }
+
+    private static bool TryParsePackageLookup(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = PackageLookupPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.PlanPackageLookup,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseProjectScaffold(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = ProjectScaffoldPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.PreviewProjectScaffold,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseRogueProcessHunt(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = RogueProcessHuntPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.PlanRogueProcessHunt,
             null,
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);
@@ -1191,6 +1431,28 @@ public static class CodingToolRequestParser
             : "ali-coding-session-report.pdf";
         request = new CodingToolRequest(
             CodingToolAction.GenerateCodingReport,
+            fileName,
+            ExplicitUserPath: false,
+            UserConfirmed: userConfirmed);
+        return true;
+    }
+
+    private static bool TryParseGenerateMorningReport(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var matched = GenerateMorningReportRequests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+            || GenerateMorningReportRequests.Any(candidate => text.StartsWith(candidate + " ", StringComparison.OrdinalIgnoreCase));
+        if (!matched)
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        var fileName = segments.Count > 0 && !string.IsNullOrWhiteSpace(segments[0])
+            ? segments[0].Trim()
+            : "ali-morning-build-report.pdf";
+        request = new CodingToolRequest(
+            CodingToolAction.GenerateMorningReport,
             fileName,
             ExplicitUserPath: false,
             UserConfirmed: userConfirmed);

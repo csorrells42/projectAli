@@ -110,6 +110,14 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowApprovedRoadmapExecutionPacket
             or CodingToolAction.DiscardApprovedRoadmapExecutionPacket
             or CodingToolAction.ShowRoadmapExecutionPacketProgress
+            or CodingToolAction.ShowApprovedPacketCommands
+            or CodingToolAction.RunApprovedPacketItem
+            or CodingToolAction.ShowPacketRunLedger
+            or CodingToolAction.PlanPackageLookup
+            or CodingToolAction.PreviewProjectScaffold
+            or CodingToolAction.ResumeBuildPlan
+            or CodingToolAction.ShowWindowsTroubleshootingToolkit
+            or CodingToolAction.PlanRogueProcessHunt
             or CodingToolAction.AdvanceRoadmapStep
             or CodingToolAction.PauseRoadmap
             or CodingToolAction.ResumeRoadmap
@@ -140,7 +148,8 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Generating a PDF in Ali's local generated documents folder is allowed.");
         }
 
-        if (request.Action == CodingToolAction.GenerateCodingReport)
+        if (request.Action == CodingToolAction.GenerateCodingReport
+            || request.Action == CodingToolAction.GenerateMorningReport)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Generating a coding session report PDF in Ali's local generated documents folder is allowed.");
         }

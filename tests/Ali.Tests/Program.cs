@@ -65,6 +65,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes active roadmap steps", TestCodingParserRoutesActiveRoadmapSteps),
     ("coding parser routes next roadmap action", TestCodingParserRoutesNextRoadmapAction),
     ("coding parser routes roadmap execution packet", TestCodingParserRoutesRoadmapExecutionPacket),
+    ("coding parser routes packet console and build planning", TestCodingParserRoutesPacketConsoleAndBuildPlanning),
+    ("coding parser routes windows troubleshooting", TestCodingParserRoutesWindowsTroubleshooting),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -90,6 +92,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows next roadmap action", TestLocalCodingToolShowsNextRoadmapAction),
     ("local coding tool shows roadmap execution packet", TestLocalCodingToolShowsRoadmapExecutionPacket),
     ("local coding tool manages approved execution packet", TestLocalCodingToolManagesApprovedExecutionPacket),
+    ("local coding tool runs packet console and build planning", TestLocalCodingToolRunsPacketConsoleAndBuildPlanning),
+    ("local coding tool shows windows troubleshooting", TestLocalCodingToolShowsWindowsTroubleshooting),
     ("local coding tool diagnoses crash recovery state", TestLocalCodingToolDiagnosesCrashRecoveryState),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
@@ -585,6 +589,49 @@ static Task TestCodingParserRoutesRoadmapExecutionPacket()
 
     Equal(true, CodingToolRequestParser.TryParse("show packet progress", out var progressRequest));
     Equal(CodingToolAction.ShowRoadmapExecutionPacketProgress, progressRequest.Action);
+
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesPacketConsoleAndBuildPlanning()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show packet commands", out var commandsRequest));
+    Equal(CodingToolAction.ShowApprovedPacketCommands, commandsRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("confirm run packet item 3", out var runRequest));
+    Equal(CodingToolAction.RunApprovedPacketItem, runRequest.Action);
+    Equal("3", runRequest.Query);
+    Equal(true, runRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("show packet ledger", out var ledgerRequest));
+    Equal(CodingToolAction.ShowPacketRunLedger, ledgerRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan package lookup Visual Studio tool window", out var packageRequest));
+    Equal(CodingToolAction.PlanPackageLookup, packageRequest.Action);
+    Equal("Visual Studio tool window", packageRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("preview project scaffold SolidWorks BOM helper", out var scaffoldRequest));
+    Equal(CodingToolAction.PreviewProjectScaffold, scaffoldRequest.Action);
+    Equal("SolidWorks BOM helper", scaffoldRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("resume build plan", out var resumeRequest));
+    Equal(CodingToolAction.ResumeBuildPlan, resumeRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("generate morning report \"morning.pdf\"", out var reportRequest));
+    Equal(CodingToolAction.GenerateMorningReport, reportRequest.Action);
+    Equal("morning.pdf", reportRequest.Path);
+
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesWindowsTroubleshooting()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show windows troubleshooting toolkit", out var toolkitRequest));
+    Equal(CodingToolAction.ShowWindowsTroubleshootingToolkit, toolkitRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan rogue process hunt port 8765", out var huntRequest));
+    Equal(CodingToolAction.PlanRogueProcessHunt, huntRequest.Action);
+    Equal("port 8765", huntRequest.Query);
 
     return Task.CompletedTask;
 }
@@ -1419,6 +1466,104 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     Equal("git", runner.Runs[0].FileName);
     Equal("dotnet", runner.Runs[1].FileName);
     Equal("git", runner.Runs[2].FileName);
+}
+
+static async Task TestLocalCodingToolRunsPacketConsoleAndBuildPlanning()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var draft = await service.TryHandleAsync("draft implementation roadmap add package lookup", CancellationToken.None);
+    var approveRoadmap = await service.TryHandleAsync("approve last roadmap", CancellationToken.None);
+    var start = await service.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var approvePacket = await service.TryHandleAsync("approve execution packet", CancellationToken.None);
+    var console = await service.TryHandleAsync("show packet commands", CancellationToken.None);
+    var gatedItemLine = console.Message
+        .Split(Environment.NewLine)
+        .First(line => line.Contains("(confirmation required)", StringComparison.OrdinalIgnoreCase));
+    var gatedItemNumber = gatedItemLine.Split('.')[0].Trim();
+    var runReadOnly = await service.TryHandleAsync("run packet item 1", CancellationToken.None);
+    var runNeedsConfirmation = await service.TryHandleAsync($"run packet item {gatedItemNumber}", CancellationToken.None);
+    var ledger = await service.TryHandleAsync("show packet ledger", CancellationToken.None);
+    var packagePlan = await service.TryHandleAsync("plan package lookup Visual Studio tool window", CancellationToken.None);
+    var scaffold = await service.TryHandleAsync("preview project scaffold SolidWorks BOM helper", CancellationToken.None);
+    var resume = await service.TryHandleAsync("resume build plan", CancellationToken.None);
+    var morning = await service.TryHandleAsync("generate morning report \"morning.pdf\"", CancellationToken.None);
+
+    Equal(true, draft.Succeeded);
+    Equal(true, approveRoadmap.Succeeded);
+    Equal(true, start.Succeeded);
+    Equal(true, approvePacket.Succeeded);
+    Equal(true, console.Succeeded);
+    Contains("Packet command console", console.Message);
+    Contains("1. [Prep]", console.Message);
+    Contains("confirmation required", console.Message);
+    Equal(true, runReadOnly.Succeeded);
+    Contains("Ran packet item 1", runReadOnly.Message);
+    Equal(false, runNeedsConfirmation.Succeeded);
+    Contains("needs explicit confirmation", runNeedsConfirmation.Message);
+    Equal(true, ledger.Succeeded);
+    Contains("Packet run ledger", ledger.Message);
+    Contains("Receipts since approval", ledger.Message);
+    Equal(true, packagePlan.Succeeded);
+    Contains("Package/library lookup plan", packagePlan.Message);
+    Contains("Dependency risk cards", packagePlan.Message);
+    Contains("Visual Studio", packagePlan.Message);
+    Equal(true, scaffold.Succeeded);
+    Contains("Project scaffold preview", scaffold.Message);
+    Contains("No directories, files, projects, packages, or solution entries were created", scaffold.Message);
+    Equal(true, resume.Succeeded);
+    Contains("Build resume plan", resume.Message);
+    Equal(true, morning.Succeeded);
+    Contains("Generated morning build report PDF", morning.Message);
+    Equal(true, File.Exists(Path.Combine(directory, "GeneratedDocuments", "morning.pdf")));
+}
+
+static async Task TestLocalCodingToolShowsWindowsTroubleshooting()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false)));
+
+    var toolkit = await service.TryHandleAsync("show windows troubleshooting toolkit", CancellationToken.None);
+    var hunt = await service.TryHandleAsync("plan rogue process hunt port 8765", CancellationToken.None);
+
+    Equal(true, toolkit.Succeeded);
+    Contains("Windows troubleshooting toolkit", toolkit.Message);
+    Contains("Get-Process", toolkit.Message);
+    Contains("netstat -ano", toolkit.Message);
+    Contains("Approval gates", toolkit.Message);
+    Equal(true, hunt.Succeeded);
+    Contains("Rogue process hunt plan", hunt.Message);
+    Contains("port 8765", hunt.Message);
+    Contains("No processes were stopped", hunt.Message);
+    Contains("Stop rule", hunt.Message);
 }
 
 static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()

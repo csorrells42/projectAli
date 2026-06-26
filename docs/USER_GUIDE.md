@@ -119,11 +119,24 @@ Useful commands:
 - `approve last roadmap`
 - `start approved roadmap`
 - `show active roadmap step`
+- `show next coding action`
+- `show execution packet`
+- `approve execution packet`
+- `show packet commands`
+- `run packet item 1`
+- `confirm run packet item N`
+- `show packet ledger`
+- `show packet progress`
+- `resume build plan`
 - `mark roadmap step complete`
 - `recover roadmap state`
 - `show crash recovery status`
 - `show visual studio integration`
 - `generate visual studio integration plan`
+- `plan package lookup Visual Studio tool window`
+- `preview project scaffold SolidWorks BOM helper`
+- `show windows troubleshooting toolkit`
+- `plan rogue process hunt port 8765`
 - `list packages`
 - `confirm dotnet add package "CommunityToolkit.Mvvm" to "C:\path\to\project.csproj"`
 - `search workspace for WidgetFactory`
@@ -133,6 +146,7 @@ Useful commands:
 - `suggest patch from last failure`
 - `generate pdf "owner-demo.pdf" with text "Ali demo ready."`
 - `generate coding report`
+- `generate morning report`
 
 Guarded patch workflow:
 
@@ -192,6 +206,29 @@ Roadmaps can be kept as pending planning state. Use `show pending roadmap`, `app
 Roadmap execution state is saved under Ali's local coding data. Use `show active roadmap step`, `mark roadmap step complete`, `pause roadmap`, `resume roadmap`, `finish roadmap`, or `recover roadmap state` to continue after interruption or crash. Recovery restores the roadmap goal, status, current step, and last receipt snapshot; it does not replay commands.
 
 Use `show crash recovery status` after a crash or interrupted build. Ali reloads the roadmap state, checks recent coding receipts, runs a read-only Git status check, compares the active roadmap step against receipts, and suggests safe continue/fix/rollback paths. If the evidence supports a concrete fix, Ali can suggest a guarded patch preview for approval; if the evidence is unclear, she should pause and show options before editing.
+
+Approved packet workflow:
+
+1. Use `show execution packet` to review the next roadmap step.
+2. Use `approve execution packet` to store that step as local planning state.
+3. Use `show packet commands` to see numbered prep, execute, validate, and closeout commands.
+4. Use `run packet item 1` for read-only items.
+5. Use `confirm run packet item N` only when you deliberately want Ali to run a gated build, package, edit, run, or Git command from the packet.
+6. Use `show packet ledger` and `show packet progress` to compare receipts against the approved packet.
+
+Package and scaffold planning:
+
+- `plan package lookup <goal>` lists package/library exploration lanes, dependency risk cards, and the approval path for restore/outdated/package-install commands. It does not run internet or package-registry lookups by itself.
+- `preview project scaffold <goal>` drafts a folder/file/test-project shape for a new feature. It does not create files or add solution entries by itself.
+- `resume build plan` combines roadmap state, approved packet state, recent receipts, last dotnet failure, and Git status into the safest next step after a crash or interruption.
+- `generate morning report` exports a PDF summary of packet commands, ledger state, resume guidance, dependency planning, scaffold planning, and install readiness.
+
+Windows troubleshooting:
+
+- `show windows troubleshooting toolkit` shows read-only PowerShell and CMD recipes for process, memory, port, service, startup, event-log, disk, network, and build-lock investigation.
+- `plan rogue process hunt <target>` gives a focused plan for finding a suspicious process, locked file, or port owner.
+- These commands are guidance only. They do not stop processes, disable services, edit startup entries, delete files, change registry/firewall/PATH/trust settings, or repair Windows.
+- Process stopping and system repair actions require explicit owner approval with a named PID/process/service and a rollback note when applicable.
 
 Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension has Project Ali branding metadata, a packaged icon, and a native `Ali Companion` tool window in Visual Studio with command buttons, command history, a command box, selected-code package preview, progress/state cues, run timing summaries, pending-approval summary, output tabs, and a Visual Studio context strip. Output is separated into Response, Diagnostics, Receipts, and Pending Patch tabs. It can read the active solution path, active document path, current line, and selected text, then fill deterministic Ali commands such as read active file, build active solution, search selection, plan from selection, and preview replace selection. The same staged commands are available from `Tools -> Ali Companion`, and the code editor context menu includes Ali entries for reading the current file, building the active solution, searching the selection, planning from the selection, and previewing a replacement for the selection. Solution Explorer context menus can stage Ali commands from selected solution, project, or file nodes: read selected file, build selected project/solution, or plan from the selected node. Visual Studio commands enable only when the needed active document, selected text, solution path, or Solution Explorer node is available. Selection-based commands show the exact packaged text, target, original length, packaged length, and trim status before the command is run. It calls Ali's loopback coding bridge at `http://127.0.0.1:8765/api/coding/*`; the helper still owns the coding command parser, workspace policy, confirmation gates, and receipts. Configure helper URL, history length, and selected-text behavior under `Tools -> Options -> Ali -> Companion`.
 

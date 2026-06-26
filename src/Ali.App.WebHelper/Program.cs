@@ -1029,9 +1029,14 @@ public const string IndexHtml = """
             <button class="command-chip" type="button" data-command="show next coding action">Next Action</button>
             <button class="command-chip" type="button" data-command="show execution packet">Packet</button>
             <button class="command-chip" type="button" data-command="approve execution packet">Approve Packet</button>
+            <button class="command-chip" type="button" data-command="show packet commands">Packet Console</button>
+            <button class="command-chip" type="button" data-command="show packet ledger">Packet Ledger</button>
             <button class="command-chip" type="button" data-command="show packet progress">Progress</button>
+            <button class="command-chip" type="button" data-command="resume build plan">Resume</button>
             <button class="command-chip" type="button" data-command="show active roadmap step">Active Step</button>
             <button class="command-chip" type="button" data-command="show crash recovery status">Recovery</button>
+            <button class="command-chip" type="button" data-command="plan package lookup ">Package Lookup</button>
+            <button class="command-chip" type="button" data-command="preview project scaffold ">Scaffold</button>
           </div>
         </div>
         <div class="command-group">
@@ -1041,6 +1046,8 @@ public const string IndexHtml = """
             <button class="command-chip confirm" type="button" data-command="confirm dotnet test &quot;path&quot;">Test</button>
             <button class="command-chip" type="button" data-command="diagnose last build failure">Diagnose</button>
             <button class="command-chip" type="button" data-command="suggest patch from last failure">Patch Preview</button>
+            <button class="command-chip" type="button" data-command="show windows troubleshooting toolkit">Win Toolkit</button>
+            <button class="command-chip" type="button" data-command="plan rogue process hunt ">Process Hunt</button>
           </div>
         </div>
         <div class="command-group">
@@ -1050,6 +1057,7 @@ public const string IndexHtml = """
             <button class="command-chip" type="button" data-command="git diff">Git Diff</button>
             <button class="command-chip" type="button" data-command="show coding receipts">Receipts</button>
             <button class="command-chip" type="button" data-command="generate coding report">Report</button>
+            <button class="command-chip" type="button" data-command="generate morning report">Morning</button>
           </div>
         </div>
         <div class="command-group">
@@ -1059,6 +1067,7 @@ public const string IndexHtml = """
             <li><strong>Plan</strong>Drafts roadmaps, next actions, execution packets, and approval checkpoints.</li>
             <li><strong>Build</strong>Runs confirmed dotnet build/test/restore/package commands.</li>
             <li><strong>Recover</strong>Compares roadmap, receipts, and Git state after interruption.</li>
+            <li><strong>Diagnose</strong>Guides Windows process, port, service, startup, and build-lock investigation.</li>
             <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>
           </ul>
         </div>

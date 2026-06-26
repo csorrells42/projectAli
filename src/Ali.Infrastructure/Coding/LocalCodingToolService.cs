@@ -186,6 +186,14 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowApprovedRoadmapExecutionPacket => ShowApprovedRoadmapExecutionPacket(),
             CodingToolAction.DiscardApprovedRoadmapExecutionPacket => DiscardApprovedRoadmapExecutionPacket(),
             CodingToolAction.ShowRoadmapExecutionPacketProgress => await ShowRoadmapExecutionPacketProgressAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowApprovedPacketCommands => ShowApprovedPacketCommands(),
+            CodingToolAction.RunApprovedPacketItem => await RunApprovedPacketItemAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowPacketRunLedger => await ShowPacketRunLedgerAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PlanPackageLookup => PlanPackageLookup(request),
+            CodingToolAction.PreviewProjectScaffold => PreviewProjectScaffold(request),
+            CodingToolAction.ResumeBuildPlan => await ResumeBuildPlanAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowWindowsTroubleshootingToolkit => ShowWindowsTroubleshootingToolkit(),
+            CodingToolAction.PlanRogueProcessHunt => PlanRogueProcessHunt(request),
             CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
             CodingToolAction.PauseRoadmap => PauseRoadmap(),
             CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
@@ -197,6 +205,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
             CodingToolAction.GeneratePdf => await GeneratePdfAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GenerateCodingReport => await GenerateCodingReportAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.GenerateMorningReport => await GenerateMorningReportAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenLastDiagnostic => await OpenLastDiagnosticAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DiagnoseLastFailure => await DiagnoseLastFailureAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.SuggestLastFailurePatch => await SuggestLastFailurePatchAsync(cancellationToken).ConfigureAwait(false),
@@ -1042,6 +1051,405 @@ public sealed class LocalCodingToolService(
             _approvedPacketPath);
     }
 
+    private CodingToolResult ShowApprovedPacketCommands()
+    {
+        LoadApprovedPacketIfNeeded();
+        if (_approvedPacket is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No approved execution packet is active. Use: approve execution packet",
+                "Packet command console",
+                _approvedPacketPath);
+        }
+
+        var items = FlattenApprovedPacketCommands(_approvedPacket);
+        var lines = new List<string>
+        {
+            "Packet command console:",
+            $"Goal: {_approvedPacket.Goal}",
+            $"Step: {_approvedPacket.StepIndex + 1}: {_approvedPacket.Step}",
+            "Truth boundary: this console lists stored packet commands. Mutating or confirmed commands still require: confirm run packet item N",
+            "Commands:"
+        };
+        foreach (var item in items)
+        {
+            var gate = PacketCommandNeedsConfirmation(item.Command) ? "confirmation required" : "read-only";
+            lines.Add($"{item.Number}. [{item.Section}] {item.Command} ({gate})");
+        }
+
+        lines.Add("Next safe commands:");
+        lines.Add("- run packet item 1");
+        lines.Add("- confirm run packet item N");
+        lines.Add("- show packet ledger");
+        lines.Add("- show packet progress");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Packet command console",
+            _approvedPacketPath);
+    }
+
+    private async Task<CodingToolResult> RunApprovedPacketItemAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        LoadApprovedPacketIfNeeded();
+        if (_approvedPacket is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No approved execution packet is active. Use: approve execution packet",
+                "Packet command console",
+                _approvedPacketPath);
+        }
+
+        if (!int.TryParse(request.Query, out var requestedNumber) || requestedNumber < 1)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Choose a packet item number. Example: run packet item 1",
+                "Packet command console",
+                _approvedPacketPath);
+        }
+
+        var items = FlattenApprovedPacketCommands(_approvedPacket);
+        var item = items.FirstOrDefault(candidate => candidate.Number == requestedNumber);
+        if (item is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Packet item {requestedNumber} was not found. Use: show packet commands",
+                "Packet command console",
+                _approvedPacketPath);
+        }
+
+        if (PacketCommandNeedsConfirmation(item.Command) && !request.UserConfirmed)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Packet item {item.Number} needs explicit confirmation before Ali runs it.{Environment.NewLine}Command: {item.Command}{Environment.NewLine}Use: confirm run packet item {item.Number}",
+                "Packet command console",
+                _approvedPacketPath);
+        }
+
+        var result = await TryHandleAsync(item.Command, cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            $"Ran packet item {item.Number}:",
+            $"Section: {item.Section}",
+            $"Command: {item.Command}",
+            $"Result: {(result.Succeeded ? "succeeded" : "failed")}",
+            string.Empty,
+            TrimForChat(result.Message, 10_000)
+        };
+
+        return new CodingToolResult(
+            true,
+            result.Succeeded,
+            string.Join(Environment.NewLine, lines),
+            "Packet command console",
+            result.TargetPath ?? _approvedPacketPath,
+            ExitCode: result.ExitCode);
+    }
+
+    private async Task<CodingToolResult> ShowPacketRunLedgerAsync(CancellationToken cancellationToken)
+    {
+        LoadApprovedPacketIfNeeded();
+        if (_approvedPacket is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No approved execution packet is active. Use: approve execution packet",
+                "Packet run ledger",
+                _approvedPacketPath);
+        }
+
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var packetReceipts = receipts
+            .Where(receipt => receipt.Timestamp >= _approvedPacket.ApprovedAt)
+            .OrderBy(receipt => receipt.Timestamp)
+            .ToList();
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+
+        var lines = new List<string>
+        {
+            "Packet run ledger:",
+            $"Goal: {_approvedPacket.Goal}",
+            $"Step: {_approvedPacket.StepIndex + 1}: {_approvedPacket.Step}",
+            $"Approved: {_approvedPacket.ApprovedAt:u}",
+            $"Git: {gitStatus.Summary}",
+            $"Receipts since approval: {packetReceipts.Count}"
+        };
+
+        if (packetReceipts.Count == 0)
+        {
+            lines.Add("- none yet");
+        }
+        else
+        {
+            foreach (var receipt in packetReceipts)
+            {
+                lines.Add(FormatReceiptSummary("-", receipt));
+            }
+        }
+
+        lines.Add("Packet receipt match:");
+        lines.AddRange(BuildPacketReceiptMatchLines(_approvedPacket, receipts, gitStatus, stale: false));
+        lines.Add("Next safe commands:");
+        lines.Add("- show packet commands");
+        lines.Add("- show packet progress");
+        lines.Add("- resume build plan");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Packet run ledger",
+            _approvedPacketPath);
+    }
+
+    private CodingToolResult PlanPackageLookup(CodingToolRequest request)
+    {
+        var goal = string.IsNullOrWhiteSpace(request.Query)
+            ? "current roadmap step"
+            : request.Query.Trim();
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+
+        var lines = new List<string>
+        {
+            "Package/library lookup plan:",
+            $"Goal: {goal}",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Primary target: {primaryTarget}",
+            "No network lookup, package restore, or install was run.",
+            "Truth boundary: package names below are exploration lanes, not current version claims. Approve live lookup before trusting availability, licensing, or latest versions.",
+            "Candidate exploration lanes:"
+        };
+
+        AddPackageLookupCandidateLanes(lines, goal);
+        lines.Add("Dependency risk cards:");
+        lines.Add("- Fit risk: verify the package targets the same framework and app shape as the project.");
+        lines.Add("- License risk: check the license before using it in a distributable build.");
+        lines.Add("- Maintenance risk: inspect recent releases, issue activity, and .NET compatibility.");
+        lines.Add("- Security risk: run approved restore/outdated/vulnerability checks before committing.");
+        lines.Add("- Integration risk: prototype behind one service interface before spreading calls across the app.");
+        lines.Add("Approval path:");
+        lines.Add($"- list packages \"{primaryTarget}\"");
+        lines.Add($"- confirm check outdated packages \"{primaryTarget}\"");
+        lines.Add($"- confirm dotnet restore \"{primaryTarget}\"");
+        lines.Add($"- confirm dotnet add package \"Package.Id\" to \"{primaryTarget}\"");
+        lines.Add("Stop rule: if the package affects app architecture, generate an execution packet and get approval before installing.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Package lookup plan",
+            primaryTarget);
+    }
+
+    private CodingToolResult PreviewProjectScaffold(CodingToolRequest request)
+    {
+        var goal = string.IsNullOrWhiteSpace(request.Query)
+            ? "new project feature"
+            : request.Query.Trim();
+        var safeName = BuildSafeScaffoldName(goal);
+        var lines = new List<string>
+        {
+            "Project scaffold preview:",
+            $"Goal: {goal}",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            "No directories, files, projects, packages, or solution entries were created.",
+            "Preview bundle:",
+            $"- src/{safeName}/{safeName}.csproj",
+            $"- src/{safeName}/README.md",
+            $"- src/{safeName}/{safeName}Service.cs",
+            $"- tests/{safeName}.Tests/{safeName}.Tests.csproj",
+            $"- tests/{safeName}.Tests/{safeName}ServiceTests.cs",
+            "Suggested first implementation shape:",
+            "- Keep core logic in a small service class with no UI dependency.",
+            "- Add one test project or test file before wiring UI/VS commands.",
+            "- Add package references only after package lookup approval.",
+            "Approval path:",
+            $"- plan package lookup {goal}",
+            $"- preview patch bundle file \"src/{safeName}/README.md\" replace \"\" with \"<approved content>\"",
+            "- confirm apply last patch preview",
+            "- confirm dotnet build \"path-to-solution-or-project\"",
+            "Stop rule: scaffold previews are planning state only. Use guarded file creation or patch previews before writing."
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Project scaffold preview",
+            Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ResumeBuildPlanAsync(CancellationToken cancellationToken)
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        LoadApprovedPacketIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+
+        var lines = new List<string>
+        {
+            "Build resume plan:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Git: {gitStatus.Summary}",
+            latestReceipt is null
+                ? "Latest receipt: none"
+                : FormatReceiptSummary("Latest receipt", latestReceipt),
+            latestDotNetReceipt is null
+                ? "Latest dotnet-style receipt: none"
+                : FormatReceiptSummary("Latest dotnet-style receipt", latestDotNetReceipt),
+            _roadmapState is null
+                ? "Roadmap: none active"
+                : $"Roadmap: {DescribeRoadmapState(_roadmapState)}; step {FormatRoadmapCurrentStep(_roadmapState)}",
+            _approvedPacket is null
+                ? "Approved packet: none active"
+                : $"Approved packet: step {_approvedPacket.StepIndex + 1}, approved {_approvedPacket.ApprovedAt:u}",
+            "Resume recommendation:"
+        };
+
+        if (latestDotNetReceipt is { Succeeded: false })
+        {
+            lines.Add("- Diagnose the failure first; do not continue builds blindly.");
+            lines.Add("- diagnose last build failure");
+            lines.Add("- suggest patch from last failure");
+            lines.Add("- If no deterministic patch is available, compare options before editing.");
+        }
+        else if (_approvedPacket is not null)
+        {
+            lines.Add("- Continue from the approved packet command console.");
+            lines.Add("- show packet commands");
+            lines.Add("- show packet ledger");
+            lines.Add("- show packet progress");
+        }
+        else if (_roadmapState is not null)
+        {
+            lines.Add("- Rebuild the next step packet from the active roadmap.");
+            lines.Add("- show next coding action");
+            lines.Add("- show execution packet");
+            lines.Add("- approve execution packet");
+        }
+        else
+        {
+            lines.Add("- Start by scouting or drafting a roadmap.");
+            lines.Add("- explore build idea <goal>");
+            lines.Add("- draft implementation roadmap <goal>");
+        }
+
+        lines.Add("Crash recovery guard:");
+        lines.Add("- If Ali knows a deterministic fix, use preview/confirmation gates.");
+        lines.Add("- If Ali is not sure, stop and compare options before changing code or packages.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Build resume plan",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowWindowsTroubleshootingToolkit()
+    {
+        var lines = new List<string>
+        {
+            "Windows troubleshooting toolkit:",
+            "Truth boundary: this is a read-only command cookbook. Ali does not kill processes, change services, edit startup items, or repair Windows from this command.",
+            "PowerShell process checks:",
+            "- Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Id,ProcessName,CPU,Path",
+            "- Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Id,ProcessName,@{Name='MB';Expression={[math]::Round($_.WorkingSet64/1MB,1)}},Path",
+            "- Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine | Out-GridView",
+            "CMD process checks:",
+            "- tasklist /v",
+            "- tasklist /svc",
+            "Ports and listeners:",
+            "- Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Select-Object LocalAddress,LocalPort,OwningProcess",
+            "- netstat -ano | findstr LISTENING",
+            "- Get-Process -Id <pid>",
+            "Services and startup:",
+            "- Get-Service | Sort-Object Status,Name",
+            "- Get-CimInstance Win32_StartupCommand | Select-Object Name,Command,Location,User",
+            "Build/file lock investigation:",
+            "- Get-Process dotnet,MSBuild,VBCSCompiler,Ali.App.WebHelper -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path",
+            "- tasklist /FI \"IMAGENAME eq dotnet.exe\"",
+            "- Use Sysinternals Handle or Process Explorer only after owner approval if a file lock cannot be identified with built-in tools.",
+            "Event and health checks:",
+            "- Get-EventLog -LogName System -Newest 50 | Select-Object TimeGenerated,EntryType,Source,Message",
+            "- Get-EventLog -LogName Application -Newest 50 | Select-Object TimeGenerated,EntryType,Source,Message",
+            "- Get-Volume",
+            "- Get-PhysicalDisk",
+            "- Test-NetConnection <host> -Port <port>",
+            "Approval gates:",
+            "- Stopping a process needs explicit approval and a named PID/process.",
+            "- Disabling startup/service entries needs explicit approval and a rollback note.",
+            "- Deleting files, clearing caches, changing registry, firewall, PATH, or trust settings needs explicit approval."
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Windows troubleshooting toolkit",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanRogueProcessHunt(CodingToolRequest request)
+    {
+        var target = string.IsNullOrWhiteSpace(request.Query)
+            ? "the suspicious process, locked file, or busy port"
+            : request.Query.Trim();
+        var lines = new List<string>
+        {
+            "Rogue process hunt plan:",
+            $"Target: {target}",
+            "No processes were stopped and no system settings were changed.",
+            "Step 1 - identify symptoms:",
+            "- Is it high CPU, high memory, a locked file, a listening port, startup reappearing, or a crashing app?",
+            "Step 2 - gather read-only evidence:",
+            "- Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Id,ProcessName,CPU,Path",
+            "- Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 Id,ProcessName,WorkingSet64,Path",
+            "- Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '<target>' } | Select-Object ProcessId,Name,CommandLine",
+            "- netstat -ano | findstr <port-or-name>",
+            "- tasklist /FI \"PID eq <pid>\" /V",
+            "Step 3 - connect owner to executable:",
+            "- Get-Process -Id <pid> | Select-Object Id,ProcessName,Path,StartTime",
+            "- Get-CimInstance Win32_Process -Filter \"ProcessId=<pid>\" | Select-Object ProcessId,ParentProcessId,CommandLine,ExecutablePath",
+            "Step 4 - decide action:",
+            "- If the process is known and safe to restart, ask for explicit approval before Stop-Process.",
+            "- If unsure, collect path, command line, parent PID, service name, startup entry, and recent event logs before acting.",
+            "Step 5 - approved stop examples:",
+            "- Stop-Process -Id <pid>",
+            "- taskkill /PID <pid>",
+            "- Stop-Service -Name <service-name>",
+            "Stop rule: if the executable path, parent process, service owner, or purpose is unclear, do not kill it yet; compare options first."
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Rogue process hunt plan",
+            Policy.WorkspaceRoot);
+    }
+
     private CodingToolResult AdvanceRoadmapStep()
     {
         LoadRoadmapStateIfNeeded();
@@ -1819,6 +2227,62 @@ public sealed class LocalCodingToolService(
         lines.AddRange(unique.Select(command => $"- {command}"));
     }
 
+    private static IReadOnlyList<PacketCommandItem> FlattenApprovedPacketCommands(ApprovedRoadmapExecutionPacket packet)
+    {
+        var items = new List<PacketCommandItem>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddSection("Prep", packet.PrepCommands);
+        AddSection("Execute", packet.ExecutionCommands);
+        AddSection("Validate", packet.ValidationCommands);
+        AddSection("Closeout", packet.CloseoutCommands);
+        return items;
+
+        void AddSection(string section, IEnumerable<string> commands)
+        {
+            foreach (var command in commands
+                         .Where(command => !string.IsNullOrWhiteSpace(command))
+                         .Select(command => command.Trim()))
+            {
+                if (!seen.Add(command))
+                {
+                    continue;
+                }
+
+                items.Add(new PacketCommandItem(items.Count + 1, section, command));
+            }
+        }
+    }
+
+    private static bool PacketCommandNeedsConfirmation(string command)
+    {
+        var normalized = command.Trim();
+        if (normalized.StartsWith("confirm ", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("confirmed ", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("go ahead ", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return normalized.StartsWith("apply ", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("dotnet ", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("restore ", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("run project", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("git add", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("git commit", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("git merge", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("git pull", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("git push", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("create file", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("append file", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("append to file", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("replace in file", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("replace text in file", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("mark roadmap step complete", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("advance roadmap step", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("finish roadmap", StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith("discard ", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static IReadOnlyList<string> BuildExecutionCandidateCommands(
         RoadmapExecutionState state,
         RoadmapNextActionRecommendation recommendation,
@@ -2108,6 +2572,57 @@ public sealed class LocalCodingToolService(
         }
 
         lines.Add("- Version/source check: approve an internet or package-registry lookup before treating any library/version as current.");
+    }
+
+    private static void AddPackageLookupCandidateLanes(List<string> lines, string goal)
+    {
+        lines.Add("- Baseline .NET: Microsoft.Extensions.Hosting, Microsoft.Extensions.Logging, Microsoft.Extensions.Options.");
+        lines.Add("- Testing: MSTest, xUnit, NUnit, FluentAssertions, Verify, or Microsoft.Playwright when UI checks matter.");
+        lines.Add("- Serialization/data: System.Text.Json, LiteDB, JSON files, or CsvHelper depending on storage shape.");
+
+        if (MentionsAny(goal, "visual studio", "vsix", "ide", "extension", "tool window"))
+        {
+            lines.Add("- Visual Studio: Microsoft.VisualStudio.SDK, Community.VisualStudio.Toolkit, and VSIX packaging tools.");
+        }
+
+        if (MentionsAny(goal, "solidworks", "cad", "drawing", "assembly", "part", "bom"))
+        {
+            lines.Add("- SolidWorks/CAD: SolidWorks COM interop/API samples first; add-in packaging only after a macro proof works.");
+        }
+
+        if (MentionsAny(goal, "pdf", "report", "document", "manual"))
+        {
+            lines.Add("- Documents/PDF: QuestPDF, PdfSharpCore, MigraDoc, or the existing local SimplePdfWriter for text-only output.");
+        }
+
+        if (MentionsAny(goal, "web", "api", "browser", "dashboard"))
+        {
+            lines.Add("- Web/API: ASP.NET Core minimal APIs, typed HttpClient, and a small browser UI before heavier frameworks.");
+        }
+
+        if (MentionsAny(goal, "voice", "audio", "stt", "tts", "piper", "whisper"))
+        {
+            lines.Add("- Voice/audio: NAudio, Piper/Whisper local process bridges, and explicit model-resource validation.");
+        }
+    }
+
+    private static string BuildSafeScaffoldName(string goal)
+    {
+        var words = goal
+            .Split([' ', '-', '_', '.', '/', '\\', ':', ';', ',', '"', '\''], StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => new string(word.Where(char.IsLetterOrDigit).ToArray()))
+            .Where(word => word.Length > 0)
+            .Take(4)
+            .ToList();
+        if (words.Count == 0)
+        {
+            return "Ali.Feature";
+        }
+
+        var name = string.Concat(words.Select(word => char.ToUpperInvariant(word[0]) + word[1..]));
+        return name.StartsWith("Ali", StringComparison.OrdinalIgnoreCase)
+            ? name
+            : $"Ali.{name}";
     }
 
     private static void AddArchitectureRecommendationCards(
@@ -2418,9 +2933,18 @@ public sealed class LocalCodingToolService(
             "- analyze solution architecture",
             "- show next coding action",
             "- show execution packet",
+            "- approve execution packet",
+            "- show packet commands",
+            "- show packet ledger",
+            "- resume build plan",
+            "- plan package lookup <goal>",
+            "- preview project scaffold <goal>",
+            "- show windows troubleshooting toolkit",
+            "- plan rogue process hunt <target>",
             "- generate visual studio integration plan",
             "- show coding receipts",
-            "- generate coding report"
+            "- generate coding report",
+            "- generate morning report"
         };
 
         return new CodingToolResult(
@@ -2538,6 +3062,81 @@ public sealed class LocalCodingToolService(
             uniquePath);
     }
 
+    private async Task<CodingToolResult> GenerateMorningReportAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryBuildGeneratedPdfPath(request.Path, out var pdfPath, out var pathError))
+        {
+            return new CodingToolResult(true, false, pathError, "Morning report", _generatedDocumentsRoot);
+        }
+
+        var reportText = await BuildMorningReportAsync(cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(_generatedDocumentsRoot);
+        var uniquePath = BuildUniquePath(pdfPath);
+        var title = Path.GetFileNameWithoutExtension(uniquePath);
+        var bytes = SimplePdfWriter.BuildTextPdf(title, reportText);
+        await File.WriteAllBytesAsync(uniquePath, bytes, cancellationToken).ConfigureAwait(false);
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Generated morning build report PDF: {uniquePath}{Environment.NewLine}Wrote {bytes.Length} byte(s).",
+            "Morning report",
+            uniquePath);
+    }
+
+    private async Task<string> BuildMorningReportAsync(CancellationToken cancellationToken)
+    {
+        var lines = new List<string>
+        {
+            "Ali Morning Build Report",
+            $"Generated: {DateTimeOffset.Now:u}",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            string.Empty,
+            "What Changed",
+            "- Ali's coding assistant surface now has approved packet commands, a packet run ledger, dependency risk cards, scaffold previews, crash resume guidance, and a morning report export.",
+            "- These features still use Ali's normal approval gates for edits, packages, builds, tests, run commands, and Git writes.",
+            string.Empty,
+            "Packet Console"
+        };
+
+        lines.Add(TrimForChat(ShowApprovedPacketCommands().Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Packet Ledger");
+        var ledger = await ShowPacketRunLedgerAsync(cancellationToken).ConfigureAwait(false);
+        lines.Add(TrimForChat(ledger.Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Resume Plan");
+        var resume = await ResumeBuildPlanAsync(cancellationToken).ConfigureAwait(false);
+        lines.Add(TrimForChat(resume.Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Dependency Planning");
+        lines.Add(TrimForChat(PlanPackageLookup(new CodingToolRequest(CodingToolAction.PlanPackageLookup, null, Query: "current project")).Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Scaffold Planning");
+        lines.Add(TrimForChat(PreviewProjectScaffold(new CodingToolRequest(CodingToolAction.PreviewProjectScaffold, null, Query: "next approved feature")).Message, 8_000));
+        lines.Add(string.Empty);
+        lines.Add("Install Readiness");
+        lines.Add("- Build from source before refreshing DevRun.");
+        lines.Add("- Keep Visual Studio Community installed for the Ali Companion VSIX.");
+        lines.Add("- Start Ali.App.WebHelper before using the VS tool window or browser companion.");
+        lines.Add("- Keep Ollama available only for model-backed chat; coding commands are deterministic local commands.");
+        lines.Add("- Keep package installs, repair actions, signing, and trust-store changes owner-approved.");
+        lines.Add(string.Empty);
+        lines.Add("Next Safe Commands");
+        lines.Add("- show packet commands");
+        lines.Add("- show packet ledger");
+        lines.Add("- resume build plan");
+        lines.Add("- plan package lookup <goal>");
+        lines.Add("- preview project scaffold <goal>");
+        lines.Add("- generate coding report");
+        lines.Add("- generate morning report");
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
     private async Task<string> BuildCodingSessionReportAsync(CancellationToken cancellationToken)
     {
         var lines = new List<string>
@@ -2619,6 +3218,13 @@ public sealed class LocalCodingToolService(
         lines.Add("- show active roadmap step");
         lines.Add("- show next coding action");
         lines.Add("- show execution packet");
+        lines.Add("- show packet commands");
+        lines.Add("- run packet item 1");
+        lines.Add("- confirm run packet item N");
+        lines.Add("- show packet ledger");
+        lines.Add("- resume build plan");
+        lines.Add("- plan package lookup <goal>");
+        lines.Add("- preview project scaffold <goal>");
         lines.Add("- recover roadmap state");
         lines.Add("- show crash recovery status");
         lines.Add("- approve last roadmap");
@@ -2638,6 +3244,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- confirm git add all");
         lines.Add("- confirm git commit \"message\"");
         lines.Add("- generate visual studio integration plan");
+        lines.Add("- generate morning report");
         lines.Add("- show coding receipts");
 
         return string.Join(Environment.NewLine, lines);
@@ -5790,6 +6397,11 @@ public sealed class LocalCodingToolService(
         string Confidence,
         IReadOnlyList<string> Reasons,
         IReadOnlyList<string> Commands);
+
+    private sealed record PacketCommandItem(
+        int Number,
+        string Section,
+        string Command);
 
     private sealed record ApprovedRoadmapExecutionPacket(
         string Goal,
