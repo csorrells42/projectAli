@@ -68,6 +68,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private VoiceRuntimeSettings _voiceSettings;
     private bool _loadingVoiceSettings;
     private bool _loadingSpeechToolSettings;
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private CancellationTokenSource? _activeUiOperation;
     private CancellationTokenSource? _activeResponse;
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
@@ -1274,7 +1276,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await EnsureLocalOllamaStartedAsync(options).ConfigureAwait(true);
             _services.ConfigureRuntimeCandidate(options);
-            var health = await _services.RuntimeController.CheckCandidateAsync(CancellationToken.None).ConfigureAwait(true);
+            var health = await _services.RuntimeController.CheckCandidateAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
             RuntimeHealthResult = FormatHealthResult(health);
             CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
             if (health.Succeeded && _services.RuntimeController.ActivateLastHealthChecked())
@@ -1290,6 +1292,12 @@ public sealed class MainWindowViewModel : ObservableObject
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
             StatusText = $"Local model failed to load: {health.Summary}";
         }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            RuntimeHealthResult = "Local model startup cancelled.";
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = "Local model startup cancelled.";
+        }
         catch (Exception ex)
         {
             RuntimeHealthResult = ex.Message;
@@ -1300,6 +1308,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task ShutdownLocalRuntimeAsync()
     {
+        RequestShutdownCancellation();
         _modelStatusTimer.Stop();
         SetModelConnectionStatus("command sent, waiting on model to shut down", MediaBrushes.Gold);
         StatusText = "Shutting down local model...";
@@ -1670,8 +1679,58 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void Stop()
     {
+        CancelActiveUiOperation();
         _activeResponse?.Cancel();
         StopSpeaking();
+    }
+
+    public void RequestShutdownCancellation()
+    {
+        CancelActiveUiOperation();
+        _activeResponse?.Cancel();
+        _activeVoiceInput?.Cancel();
+        _activeSpeech?.Cancel();
+        if (!_lifetimeCancellation.IsCancellationRequested)
+        {
+            _lifetimeCancellation.Cancel();
+        }
+    }
+
+    private CancellationTokenSource BeginUiOperation(TimeSpan timeout)
+    {
+        CancelActiveUiOperation();
+        var operation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        operation.CancelAfter(timeout);
+        _activeUiOperation = operation;
+        return operation;
+    }
+
+    private void CompleteUiOperation(CancellationTokenSource operation)
+    {
+        if (ReferenceEquals(_activeUiOperation, operation))
+        {
+            _activeUiOperation = null;
+        }
+
+        operation.Dispose();
+    }
+
+    private void CancelActiveUiOperation()
+    {
+        try
+        {
+            _activeUiOperation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private CancellationTokenSource CreateLinkedTimeout(TimeSpan timeout)
+    {
+        var operation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        operation.CancelAfter(timeout);
+        return operation;
     }
 
     private void StartNewChat()
@@ -2451,9 +2510,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         IsBusy = true;
         StatusText = "Refreshing installed local models...";
+        var operation = BeginUiOperation(TimeSpan.FromSeconds(15));
         try
         {
-            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, CancellationToken.None).ConfigureAwait(true);
+            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, operation.Token).ConfigureAwait(true);
             if (installedChoices.Count == 0)
             {
                 RuntimeSelectionStatusText = "No installed models were listed by the local runtime endpoint.";
@@ -2478,6 +2538,11 @@ public sealed class MainWindowViewModel : ObservableObject
             RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed local model(s).";
             StatusText = RuntimeSelectionStatusText;
         }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        {
+            RuntimeSelectionStatusText = "Installed model refresh cancelled.";
+            StatusText = RuntimeSelectionStatusText;
+        }
         catch (Exception ex)
         {
             RuntimeSelectionStatusText = $"Installed model refresh failed: {ex.Message}";
@@ -2485,6 +2550,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         finally
         {
+            CompleteUiOperation(operation);
             IsBusy = false;
         }
     }
@@ -2497,11 +2563,12 @@ public sealed class MainWindowViewModel : ObservableObject
         SetModelConnectionStatus("command sent, waiting on model to load", MediaBrushes.Gold);
         await Task.Yield();
 
+        var operation = BeginUiOperation(TimeSpan.FromMinutes(3));
         try
         {
             var options = BuildRuntimeOptionsFromUi();
             _services.ConfigureRuntimeCandidate(options);
-            var health = await _services.RuntimeController.CheckCandidateAsync(CancellationToken.None).ConfigureAwait(true);
+            var health = await _services.RuntimeController.CheckCandidateAsync(operation.Token).ConfigureAwait(true);
             RuntimeHealthResult = FormatHealthResult(health);
             CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
             StatusText = CanActivateRuntime
@@ -2516,6 +2583,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
             UpdateRuntimeStatus();
         }
+        catch (OperationCanceledException) when (operation.IsCancellationRequested)
+        {
+            RuntimeHealthResult = "Runtime check cancelled.";
+            StatusText = "Runtime check cancelled.";
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            UpdateRuntimeStatus();
+        }
         catch (Exception ex)
         {
             RuntimeHealthResult = ex.Message;
@@ -2524,6 +2598,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         finally
         {
+            CompleteUiOperation(operation);
             IsBusy = false;
         }
     }
@@ -2600,6 +2675,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
+            using var operation = CreateLinkedTimeout(TimeSpan.FromSeconds(10));
             var report = await _services.Orchestrator.Corrections.FlagIncorrectAsync(
                 _conversationId,
                 message.SourceUserMessageId,
@@ -2611,11 +2687,15 @@ public sealed class MainWindowViewModel : ObservableObject
                 message.SourceAttachmentCount > 0 ? CorrectionCategory.MisreadScreenshot : CorrectionCategory.Other,
                 userNote: "Flagged from WPF bootstrap chat.",
                 voiceMetadata: message.SourceVoiceMetadata,
-                cancellationToken: CancellationToken.None).ConfigureAwait(true);
+                cancellationToken: operation.Token).ConfigureAwait(true);
 
             message.MarkCorrection(report.Id);
             SaveActiveConversation();
             StatusText = $"Flagged for correction: {report.Id}";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Correction queue write cancelled.";
         }
         catch (Exception ex)
         {
@@ -2628,7 +2708,8 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             var selectedId = SelectedCorrectionReviewItem?.Id;
-            var reports = await _services.Orchestrator.Corrections.ListAsync(CancellationToken.None).ConfigureAwait(true);
+            using var operation = CreateLinkedTimeout(TimeSpan.FromSeconds(10));
+            var reports = await _services.Orchestrator.Corrections.ListAsync(operation.Token).ConfigureAwait(true);
 
             CorrectionReviewItems.Clear();
             CorrectionReviewItemViewModel? selected = null;
@@ -2646,6 +2727,10 @@ public sealed class MainWindowViewModel : ObservableObject
             CorrectionReviewStatusText = reports.Count == 0
                 ? "Correction queue is empty."
                 : $"Loaded {reports.Count} local correction report(s).";
+        }
+        catch (OperationCanceledException)
+        {
+            CorrectionReviewStatusText = "Correction queue load cancelled.";
         }
         catch (Exception ex)
         {
@@ -2670,11 +2755,21 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var updated = await _services.Orchestrator.Corrections.SetStatusAsync(
-                SelectedCorrectionReviewItem.Id,
-                status,
-                CancellationToken.None)
-            .ConfigureAwait(true);
+        CorrectionReport? updated;
+        try
+        {
+            using var operation = CreateLinkedTimeout(TimeSpan.FromSeconds(10));
+            updated = await _services.Orchestrator.Corrections.SetStatusAsync(
+                    SelectedCorrectionReviewItem.Id,
+                    status,
+                    operation.Token)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            CorrectionReviewStatusText = "Correction update cancelled.";
+            return;
+        }
 
         if (updated is null)
         {
@@ -2694,11 +2789,21 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var path = await _services.Orchestrator.Corrections.ExportOneMarkdownAsync(
-                SelectedCorrectionReviewItem.Id,
-                CorrectionExportDirectory(),
-                CancellationToken.None)
-            .ConfigureAwait(true);
+        string? path;
+        try
+        {
+            using var operation = CreateLinkedTimeout(TimeSpan.FromSeconds(15));
+            path = await _services.Orchestrator.Corrections.ExportOneMarkdownAsync(
+                    SelectedCorrectionReviewItem.Id,
+                    CorrectionExportDirectory(),
+                    operation.Token)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            CorrectionReviewStatusText = "Correction export cancelled.";
+            return;
+        }
 
         if (path is null)
         {
@@ -2713,10 +2818,20 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task ExportAllCorrectionsAsync()
     {
-        var path = await _services.Orchestrator.Corrections.ExportAllMarkdownAsync(
-                CorrectionExportDirectory(),
-                CancellationToken.None)
-            .ConfigureAwait(true);
+        string path;
+        try
+        {
+            using var operation = CreateLinkedTimeout(TimeSpan.FromSeconds(20));
+            path = await _services.Orchestrator.Corrections.ExportAllMarkdownAsync(
+                    CorrectionExportDirectory(),
+                    operation.Token)
+                .ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            CorrectionReviewStatusText = "Correction queue export cancelled.";
+            return;
+        }
 
         CorrectionReviewStatusText = $"Exported correction queue: {path}";
     }
@@ -3523,7 +3638,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
-            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, CancellationToken.None).ConfigureAwait(true);
+            using var refresh = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+            refresh.CancelAfter(TimeSpan.FromSeconds(10));
+            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, refresh.Token).ConfigureAwait(true);
             if (installedChoices.Count == 0)
             {
                 EnsureRuntimeModelChoicesAvailable(currentModel);
@@ -3542,6 +3659,11 @@ public sealed class MainWindowViewModel : ObservableObject
                 preferredOutputLimit: currentOutputLimit,
                 resetToSmallest: string.IsNullOrWhiteSpace(currentModel));
             RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed local model(s).";
+        }
+        catch (OperationCanceledException)
+        {
+            EnsureRuntimeModelChoicesAvailable(currentModel);
+            RuntimeSelectionStatusText = "Installed model refresh cancelled.";
         }
         catch (Exception ex)
         {

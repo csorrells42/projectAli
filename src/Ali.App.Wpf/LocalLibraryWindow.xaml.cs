@@ -14,6 +14,7 @@ public partial class LocalLibraryWindow : Window
 {
     private readonly AliServices _services;
     private LocalVectorLibrarySettings _settings;
+    private CancellationTokenSource? _scanCancellation;
 
     public LocalLibraryWindow(AliServices services)
     {
@@ -92,6 +93,9 @@ public partial class LocalLibraryWindow : Window
 
         ScanButton.IsEnabled = false;
         StatusText.Text = "Scanning local library and updating vector index...";
+        _scanCancellation?.Cancel();
+        _scanCancellation?.Dispose();
+        _scanCancellation = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         try
         {
             var retriever = _services.CreateLocalVectorLibraryRetriever();
@@ -104,7 +108,7 @@ public partial class LocalLibraryWindow : Window
                         "local library document folder scan",
                         ["local", "library", "document", "folder"],
                         ["local_documents"]),
-                    CancellationToken.None)
+                    _scanCancellation.Token)
                 .ConfigureAwait(true);
 
             RefreshIndexSummary();
@@ -112,19 +116,34 @@ public partial class LocalLibraryWindow : Window
                 ? $"Scan complete. Retrieved {result.Excerpts.Count} local library excerpt(s) for the scan probe."
                 : $"Scan complete with note: {string.Join(" ", result.Warnings)}";
         }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Local library scan cancelled.";
+        }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
             StatusText.Text = $"Local library scan failed safely: {ex.Message}";
         }
         finally
         {
+            _scanCancellation?.Dispose();
+            _scanCancellation = null;
             ScanButton.IsEnabled = true;
         }
     }
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
     {
+        _scanCancellation?.Cancel();
         Close();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _scanCancellation?.Cancel();
+        _scanCancellation?.Dispose();
+        _scanCancellation = null;
+        base.OnClosed(e);
     }
 
     private bool SaveSettingsFromView()

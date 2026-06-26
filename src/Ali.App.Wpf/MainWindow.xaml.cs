@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         _closing = true;
         if (DataContext is MainWindowViewModel viewModel)
         {
+            viewModel.RequestShutdownCancellation();
             if (_startupTask is { IsCompleted: false })
             {
                 await _startupTask.ConfigureAwait(true);
