@@ -25,6 +25,7 @@ public enum CodingToolAction
     SuggestLastFailurePatch,
     ListPackages,
     ListOutdatedPackages,
+    AddPackage,
     SearchWorkspace,
     ReadFile,
     CreateFile,

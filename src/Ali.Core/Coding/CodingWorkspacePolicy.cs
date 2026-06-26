@@ -228,6 +228,12 @@ public sealed class CodingWorkspacePolicy
             CodingToolAction.ListPackages =>
                 CodingToolPermissionKind.Deny.AsPermission("Package inspection is limited to the approved coding workspace."),
 
+            CodingToolAction.AddPackage when insideWorkspace =>
+                EvaluateBuildTestRun(fullPath, request),
+
+            CodingToolAction.AddPackage =>
+                CodingToolPermissionKind.Deny.AsPermission("Package install is limited to the approved coding workspace."),
+
             _ when IsEditAction(request.Action) && insideWorkspace =>
                 EvaluateEdit(request),
 
@@ -287,19 +293,19 @@ public sealed class CodingWorkspacePolicy
         if (!IsInsideWorkspace(fullPath))
         {
             return CodingToolPermissionKind.RequireConfirmation.AsPermission(
-                "Build, test, restore, and run actions are limited to the approved coding workspace.");
+                "Build, test, restore, package install, and run actions are limited to the approved coding workspace.");
         }
 
         if (!AllowConfirmedBuildTestRunInsideWorkspace)
         {
             return CodingToolPermissionKind.Deny.AsPermission(
-                "Build, test, restore, and run actions are disabled in coding permissions.");
+                "Build, test, restore, package install, and run actions are disabled in coding permissions.");
         }
 
         return request.UserConfirmed
-            ? CodingToolPermissionKind.Allow.AsPermission("Confirmed build/test/restore/run action inside the approved coding workspace is allowed.")
+            ? CodingToolPermissionKind.Allow.AsPermission("Confirmed build/test/restore/package-install/run action inside the approved coding workspace is allowed.")
             : CodingToolPermissionKind.RequireConfirmation.AsPermission(
-                "Build, test, restore, and run actions need an explicit confirmation phrase before execution.");
+                "Build, test, restore, package install, and run actions need an explicit confirmation phrase before execution.");
     }
 
     private static bool IsBuildTestRun(CodingToolAction action) =>
@@ -307,6 +313,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.Test
             or CodingToolAction.Restore
             or CodingToolAction.ListOutdatedPackages
+            or CodingToolAction.AddPackage
             or CodingToolAction.RunProject;
 
     private CodingToolPermission EvaluateEdit(CodingToolRequest request)

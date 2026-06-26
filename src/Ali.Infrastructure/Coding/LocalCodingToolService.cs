@@ -189,7 +189,8 @@ public sealed class LocalCodingToolService(
                 await EditFileAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.OpenSolution => await OpenSolutionAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.Build or CodingToolAction.Test or CodingToolAction.Restore
-                or CodingToolAction.ListOutdatedPackages or CodingToolAction.RunProject =>
+                or CodingToolAction.ListOutdatedPackages or CodingToolAction.AddPackage
+                or CodingToolAction.RunProject =>
                 await RunDotNetCommandAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.GitStatus or CodingToolAction.GitDiff or CodingToolAction.GitLog
                 or CodingToolAction.GitAdd or CodingToolAction.GitCommit or CodingToolAction.GitMerge
@@ -370,7 +371,7 @@ public sealed class LocalCodingToolService(
         lines.Add("Permission gates:");
         lines.Add("- Read/open/search/inspect inside the approved workspace can proceed as read-only actions.");
         lines.Add("- File writes require an explicit confirmation phrase before Ali changes files.");
-        lines.Add("- Build, test, restore, and run require confirmation before execution.");
+        lines.Add("- Build, test, restore, package install, and run require confirmation before execution.");
         lines.Add("- Git write/network actions follow the Git permission settings and may be blocked.");
 
         return Task.FromResult(new CodingTaskPlan(
@@ -613,6 +614,14 @@ public sealed class LocalCodingToolService(
             "- analyze solution architecture",
             "- inspect coding workspace",
             $"- plan coding task {goal}",
+            "Confirmed execution commands available after the next step is clear:",
+            "- preview patch bundle",
+            "- confirm apply last patch preview",
+            "- confirm dotnet add package \"Package.Id\" to \"path\"",
+            "- confirm dotnet build \"path\"",
+            "- confirm dotnet test \"path\"",
+            "- confirm git add all",
+            "- confirm git commit \"message\"",
             "Stop boundaries:",
             "- Package lookup/install needs explicit approval.",
             "- File edits must go through preview/apply confirmation.",
@@ -1154,8 +1163,11 @@ public sealed class LocalCodingToolService(
         lines.Add("- show pending patch preview");
         lines.Add("- confirm apply last patch preview");
         lines.Add("- suggest patch from last failure");
+        lines.Add("- confirm dotnet add package \"Package.Id\" to \"path\"");
         lines.Add("- confirm dotnet build \"path\"");
         lines.Add("- diagnose last build failure");
+        lines.Add("- confirm git add all");
+        lines.Add("- confirm git commit \"message\"");
         lines.Add("- generate visual studio integration plan");
         lines.Add("- show coding receipts");
 
@@ -2491,7 +2503,12 @@ public sealed class LocalCodingToolService(
             return new CodingToolResult(true, false, error, "dotnet", request.Path);
         }
 
-        var arguments = BuildDotNetArguments(request.Action, targetPath, workingDirectory);
+        if (request.Action == CodingToolAction.AddPackage && !TryValidatePackageInstall(request, out var packageError))
+        {
+            return new CodingToolResult(true, false, packageError, "dotnet", targetPath);
+        }
+
+        var arguments = BuildDotNetArguments(request, targetPath, workingDirectory);
         var run = await _commandRunner.RunAsync(
             "dotnet",
             arguments,
@@ -2504,6 +2521,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.Test => "Test",
             CodingToolAction.Restore => "Restore",
             CodingToolAction.ListOutdatedPackages => "Package update check",
+            CodingToolAction.AddPackage => "Package install",
             _ => "Run"
         };
         var output = MergeCommandOutput(run);
@@ -3105,6 +3123,32 @@ public sealed class LocalCodingToolService(
             targetPath = packageTarget;
         }
 
+        if (request.Action == CodingToolAction.AddPackage)
+        {
+            if (Directory.Exists(targetPath))
+            {
+                var packageDirectory = targetPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var projectTarget = EnumerateWorkspaceFiles()
+                    .Where(file => file.StartsWith(packageDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault();
+                if (projectTarget is null)
+                {
+                    error = $"Coding tool could not find a project under: {targetPath}";
+                    return false;
+                }
+
+                targetPath = projectTarget;
+            }
+
+            if (!targetPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "Package install target must be a .csproj file or a folder containing a .csproj file.";
+                return false;
+            }
+        }
+
         workingDirectory = Directory.Exists(targetPath)
             ? targetPath
             : Path.GetDirectoryName(targetPath) ?? Policy.WorkspaceRoot;
@@ -3193,11 +3237,23 @@ public sealed class LocalCodingToolService(
     }
 
     private static IReadOnlyList<string> BuildDotNetArguments(
-        CodingToolAction action,
+        CodingToolRequest request,
         string targetPath,
         string workingDirectory)
     {
-        return action switch
+        if (request.Action == CodingToolAction.AddPackage)
+        {
+            var arguments = new List<string> { "add", targetPath, "package", request.Query!.Trim() };
+            if (!string.IsNullOrWhiteSpace(request.Replacement))
+            {
+                arguments.Add("--version");
+                arguments.Add(request.Replacement.Trim());
+            }
+
+            return arguments;
+        }
+
+        return request.Action switch
         {
             CodingToolAction.Build => ["build", targetPath, "--no-restore"],
             CodingToolAction.Test => ["test", targetPath, "--no-restore"],
@@ -3207,6 +3263,35 @@ public sealed class LocalCodingToolService(
             CodingToolAction.RunProject => ["run", "--no-restore", "--project", targetPath],
             _ => ["--info"]
         };
+    }
+
+    private static bool TryValidatePackageInstall(CodingToolRequest request, out string error)
+    {
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(request.Query))
+        {
+            error = "Package install needs a package ID.";
+            return false;
+        }
+
+        var packageId = request.Query.Trim();
+        if (packageId.Length > 128 || packageId.Any(character => !(char.IsLetterOrDigit(character) || character is '.' or '-' or '_')))
+        {
+            error = "Package install package ID can only contain letters, digits, dots, dashes, and underscores.";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Replacement))
+        {
+            var version = request.Replacement.Trim();
+            if (version.Length > 80 || version.Any(character => !(char.IsLetterOrDigit(character) || character is '.' or '-' or '_' or '+')))
+            {
+                error = "Package install version can only contain letters, digits, dots, dashes, underscores, and plus signs.";
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryBuildGitArguments(
@@ -3398,6 +3483,7 @@ public sealed class LocalCodingToolService(
             or CodingToolAction.Test
             or CodingToolAction.Restore
             or CodingToolAction.ListOutdatedPackages
+            or CodingToolAction.AddPackage
             or CodingToolAction.RunProject))
         {
             return;

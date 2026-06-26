@@ -97,6 +97,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool diagnoses last failure", TestLocalCodingToolDiagnosesLastFailure),
     ("local coding tool suggests last failure patch", TestLocalCodingToolSuggestsLastFailurePatch),
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
+    ("local coding tool requires confirmation before package install", TestLocalCodingToolRequiresConfirmationBeforePackageInstall),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
@@ -618,6 +619,12 @@ static Task TestCodingParserRoutesPackageAndRestoreCommands()
     Equal(path, restoreRequest.Path);
     Equal(true, restoreRequest.UserConfirmed);
 
+    Equal(true, CodingToolRequestParser.TryParse($"confirm dotnet add package \"CommunityToolkit.Mvvm\" to \"{path}\"", out var addPackageRequest));
+    Equal(CodingToolAction.AddPackage, addPackageRequest.Action);
+    Equal(path, addPackageRequest.Path);
+    Equal("CommunityToolkit.Mvvm", addPackageRequest.Query);
+    Equal(true, addPackageRequest.UserConfirmed);
+
     Equal(true, CodingToolRequestParser.TryParse($"confirm check outdated packages \"{path}\"", out var outdatedRequest));
     Equal(CodingToolAction.ListOutdatedPackages, outdatedRequest.Action);
     Equal(path, outdatedRequest.Path);
@@ -909,7 +916,7 @@ static async Task TestLocalCodingToolPlansGuardedTask()
     Contains("Permission gates", result.Message);
     Contains("Impact checklist", result.Message);
     Contains("File writes require", result.Message);
-    Contains("Build, test, restore, and run require confirmation", result.Message);
+    Contains("Build, test, restore, package install, and run require confirmation", result.Message);
     Equal(0, runner.Runs.Count);
 }
 
@@ -1564,6 +1571,37 @@ static async Task TestLocalCodingToolRequiresConfirmationBeforeRestore()
     Equal(1, runner.Runs.Count);
     Equal("dotnet", runner.Runs[0].FileName);
     Equal($"restore {projectPath}", string.Join(" ", runner.Runs[0].Arguments));
+}
+
+static async Task TestLocalCodingToolRequiresConfirmationBeforePackageInstall()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Package added.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var needsConfirmation = await service.TryHandleAsync($"dotnet add package \"CommunityToolkit.Mvvm\" to \"{projectPath}\"", CancellationToken.None);
+
+    Equal(true, needsConfirmation.Handled);
+    Equal(false, needsConfirmation.Succeeded);
+    Contains("needs confirmation", needsConfirmation.Message);
+    Equal(0, runner.Runs.Count);
+    var confirmed = await service.TryHandleAsync($"confirm dotnet add package \"CommunityToolkit.Mvvm\" to \"{projectPath}\"", CancellationToken.None);
+
+    Equal(true, confirmed.Handled);
+    Equal(true, confirmed.Succeeded);
+    Contains("Package install passed", confirmed.Message);
+    Contains("dotnet add", confirmed.Message);
+    Equal(1, runner.Runs.Count);
+    Equal("dotnet", runner.Runs[0].FileName);
+    Equal($"add {projectPath} package CommunityToolkit.Mvvm", string.Join(" ", runner.Runs[0].Arguments));
 }
 
 static async Task TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck()

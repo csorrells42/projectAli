@@ -399,6 +399,15 @@ public static class CodingToolRequestParser
         "check dependency updates"
     ];
 
+    private static readonly string[] AddPackagePrefixes =
+    [
+        "dotnet add package",
+        "add package",
+        "install package",
+        "add nuget package",
+        "install nuget package"
+    ];
+
     private static readonly string[] BuildPrefixes =
     [
         "dotnet build",
@@ -806,12 +815,77 @@ public static class CodingToolRequestParser
     private static bool TryParsePackages(string text, bool userConfirmed, out CodingToolRequest request)
     {
         request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        if (TryParseAddPackage(text, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (!TryParseWorkspaceCommand(text, PackagePrefixes, CodingToolAction.ListPackages, userConfirmed, out request))
         {
             return TryParseWorkspaceCommand(text, OutdatedPackagePrefixes, CodingToolAction.ListOutdatedPackages, userConfirmed, out request);
         }
 
         return true;
+    }
+
+    private static bool TryParseAddPackage(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = AddPackagePrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var segments = ExtractQuotedSegments(text);
+        if (segments.Count >= 2)
+        {
+            request = new CodingToolRequest(
+                CodingToolAction.AddPackage,
+                segments[1].Trim(),
+                ExplicitUserPath: true,
+                UserConfirmed: userConfirmed,
+                Query: segments[0].Trim());
+            return !string.IsNullOrWhiteSpace(request.Query)
+                   && !string.IsNullOrWhiteSpace(request.Path);
+        }
+
+        var remainder = text[prefix.Length..].Trim();
+        if (remainder.Length == 0)
+        {
+            return false;
+        }
+
+        var pathPrefix = " to ";
+        var pathIndex = remainder.IndexOf(pathPrefix, StringComparison.OrdinalIgnoreCase);
+        if (pathIndex < 0)
+        {
+            pathPrefix = " in ";
+            pathIndex = remainder.IndexOf(pathPrefix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (pathIndex < 0)
+        {
+            request = new CodingToolRequest(
+                CodingToolAction.AddPackage,
+                null,
+                UserConfirmed: userConfirmed,
+                Query: remainder.Trim().Trim('"'));
+            return true;
+        }
+
+        var packageId = remainder[..pathIndex].Trim().Trim('"');
+        var path = remainder[(pathIndex + pathPrefix.Length)..].Trim().Trim('"');
+        request = new CodingToolRequest(
+            CodingToolAction.AddPackage,
+            path,
+            ExplicitUserPath: true,
+            UserConfirmed: userConfirmed,
+            Query: packageId);
+        return !string.IsNullOrWhiteSpace(packageId)
+               && !string.IsNullOrWhiteSpace(path);
     }
 
     private static bool TryParseRead(string text, bool userConfirmed, out CodingToolRequest request)

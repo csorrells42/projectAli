@@ -121,6 +121,7 @@ Useful commands:
 - `show visual studio integration`
 - `generate visual studio integration plan`
 - `list packages`
+- `confirm dotnet add package "CommunityToolkit.Mvvm" to "C:\path\to\project.csproj"`
 - `search workspace for WidgetFactory`
 - `read file "C:\path\to\file.cs" at line 42`
 - `plan coding task fix the build`
@@ -158,7 +159,8 @@ Patch bundles are limited to exact literal replacements inside the approved codi
 
 Build and diagnostic workflow:
 
-- Build/test/run commands require confirmation.
+- Build/test/run/restore/package-install commands require confirmation.
+- Use `confirm dotnet add package "Package.Id" to "C:\path\to\project.csproj"` to install a NuGet package into a project.
 - Use `confirm dotnet build "C:\path\to\project-or-solution"` to run a guarded build.
 - If a build or test fails, use `diagnose last build failure`.
 - Use `open build error` to open the first diagnostic file at the reported line.
@@ -168,6 +170,7 @@ Git workflow:
 
 - Read-only commands such as `git status`, `git diff`, and `git log` are allowed when Git permissions are enabled.
 - `git add`, `git commit`, and `git merge` require confirmation and follow the configured Git permission gates.
+- Use `confirm git add all` and then `confirm git commit "message"` when you want Ali to write a commit.
 - `git pull` and `git push` remain blocked unless network Git operations are deliberately enabled later.
 
 Ali does not silently change files, run builds, restore packages, or write Git history. Tool results are recorded as coding receipts so Ali can report what actually happened.
