@@ -17,6 +17,15 @@
       <Group guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" priority="0x0100">
         <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsMenu" />
       </Group>
+      <Group guid="guidAliCompanionCommandSet" id="AliCompanionSolutionNodeGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_SOLNNODE" />
+      </Group>
+      <Group guid="guidAliCompanionCommandSet" id="AliCompanionProjectNodeGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_PROJNODE" />
+      </Group>
+      <Group guid="guidAliCompanionCommandSet" id="AliCompanionItemNodeGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE" />
+      </Group>
     </Groups>
 
     <Buttons>
@@ -62,6 +71,27 @@
           <ButtonText>Ali: Preview Replace Selection</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidAliCompanionCommandSet" id="ReadSelectedNodeCommand" priority="0x0250" type="Button">
+        <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Read Selected Node</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidAliCompanionCommandSet" id="BuildSelectedNodeCommand" priority="0x0260" type="Button">
+        <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Build Selected Node</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidAliCompanionCommandSet" id="PlanSelectedNodeCommand" priority="0x0270" type="Button">
+        <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
+        <Strings>
+          <ButtonText>Ali: Plan Selected Node</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
 
     <Bitmaps>
@@ -88,6 +118,24 @@
     <CommandPlacement guid="guidAliCompanionCommandSet" id="PreviewReplaceSelectionCommand" priority="0x0150">
       <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
     </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="ReadSelectedNodeCommand" priority="0x0210">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionItemNodeGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="BuildSelectedNodeCommand" priority="0x0210">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionSolutionNodeGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="BuildSelectedNodeCommand" priority="0x0210">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionProjectNodeGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="PlanSelectedNodeCommand" priority="0x0220">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionSolutionNodeGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="PlanSelectedNodeCommand" priority="0x0220">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionProjectNodeGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="PlanSelectedNodeCommand" priority="0x0220">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionItemNodeGroup" />
+    </CommandPlacement>
   </CommandPlacements>
 
   <Symbols>
@@ -99,8 +147,14 @@
       <IDSymbol name="SearchSelectionCommand" value="0x0103" />
       <IDSymbol name="PlanSelectionCommand" value="0x0104" />
       <IDSymbol name="PreviewReplaceSelectionCommand" value="0x0105" />
+      <IDSymbol name="ReadSelectedNodeCommand" value="0x0106" />
+      <IDSymbol name="BuildSelectedNodeCommand" value="0x0107" />
+      <IDSymbol name="PlanSelectedNodeCommand" value="0x0108" />
       <IDSymbol name="AliCompanionToolsMenu" value="0x0200" />
       <IDSymbol name="AliCompanionToolsGroup" value="0x0201" />
+      <IDSymbol name="AliCompanionSolutionNodeGroup" value="0x0202" />
+      <IDSymbol name="AliCompanionProjectNodeGroup" value="0x0203" />
+      <IDSymbol name="AliCompanionItemNodeGroup" value="0x0204" />
     </GuidSymbol>
     <GuidSymbol name="guidAliCompanionImages" value="{d7de1e3b-871f-45bb-9a53-37d050b39d74}">
       <IDSymbol name="AliCompanionCommandIcon" value="1" />

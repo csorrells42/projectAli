@@ -13,6 +13,9 @@ internal sealed class AliCompanionCommand
     public const int SearchSelectionCommandId = 0x0103;
     public const int PlanSelectionCommandId = 0x0104;
     public const int PreviewReplaceSelectionCommandId = 0x0105;
+    public const int ReadSelectedNodeCommandId = 0x0106;
+    public const int BuildSelectedNodeCommandId = 0x0107;
+    public const int PlanSelectedNodeCommandId = 0x0108;
     public static readonly Guid CommandSet = new("1c60cf1b-8401-43c2-baf1-1636f492dd04");
 
     private readonly AliCompanionPackage _package;
@@ -41,6 +44,9 @@ internal sealed class AliCompanionCommand
             _ = new AliCompanionCommand(package, commandService, SearchSelectionCommandId, AliCompanionAction.SearchSelection);
             _ = new AliCompanionCommand(package, commandService, PlanSelectionCommandId, AliCompanionAction.PlanSelection);
             _ = new AliCompanionCommand(package, commandService, PreviewReplaceSelectionCommandId, AliCompanionAction.PreviewReplaceSelection);
+            _ = new AliCompanionCommand(package, commandService, ReadSelectedNodeCommandId, AliCompanionAction.ReadSelectedNode);
+            _ = new AliCompanionCommand(package, commandService, BuildSelectedNodeCommandId, AliCompanionAction.BuildSelectedNode);
+            _ = new AliCompanionCommand(package, commandService, PlanSelectedNodeCommandId, AliCompanionAction.PlanSelectedNode);
         }
     }
 
@@ -68,5 +74,8 @@ internal enum AliCompanionAction
     BuildActiveSolution,
     SearchSelection,
     PlanSelection,
-    PreviewReplaceSelection
+    PreviewReplaceSelection,
+    ReadSelectedNode,
+    BuildSelectedNode,
+    PlanSelectedNode
 }

@@ -79,6 +79,15 @@ public sealed class AliCompanionToolWindowControl : UserControl
             case AliCompanionAction.PreviewReplaceSelection:
                 FillPatchSelectionCommand();
                 break;
+            case AliCompanionAction.ReadSelectedNode:
+                FillReadSelectedNodeCommand();
+                break;
+            case AliCompanionAction.BuildSelectedNode:
+                FillBuildSelectedNodeCommand();
+                break;
+            case AliCompanionAction.PlanSelectedNode:
+                FillPlanSelectedNodeCommand();
+                break;
             default:
                 SetCommand("show visual studio integration");
                 break;
@@ -590,6 +599,116 @@ public sealed class AliCompanionToolWindowControl : UserControl
         ShowSelectionPackagePreview("Patch Selection", filePath!, packagedPatch, _lastContext.SelectedText);
         SetCommand($"preview replace in file {Quote(filePath!)} {Quote(packagedPatch)} with \"replacement text\"", clearSelectionPreview: false);
     }
+
+    private void FillReadSelectedNodeCommand()
+    {
+        var node = GetSelectedSolutionExplorerNode();
+        if (node is null)
+        {
+            ShowMissingContext("Select a file node in Solution Explorer first.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(node.FilePath))
+        {
+            ShowMissingContext("The selected Solution Explorer node is not a readable file.");
+            return;
+        }
+
+        SetCommand($"read file {Quote(node.FilePath!)}");
+        ShowSelectionPackagePreview("Solution Explorer Node", node.DisplayTarget, node.DisplayTarget, node.DisplayTarget);
+    }
+
+    private void FillBuildSelectedNodeCommand()
+    {
+        var node = GetSelectedSolutionExplorerNode();
+        if (node is null)
+        {
+            ShowMissingContext("Select a solution or project node in Solution Explorer first.");
+            return;
+        }
+
+        var targetPath = !string.IsNullOrWhiteSpace(node.ProjectPath)
+            ? node.ProjectPath
+            : node.SolutionPath;
+        if (string.IsNullOrWhiteSpace(targetPath))
+        {
+            ShowMissingContext("The selected Solution Explorer node does not have a buildable project or solution path.");
+            return;
+        }
+
+        SetCommand($"confirm dotnet build {Quote(targetPath!)}");
+        ShowSelectionPackagePreview("Solution Explorer Build", node.DisplayTarget, targetPath!, node.DisplayTarget);
+    }
+
+    private void FillPlanSelectedNodeCommand()
+    {
+        var node = GetSelectedSolutionExplorerNode();
+        if (node is null)
+        {
+            ShowMissingContext("Select a node in Solution Explorer first.");
+            return;
+        }
+
+        SetCommand($"plan coding task review selected {node.Kind} {Quote(node.DisplayTarget)}");
+        ShowSelectionPackagePreview("Solution Explorer Plan", node.DisplayTarget, node.DisplayTarget, node.DisplayTarget);
+    }
+
+    private static SolutionExplorerNode? GetSelectedSolutionExplorerNode()
+    {
+        try
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            var dte = Package.GetGlobalService(typeof(SDTE)) as DTE2;
+            var selectedItems = dte?.SelectedItems;
+            if (dte is null || selectedItems is null || selectedItems.Count < 1)
+            {
+                return null;
+            }
+
+            var selected = selectedItems.Item(1);
+            var solutionPath = BlankPath(dte.Solution?.FullName);
+            if (selected.ProjectItem is ProjectItem projectItem)
+            {
+                var filePath = BlankPath(GetProjectItemFilePath(projectItem));
+                var projectPath = BlankPath(projectItem.ContainingProject?.FullName);
+                return new SolutionExplorerNode("file", selected.Name, filePath, projectPath, solutionPath);
+            }
+
+            if (selected.Project is Project project)
+            {
+                var projectPath = BlankPath(project.FullName);
+                return new SolutionExplorerNode("project", project.Name, null, projectPath, solutionPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(solutionPath))
+            {
+                return new SolutionExplorerNode("solution", Path.GetFileName(solutionPath), null, null, solutionPath);
+            }
+
+            return null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string? GetProjectItemFilePath(ProjectItem projectItem)
+    {
+        try
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return projectItem.FileCount > 0 ? projectItem.FileNames[1] : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string? BlankPath(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 
     private async Task SendAsync(Uri uri, string? body, string statusPrefix)
     {
@@ -1343,5 +1462,35 @@ public sealed class AliCompanionToolWindowControl : UserControl
         public int? LineNumber { get; }
 
         public string? SelectedText { get; }
+    }
+
+    private sealed class SolutionExplorerNode
+    {
+        public SolutionExplorerNode(
+            string kind,
+            string? name,
+            string? filePath,
+            string? projectPath,
+            string? solutionPath)
+        {
+            Kind = kind;
+            Name = string.IsNullOrWhiteSpace(name) ? kind : name!;
+            FilePath = filePath;
+            ProjectPath = projectPath;
+            SolutionPath = solutionPath;
+        }
+
+        public string Kind { get; }
+
+        public string Name { get; }
+
+        public string? FilePath { get; }
+
+        public string? ProjectPath { get; }
+
+        public string? SolutionPath { get; }
+
+        public string DisplayTarget =>
+            FilePath ?? ProjectPath ?? SolutionPath ?? Name;
     }
 }
