@@ -16,10 +16,10 @@ This list tracks the Visual Studio plugin polish path while keeping Ali's curren
 - Dedicated output tabs for response, diagnostics, receipts, and pending patch.
 - Diagnostic list with double-click open for compiler-style file/line output.
 - Visual Studio options page for helper URL, command history limit, and selected-text context behavior.
+- Real icon, Project Ali branding metadata, and packaged extension identity polish.
 
 ## Next
 
-- Real icon, branding pass, and marketplace-ready metadata.
 - Installer/update notes for Community versus future Visual Studio editions.
 
 ## Guardrails

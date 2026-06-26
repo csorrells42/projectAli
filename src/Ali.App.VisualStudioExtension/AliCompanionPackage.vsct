@@ -7,17 +7,25 @@
     <Buttons>
       <Button guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0100" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
+        <Icon guid="guidAliCompanionImages" id="AliCompanionCommandIcon" />
         <Strings>
           <ButtonText>Ali Companion</ButtonText>
         </Strings>
       </Button>
     </Buttons>
+
+    <Bitmaps>
+      <Bitmap guid="guidAliCompanionImages" href="Resources\AliCompanionCommandIcon.png" usedList="AliCompanionCommandIcon" />
+    </Bitmaps>
   </Commands>
 
   <Symbols>
     <GuidSymbol name="guidAliCompanionPackage" value="{af94ca1b-cbb3-4c03-bd44-9ed0654e6931}" />
     <GuidSymbol name="guidAliCompanionCommandSet" value="{1c60cf1b-8401-43c2-baf1-1636f492dd04}">
       <IDSymbol name="OpenAliCompanionCommand" value="0x0100" />
+    </GuidSymbol>
+    <GuidSymbol name="guidAliCompanionImages" value="{d7de1e3b-871f-45bb-9a53-37d050b39d74}">
+      <IDSymbol name="AliCompanionCommandIcon" value="1" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>
