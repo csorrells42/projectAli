@@ -16,6 +16,7 @@ public enum CodingToolAction
     ApproveLastRoadmap,
     StartApprovedRoadmap,
     ShowActiveRoadmapStep,
+    ShowNextRoadmapAction,
     AdvanceRoadmapStep,
     PauseRoadmap,
     ResumeRoadmap,

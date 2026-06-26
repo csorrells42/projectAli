@@ -383,7 +383,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         var panel = new StackPanel();
         AddContextGroup(panel);
         AddGroup(panel, "Awareness", ("VS Status", "show visual studio integration"), ("Architecture", "analyze solution architecture"));
-        AddGroup(panel, "Plan", ("Active Step", "show active roadmap step"), ("Recovery", "show crash recovery status"));
+        AddGroup(panel, "Plan", ("Next Action", "show next coding action"), ("Active Step", "show active roadmap step"), ("Recovery", "show crash recovery status"));
         AddGroup(panel, "Build", ("Build", "confirm dotnet build \"path\""), ("Diagnose", "diagnose last build failure"));
         AddGroup(panel, "Git and Reports", ("Git Status", "git status"), ("Report", "generate coding report"));
         return panel;

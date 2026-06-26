@@ -177,6 +177,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ApproveLastRoadmap => ApproveLastRoadmap(),
             CodingToolAction.StartApprovedRoadmap => StartApprovedRoadmap(),
             CodingToolAction.ShowActiveRoadmapStep => ShowActiveRoadmapStep(),
+            CodingToolAction.ShowNextRoadmapAction => await ShowNextRoadmapActionAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
             CodingToolAction.PauseRoadmap => PauseRoadmap(),
             CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
@@ -659,6 +660,7 @@ public sealed class LocalCodingToolService(
             "Phase 1: active roadmap step tracking.",
             $"Current step: {FormatRoadmapCurrentStep(_roadmapState)}",
             "Recommended next Ali commands:",
+            "- show next coding action",
             "- show active roadmap step",
             "- analyze solution architecture",
             "- inspect coding workspace",
@@ -705,6 +707,85 @@ public sealed class LocalCodingToolService(
             true,
             FormatRoadmapStatus(_roadmapState, includeRecoveryPath: true),
             "Roadmap execution",
+            Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowNextRoadmapActionAsync(CancellationToken cancellationToken)
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+
+        var lines = new List<string>
+        {
+            "Next coding action:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Primary target: {primaryTarget}",
+            "No files were changed."
+        };
+
+        if (_roadmapState is null)
+        {
+            lines.Add("Roadmap state: none active.");
+            lines.Add("Recommended action: draft and approve a roadmap before execution.");
+            lines.Add("Exact safe commands:");
+            lines.Add("- explore build idea <goal>");
+            lines.Add("- draft implementation roadmap <goal>");
+            lines.Add("- approve last roadmap");
+            lines.Add("- start approved roadmap");
+            lines.Add("Confidence: high. Ali has no active roadmap to continue yet.");
+            lines.Add("Stop rule: do not edit, install packages, build, test, or commit until an approved roadmap or explicit confirmed command exists.");
+            return new CodingToolResult(
+                true,
+                true,
+                string.Join(Environment.NewLine, lines),
+                "Next coding action",
+                Policy.WorkspaceRoot);
+        }
+
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+
+        lines.Add($"Goal: {_roadmapState.Goal}");
+        lines.Add($"Status: {DescribeRoadmapState(_roadmapState)}");
+        lines.Add($"Current step: {FormatRoadmapCurrentStep(_roadmapState)}");
+        lines.Add($"Git: {gitStatus.Summary}");
+        if (latestReceipt is null)
+        {
+            lines.Add("Latest receipt: none");
+        }
+        else
+        {
+            var target = string.IsNullOrWhiteSpace(latestReceipt.TargetPath) ? string.Empty : $" target={latestReceipt.TargetPath}";
+            var exit = latestReceipt.ExitCode is null ? string.Empty : $" exit={latestReceipt.ExitCode.Value}";
+            lines.Add($"Latest receipt: {latestReceipt.Timestamp:u} {latestReceipt.Action} {(latestReceipt.Succeeded ? "succeeded" : "failed")}{exit}{target}");
+        }
+
+        var recommendation = BuildNextRoadmapRecommendation(_roadmapState, gitStatus, latestDotNetReceipt, primaryTarget);
+        lines.Add($"Recommended action: {recommendation.Action}");
+        lines.Add($"Confidence: {recommendation.Confidence}");
+        lines.Add("Why:");
+        lines.AddRange(recommendation.Reasons.Select(reason => $"- {reason}"));
+        lines.Add("Exact safe commands:");
+        lines.AddRange(recommendation.Commands.Select(command => $"- {command}"));
+        lines.Add("Approval gates:");
+        lines.Add("- Preview/edit commands still require preview plus explicit apply confirmation.");
+        lines.Add("- Build, test, restore, run, and package install commands still require confirmation.");
+        lines.Add("- Git write/network commands still follow Git permission gates.");
+        lines.Add("Stop and compare options when:");
+        lines.Add("- Git has unexpected changes.");
+        lines.Add("- The last build/test/package receipt failed and no deterministic patch suggestion is available.");
+        lines.Add("- The next step requires a package, library, or external tool that has not been approved for lookup/install.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Next coding action",
             Policy.WorkspaceRoot);
     }
 
@@ -1131,6 +1212,7 @@ public sealed class LocalCodingToolService(
         else
         {
             lines.Add("- plan coding task <current step>");
+            lines.Add("- show next coding action");
             lines.Add("- preview patch bundle");
             lines.Add("- confirm dotnet build \"path\"");
             lines.Add("- mark roadmap step complete");
@@ -1143,6 +1225,139 @@ public sealed class LocalCodingToolService(
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static RoadmapNextActionRecommendation BuildNextRoadmapRecommendation(
+        RoadmapExecutionState state,
+        GitWorkingTreeStatus gitStatus,
+        CodingReceipt? latestDotNetReceipt,
+        string primaryTarget)
+    {
+        if (!state.Approved)
+        {
+            return new RoadmapNextActionRecommendation(
+                "approve the roadmap or revise it before execution",
+                "high. Approval state is explicit.",
+                ["The roadmap exists but is still pending approval.", "Approving a roadmap changes only Ali's local planning state."],
+                ["approve last roadmap", "show pending roadmap"]);
+        }
+
+        if (!state.Started)
+        {
+            return new RoadmapNextActionRecommendation(
+                "start the approved roadmap",
+                "high. The roadmap is approved and waiting to start.",
+                ["Starting records execution state without changing code.", "After start, Ali can track the current step and recovery file."],
+                ["start approved roadmap", "show active roadmap step"]);
+        }
+
+        if (state.Paused)
+        {
+            return new RoadmapNextActionRecommendation(
+                "resume the roadmap or inspect recovery before changing anything",
+                "high. The roadmap is intentionally paused.",
+                ["Paused state should be cleared before step work continues.", "Recovery status can compare receipts and Git state first."],
+                ["show crash recovery status", "resume roadmap"]);
+        }
+
+        if (state.Finished)
+        {
+            return new RoadmapNextActionRecommendation(
+                "generate a report or commit the completed phase after review",
+                "medium. The roadmap is finished, but Git state still decides the final closeout path.",
+                ["Finished roadmap state does not prove Git is clean or committed.", "A report captures receipts for handoff."],
+                ["show coding receipts", "generate coding report", "git status", "confirm git commit \"message\""]);
+        }
+
+        if (gitStatus.HasUncommittedChanges)
+        {
+            return new RoadmapNextActionRecommendation(
+                "review the working tree before continuing",
+                "high. Git reports uncommitted changes.",
+                ["Unexpected or unreviewed changes can make roadmap recovery misleading.", "Read-only Git inspection is allowed before deciding whether to continue, patch, or commit."],
+                ["git status", "git diff", "show crash recovery status"]);
+        }
+
+        if (latestDotNetReceipt is { Succeeded: false })
+        {
+            return new RoadmapNextActionRecommendation(
+                "diagnose the failed validation and preview a fix only if evidence is concrete",
+                "high. The latest dotnet-style receipt failed.",
+                ["A failed build/test/package receipt blocks marking the step complete.", "Ali can suggest a deterministic patch only for failure shapes she understands."],
+                ["diagnose last build failure", "suggest patch from last failure", "show crash recovery status"]);
+        }
+
+        var step = state.Steps.Count == 0
+            ? string.Empty
+            : state.Steps[Math.Clamp(state.CurrentStepIndex, 0, state.Steps.Count - 1)];
+        if (MentionsAny(step, "Clarify", "owner", "behavior", "non-goals"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "clarify the owner-visible behavior and boundaries",
+                "medium. This is a planning step, so the output depends on the goal wording.",
+                ["No code action is needed yet.", "A build idea scout can compare paths and libraries without claiming current package versions."],
+                [$"explore build idea {state.Goal}", $"plan coding task {step}"]);
+        }
+
+        if (MentionsAny(step, "Inspect", "architecture", "impact surface"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "inspect architecture and identify the smallest impact surface",
+                "high. These are read-only workspace commands.",
+                ["Architecture and workspace inspection are deterministic local reads.", "This should happen before selecting files to edit."],
+                ["analyze solution architecture", "inspect coding workspace", $"plan coding task {state.Goal}"]);
+        }
+
+        if (MentionsAny(step, "Plan", "exact next", "code", "package", "build action"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "create the exact next guarded task plan",
+                "medium. Ali can plan safely, but execution still needs approval.",
+                ["The current step is about choosing the next concrete action.", "Package lookup/install, edits, builds, and Git writes remain gated."],
+                [$"plan coding task {state.Goal}", "list packages", "show visual studio integration"]);
+        }
+
+        if (MentionsAny(step, "Preview", "execute", "approved action", "patch"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "prepare a guarded preview or run the approved confirmed command",
+                "medium. The correct command depends on the selected implementation action.",
+                ["File edits should be previewed before apply.", "Package/build/test/run commands need explicit confirmation."],
+                ["preview patch bundle", $"confirm dotnet build \"{primaryTarget}\"", $"confirm dotnet test \"{primaryTarget}\""]);
+        }
+
+        if (MentionsAny(step, "validation", "changed surface", "build", "test"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "run confirmed validation for the changed surface",
+                "medium. The primary target is deterministic, but the owner still approves execution.",
+                ["Validation commands are not run automatically.", "A passing receipt is needed before the step should be marked complete."],
+                [$"confirm dotnet build \"{primaryTarget}\"", $"confirm dotnet test \"{primaryTarget}\"", "diagnose last build failure"]);
+        }
+
+        if (MentionsAny(step, "receipts", "decide", "complete"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "review receipts, then advance only if the evidence supports it",
+                latestDotNetReceipt is { Succeeded: true } ? "high. The latest dotnet-style receipt succeeded." : "medium. Receipt review is still needed.",
+                ["Roadmap advancement changes planning state only.", "Do not mark complete after a failed or missing validation when validation was required."],
+                ["show coding receipts", "show crash recovery status", "mark roadmap step complete"]);
+        }
+
+        if (MentionsAny(step, "Stage", "commit", "completed phase"))
+        {
+            return new RoadmapNextActionRecommendation(
+                "review Git state and commit only after approval",
+                "medium. Git status must be reviewed before write actions.",
+                ["Git staging and commits remain confirmed actions.", "Commit only after build/test receipts support the phase."],
+                ["git status", "git diff", "confirm git add all", "confirm git commit \"message\""]);
+        }
+
+        return new RoadmapNextActionRecommendation(
+            "plan the current roadmap step before executing",
+            "medium. The step is active but does not map to a specialized command lane.",
+            ["Ali can produce a guarded plan from the current step.", "Execution remains behind the normal approval gates."],
+            [$"plan coding task {step}", "show crash recovery status"]);
     }
 
     private bool TryGetActiveRoadmapForStepChange(
@@ -1496,6 +1711,7 @@ public sealed class LocalCodingToolService(
             "Useful commands:",
             "- open solution",
             "- analyze solution architecture",
+            "- show next coding action",
             "- generate visual studio integration plan",
             "- show coding receipts",
             "- generate coding report"
@@ -1695,6 +1911,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- draft implementation roadmap <goal>");
         lines.Add("- show pending roadmap");
         lines.Add("- show active roadmap step");
+        lines.Add("- show next coding action");
         lines.Add("- recover roadmap state");
         lines.Add("- show crash recovery status");
         lines.Add("- approve last roadmap");
@@ -4768,6 +4985,12 @@ public sealed class LocalCodingToolService(
     private sealed record DiagnosticFileReference(
         string Path,
         int? LineNumber);
+
+    private sealed record RoadmapNextActionRecommendation(
+        string Action,
+        string Confidence,
+        IReadOnlyList<string> Reasons,
+        IReadOnlyList<string> Commands);
 
     private sealed record RoadmapExecutionState(
         string Goal,

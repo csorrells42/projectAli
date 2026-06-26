@@ -104,6 +104,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ApproveLastRoadmap
             or CodingToolAction.StartApprovedRoadmap
             or CodingToolAction.ShowActiveRoadmapStep
+            or CodingToolAction.ShowNextRoadmapAction
             or CodingToolAction.AdvanceRoadmapStep
             or CodingToolAction.PauseRoadmap
             or CodingToolAction.ResumeRoadmap

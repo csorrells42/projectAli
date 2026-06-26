@@ -1026,6 +1026,7 @@ public const string IndexHtml = """
           <div class="command-grid">
             <button class="command-chip" type="button" data-command="explore build idea ">Explore Idea</button>
             <button class="command-chip" type="button" data-command="draft implementation roadmap ">Roadmap</button>
+            <button class="command-chip" type="button" data-command="show next coding action">Next Action</button>
             <button class="command-chip" type="button" data-command="show active roadmap step">Active Step</button>
             <button class="command-chip" type="button" data-command="show crash recovery status">Recovery</button>
           </div>
@@ -1052,7 +1053,7 @@ public const string IndexHtml = """
           <h3>Skills</h3>
           <ul class="skill-list">
             <li><strong>Scout</strong>Maps solutions, packages, files, and architecture.</li>
-            <li><strong>Plan</strong>Drafts roadmaps and approval checkpoints.</li>
+            <li><strong>Plan</strong>Drafts roadmaps, next actions, and approval checkpoints.</li>
             <li><strong>Build</strong>Runs confirmed dotnet build/test/restore/package commands.</li>
             <li><strong>Recover</strong>Compares roadmap, receipts, and Git state after interruption.</li>
             <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>

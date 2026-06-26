@@ -248,6 +248,18 @@ public static class CodingToolRequestParser
         "roadmap status"
     ];
 
+    private static readonly string[] ShowNextRoadmapActionRequests =
+    [
+        "show next roadmap action",
+        "show next coding action",
+        "next roadmap action",
+        "next coding action",
+        "what should ali do next",
+        "what should we do next",
+        "what is the next coding action",
+        "what is the next roadmap action"
+    ];
+
     private static readonly string[] AdvanceRoadmapStepRequests =
     [
         "advance roadmap step",
@@ -688,6 +700,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsShowNextRoadmapActionRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowNextRoadmapAction, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsAdvanceRoadmapStepRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.AdvanceRoadmapStep, null, UserConfirmed: userConfirmed);
@@ -812,6 +830,9 @@ public static class CodingToolRequestParser
 
     private static bool IsShowActiveRoadmapStepRequest(string text) =>
         ShowActiveRoadmapStepRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowNextRoadmapActionRequest(string text) =>
+        ShowNextRoadmapActionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsAdvanceRoadmapStepRequest(string text) =>
         AdvanceRoadmapStepRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
