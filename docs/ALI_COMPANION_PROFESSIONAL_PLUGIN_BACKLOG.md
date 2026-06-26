@@ -21,6 +21,7 @@ This list tracks the Visual Studio plugin polish path while keeping Ali's curren
 - Code editor context-menu commands that stage Ali actions from the current file or selection.
 - Tools menu command group for discoverable Ali Companion actions.
 - Solution Explorer context-menu commands for selected solution, project, and file nodes.
+- Visual Studio command availability checks for active document, selection, solution, and node context.
 
 ## Next
 

@@ -1,7 +1,10 @@
 using System;
 using System.ComponentModel.Design;
 using System.Threading.Tasks;
+using EnvDTE;
+using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 
 namespace Ali.App.VisualStudioExtension;
 
@@ -29,7 +32,9 @@ internal sealed class AliCompanionCommand
     {
         _package = package;
         _action = action;
-        commandService.AddCommand(new MenuCommand(Execute, new CommandID(CommandSet, commandId)));
+        var command = new OleMenuCommand(Execute, new CommandID(CommandSet, commandId));
+        command.BeforeQueryStatus += BeforeQueryStatus;
+        commandService.AddCommand(command);
     }
 
     public static async Task InitializeAsync(AliCompanionPackage package)
@@ -64,6 +69,145 @@ internal sealed class AliCompanionCommand
 
                 await _package.StageToolWindowCommandAsync(_action, _package.DisposalToken);
             });
+    }
+
+    private void BeforeQueryStatus(object sender, EventArgs e)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        if (sender is OleMenuCommand command)
+        {
+            command.Enabled = IsAvailable();
+        }
+    }
+
+    private bool IsAvailable()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return _action switch
+        {
+            AliCompanionAction.Open => true,
+            AliCompanionAction.ReadActiveFile => HasActiveDocumentPath(),
+            AliCompanionAction.BuildActiveSolution => HasSolutionPath(),
+            AliCompanionAction.SearchSelection => HasEnabledSelection(),
+            AliCompanionAction.PlanSelection => HasEnabledSelection(),
+            AliCompanionAction.PreviewReplaceSelection => HasActiveDocumentPath() && HasEnabledSelection(),
+            AliCompanionAction.ReadSelectedNode => HasSelectedFileNode(),
+            AliCompanionAction.BuildSelectedNode => HasSelectedBuildNode(),
+            AliCompanionAction.PlanSelectedNode => HasSelectedSolutionExplorerNode(),
+            _ => true
+        };
+    }
+
+    private bool HasActiveDocumentPath()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            return !string.IsNullOrWhiteSpace(GetDte()?.ActiveDocument?.FullName);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private bool HasSolutionPath()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            return !string.IsNullOrWhiteSpace(GetDte()?.Solution?.FullName);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private bool HasEnabledSelection()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            if (!_package.GetOptionsPage().UseSelectedTextInCommands)
+            {
+                return false;
+            }
+
+            return GetDte()?.ActiveDocument?.Selection is TextSelection selection
+                && !string.IsNullOrWhiteSpace(selection.Text);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private bool HasSelectedFileNode()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            var projectItem = GetSelectedItem()?.ProjectItem;
+            return projectItem is not null && projectItem.FileCount > 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private bool HasSelectedBuildNode()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            var dte = GetDte();
+            var selected = GetSelectedItem();
+            if (selected?.Project is Project project)
+            {
+                return !string.IsNullOrWhiteSpace(project.FullName);
+            }
+
+            return selected?.ProjectItem is null
+                && !string.IsNullOrWhiteSpace(dte?.Solution?.FullName);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private bool HasSelectedSolutionExplorerNode()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            var dte = GetDte();
+            var selected = GetSelectedItem();
+            return selected?.ProjectItem is not null
+                || selected?.Project is not null
+                || !string.IsNullOrWhiteSpace(dte?.Solution?.FullName);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static DTE2? GetDte()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return Package.GetGlobalService(typeof(SDTE)) as DTE2;
+    }
+
+    private static SelectedItem? GetSelectedItem()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        var selectedItems = GetDte()?.SelectedItems;
+        return selectedItems is not null && selectedItems.Count > 0
+            ? selectedItems.Item(1)
+            : null;
     }
 }
 
