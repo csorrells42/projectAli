@@ -4,15 +4,9 @@
   <Extern href="vsshlids.h" />
 
   <Commands package="guidAliCompanionPackage">
-    <Groups>
-      <Group guid="guidAliCompanionCommandSet" id="AliCompanionGroup" priority="0x0600">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
-      </Group>
-    </Groups>
-
     <Buttons>
       <Button guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0100" type="Button">
-        <Parent guid="guidAliCompanionCommandSet" id="AliCompanionGroup" />
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
         <Strings>
           <ButtonText>Ali Companion</ButtonText>
         </Strings>
@@ -23,7 +17,6 @@
   <Symbols>
     <GuidSymbol name="guidAliCompanionPackage" value="{af94ca1b-cbb3-4c03-bd44-9ed0654e6931}" />
     <GuidSymbol name="guidAliCompanionCommandSet" value="{1c60cf1b-8401-43c2-baf1-1636f492dd04}">
-      <IDSymbol name="AliCompanionGroup" value="0x1020" />
       <IDSymbol name="OpenAliCompanionCommand" value="0x0100" />
     </GuidSymbol>
   </Symbols>
