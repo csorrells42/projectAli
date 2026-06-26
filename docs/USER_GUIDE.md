@@ -193,6 +193,16 @@ Example External Tools arguments:
 
 This is still not a Visual Studio extension. It is a guarded local bridge that lets Visual Studio invoke Ali's current deterministic coding abilities.
 
+The full External Tools setup guide is at:
+
+```text
+tools\visualstudio\ALI_VISUAL_STUDIO_EXTERNAL_TOOLS.md
+```
+
+The bridge tries to start Ali's local WebHelper automatically when it is offline. Use `--no-start-helper` if you want Visual Studio to fail fast instead.
+
+The bridge is not tied to Insiders. If you switch to regular Visual Studio Community later, add the same External Tools entries in that Community instance and point them at the same bridge executable.
+
 ## Voice
 
 Phase 1C voice is local-only.

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Diagnostics;
 using System.Text.Json;
 
 var options = BridgeOptions.Parse(args);
@@ -18,7 +19,8 @@ if (!Uri.TryCreate(options.HelperUrl, UriKind.Absolute, out var helperUri)
 
 using var http = new HttpClient
 {
-    BaseAddress = helperUri
+    BaseAddress = helperUri,
+    Timeout = TimeSpan.FromSeconds(15)
 };
 http.DefaultRequestHeaders.UserAgent.ParseAdd("AliVisualStudioBridge/1.0");
 if (!string.IsNullOrWhiteSpace(options.Token))
@@ -28,6 +30,22 @@ if (!string.IsNullOrWhiteSpace(options.Token))
 
 try
 {
+    if (!await IsHelperReachableAsync(http).ConfigureAwait(false))
+    {
+        if (!options.StartHelper)
+        {
+            Console.Error.WriteLine("Ali WebHelper is not reachable. Start it first or omit --no-start-helper.");
+            return 2;
+        }
+
+        var started = await TryStartHelperAsync(options, helperUri, http).ConfigureAwait(false);
+        if (!started)
+        {
+            Console.Error.WriteLine("Ali WebHelper is not reachable and the bridge could not start it automatically.");
+            return 2;
+        }
+    }
+
     CodingCommandResponse response;
     if (options.StatusOnly)
     {
@@ -58,6 +76,100 @@ catch (TaskCanceledException ex)
 {
     Console.Error.WriteLine($"Ali Visual Studio Bridge timed out: {ex.Message}");
     return 2;
+}
+
+static async Task<bool> IsHelperReachableAsync(HttpClient http)
+{
+    try
+    {
+        using var response = await http.GetAsync("/api/status").ConfigureAwait(false);
+        return response.IsSuccessStatusCode;
+    }
+    catch (HttpRequestException)
+    {
+        return false;
+    }
+    catch (TaskCanceledException)
+    {
+        return false;
+    }
+}
+
+static async Task<bool> TryStartHelperAsync(BridgeOptions options, Uri helperUri, HttpClient http)
+{
+    var projectPath = options.HelperProjectPath;
+    if (string.IsNullOrWhiteSpace(projectPath))
+    {
+        projectPath = FindHelperProjectPath();
+    }
+
+    if (string.IsNullOrWhiteSpace(projectPath) || !File.Exists(projectPath))
+    {
+        return false;
+    }
+
+    var listenUrl = helperUri.GetLeftPart(UriPartial.Authority);
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = "dotnet",
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        WorkingDirectory = Path.GetDirectoryName(projectPath) ?? Environment.CurrentDirectory
+    };
+    startInfo.ArgumentList.Add("run");
+    startInfo.ArgumentList.Add("--project");
+    startInfo.ArgumentList.Add(projectPath);
+    startInfo.ArgumentList.Add("--no-build");
+    startInfo.Environment["ALI_HELPER_URLS"] = listenUrl;
+
+    if (!string.IsNullOrWhiteSpace(options.Token))
+    {
+        startInfo.Environment["ALI_HELPER_TOKEN"] = options.Token;
+    }
+
+    try
+    {
+        Process.Start(startInfo);
+    }
+    catch
+    {
+        return false;
+    }
+
+    for (var attempt = 0; attempt < 20; attempt++)
+    {
+        await Task.Delay(500).ConfigureAwait(false);
+        if (await IsHelperReachableAsync(http).ConfigureAwait(false))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static string? FindHelperProjectPath()
+{
+    var current = AppContext.BaseDirectory;
+    for (var depth = 0; depth < 12 && !string.IsNullOrWhiteSpace(current); depth++)
+    {
+        var candidate = Path.Combine(current, "src", "Ali.App.WebHelper", "Ali.App.WebHelper.csproj");
+        if (File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        candidate = Path.Combine(current, "..", "Ali.App.WebHelper", "Ali.App.WebHelper.csproj");
+        candidate = Path.GetFullPath(candidate);
+        if (File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        current = Directory.GetParent(current)?.FullName;
+    }
+
+    return null;
 }
 
 static async Task<CodingCommandResponse> ReadStatusAsync(HttpClient http)
@@ -124,6 +236,8 @@ internal sealed record BridgeOptions(
     string? SolutionPath,
     string? FilePath,
     int? LineNumber,
+    string? HelperProjectPath,
+    bool StartHelper,
     bool StatusOnly,
     bool Handoff,
     bool ReadCurrentFile,
@@ -142,6 +256,8 @@ internal sealed record BridgeOptions(
         var handoff = false;
         var readCurrentFile = false;
         var openCurrentFile = false;
+        var startHelper = true;
+        string? helperProjectPath = null;
         var showHelp = args.Count == 0;
         var remainder = new List<string>();
 
@@ -176,6 +292,12 @@ internal sealed record BridgeOptions(
                         line = parsedLine;
                     }
                     break;
+                case "--helper-project":
+                    helperProjectPath = ReadValue(args, ref index, arg);
+                    break;
+                case "--no-start-helper":
+                    startHelper = false;
+                    break;
                 case "--status":
                     status = true;
                     break;
@@ -206,6 +328,8 @@ internal sealed record BridgeOptions(
             solution,
             file,
             line,
+            helperProjectPath,
+            startHelper,
             status,
             handoff,
             readCurrentFile,
@@ -309,6 +433,8 @@ Examples:
 Options:
   --helper-url <url>        Default: ALI_HELPER_URL or http://127.0.0.1:8765
   --token <token>           Default: ALI_HELPER_TOKEN
+  --helper-project <path>   Optional path to Ali.App.WebHelper.csproj for auto-start.
+  --no-start-helper         Do not auto-start the local WebHelper if it is offline.
   --status                  Show Ali coding tool status.
   --handoff                 Generate the Visual Studio integration handoff.
   --command <command>       Send a deterministic Ali coding command.
