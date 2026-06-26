@@ -178,6 +178,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.StartApprovedRoadmap => StartApprovedRoadmap(),
             CodingToolAction.ShowActiveRoadmapStep => ShowActiveRoadmapStep(),
             CodingToolAction.ShowNextRoadmapAction => await ShowNextRoadmapActionAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowRoadmapExecutionPacket => await ShowRoadmapExecutionPacketAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
             CodingToolAction.PauseRoadmap => PauseRoadmap(),
             CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
@@ -661,6 +662,7 @@ public sealed class LocalCodingToolService(
             $"Current step: {FormatRoadmapCurrentStep(_roadmapState)}",
             "Recommended next Ali commands:",
             "- show next coding action",
+            "- show execution packet",
             "- show active roadmap step",
             "- analyze solution architecture",
             "- inspect coding workspace",
@@ -786,6 +788,101 @@ public sealed class LocalCodingToolService(
             true,
             string.Join(Environment.NewLine, lines),
             "Next coding action",
+            Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowRoadmapExecutionPacketAsync(CancellationToken cancellationToken)
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+
+        var lines = new List<string>
+        {
+            "Coding execution packet:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Primary target: {primaryTarget}",
+            "No files were changed.",
+            "Truth boundary: this packet suggests commands only; Ali does not edit, install, build, test, run, or commit until the matching approval gate is used."
+        };
+
+        if (_roadmapState is null)
+        {
+            lines.Add("Packet status: setup needed.");
+            lines.Add("Reason: no active roadmap state exists.");
+            lines.Add("Setup commands:");
+            lines.Add("- explore build idea <goal>");
+            lines.Add("- draft implementation roadmap <goal>");
+            lines.Add("- approve last roadmap");
+            lines.Add("- start approved roadmap");
+            lines.Add("Stop rule: do not execute build, package, edit, run, or Git commands from a packet until a roadmap exists and the owner has approved the step.");
+            return new CodingToolResult(
+                true,
+                true,
+                string.Join(Environment.NewLine, lines),
+                "Coding execution packet",
+                Policy.WorkspaceRoot);
+        }
+
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var recommendation = BuildNextRoadmapRecommendation(_roadmapState, gitStatus, latestDotNetReceipt, primaryTarget);
+        var currentStep = GetRoadmapCurrentStep(_roadmapState);
+        var packetStatus = DescribeExecutionPacketStatus(_roadmapState, gitStatus, latestDotNetReceipt);
+
+        lines.Add($"Packet status: {packetStatus}");
+        lines.Add($"Goal: {_roadmapState.Goal}");
+        lines.Add($"Roadmap status: {DescribeRoadmapState(_roadmapState)}");
+        lines.Add($"Current step: {FormatRoadmapCurrentStep(_roadmapState)}");
+        lines.Add($"Recommended action: {recommendation.Action}");
+        lines.Add($"Confidence: {recommendation.Confidence}");
+        lines.Add("Evidence snapshot:");
+        lines.Add($"- Git: {gitStatus.Summary}");
+        lines.Add(latestReceipt is null
+            ? "- Latest receipt: none"
+            : FormatReceiptSummary("- Latest receipt", latestReceipt));
+        if (latestDotNetReceipt is not null && !ReferenceEquals(latestDotNetReceipt, latestReceipt))
+        {
+            lines.Add(FormatReceiptSummary("- Latest dotnet-style receipt", latestDotNetReceipt));
+        }
+
+        lines.Add("Read-only prep:");
+        AddUniqueCommands(lines, [
+            "show next coding action",
+            "show crash recovery status",
+            "show coding receipts"
+        ]);
+
+        lines.Add("Execution candidates:");
+        AddUniqueCommands(lines, BuildExecutionCandidateCommands(_roadmapState, recommendation, currentStep, primaryTarget));
+
+        lines.Add("Validation commands:");
+        AddUniqueCommands(lines, BuildValidationCommands(_roadmapState, currentStep, primaryTarget));
+
+        lines.Add("Closeout commands:");
+        AddUniqueCommands(lines, BuildCloseoutCommands(_roadmapState, currentStep));
+
+        lines.Add("Approval gates:");
+        lines.Add("- File edits: use preview patch bundle, review it, then confirm apply last patch preview.");
+        lines.Add("- Packages: confirm restore/package/check commands before NuGet changes or network checks.");
+        lines.Add("- Build/test/run: use confirm dotnet build/test/run commands.");
+        lines.Add("- Git writes: review git status/diff first, then use confirmed git add/commit only after validation.");
+
+        lines.Add("Stop and compare options when:");
+        lines.Add("- Packet status says blocked or review-first.");
+        lines.Add("- The command needs a package/library/tool that has not been approved for lookup/install.");
+        lines.Add("- The suggested change is not an exact literal patch preview.");
+        lines.Add("- Git shows unexpected files or a validation receipt failed.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Coding execution packet",
             Policy.WorkspaceRoot);
     }
 
@@ -1028,6 +1125,7 @@ public sealed class LocalCodingToolService(
         else if (activeRoadmap)
         {
             lines.Add("- run: show active roadmap step");
+            lines.Add("- run: show execution packet");
             lines.Add("- rerun the needed confirmed build/test/package command if no current success receipt exists");
         }
         else
@@ -1168,6 +1266,17 @@ public sealed class LocalCodingToolService(
         return $"{index + 1}/{state.Steps.Count}: {state.Steps[index]}";
     }
 
+    private static string GetRoadmapCurrentStep(RoadmapExecutionState state)
+    {
+        if (state.Steps.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var index = Math.Clamp(state.CurrentStepIndex, 0, state.Steps.Count - 1);
+        return state.Steps[index];
+    }
+
     private static string DescribeRoadmapState(RoadmapExecutionState state) =>
         state.Finished
             ? "finished"
@@ -1213,6 +1322,7 @@ public sealed class LocalCodingToolService(
         {
             lines.Add("- plan coding task <current step>");
             lines.Add("- show next coding action");
+            lines.Add("- show execution packet");
             lines.Add("- preview patch bundle");
             lines.Add("- confirm dotnet build \"path\"");
             lines.Add("- mark roadmap step complete");
@@ -1358,6 +1468,174 @@ public sealed class LocalCodingToolService(
             "medium. The step is active but does not map to a specialized command lane.",
             ["Ali can produce a guarded plan from the current step.", "Execution remains behind the normal approval gates."],
             [$"plan coding task {step}", "show crash recovery status"]);
+    }
+
+    private static string DescribeExecutionPacketStatus(
+        RoadmapExecutionState state,
+        GitWorkingTreeStatus gitStatus,
+        CodingReceipt? latestDotNetReceipt)
+    {
+        if (!state.Approved)
+        {
+            return "not-ready: roadmap needs approval";
+        }
+
+        if (!state.Started)
+        {
+            return "not-ready: roadmap has not started";
+        }
+
+        if (state.Paused)
+        {
+            return "not-ready: roadmap is paused";
+        }
+
+        if (state.Finished)
+        {
+            return "closeout: roadmap is finished";
+        }
+
+        if (gitStatus.HasUncommittedChanges)
+        {
+            return "review-first: Git has uncommitted changes";
+        }
+
+        if (latestDotNetReceipt is { Succeeded: false })
+        {
+            return "blocked: latest validation failed";
+        }
+
+        return "ready: use the packet commands through approval gates";
+    }
+
+    private static string FormatReceiptSummary(string label, CodingReceipt receipt)
+    {
+        var target = string.IsNullOrWhiteSpace(receipt.TargetPath) ? string.Empty : $" target={receipt.TargetPath}";
+        var exit = receipt.ExitCode is null ? string.Empty : $" exit={receipt.ExitCode.Value}";
+        return $"{label}: {receipt.Timestamp:u} {receipt.Action} {(receipt.Succeeded ? "succeeded" : "failed")}{exit}{target}";
+    }
+
+    private static void AddUniqueCommands(List<string> lines, IEnumerable<string> commands)
+    {
+        var unique = commands
+            .Where(command => !string.IsNullOrWhiteSpace(command))
+            .Select(command => command.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (unique.Count == 0)
+        {
+            lines.Add("- none");
+            return;
+        }
+
+        lines.AddRange(unique.Select(command => $"- {command}"));
+    }
+
+    private static IReadOnlyList<string> BuildExecutionCandidateCommands(
+        RoadmapExecutionState state,
+        RoadmapNextActionRecommendation recommendation,
+        string currentStep,
+        string primaryTarget)
+    {
+        var commands = new List<string>();
+        commands.AddRange(recommendation.Commands);
+
+        if (MentionsAny(currentStep, "Clarify", "owner", "behavior", "non-goals"))
+        {
+            commands.Add($"explore build idea {state.Goal}");
+            commands.Add($"draft implementation roadmap {state.Goal}");
+        }
+        else if (MentionsAny(currentStep, "Inspect", "architecture", "impact surface"))
+        {
+            commands.Add("inspect coding workspace");
+            commands.Add("analyze solution architecture");
+            commands.Add("list packages");
+        }
+        else if (MentionsAny(currentStep, "Plan", "exact next", "code", "package", "build action"))
+        {
+            commands.Add($"plan coding task {state.Goal}");
+            commands.Add("show next coding action");
+            if (MentionsAny(state.Goal, "package", "library", "dependency", "nuget", "install"))
+            {
+                commands.Add($"confirm check outdated packages \"{primaryTarget}\"");
+            }
+        }
+        else if (MentionsAny(currentStep, "package", "library", "dependency", "nuget", "install"))
+        {
+            commands.Add("list packages");
+            commands.Add($"confirm dotnet restore \"{primaryTarget}\"");
+            commands.Add($"confirm dotnet add package \"Package.Id\" to \"{primaryTarget}\"");
+        }
+        else if (MentionsAny(currentStep, "Preview", "execute", "approved action", "patch"))
+        {
+            commands.Add("preview patch bundle");
+            commands.Add("show pending patch preview");
+            commands.Add("confirm apply last patch preview");
+        }
+        else if (MentionsAny(currentStep, "validation", "changed surface", "build", "test"))
+        {
+            commands.Add($"confirm dotnet build \"{primaryTarget}\"");
+            commands.Add($"confirm dotnet test \"{primaryTarget}\"");
+        }
+        else if (MentionsAny(currentStep, "receipts", "decide", "complete"))
+        {
+            commands.Add("show coding receipts");
+            commands.Add("show crash recovery status");
+            commands.Add("mark roadmap step complete");
+        }
+        else if (MentionsAny(currentStep, "Stage", "commit", "completed phase"))
+        {
+            commands.Add("git status");
+            commands.Add("git diff");
+            commands.Add("confirm git add all");
+            commands.Add("confirm git commit \"message\"");
+        }
+
+        return commands;
+    }
+
+    private static IReadOnlyList<string> BuildValidationCommands(
+        RoadmapExecutionState state,
+        string currentStep,
+        string primaryTarget)
+    {
+        var commands = new List<string>
+        {
+            $"confirm dotnet build \"{primaryTarget}\""
+        };
+        if (MentionsAny(state.Goal, "test", "package", "library", "dependency", "nuget", "install")
+            || MentionsAny(currentStep, "validation", "test", "changed surface"))
+        {
+            commands.Add($"confirm dotnet test \"{primaryTarget}\"");
+        }
+
+        commands.Add("diagnose last build failure");
+        return commands;
+    }
+
+    private static IReadOnlyList<string> BuildCloseoutCommands(RoadmapExecutionState state, string currentStep)
+    {
+        var commands = new List<string>
+        {
+            "show coding receipts",
+            "show crash recovery status"
+        };
+        if (MentionsAny(currentStep, "receipts", "decide", "complete")
+            || MentionsAny(currentStep, "validation", "changed surface"))
+        {
+            commands.Add("mark roadmap step complete");
+        }
+
+        if (MentionsAny(currentStep, "Stage", "commit", "completed phase") || state.Finished)
+        {
+            commands.Add("git status");
+            commands.Add("git diff");
+            commands.Add("confirm git add all");
+            commands.Add("confirm git commit \"message\"");
+        }
+
+        commands.Add("generate coding report");
+        return commands;
     }
 
     private bool TryGetActiveRoadmapForStepChange(
@@ -1608,6 +1886,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- analyze solution architecture");
         lines.Add("- show visual studio integration");
         lines.Add("- show coding receipts");
+        lines.Add("- show execution packet");
     }
 
     private static string FormatRoadmapList(IReadOnlyList<string> values) =>
@@ -1631,6 +1910,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- analyze solution architecture");
         lines.Add("- list packages");
         lines.Add($"- plan coding task {goal}");
+        lines.Add("- show execution packet");
         lines.Add("- generate coding report");
     }
 
@@ -1712,6 +1992,7 @@ public sealed class LocalCodingToolService(
             "- open solution",
             "- analyze solution architecture",
             "- show next coding action",
+            "- show execution packet",
             "- generate visual studio integration plan",
             "- show coding receipts",
             "- generate coding report"
@@ -1912,6 +2193,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- show pending roadmap");
         lines.Add("- show active roadmap step");
         lines.Add("- show next coding action");
+        lines.Add("- show execution packet");
         lines.Add("- recover roadmap state");
         lines.Add("- show crash recovery status");
         lines.Add("- approve last roadmap");

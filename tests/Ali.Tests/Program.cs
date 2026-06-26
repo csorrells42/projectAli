@@ -64,6 +64,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes crash recovery state", TestCodingParserRoutesCrashRecoveryState),
     ("coding parser routes active roadmap steps", TestCodingParserRoutesActiveRoadmapSteps),
     ("coding parser routes next roadmap action", TestCodingParserRoutesNextRoadmapAction),
+    ("coding parser routes roadmap execution packet", TestCodingParserRoutesRoadmapExecutionPacket),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -87,6 +88,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool manages approved roadmap", TestLocalCodingToolManagesApprovedRoadmap),
     ("local coding tool recovers active roadmap state", TestLocalCodingToolRecoversActiveRoadmapState),
     ("local coding tool shows next roadmap action", TestLocalCodingToolShowsNextRoadmapAction),
+    ("local coding tool shows roadmap execution packet", TestLocalCodingToolShowsRoadmapExecutionPacket),
     ("local coding tool diagnoses crash recovery state", TestLocalCodingToolDiagnosesCrashRecoveryState),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
@@ -558,6 +560,17 @@ static Task TestCodingParserRoutesNextRoadmapAction()
 
     Equal(true, CodingToolRequestParser.TryParse("what should Ali do next", out var aliRequest));
     Equal(CodingToolAction.ShowNextRoadmapAction, aliRequest.Action);
+
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesRoadmapExecutionPacket()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show execution packet", out var packetRequest));
+    Equal(CodingToolAction.ShowRoadmapExecutionPacket, packetRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("prepare next step packet", out var prepareRequest));
+    Equal(CodingToolAction.ShowRoadmapExecutionPacket, prepareRequest.Action);
 
     return Task.CompletedTask;
 }
@@ -1244,6 +1257,65 @@ static async Task TestLocalCodingToolShowsNextRoadmapAction()
     Contains("Approval gates", next.Message);
     Contains("Stop and compare options", next.Message);
     Contains("explore build idea add package lookup", next.Message);
+    Equal(1, runner.Runs.Count);
+    Equal("git", runner.Runs[0].FileName);
+    Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
+}
+
+static async Task TestLocalCodingToolShowsRoadmapExecutionPacket()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    var solutionPath = Path.Combine(workspace, "Demo.sln");
+    await File.WriteAllTextAsync(solutionPath, "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var none = await service.TryHandleAsync("show execution packet", CancellationToken.None);
+    var draft = await service.TryHandleAsync("draft implementation roadmap add package lookup", CancellationToken.None);
+    var approve = await service.TryHandleAsync("approve last roadmap", CancellationToken.None);
+    var start = await service.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var packet = await service.TryHandleAsync("prepare next step packet", CancellationToken.None);
+
+    Equal(true, none.Handled);
+    Equal(true, none.Succeeded);
+    Contains("Coding execution packet", none.Message);
+    Contains("Packet status: setup needed", none.Message);
+    Contains("draft implementation roadmap <goal>", none.Message);
+    Equal(true, draft.Succeeded);
+    Equal(true, approve.Succeeded);
+    Equal(true, start.Succeeded);
+    Equal(true, packet.Handled);
+    Equal(true, packet.Succeeded);
+    Contains("Coding execution packet", packet.Message);
+    Contains("Packet status: ready", packet.Message);
+    Contains("Truth boundary", packet.Message);
+    Contains("Evidence snapshot", packet.Message);
+    Contains("Read-only prep", packet.Message);
+    Contains("Execution candidates", packet.Message);
+    Contains("Validation commands", packet.Message);
+    Contains("Closeout commands", packet.Message);
+    Contains("Approval gates", packet.Message);
+    Contains("Stop and compare options", packet.Message);
+    Contains("show next coding action", packet.Message);
+    Contains("explore build idea add package lookup", packet.Message);
     Equal(1, runner.Runs.Count);
     Equal("git", runner.Runs[0].FileName);
     Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
