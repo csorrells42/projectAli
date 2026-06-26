@@ -67,6 +67,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes roadmap execution packet", TestCodingParserRoutesRoadmapExecutionPacket),
     ("coding parser routes packet console and build planning", TestCodingParserRoutesPacketConsoleAndBuildPlanning),
     ("coding parser routes windows troubleshooting", TestCodingParserRoutesWindowsTroubleshooting),
+    ("coding parser routes computer assistant", TestCodingParserRoutesComputerAssistant),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -95,6 +96,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool manages approved execution packet", TestLocalCodingToolManagesApprovedExecutionPacket),
     ("local coding tool runs packet console and build planning", TestLocalCodingToolRunsPacketConsoleAndBuildPlanning),
     ("local coding tool shows windows troubleshooting", TestLocalCodingToolShowsWindowsTroubleshooting),
+    ("local coding tool shows computer assistant", TestLocalCodingToolShowsComputerAssistant),
     ("local coding tool diagnoses crash recovery state", TestLocalCodingToolDiagnosesCrashRecoveryState),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
@@ -724,6 +726,38 @@ static Task TestCodingParserRoutesWindowsTroubleshooting()
 
     Equal(true, CodingToolRequestParser.TryParse("show install doctor", out var installRequest));
     Equal(CodingToolAction.ShowInstallDoctor, installRequest.Action);
+
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesComputerAssistant()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show computer assistant status", out var statusRequest));
+    Equal(CodingToolAction.ShowComputerAssistantStatus, statusRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show computer assistant commands", out var indexRequest));
+    Equal(CodingToolAction.ShowComputerAssistantCommandIndex, indexRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("can you tell me about your abilities", out var naturalAbilitiesRequest));
+    Equal(CodingToolAction.ShowComputerAssistantCommandIndex, naturalAbilitiesRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("what are your programming and data access limitations", out var dataAccessRequest));
+    Equal(CodingToolAction.ShowComputerAssistantStatus, dataAccessRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan file organization \"Downloads\"", out var filePlanRequest));
+    Equal(CodingToolAction.PlanFileOrganization, filePlanRequest.Action);
+    Equal("Downloads", filePlanRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan disk cleanup", out var cleanupRequest));
+    Equal(CodingToolAction.PlanDiskCleanup, cleanupRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan app install troubleshooting Visual Studio installer crash", out var installRequest));
+    Equal(CodingToolAction.PlanAppInstallTroubleshooting, installRequest.Action);
+    Equal("Visual Studio installer crash", installRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("plan peripheral setup Scarlett Solo gain", out var peripheralRequest));
+    Equal(CodingToolAction.PlanPeripheralSetup, peripheralRequest.Action);
+    Equal("Scarlett Solo gain", peripheralRequest.Query);
 
     return Task.CompletedTask;
 }
@@ -1782,6 +1816,48 @@ static async Task TestLocalCodingToolShowsWindowsTroubleshooting()
     Contains("Roadmap step acceptance checklist", checklist.Message);
     Equal(true, installDoctor.Succeeded);
     Contains("Ali install doctor", installDoctor.Message);
+}
+
+static async Task TestLocalCodingToolShowsComputerAssistant()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var downloads = Path.Combine(directory, "Downloads");
+    Directory.CreateDirectory(workspace);
+    Directory.CreateDirectory(downloads);
+    await File.WriteAllTextAsync(Path.Combine(downloads, "setup.exe"), "installer");
+    await File.WriteAllTextAsync(Path.Combine(downloads, "notes.pdf"), "%PDF-1.4");
+    await File.WriteAllTextAsync(Path.Combine(downloads, "photo.jpg"), "jpg");
+
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+
+    var status = await service.TryHandleAsync("show computer assistant status", CancellationToken.None);
+    var index = await service.TryHandleAsync("show computer assistant commands", CancellationToken.None);
+    var filePlan = await service.TryHandleAsync($"plan file organization \"{downloads}\"", CancellationToken.None);
+    var cleanup = await service.TryHandleAsync("plan disk cleanup", CancellationToken.None);
+    var install = await service.TryHandleAsync("plan app install troubleshooting Visual Studio installer crash", CancellationToken.None);
+    var peripheral = await service.TryHandleAsync("plan peripheral setup Scarlett Solo gain", CancellationToken.None);
+
+    Equal(true, status.Succeeded);
+    Contains("Ali computer assistant status", status.Message);
+    Contains("Guardrails", status.Message);
+    Equal(true, index.Succeeded);
+    Contains("Ali computer assistant command index", index.Message);
+    Contains("plan file organization", index.Message);
+    Equal(true, filePlan.Succeeded);
+    Contains("File organization plan", filePlan.Message);
+    Contains("No files were moved", filePlan.Message);
+    Contains(".exe", filePlan.Message);
+    Equal(true, cleanup.Succeeded);
+    Contains("Disk cleanup plan", cleanup.Message);
+    Contains("No files were deleted", cleanup.Message);
+    Equal(true, install.Succeeded);
+    Contains("App install troubleshooting plan", install.Message);
+    Contains("Visual Studio installer crash", install.Message);
+    Equal(true, peripheral.Succeeded);
+    Contains("Peripheral setup plan", peripheral.Message);
+    Contains("Scarlett Solo gain", peripheral.Message);
+    Contains("AT2040", peripheral.Message);
 }
 
 static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()
@@ -5140,12 +5216,20 @@ static Task TestSpokenResponseCleanerStripsClutter()
         ```
            at Fake.Stack.Trace()
         Final answer.
+
+        Sources checked:
+        [1] Focusrite Help - https://example.com/focusrite
+        [2] Shure Manual - https://example.com/shure
+
         Thanks :) {winkEmoji} <3
         """);
 
     Equal(false, cleaned.Contains("https://", StringComparison.OrdinalIgnoreCase));
     Equal(false, cleaned.Contains("```", StringComparison.OrdinalIgnoreCase));
     Equal(false, cleaned.Contains("Source:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, cleaned.Contains("Sources checked", StringComparison.OrdinalIgnoreCase));
+    Equal(false, cleaned.Contains("Focusrite Help", StringComparison.OrdinalIgnoreCase));
+    Equal(false, cleaned.Contains("Shure Manual", StringComparison.OrdinalIgnoreCase));
     Equal(false, cleaned.Contains(":)", StringComparison.Ordinal));
     Equal(false, cleaned.Contains(winkEmoji, StringComparison.Ordinal));
     Equal(false, cleaned.Contains("<3", StringComparison.Ordinal));

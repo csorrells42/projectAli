@@ -157,7 +157,13 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ResumeRoadmap
             or CodingToolAction.FinishRoadmap
             or CodingToolAction.RecoverRoadmapState
-            or CodingToolAction.DiagnoseRecoveryState)
+            or CodingToolAction.DiagnoseRecoveryState
+            or CodingToolAction.ShowComputerAssistantStatus
+            or CodingToolAction.ShowComputerAssistantCommandIndex
+            or CodingToolAction.PlanFileOrganization
+            or CodingToolAction.PlanDiskCleanup
+            or CodingToolAction.PlanAppInstallTroubleshooting
+            or CodingToolAction.PlanPeripheralSetup)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Managing an implementation roadmap is local planning state and does not change files.");
         }

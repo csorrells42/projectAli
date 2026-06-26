@@ -214,6 +214,90 @@ public static class CodingToolRequestParser
         "generate computer troubleshooting report"
     ];
 
+    private static readonly string[] ComputerAssistantStatusRequests =
+    [
+        "show computer assistant status",
+        "show general computer assistant status",
+        "show computer help status",
+        "computer assistant status",
+        "computer help status",
+        "show ali computer status",
+        "what are your programming and data access limitations",
+        "what are your programming limitations",
+        "what data access do you have",
+        "what internet access do you have",
+        "what sources can you use"
+    ];
+
+    private static readonly string[] ComputerAssistantCommandIndexRequests =
+    [
+        "show computer assistant commands",
+        "show computer help commands",
+        "show general computer commands",
+        "computer assistant commands",
+        "computer help commands",
+        "what can ali do for computer help",
+        "what can ali do with my computer",
+        "can you tell me about your abilities",
+        "tell me about your abilities",
+        "what are your abilities",
+        "what can you do",
+        "what can you do on this computer",
+        "what are your local computer abilities",
+        "what are some of your abilities on this local computer"
+    ];
+
+    private static readonly string[] FileOrganizationPlanPrefixes =
+    [
+        "plan file organization ",
+        "plan folder organization ",
+        "plan organize files ",
+        "plan organize folder ",
+        "organize files plan ",
+        "organize folder plan ",
+        "plan downloads cleanup ",
+        "plan documents cleanup "
+    ];
+
+    private static readonly string[] DiskCleanupPlanRequests =
+    [
+        "plan disk cleanup",
+        "plan computer cleanup",
+        "plan storage cleanup",
+        "plan pc cleanup",
+        "disk cleanup plan",
+        "storage cleanup plan"
+    ];
+
+    private static readonly string[] DiskCleanupPlanPrefixes =
+    [
+        "plan disk cleanup ",
+        "plan computer cleanup ",
+        "plan storage cleanup ",
+        "plan pc cleanup "
+    ];
+
+    private static readonly string[] AppInstallTroubleshootingPlanPrefixes =
+    [
+        "plan app install troubleshooting ",
+        "plan install troubleshooting ",
+        "troubleshoot app install ",
+        "troubleshoot installer ",
+        "plan installer fix ",
+        "plan installation troubleshooting "
+    ];
+
+    private static readonly string[] PeripheralSetupPlanPrefixes =
+    [
+        "plan peripheral setup ",
+        "plan device setup ",
+        "plan audio setup ",
+        "plan microphone setup ",
+        "plan interface setup ",
+        "troubleshoot peripheral setup ",
+        "troubleshoot device setup "
+    ];
+
     private static readonly string[] ToolIntegrationStatusRequests =
     [
         "show visual studio integration",
@@ -1084,6 +1168,11 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParseComputerAssistantCommand(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
         if (IsToolIntegrationStatusRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowToolIntegrationStatus, null, UserConfirmed: userConfirmed);
@@ -1508,6 +1597,15 @@ public static class CodingToolRequestParser
     private static bool IsInstallDoctorRequest(string text) =>
         InstallDoctorRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsComputerAssistantStatusRequest(string text) =>
+        ComputerAssistantStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsComputerAssistantCommandIndexRequest(string text) =>
+        ComputerAssistantCommandIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDiskCleanupPlanRequest(string text) =>
+        DiskCleanupPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -1683,6 +1781,34 @@ public static class CodingToolRequestParser
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);
         return true;
+    }
+
+    private static bool TryParseComputerAssistantCommand(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+
+        if (IsComputerAssistantStatusRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowComputerAssistantStatus, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsComputerAssistantCommandIndexRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowComputerAssistantCommandIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDiskCleanupPlanRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.PlanDiskCleanup, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        return TryParsePrefixedQuery(text, FileOrganizationPlanPrefixes, CodingToolAction.PlanFileOrganization, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, DiskCleanupPlanPrefixes, CodingToolAction.PlanDiskCleanup, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, AppInstallTroubleshootingPlanPrefixes, CodingToolAction.PlanAppInstallTroubleshooting, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PeripheralSetupPlanPrefixes, CodingToolAction.PlanPeripheralSetup, userConfirmed, out request);
     }
 
     private static bool TryParseProcessEvidence(string text, bool userConfirmed, out CodingToolRequest request)

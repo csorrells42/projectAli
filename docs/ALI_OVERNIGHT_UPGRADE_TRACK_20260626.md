@@ -38,6 +38,8 @@ This is the approved build-skills path for the overnight sprint.
 32. Start Here discoverability lane: WebHelper and VSIX now surface What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, and Windows Help before the deeper command groups.
 33. Audio setup source catalog: official Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure SH-BROADCAST2 sources are cataloged for source-backed setup guidance.
 34. PDF workspace polish: configurable PDF workspace folder, PDF permission rows, polished PDF generation, PDF command/status index, inspection/extraction/summarization, Markdown conversion, confirmed derived combine/split, and install/troubleshooting report PDFs.
+35. General computer assistant front door: `show computer assistant status`, `show computer assistant commands`, natural ability-question routing, file organization planning, disk cleanup planning, app install troubleshooting planning, and peripheral setup planning.
+36. Ability and source-awareness polish: deterministic ability questions now use Ali's own command/status index, source-backed access is described as curated approved-source lookup, and spoken responses strip source appendices so Piper does not read source plumbing aloud.
 
 ## Approved Next Road Completed
 
@@ -48,3 +50,4 @@ The second approved sprint moved Windows troubleshooting and build readiness int
 - Read-only diagnostics first.
 - Stop, disable, delete, repair, registry, firewall, PATH, trust-store, and signing changes need explicit owner approval.
 - If Ali is not sure, she should present options instead of acting.
+- Every new feature should update the ability indexes, helper/VS command surfaces when relevant, docs, and tests so Ali can accurately explain her own abilities.

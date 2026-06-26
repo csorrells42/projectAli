@@ -20,6 +20,7 @@ public static partial class SpeechOutputCleaner
         cleaned = UnclosedThinkingRegex().Replace(cleaned, " ");
         cleaned = CodeBlockRegex().Replace(cleaned, " Code block omitted. ");
         cleaned = StackTraceLineRegex().Replace(cleaned, " ");
+        cleaned = SourceAppendixRegex().Replace(cleaned, " ");
         cleaned = UrlRegex().Replace(cleaned, " ");
         cleaned = MetadataLineRegex().Replace(cleaned, " ");
         cleaned = CitationRegex().Replace(cleaned, string.Empty);
@@ -105,6 +106,9 @@ public static partial class SpeechOutputCleaner
 
     [GeneratedRegex(@"^\s+at\s+[\w\.`]+\([^\n]*\)\s*$", RegexOptions.Multiline)]
     private static partial Regex StackTraceLineRegex();
+
+    [GeneratedRegex(@"(?:^|\n)\s*Sources checked:\s*(?:\n\s*\[\d+\][^\n]*)*(?=\n{2,}|\z)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SourceAppendixRegex();
 
     [GeneratedRegex(@"https?://\S+|www\.\S+", RegexOptions.IgnoreCase)]
     private static partial Regex UrlRegex();

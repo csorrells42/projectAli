@@ -153,6 +153,15 @@ Useful commands:
 - `plan post edit validation`
 - `show coding skill command index`
 - `show coding session summary`
+- `show computer assistant status`
+- `show computer assistant commands`
+- `what can you do`
+- `can you tell me about your abilities`
+- `what are your programming and data access limitations`
+- `plan file organization "Downloads"`
+- `plan disk cleanup`
+- `plan app install troubleshooting Visual Studio installer crash`
+- `plan peripheral setup Scarlett Solo gain`
 - `show windows troubleshooting toolkit`
 - `plan rogue process hunt port 8765`
 - `collect process evidence dotnet`
@@ -241,6 +250,19 @@ PDF tools:
 - `generate install report pdf` and `generate troubleshooting report pdf` create focused owner-facing report PDFs.
 
 PDF workspace and permission controls live under Settings -> Coding / Permissions. The PDF workspace has its own textbox and Choose Folder button. PDF inspect/extract, create/export, and combine/split/modify each have their own permission row. Ali is not a full Acrobat replacement yet; scanned/image-only PDFs, OCR, redaction, form editing, annotations, and layout-preserving arbitrary PDF editing are future work.
+
+Computer assistant:
+
+- `show computer assistant status` reports Ali's visible local assistant lanes, including coding/Visual Studio, PDF workspace, Windows troubleshooting, general computer planning, source-backed answers, and audio setup sources.
+- `show computer assistant commands` lists everyday computer-help commands and routes plain questions such as `what can you do` and `can you tell me about your abilities` to the real ability index instead of letting the model guess.
+- `plan file organization "Downloads"` creates a read-only organization plan and, when possible, a top-level folder snapshot. It does not move, rename, copy, or delete files.
+- `plan disk cleanup` creates a read-only cleanup path and drive-space snapshot. It does not delete files or change Windows settings.
+- `plan app install troubleshooting <app-or-error>` creates an installer troubleshooting plan without running installers, uninstallers, registry edits, driver installs, service changes, PATH changes, signing changes, or trust-store changes.
+- `plan peripheral setup <device-or-symptom>` creates a setup plan for devices such as audio interfaces, microphones, and boom arms without changing drivers, firmware, default devices, exclusive-mode settings, services, or registry entries.
+
+Ali's source access is curated and approval-oriented. She can use approved source catalog entries when the app performs a source lookup, but this is not unrestricted browsing or autonomous web control. Spoken responses are cleaned so source appendices remain visible in text but are not read aloud by Piper.
+
+Ability-index maintenance rule: whenever a feature is added, update `show coding skill command index`, `show computer assistant commands`, relevant Web Helper/VS Companion buttons, this guide, and the engineering notes so Ali can accurately describe her own current abilities.
 
 `analyze solution architecture` is read-only. It reports solutions, projects, target frameworks, project roles, project references, package references, source-file counts, a project dependency graph, and an estimated build order.
 

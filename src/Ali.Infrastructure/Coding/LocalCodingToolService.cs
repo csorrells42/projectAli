@@ -229,6 +229,12 @@ public sealed class LocalCodingToolService(
             CodingToolAction.RecoverRoadmapState => RecoverRoadmapState(),
             CodingToolAction.DiagnoseRecoveryState => await DiagnoseRecoveryStateAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
+            CodingToolAction.ShowComputerAssistantStatus => ShowComputerAssistantStatus(),
+            CodingToolAction.ShowComputerAssistantCommandIndex => ShowComputerAssistantCommandIndex(),
+            CodingToolAction.PlanFileOrganization => PlanFileOrganization(request),
+            CodingToolAction.PlanDiskCleanup => PlanDiskCleanup(request),
+            CodingToolAction.PlanAppInstallTroubleshooting => PlanAppInstallTroubleshooting(request),
+            CodingToolAction.PlanPeripheralSetup => PlanPeripheralSetup(request),
             CodingToolAction.ShowPdfToolStatus => ShowPdfToolStatus(),
             CodingToolAction.ShowPdfCommandIndex => ShowPdfCommandIndex(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
@@ -1738,11 +1744,20 @@ public sealed class LocalCodingToolService(
             "- confirm split pdf \"source.pdf\" \"split-output.pdf\"",
             "- generate install report pdf",
             "- generate troubleshooting report pdf",
+            "Computer assistant:",
+            "- show computer assistant status",
+            "- show computer assistant commands",
+            "- plan file organization \"C:\\Users\\<you>\\Downloads\"",
+            "- plan disk cleanup",
+            "- plan app install troubleshooting <app-or-error>",
+            "- plan peripheral setup <device-or-symptom>",
             "Windows diagnostics:",
             "- collect process evidence <name-or-pid>",
             "- diagnose port <port>",
             "- diagnose build lock",
             "- show install doctor",
+            "Ability-index maintenance rule:",
+            "- Each new feature should be surfaced here, in the computer assistant index, in the helper/VS command buttons when useful, and in the user/engineering docs.",
             "Prototype/future lane:",
             "- Screenshot bug diagnosis can use existing temporary image attachments and local vision proof, but reliable screenshot-to-source debugging still needs a dedicated evidence/triage workflow."
         };
@@ -1778,6 +1793,350 @@ public sealed class LocalCodingToolService(
         };
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session summary", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowComputerAssistantStatus()
+    {
+        var lines = new List<string>
+        {
+            "Ali computer assistant status:",
+            $"Coding workspace: {Policy.WorkspaceRoot}",
+            $"PDF workspace: {_pdfWorkspaceRoot}",
+            "Visible helper lanes:",
+            "- Coding/Visual Studio companion: workspace inspection, planning, gated edits, builds, tests, packages, Git, reports.",
+            "- PDF workspace: create/export, inspect/extract/summarize, Markdown conversion, gated combine/split.",
+            "- Windows troubleshooting: processes, ports, services/startup, event logs, build locks, install readiness.",
+            "- General computer planning: file organization, disk cleanup, app install troubleshooting, peripheral setup.",
+            "- Source-backed answers: Ali can use approved curated web/source entries when the app performs a source lookup; this is not unrestricted browsing.",
+            "- Audio setup sources: Focusrite Scarlett Solo/2i2, AT2040, FetHead, and Shure SH-BROADCAST2 source links are available as reference material.",
+            "Guardrails:",
+            "- Status and planning commands are read-only.",
+            "- File moves, deletes, installers, services, startup entries, registry, firewall, PATH, drivers, and process stops require explicit approval through narrower commands.",
+            "- If Ali is uncertain, she should stop with options instead of pretending a fix is deterministic.",
+            "Fast commands:",
+            "- show computer assistant commands",
+            "- plan file organization \"<folder>\"",
+            "- plan disk cleanup",
+            "- plan app install troubleshooting <app-or-error>",
+            "- plan peripheral setup <device-or-symptom>",
+            "- show windows troubleshooting toolkit",
+            "- show pdf commands",
+            "Truth boundary:",
+            "- Ali should not claim she has no internet/source access when approved source lookup is available.",
+            "- Ali should say source access is curated/approved-source lookup, not a free-form browser or autonomous web agent."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Computer assistant status", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowComputerAssistantCommandIndex()
+    {
+        var lines = new List<string>
+        {
+            "Ali computer assistant command index:",
+            "No files, apps, services, or settings were changed.",
+            "Start here:",
+            "- show computer assistant status",
+            "- show computer assistant commands",
+            "- show coding skill command index",
+            "Ability questions:",
+            "- what can you do",
+            "- can you tell me about your abilities",
+            "- what are your programming and data access limitations",
+            "Everyday computer planning:",
+            "- plan file organization \"C:\\Users\\<you>\\Downloads\"",
+            "- plan disk cleanup",
+            "- plan app install troubleshooting Visual Studio installer crash",
+            "- plan peripheral setup Scarlett Solo microphone gain",
+            "Windows diagnostics:",
+            "- show windows troubleshooting toolkit",
+            "- collect process evidence <name-or-pid>",
+            "- diagnose port <port>",
+            "- inspect services and startup",
+            "- triage event logs",
+            "- show install doctor",
+            "PDF/document work:",
+            "- show pdf commands",
+            "- generate pdf \"name.pdf\" with text \"...\"",
+            "- inspect pdf \"document.pdf\"",
+            "- summarize pdf \"document.pdf\"",
+            "Coding and Visual Studio:",
+            "- show visual studio integration",
+            "- inspect coding workspace",
+            "- interpret build goal <goal>",
+            "- draft implementation roadmap <goal>",
+            "- show execution packet",
+            "- confirm run packet item N",
+            "Future executor lane:",
+            "- File cleanup execution should be previewed as a move/copy plan first, then applied only after confirmation.",
+            "- Driver, installer, registry, trust-store, and service repairs stay owner-approved."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Computer assistant command index", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanFileOrganization(CodingToolRequest request)
+    {
+        var target = CleanGoal(request.Query, "the folder you want organized");
+        var resolvedTarget = ResolveCommonFolderHint(target);
+        var targetExists = !string.IsNullOrWhiteSpace(resolvedTarget) && Directory.Exists(resolvedTarget);
+        var lines = new List<string>
+        {
+            "File organization plan:",
+            $"Target: {target}",
+            resolvedTarget is null ? "Resolved folder: not enough information yet" : $"Resolved folder: {resolvedTarget}",
+            "No files were moved, copied, renamed, or deleted.",
+            "Suggested workflow:",
+            "1. Inspect the folder top level and identify file families by extension, age, size, and owner meaning.",
+            "2. Create a proposed destination map such as Documents, Photos, Installers, Archives, Projects, Receipts, and Review.",
+            "3. Preview moves as a written plan before touching files.",
+            "4. Move by copy-then-verify when the files matter, keeping originals until the owner approves cleanup.",
+            "5. Use duplicate checks before deleting anything.",
+            "Safety rules:",
+            "- Never delete originals during the first organization pass.",
+            "- Skip cloud sync/system/application folders unless the owner explicitly names them.",
+            "- Keep project folders, source repos, installers, license files, and recent work visible in the plan."
+        };
+
+        if (targetExists && resolvedTarget is not null)
+        {
+            lines.Add("Top-level read-only snapshot:");
+            lines.AddRange(SummarizeFolderTopLevel(resolvedTarget));
+        }
+        else
+        {
+            lines.Add("Next prompt:");
+            lines.Add("- Give Ali a folder path, for example: plan file organization \"C:\\Users\\<you>\\Downloads\"");
+        }
+
+        lines.Add("Next safe upgrade:");
+        lines.Add("- Add a preview-only file move plan that lists exact source and destination paths for approval.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "File organization plan",
+            targetExists && resolvedTarget is not null ? resolvedTarget : Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanDiskCleanup(CodingToolRequest request)
+    {
+        var target = string.IsNullOrWhiteSpace(request.Query) ? "this PC" : request.Query.Trim();
+        var lines = new List<string>
+        {
+            "Disk cleanup plan:",
+            $"Target: {target}",
+            "No files were deleted and no Windows settings were changed.",
+            "Read-only triage:",
+            "- Check free space by drive.",
+            "- Identify large owner folders before touching caches or system areas.",
+            "- Review Downloads, Desktop, Videos, Pictures, installers, old exports, and temporary build outputs.",
+            "- Check OneDrive sync state before moving cloud-backed folders.",
+            "Built-in Windows paths to consider with owner approval:",
+            "- Settings -> System -> Storage -> Temporary files",
+            "- Disk Cleanup / cleanmgr",
+            "- Recycle Bin review",
+            "- Installed apps sorted by size/date",
+            "Ali-safe cleanup sequence:",
+            "1. Snapshot drive free space and top suspect folders.",
+            "2. Propose deletes/moves in a preview list.",
+            "3. Back up or copy important files first.",
+            "4. Apply only owner-confirmed operations.",
+            "5. Re-check free space and app behavior after cleanup.",
+            "Stop rules:",
+            "- Do not delete Windows, Program Files, AppData, .git, .vs, node_modules, package caches, or model folders without a narrow approved reason.",
+            "- Do not clear browser profiles, credentials, certificates, or model data as a generic cleanup step."
+        };
+
+        lines.Add("Drive snapshot:");
+        lines.AddRange(SummarizeDriveSpace());
+        lines.Add("Next safe commands:");
+        lines.Add("- plan file organization \"C:\\Users\\<you>\\Downloads\"");
+        lines.Add("- show windows troubleshooting toolkit");
+        lines.Add("- show install doctor");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Disk cleanup plan", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanAppInstallTroubleshooting(CodingToolRequest request)
+    {
+        var target = CleanGoal(request.Query, "the app or installer problem");
+        var lines = new List<string>
+        {
+            "App install troubleshooting plan:",
+            $"Target: {target}",
+            "No installer was run and no system settings were changed.",
+            "Evidence to gather:",
+            "- Exact app name, version, installer source, and whether it is offline/web/bootstrap installer.",
+            "- Error text, screenshot, installer log path, and Windows Event Viewer Application errors around the install time.",
+            "- Required runtime stack: .NET, Visual C++ redistributable, WebView2, GPU/audio/USB drivers, or vendor services.",
+            "- Current Windows version, free disk space, antivirus/security prompt, and whether a reboot is pending.",
+            "Troubleshooting path:",
+            "1. Verify the installer source and checksum/signature when available.",
+            "2. Close conflicting app instances and inspect file locks before retrying.",
+            "3. Run the vendor repair/update tool only after the owner approves it.",
+            "4. Check logs before reinstalling blindly.",
+            "5. If the fix is uncertain, compare repair, reinstall, clean uninstall, and vendor support paths.",
+            "Useful Ali commands:",
+            "- show install doctor",
+            "- triage event logs",
+            "- collect process evidence <app-name>",
+            "- diagnose file lock \"<locked-file>\"",
+            "- plan disk cleanup",
+            "Approval boundaries:",
+            "- Admin installers, driver installs, PATH changes, registry edits, service changes, trust-store/signing changes, and uninstallers need explicit approval."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "App install troubleshooting plan", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult PlanPeripheralSetup(CodingToolRequest request)
+    {
+        var target = CleanGoal(request.Query, "the device or setup symptom");
+        var lines = new List<string>
+        {
+            "Peripheral setup plan:",
+            $"Target: {target}",
+            "No drivers, devices, audio settings, or Windows settings were changed.",
+            "General setup path:",
+            "1. Identify the exact device model, cable type, port, power requirement, and vendor driver/control app.",
+            "2. Confirm Windows sees the device in Device Manager, Sound settings, Bluetooth, or the vendor utility.",
+            "3. Confirm the app using the device has the correct input/output device selected.",
+            "4. Test with a simple built-in app before troubleshooting the advanced app.",
+            "5. Change one variable at a time and write down the result.",
+            "Audio kit notes:",
+            "- Scarlett Solo/2i2 interfaces usually need the correct Focusrite Control/driver generation for Windows.",
+            "- AT2040 is a dynamic XLR microphone; it connects through the audio interface, not USB.",
+            "- FetHead-style inline preamps require phantom power from the interface to power the preamp, while protecting the dynamic mic from needing phantom itself.",
+            "- Start with conservative gain, speak at normal distance, watch clipping/green-red indicators, then adjust in small steps.",
+            "- The Shure SH-BROADCAST2 boom arm setup is mechanical: clamp/mount stability, XLR strain relief, and mic position matter.",
+            "Useful Ali commands:",
+            "- show computer assistant commands",
+            "- show windows troubleshooting toolkit",
+            "- collect process evidence <vendor-app>",
+            "- triage event logs",
+            "Approval boundaries:",
+            "- Driver installs, firmware updates, default device changes, exclusive-mode changes, service changes, and registry edits need approval."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Peripheral setup plan", Policy.WorkspaceRoot);
+    }
+
+    private static string? ResolveCommonFolderHint(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return null;
+        }
+
+        var trimmed = target.Trim().Trim('"');
+        if (Path.IsPathFullyQualified(trimmed))
+        {
+            return trimmed;
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userProfile))
+        {
+            return null;
+        }
+
+        return trimmed.ToLowerInvariant() switch
+        {
+            "downloads" or "download" => Path.Combine(userProfile, "Downloads"),
+            "desktop" => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            "documents" or "docs" => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "pictures" or "photos" => Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+            "music" => Environment.GetFolderPath(Environment.SpecialFolder.MyMusic),
+            "videos" => Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
+            _ => null
+        };
+    }
+
+    private static IEnumerable<string> SummarizeFolderTopLevel(string folderPath)
+    {
+        var lines = new List<string>();
+
+        try
+        {
+            var directories = Directory.EnumerateDirectories(folderPath)
+                .Take(25)
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToList();
+            var files = Directory.EnumerateFiles(folderPath)
+                .Take(500)
+                .Select(path => new FileInfo(path))
+                .ToList();
+            var extensionGroups = files
+                .GroupBy(file => string.IsNullOrWhiteSpace(file.Extension) ? "(no extension)" : file.Extension.ToLowerInvariant())
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(12)
+                .Select(group => $"{group.Key}: {group.Count()} file(s)")
+                .ToList();
+            var largestFiles = files
+                .OrderByDescending(file => file.Length)
+                .Take(8)
+                .Select(file => $"- {file.Name} ({file.Length / 1024d / 1024d:0.0} MB)")
+                .ToList();
+
+            lines.Add($"- Subfolders sampled: {directories.Count}");
+            if (directories.Count > 0)
+            {
+                lines.Add($"- Subfolder examples: {string.Join(", ", directories.Take(8))}");
+            }
+
+            lines.Add($"- Files sampled: {files.Count}");
+            if (extensionGroups.Count > 0)
+            {
+                lines.Add($"- Extension mix: {string.Join("; ", extensionGroups)}");
+            }
+
+            if (largestFiles.Count > 0)
+            {
+                lines.Add("- Largest sampled files:");
+                lines.AddRange(largestFiles);
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
+            lines.Add($"- Folder snapshot unavailable: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (lines.Count == 0)
+        {
+            lines.Add("- Folder exists but no top-level files or folders were sampled.");
+        }
+
+        return lines;
+    }
+
+    private static IEnumerable<string> SummarizeDriveSpace()
+    {
+        try
+        {
+            var drives = DriveInfo.GetDrives()
+                .Where(drive => drive.IsReady)
+                .OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase)
+                .Take(12)
+                .Select(drive =>
+                {
+                    var freeGb = drive.AvailableFreeSpace / 1024d / 1024d / 1024d;
+                    var totalGb = drive.TotalSize / 1024d / 1024d / 1024d;
+                    return $"- {drive.Name} {freeGb:0.0} GB free of {totalGb:0.0} GB";
+                })
+                .ToList();
+
+            return drives.Count == 0
+                ? ["- No ready drives were found."]
+                : drives;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return [$"- Drive snapshot unavailable: {ex.GetType().Name}: {ex.Message}"];
+        }
     }
 
     private async Task<CodingToolResult> ResumeBuildPlanAsync(CancellationToken cancellationToken)

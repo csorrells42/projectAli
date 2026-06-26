@@ -1032,6 +1032,7 @@ public const string IndexHtml = """
             <button class="command-chip primary" type="button" data-command="show visual studio integration">VS Setup</button>
             <button class="command-chip primary" type="button" data-command="show windows troubleshooting toolkit">Windows Help</button>
             <button class="command-chip primary" type="button" data-command="show pdf commands">PDF Tools</button>
+            <button class="command-chip primary" type="button" data-command="show computer assistant commands">Computer Help</button>
           </div>
         </div>
         <div class="command-group">
@@ -1113,6 +1114,17 @@ public const string IndexHtml = """
           </div>
         </div>
         <div class="command-group">
+          <h3>Computer Help</h3>
+          <div class="command-grid">
+            <button class="command-chip" type="button" data-command="show computer assistant status">Computer Status</button>
+            <button class="command-chip" type="button" data-command="show computer assistant commands">Computer Index</button>
+            <button class="command-chip" type="button" data-command="plan file organization &quot;Downloads&quot;">File Plan</button>
+            <button class="command-chip" type="button" data-command="plan disk cleanup">Disk Cleanup</button>
+            <button class="command-chip" type="button" data-command="plan app install troubleshooting ">Install Help</button>
+            <button class="command-chip" type="button" data-command="plan peripheral setup ">Peripheral Setup</button>
+          </div>
+        </div>
+        <div class="command-group">
           <h3>PDF Tools</h3>
           <div class="command-grid">
             <button class="command-chip" type="button" data-command="show pdf tool status">PDF Status</button>
@@ -1136,6 +1148,7 @@ public const string IndexHtml = """
             <li><strong>Recover</strong>Compares roadmap, receipts, and Git state after interruption.</li>
             <li><strong>Diagnose</strong>Guides Windows process, port, service, startup, and build-lock investigation.</li>
             <li><strong>PDF</strong>Creates polished PDFs, inspects/extracts text, summarizes, converts Markdown, and assembles derived PDFs through gates.</li>
+            <li><strong>Computer</strong>Plans file organization, disk cleanup, app install troubleshooting, and peripheral setup without changing the PC.</li>
             <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>
           </ul>
         </div>
