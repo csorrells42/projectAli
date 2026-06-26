@@ -193,11 +193,11 @@ Roadmap execution state is saved under Ali's local coding data. Use `show active
 
 Use `show crash recovery status` after a crash or interrupted build. Ali reloads the roadmap state, checks recent coding receipts, runs a read-only Git status check, compares the active roadmap step against receipts, and suggests safe continue/fix/rollback paths. If the evidence supports a concrete fix, Ali can suggest a guarded patch preview for approval; if the evidence is unclear, she should pause and show options before editing.
 
-Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension adds an `Ali Companion` tool window in Visual Studio and loads Ali's local helper page at `http://127.0.0.1:8765/`. The helper still owns the coding command parser, workspace policy, confirmation gates, and receipts.
+Visual Studio integration in this build now includes a developer VSIX named `Ali Companion`. The extension adds a native `Ali Companion` tool window in Visual Studio with command buttons, a command box, and an output pane. It calls Ali's loopback coding bridge at `http://127.0.0.1:8765/api/coding/*`; the helper still owns the coding command parser, workspace policy, confirmation gates, and receipts.
 
 Use `generate visual studio integration plan` to produce a deterministic handoff for deeper phases. The handoff reports the current workspace, launcher discovery, architecture snapshot, and the minimum guarded contract the VSIX must keep following.
 
-The HTML helper's Programming Companion panel is the first local companion surface for that direction. It can submit deterministic coding commands to Ali on loopback, but all writes/builds/tests/Git actions still follow the same confirmation gates.
+The HTML helper's Programming Companion panel remains available in the browser. The VSIX uses native Visual Studio controls instead of embedding that page, which avoids legacy embedded-browser rendering and script issues. Both surfaces submit deterministic coding commands to Ali on loopback, and all writes/builds/tests/Git actions still follow the same confirmation gates.
 
 The VSIX build output is:
 
@@ -205,7 +205,7 @@ The VSIX build output is:
 src\Ali.App.VisualStudioExtension\bin\Debug\net472\Ali.App.VisualStudioExtension.vsix
 ```
 
-Install it into Visual Studio Community with Visual Studio's VSIX Installer, then open `View -> Ali Companion`. Start the WebHelper before using the window:
+Install it into Visual Studio Community with Visual Studio's VSIX Installer, then open `View -> Ali Companion`. Start the WebHelper before using the window. The tool window can also open the browser helper separately with `Open Helper`:
 
 ```powershell
 dotnet run --project .\src\Ali.App.WebHelper\Ali.App.WebHelper.csproj --no-build

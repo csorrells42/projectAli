@@ -134,7 +134,7 @@ Both endpoints honor the helper access token when configured and reject non-loop
 
 `Ali.App.VisualStudioBridge` is a buildable CLI bridge for Visual Studio External Tools. It accepts solution/file/line context, expands command templates such as `{file}` and `{line}`, and sends the resulting deterministic command to the loopback coding bridge.
 
-`Ali.App.VisualStudioExtension` is a buildable VSIX. It registers an `Ali Companion` tool window and opens the local helper URL inside Visual Studio. The VSIX does not add direct file/build/Git authority; those actions still route through the local helper and Ali's normal confirmation gates.
+`Ali.App.VisualStudioExtension` is a buildable VSIX. It registers an `Ali Companion` tool window with native WPF controls for status, common coding commands, command entry, and command output. It calls the loopback coding bridge directly instead of embedding the helper page inside Visual Studio. The VSIX does not add direct file/build/Git authority; those actions still route through the local helper and Ali's normal confirmation gates.
 
 The bridge can auto-start `Ali.App.WebHelper` on loopback when the helper is offline, using `ALI_HELPER_URL` or the default `http://127.0.0.1:8765`. Pass `--no-start-helper` for fail-fast behavior. The current setup guide lives in `tools\visualstudio\ALI_VISUAL_STUDIO_EXTERNAL_TOOLS.md`.
 

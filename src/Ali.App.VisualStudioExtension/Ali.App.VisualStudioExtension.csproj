@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <Reference Include="System.Design" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 
   <ItemGroup>
