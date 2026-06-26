@@ -1,0 +1,57 @@
+[
+  {
+    "id": "focusrite-scarlett-solo-4th-gen-downloads",
+    "topic": "audio",
+    "name": "Focusrite Scarlett Solo 4th Gen Downloads and User Guide",
+    "url": "https://downloads.focusrite.com/focusrite/scarlett-4th-gen/scarlett-solo-4th-gen",
+    "type": "reference",
+    "trustLevel": "official",
+    "keywords": ["focusrite", "scarlett", "solo", "4th gen", "audio interface", "gain", "air", "halo", "driver", "control 2", "microphone setup"],
+    "notes": "Official Focusrite downloads page for Scarlett Solo 4th Gen, including user guide and software links.",
+    "enabled": true
+  },
+  {
+    "id": "focusrite-scarlett-2i2-4th-gen-downloads",
+    "topic": "audio",
+    "name": "Focusrite Scarlett 2i2 4th Gen Downloads and User Guide",
+    "url": "https://downloads.focusrite.com/focusrite/scarlett-4th-gen/scarlett-2i2-4th-gen",
+    "type": "reference",
+    "trustLevel": "official",
+    "keywords": ["focusrite", "scarlett", "2i2", "4th gen", "audio interface", "gain", "air", "halo", "driver", "control 2", "microphone setup"],
+    "notes": "Official Focusrite downloads page for Scarlett 2i2 4th Gen, including user guide and software links.",
+    "enabled": true
+  },
+  {
+    "id": "audio-technica-at2040-product",
+    "topic": "audio",
+    "name": "Audio-Technica AT2040 Product Page",
+    "url": "https://www.audio-technica.com/en-us/at2040",
+    "type": "reference",
+    "trustLevel": "official",
+    "keywords": ["audio-technica", "at2040", "dynamic microphone", "hypercardioid", "podcast microphone", "xlr", "gain", "mic technique"],
+    "notes": "Official Audio-Technica product page for AT2040 microphone specifications and documents.",
+    "enabled": true
+  },
+  {
+    "id": "tritonaudio-fethead-product",
+    "topic": "audio",
+    "name": "TritonAudio FetHead Product Page",
+    "url": "https://tritonaudio.com/product/fethead/",
+    "type": "reference",
+    "trustLevel": "official",
+    "keywords": ["tritonaudio", "fethead", "inline preamp", "microphone preamp", "phantom power", "dynamic microphone", "gain", "xlr"],
+    "notes": "Official TritonAudio FetHead product page for inline preamp behavior and power requirements.",
+    "enabled": true
+  },
+  {
+    "id": "shure-gator-broadcast2-boom",
+    "topic": "audio",
+    "name": "Shure Gator Low Profile Boom Arm SH-BROADCAST2",
+    "url": "https://www.shure.com/en-US/products/accessories/gator-broadcast2-boom?variant=SH-BROADCAST2",
+    "type": "reference",
+    "trustLevel": "official",
+    "keywords": ["shure", "gator", "sh-broadcast2", "broadcast2", "low profile boom arm", "microphone arm", "desk clamp", "direct mount", "cable channel", "at2040"],
+    "notes": "Official Shure product page for the Gator Low Profile Boom Arm, SKU SH-BROADCAST2.",
+    "enabled": true
+  }
+]

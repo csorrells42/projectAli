@@ -811,6 +811,16 @@ public const string IndexHtml = """
       border-color: #f59e0b;
     }
 
+    .command-chip.primary {
+      border-color: #2563eb;
+      background: #0f1f3a;
+    }
+
+    .command-chip.primary:hover {
+      border-color: #60a5fa;
+      background: #132b52;
+    }
+
     .skill-list {
       display: grid;
       gap: 6px;
@@ -1013,6 +1023,17 @@ public const string IndexHtml = """
         <h2>Programming Companion</h2>
         <p class="bridge-kicker">Pick a command, review it, then run it through Ali's normal approval gates.</p>
         <div class="command-group">
+          <h3>Start Here</h3>
+          <div class="command-grid">
+            <button class="command-chip primary" type="button" data-command="show coding skill command index">What Can Ali Do?</button>
+            <button class="command-chip primary" type="button" data-command="interpret build goal ">Plan A Build</button>
+            <button class="command-chip primary" type="button" data-command="diagnose last build failure">Fix A Build</button>
+            <button class="command-chip primary" type="button" data-command="show install doctor">Install Check</button>
+            <button class="command-chip primary" type="button" data-command="show visual studio integration">VS Setup</button>
+            <button class="command-chip primary" type="button" data-command="show windows troubleshooting toolkit">Windows Help</button>
+          </div>
+        </div>
+        <div class="command-group">
           <h3>Awareness</h3>
           <div class="command-grid">
             <button class="command-chip" type="button" data-command="show visual studio integration">VS Status</button>
@@ -1101,7 +1122,7 @@ public const string IndexHtml = """
             <li><strong>Guard</strong>Previews exact patches before applying confirmed edits.</li>
           </ul>
         </div>
-        <textarea id="codingCommand" placeholder="show visual studio integration"></textarea>
+        <textarea id="codingCommand" placeholder="show coding skill command index"></textarea>
         <div class="command-actions">
           <button id="codingRun" type="button">Run</button>
           <button id="codingClear" type="button">Clear</button>

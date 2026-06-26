@@ -144,7 +144,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
         _command.MinHeight = 58;
         _command.Margin = new Thickness(0, 10, 0, 8);
-        _command.Text = "show visual studio integration";
+        _command.Text = "show coding skill command index";
         _command.AcceptsReturn = true;
         _command.TextWrapping = TextWrapping.Wrap;
         _command.Background = Brush(15, 23, 42);
@@ -382,6 +382,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
     {
         var panel = new StackPanel();
         AddContextGroup(panel);
+        AddGroup(panel, "Start Here", ("What Can Ali Do?", "show coding skill command index"), ("Plan A Build", "interpret build goal "), ("Fix A Build", "diagnose last build failure"), ("Install Check", "show install doctor"), ("VS Setup", "show visual studio integration"), ("Windows Help", "show windows troubleshooting toolkit"));
         AddGroup(panel, "Awareness", ("VS Status", "show visual studio integration"), ("Workspace", "inspect coding workspace"), ("Architecture", "analyze solution architecture"), ("Patterns", "detect codebase patterns"));
         AddGroup(panel, "Guided Flow", ("Goal", "interpret build goal "), ("Options", "show architecture options "), ("Criteria", "write acceptance criteria "), ("Tests", "suggest tests for "), ("Roadmap", "draft implementation roadmap "), ("Next", "show next coding action"), ("Packet", "show execution packet"), ("Validate", "plan post edit validation"));
         AddGroup(panel, "Plan Tools", ("Files", "plan feature files "), ("Safety", "show refactor safety checklist "), ("Packages", "plan package lookup "), ("Install Packet", "plan dependency install packet "), ("Scaffold", "preview project scaffold "), ("Scaffold Apply", "plan scaffold apply "));

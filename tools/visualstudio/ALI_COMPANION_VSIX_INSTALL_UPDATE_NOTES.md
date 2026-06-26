@@ -52,6 +52,7 @@ http://127.0.0.1:8765
 The expected tool window command groups are:
 
 ```text
+Start Here
 Awareness
 Guided Flow
 Plan Tools
@@ -59,6 +60,8 @@ Execute
 Diagnostics
 Reports
 ```
+
+Start Here surfaces What Can Ali Do, Plan A Build, Fix A Build, Install Check, VS Setup, and Windows Help so the first useful commands are visible without reading the manual first.
 
 The first guided workflow is Goal -> Options -> Criteria -> Tests -> Roadmap -> Next -> Packet -> Validate.
 

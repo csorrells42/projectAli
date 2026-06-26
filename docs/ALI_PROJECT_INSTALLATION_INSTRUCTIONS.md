@@ -136,6 +136,22 @@ Model: qwen3-vl:8b
 
 Ali should not claim model-backed chat is active unless the runtime check passes.
 
+## Audio Setup Sources
+
+Ali's source-backed audio setup catalog is:
+
+```text
+docs\source-catalogs\ali_audio_setup_sources.json
+```
+
+Merge those entries into the live curated source catalog:
+
+```text
+%LOCALAPPDATA%\Ali\BootstrapData\Sources\curated_sources.json
+```
+
+The catalog gives Ali official source links for the Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure Gator Low Profile Boom Arm SH-BROADCAST2. This is reference material for ordinary source-backed setup questions, not a special audio setup feature.
+
 ## Coding Companion Checks
 
 After WebHelper and Visual Studio are running, verify these commands:
