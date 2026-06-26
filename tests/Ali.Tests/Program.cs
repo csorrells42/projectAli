@@ -144,6 +144,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI stream parser extracts content delta", TestOpenAiStreamParserExtractsContentDelta),
     ("OpenAI stream parser hides reasoning delta by default", TestOpenAiStreamParserHidesReasoningDeltaByDefault),
     ("OpenAI stream parser can expose reasoning delta for health checks", TestOpenAiStreamParserCanExposeReasoningDeltaForHealthChecks),
+    ("OpenAI stream parser extracts finish reason", TestOpenAiStreamParserExtractsFinishReason),
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("OpenAI runtime preserves normal prompt text", TestRuntimePreservesNormalPromptText),
     ("OpenAI runtime pins Ali persona", TestRuntimePinsAliPersona),
@@ -153,6 +154,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI runtime shutdown unloads model", TestRuntimeShutdownUnloadsModel),
     ("OpenAI runtime reports empty visible stream content", TestRuntimeReportsEmptyVisibleStreamContent),
     ("OpenAI runtime retries empty visible qwen output", TestRuntimeRetriesEmptyVisibleQwenOutput),
+    ("OpenAI runtime continues after length finish", TestRuntimeContinuesAfterLengthFinish),
     ("runtime cancellation path throws OperationCanceledException", TestRuntimeCancellationPath),
     ("correction queue stores runtime snapshot", TestCorrectionQueueStoresRuntimeSnapshot),
     ("correction queue can mark reviewed and unresolved", TestCorrectionQueueCanMarkReviewedAndUnresolved),
@@ -3184,6 +3186,17 @@ static Task TestOpenAiStreamParserCanExposeReasoningDeltaForHealthChecks()
     return Task.CompletedTask;
 }
 
+static Task TestOpenAiStreamParserExtractsFinishReason()
+{
+    var streamEvent = OpenAiStreamParser.ExtractStreamEvent(
+        """{"choices":[{"delta":{},"finish_reason":"length"}]}""");
+
+    Equal(null, streamEvent.Content);
+    Equal("length", streamEvent.FinishReason);
+    Equal(false, streamEvent.IsDone);
+    return Task.CompletedTask;
+}
+
 static async Task TestRuntimeSettingsSaveAndLoad()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -3466,6 +3479,22 @@ static async Task TestRuntimeRetriesEmptyVisibleQwenOutput()
     Equal("Alabama football went 11-4 in 2025.", answer);
     Equal(2, handler.ChatCompletionRequestCount);
     Contains("visible assistant message content only", handler.LastChatBody);
+}
+
+static async Task TestRuntimeContinuesAfterLengthFinish()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var handler = new LengthThenContinuationHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+
+    var answer = await StreamToStringAsync(runtime, "Explain no free lunch.", CancellationToken.None);
+
+    Equal(
+        "In summary, \"There's no such thing as a free lunch\" is a reminder that tradeoffs still exist.",
+        answer);
+    Equal(2, handler.ChatCompletionRequestCount);
+    Contains("Continue exactly from where your previous answer stopped", handler.LastChatBody);
+    Contains("\"role\":\"assistant\"", handler.LastChatBody);
 }
 
 static async Task TestRuntimeCancellationPath()
@@ -7124,6 +7153,61 @@ internal sealed class EmptyQwenThenVisibleRetryHandler(string model) : HttpMessa
         return LastChatBody.Contains("visible assistant message content only", StringComparison.OrdinalIgnoreCase)
             ? JsonResponse("""{"choices":[{"message":{"content":"Alabama football went 11-4 in 2025."}}]}""")
             : JsonResponse("""{"choices":[{"message":{"content":""}}]}""");
+    }
+
+    private static HttpResponseMessage JsonResponse(string json) =>
+        new(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+        };
+}
+
+internal sealed class LengthThenContinuationHandler(string model) : HttpMessageHandler
+{
+    public int ChatCompletionRequestCount { get; private set; }
+
+    public string LastChatBody { get; private set; } = string.Empty;
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+
+        if (path.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonResponse($$"""{"data":[{"id":"{{model}}"}]}""");
+        }
+
+        if (!path.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("not found")
+            };
+        }
+
+        ChatCompletionRequestCount++;
+        LastChatBody = request.Content is null
+            ? string.Empty
+            : await request.Content.ReadAsStringAsync(cancellationToken);
+
+        return ChatCompletionRequestCount == 1
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"In summary, \\\"There's no such thing as a free lunch\\\" is\"}}]}\n\n" +
+                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+                    "data: [DONE]\n\n")
+            }
+            : new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\" a reminder that tradeoffs still exist.\"}}]}\n\n" +
+                    "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+                    "data: [DONE]\n\n")
+            };
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>

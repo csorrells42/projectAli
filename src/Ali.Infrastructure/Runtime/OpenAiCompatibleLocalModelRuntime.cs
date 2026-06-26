@@ -15,12 +15,17 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const int HealthProbeOutputTokenLimit = 512;
     private const int QwenVisibleOutputTokenFloor = 512;
     private const int QwenVisibleOutputRetryTokenLimit = 1024;
+    private const int MaxAutomaticLengthContinuations = 1;
     private const string HealthProbeExpectedResponse = "OK";
     private const string SourcePlannerConversationId = "source_query_plan";
     private const string AliPersonaInstruction =
         "You are Ali, the local desktop assistant in this application. If asked who you are or what your name is, identify yourself as Ali. Do not prepend your name or identity to ordinary answers. Do not argue that your name is Qwen, the model package, or the model provider; those are implementation details. If asked whether you are connected to the internet, answer as Ali: you run on this computer and can use only the local app/runtime features that are enabled; do not claim live web browsing, training cutoffs, or internet limitations unless the user asks specifically about web access. If the app provides source excerpts, treat them as app-provided evidence and do not say you lack real-time data. Keep normal replies concise: usually one short paragraph or a few bullets. Avoid emoji and emoticons in normal replies.";
     private const string VisibleOutputRetryInstruction =
         "The previous runtime attempt produced no visible assistant content. Follow the existing instructions exactly, but write the final result in visible assistant message content only. Do not include hidden reasoning, analysis, or <think> blocks. If the task requires JSON, return only that JSON.";
+    private const string ContinueAfterLengthInstruction =
+        "Continue exactly from where your previous answer stopped. Do not restart, repeat completed text, summarize, or add a preface.";
+    private const string OutputLimitReachedNotice =
+        "Response reached the configured output limit before the model finished. Ask me to continue or increase the Runtime output limit.";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
@@ -64,8 +69,67 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             yield break;
         }
 
-        var uri = BuildUri("chat/completions");
         var isHealthCheck = IsHealthCheckRequest(request);
+        var firstAttempt = new StreamingAttemptState();
+        await foreach (var token in StreamChatAttemptAsync(request, isHealthCheck, firstAttempt, cancellationToken).ConfigureAwait(false))
+        {
+            yield return token;
+        }
+
+        if (!firstAttempt.EmittedContent && !isHealthCheck)
+        {
+            var fallbackContent = await SendVisibleOutputRetryAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(fallbackContent))
+            {
+                yield return new ModelToken(fallbackContent, EvidenceStatus.Unverified);
+                yield break;
+            }
+
+            yield return new ModelToken(
+                "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
+                EvidenceStatus.Unverified);
+            yield break;
+        }
+
+        var previousAttempt = firstAttempt;
+        for (var continuationIndex = 0;
+             !isHealthCheck
+             && continuationIndex < MaxAutomaticLengthContinuations
+             && IsLengthFinish(previousAttempt.FinishReason)
+             && previousAttempt.EmittedContent;
+             continuationIndex++)
+        {
+            var continuationRequest = BuildContinuationRequest(request, previousAttempt.Text.ToString());
+            var continuationAttempt = new StreamingAttemptState();
+            await foreach (var token in StreamChatAttemptAsync(continuationRequest, isHealthCheck: false, continuationAttempt, cancellationToken).ConfigureAwait(false))
+            {
+                yield return token;
+            }
+
+            if (!continuationAttempt.EmittedContent)
+            {
+                break;
+            }
+
+            previousAttempt = continuationAttempt;
+        }
+
+        if (!isHealthCheck && IsLengthFinish(previousAttempt.FinishReason))
+        {
+            yield return new ModelToken(
+                $"{Environment.NewLine}{Environment.NewLine}{OutputLimitReachedNotice}",
+                EvidenceStatus.Unknown,
+                FinishReason: "length");
+        }
+    }
+
+    private async IAsyncEnumerable<ModelToken> StreamChatAttemptAsync(
+        ChatRequest request,
+        bool isHealthCheck,
+        StreamingAttemptState state,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var uri = BuildUri("chat/completions");
         var payload = JsonSerializer.Serialize(
             BuildChatPayload(request, maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null),
             JsonOptions);
@@ -93,6 +157,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             {
                 WriteHealthLog($"response STREAM POST {uri} error={error}");
             }
+
             yield return new ModelToken(
                 $"Unknown: local model runtime returned HTTP {(int)response.StatusCode}. {TrimForUser(error)}",
                 EvidenceStatus.Verified);
@@ -101,7 +166,6 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8);
-        var emittedContent = false;
 
         while (true)
         {
@@ -118,34 +182,65 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 continue;
             }
 
-            var content = OpenAiStreamParser.ExtractContentDelta(
+            var streamEvent = OpenAiStreamParser.ExtractStreamEvent(
                 line["data:".Length..],
                 includeReasoning: isHealthCheck);
-            if (!string.IsNullOrEmpty(content))
+            if (streamEvent.IsDone)
             {
-                emittedContent = true;
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(streamEvent.FinishReason))
+            {
+                state.FinishReason = streamEvent.FinishReason;
+            }
+
+            if (!string.IsNullOrEmpty(streamEvent.Content))
+            {
+                state.EmittedContent = true;
+                state.Text.Append(streamEvent.Content);
                 if (isHealthCheck)
                 {
-                    WriteHealthLog($"response STREAM POST {uri} delta={content}");
+                    WriteHealthLog($"response STREAM POST {uri} delta={streamEvent.Content}");
                 }
-                yield return new ModelToken(content, EvidenceStatus.Unverified);
-            }
-        }
 
-        if (!emittedContent && !isHealthCheck)
-        {
-            var fallbackContent = await SendVisibleOutputRetryAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(fallbackContent))
-            {
-                yield return new ModelToken(fallbackContent, EvidenceStatus.Unverified);
-                yield break;
+                yield return new ModelToken(
+                    streamEvent.Content,
+                    EvidenceStatus.Unverified,
+                    streamEvent.FinishReason);
             }
-
-            yield return new ModelToken(
-                "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
-                EvidenceStatus.Unverified);
         }
     }
+
+    private static ChatRequest BuildContinuationRequest(ChatRequest request, string partialAnswer)
+    {
+        var history = request.History.ToList();
+        history.Add(new ChatMessage(
+            $"runtime_original_user_{Guid.NewGuid():N}",
+            ChatRole.User,
+            request.UserText,
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Unverified));
+
+        if (!string.IsNullOrWhiteSpace(partialAnswer))
+        {
+            history.Add(new ChatMessage(
+                $"runtime_partial_assistant_{Guid.NewGuid():N}",
+                ChatRole.Assistant,
+                partialAnswer,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Unverified));
+        }
+
+        return request with
+        {
+            UserText = ContinueAfterLengthInstruction,
+            History = history
+        };
+    }
+
+    private static bool IsLengthFinish(string? finishReason) =>
+        string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase);
 
     public async Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken)
     {
@@ -379,7 +474,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             throw new HttpRequestException($"Chat completion failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
         }
 
-        return OpenAiStreamParser.ExtractMessageContent(body, includeReasoning: isHealthCheck) ?? string.Empty;
+        var result = OpenAiStreamParser.ExtractMessageResult(body, includeReasoning: isHealthCheck);
+        var content = result.Content ?? string.Empty;
+        if (!isHealthCheck && IsLengthFinish(result.FinishReason) && !string.IsNullOrWhiteSpace(content))
+        {
+            return $"{content}{Environment.NewLine}{Environment.NewLine}{OutputLimitReachedNotice}";
+        }
+
+        return content;
     }
 
     private async Task<string> SendNonStreamingProbeWithRetryAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -677,6 +779,15 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
 
         return content.ToArray();
+    }
+
+    private sealed class StreamingAttemptState
+    {
+        public bool EmittedContent { get; set; }
+
+        public string? FinishReason { get; set; }
+
+        public StringBuilder Text { get; } = new();
     }
 
     private sealed record ModelsCheckResult(bool Succeeded, string Summary)

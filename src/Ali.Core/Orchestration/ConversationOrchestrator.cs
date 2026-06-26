@@ -16,7 +16,12 @@ public sealed record AssistantStreamChunk(
     string UserMessageId,
     string AssistantMessageId,
     string Text,
-    EvidenceStatus EvidenceStatus);
+    EvidenceStatus EvidenceStatus,
+    string? FinishReason = null)
+{
+    public bool ReachedOutputLimit =>
+        string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase);
+}
 
 public sealed class ConversationOrchestrator(
     ILocalModelRuntime runtime,
@@ -154,7 +159,8 @@ public sealed class ConversationOrchestrator(
                     userMessageId,
                     assistantMessageId,
                     token.Text,
-                    token.EvidenceStatus);
+                    token.EvidenceStatus,
+                    token.FinishReason);
             }
 
             yield break;
@@ -162,10 +168,15 @@ public sealed class ConversationOrchestrator(
 
         var answer = new StringBuilder();
         var evidenceStatus = EvidenceStatus.Unverified;
+        string? finishReason = null;
         await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
         {
             answer.Append(token.Text);
             evidenceStatus = token.EvidenceStatus;
+            if (!string.IsNullOrWhiteSpace(token.FinishReason))
+            {
+                finishReason = token.FinishReason;
+            }
         }
 
         var cleanedAnswer = StripModelGeneratedSourceAppendix(answer.ToString());
@@ -176,7 +187,8 @@ public sealed class ConversationOrchestrator(
                 userMessageId,
                 assistantMessageId,
                 cleanedAnswer,
-                evidenceStatus);
+                evidenceStatus,
+                finishReason);
         }
 
         var sourceAppendix = SourcePromptFormatter.BuildAnswerAppendix(sourceResult);

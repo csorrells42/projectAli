@@ -1594,6 +1594,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _activeResponse = new CancellationTokenSource();
         var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
+        var reachedOutputLimit = false;
 
         try
         {
@@ -1608,6 +1609,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 assistantMessage.Text += chunk.Text;
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
+                reachedOutputLimit |= chunk.ReachedOutputLimit;
                 QueueStreamingSpeech(streamingSpeech, chunk.Text);
             }
 
@@ -1621,7 +1623,9 @@ public sealed class MainWindowViewModel : ObservableObject
             else if (!_services.RuntimeController.IsUsingFallback)
             {
                 SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
-                StatusText = "Response complete.";
+                StatusText = reachedOutputLimit
+                    ? "Response reached the output limit."
+                    : "Response complete.";
             }
             else
             {
