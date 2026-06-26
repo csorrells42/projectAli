@@ -22,9 +22,6 @@ namespace Ali.App.VisualStudioExtension;
 
 public sealed class AliCompanionToolWindowControl : UserControl
 {
-    private static readonly Uri HelperUri = new("http://127.0.0.1:8765/");
-    private static readonly Uri CodingStatusUri = new("http://127.0.0.1:8765/api/coding/status");
-    private static readonly Uri CodingCommandUri = new("http://127.0.0.1:8765/api/coding/command");
     private static readonly string HistoryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Ali",
@@ -247,7 +244,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         DockPanel.SetDock(open, Dock.Left);
         toolbar.Children.Add(open);
 
-        _status.Text = "Ali helper: http://127.0.0.1:8765/";
+        _status.Text = "Ali helper: " + GetHelperUri();
         _status.Foreground = Brush(203, 213, 225);
         _status.VerticalAlignment = VerticalAlignment.Center;
         _status.TextWrapping = TextWrapping.Wrap;
@@ -324,7 +321,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private async Task RefreshStatusAsync()
     {
-        await SendAsync(CodingStatusUri, body: null, statusPrefix: "Reading Ali bridge status...");
+        await SendAsync(GetEndpointUri("api/coding/status"), body: null, statusPrefix: "Reading Ali bridge status...");
     }
 
     private async Task RunCommandAsync()
@@ -338,7 +335,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
         SaveCommandToHistory(command);
         await SendAsync(
-            CodingCommandUri,
+            GetEndpointUri("api/coding/command"),
             "{\"command\":\"" + EscapeJson(command) + "\"}",
             "Running Ali command...");
     }
@@ -368,9 +365,11 @@ public sealed class AliCompanionToolWindowControl : UserControl
             }
 
             var selectionText = selection?.Text;
-            var selectedText = string.IsNullOrWhiteSpace(selectionText) ? null : selectionText;
+            var selectedText = GetOptions().UseSelectedTextInCommands && !string.IsNullOrWhiteSpace(selectionText)
+                ? selectionText
+                : null;
             _lastContext = new VsContext(solutionPath, filePath, lineNumber, selectedText);
-            _context.Text = FormatContext(_lastContext);
+            _context.Text = FormatContext(_lastContext, GetOptions().UseSelectedTextInCommands, selectionText);
         }
         catch (Exception ex) when (ex is InvalidOperationException or NotImplementedException or System.Runtime.InteropServices.COMException)
         {
@@ -408,6 +407,12 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private void FillSearchSelectionCommand()
     {
+        if (!GetOptions().UseSelectedTextInCommands)
+        {
+            ShowMissingContext("Selection-based commands are disabled in Ali Companion options.");
+            return;
+        }
+
         var query = CompactSelection(_lastContext.SelectedText, maxLength: 80);
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -420,6 +425,12 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private void FillPlanSelectionCommand()
     {
+        if (!GetOptions().UseSelectedTextInCommands)
+        {
+            ShowMissingContext("Selection-based commands are disabled in Ali Companion options.");
+            return;
+        }
+
         var selected = CompactSelection(_lastContext.SelectedText, maxLength: 160);
         if (string.IsNullOrWhiteSpace(selected))
         {
@@ -435,6 +446,12 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private void FillPatchSelectionCommand()
     {
+        if (!GetOptions().UseSelectedTextInCommands)
+        {
+            ShowMissingContext("Selection-based commands are disabled in Ali Companion options.");
+            return;
+        }
+
         var filePath = _lastContext.FilePath;
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -571,7 +588,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private void LoadCommandHistory()
     {
         _history.Items.Clear();
-        foreach (var command in ReadHistory().Take(20))
+        foreach (var command in ReadHistory().Take(GetOptions().ClampedHistoryLimit))
         {
             _history.Items.Add(command);
         }
@@ -579,10 +596,11 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private void SaveCommandToHistory(string command)
     {
+        var limit = GetOptions().ClampedHistoryLimit;
         var history = new List<string> { command };
         history.AddRange(ReadHistory().Where(item => !string.Equals(item, command, StringComparison.OrdinalIgnoreCase)));
         Directory.CreateDirectory(Path.GetDirectoryName(HistoryPath)!);
-        File.WriteAllLines(HistoryPath, history.Take(20), Encoding.UTF8);
+        File.WriteAllLines(HistoryPath, history.Take(limit), Encoding.UTF8);
         LoadCommandHistory();
     }
 
@@ -628,7 +646,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private static void OpenHelperInBrowser()
     {
-        System.Diagnostics.Process.Start(new ProcessStartInfo(HelperUri.ToString()) { UseShellExecute = true });
+        System.Diagnostics.Process.Start(new ProcessStartInfo(GetHelperUri().ToString()) { UseShellExecute = true });
     }
 
     private void SetCommand(string command)
@@ -645,6 +663,23 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private static SolidColorBrush Brush(byte r, byte g, byte b) =>
         new(Color.FromRgb(r, g, b));
+
+    private static AliCompanionOptionsPage GetOptions()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return AliCompanionPackage.Instance?.GetOptionsPage() ?? new AliCompanionOptionsPage();
+    }
+
+    private static Uri GetHelperUri()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return Uri.TryCreate(GetOptions().NormalizedHelperUrl, UriKind.Absolute, out var uri)
+            ? uri
+            : new Uri("http://127.0.0.1:8765/");
+    }
+
+    private static Uri GetEndpointUri(string relativePath) =>
+        new(GetHelperUri(), relativePath);
 
     private static string EscapeJson(string value) =>
         value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
@@ -676,7 +711,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         return trimmed.Length <= 240 ? trimmed : trimmed.Substring(0, 240);
     }
 
-    private static string FormatContext(VsContext context)
+    private static string FormatContext(VsContext context, bool selectedTextEnabled, string? rawSelectedText)
     {
         var solution = string.IsNullOrWhiteSpace(context.SolutionPath)
             ? "no solution"
@@ -685,7 +720,9 @@ public sealed class AliCompanionToolWindowControl : UserControl
             ? "no active file"
             : Path.GetFileName(context.FilePath);
         var line = context.LineNumber is int lineNumber ? lineNumber.ToString() : "n/a";
-        var selection = string.IsNullOrWhiteSpace(context.SelectedText)
+        var selection = !selectedTextEnabled && !string.IsNullOrWhiteSpace(rawSelectedText)
+            ? "withheld by options"
+            : string.IsNullOrWhiteSpace(context.SelectedText)
             ? "none"
             : context.SelectedText!.Length + " chars";
         return $"VS context: solution {solution}; file {file}; line {line}; selection {selection}.";

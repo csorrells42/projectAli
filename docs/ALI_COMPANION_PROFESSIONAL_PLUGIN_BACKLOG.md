@@ -11,10 +11,10 @@ This list tracks the Visual Studio plugin polish path while keeping Ali's curren
 - Visible progress and command state indicators.
 - Pending approval and patch-preview state cues.
 - Diagnostic list with double-click open for compiler-style file/line output.
+- Visual Studio options page for helper URL, command history limit, and selected-text context behavior.
 
 ## Next
 
-- Persistent extension options page for helper URL, history length, and context behavior.
 - Richer pending-approval view that separates requested command, risk, target path, and next confirmation command.
 - Build/test progress model that can show start time, elapsed time, exit code, and recent receipt link.
 - Safer selected-code packaging with explicit preview of what context will be sent to Ali.
