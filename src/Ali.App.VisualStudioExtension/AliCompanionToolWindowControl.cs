@@ -31,6 +31,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private readonly HttpClient _http = new();
     private readonly TextBlock _status = new();
     private readonly TextBlock _context = new();
+    private readonly TextBlock _selectionPreview = new();
     private readonly TextBlock _state = new();
     private readonly TextBlock _runSummary = new();
     private readonly TextBlock _approval = new();
@@ -76,6 +77,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -87,12 +89,21 @@ public sealed class AliCompanionToolWindowControl : UserControl
         Grid.SetRow(_context, 0);
         content.Children.Add(_context);
 
+        _selectionPreview.Foreground = Brush(148, 163, 184);
+        _selectionPreview.Background = Brush(8, 13, 22);
+        _selectionPreview.Padding = new Thickness(8);
+        _selectionPreview.Margin = new Thickness(0, 8, 0, 0);
+        _selectionPreview.TextWrapping = TextWrapping.Wrap;
+        _selectionPreview.Text = "Selection package: none staged.";
+        Grid.SetRow(_selectionPreview, 1);
+        content.Children.Add(_selectionPreview);
+
         var commandGroups = BuildCommandGroups();
-        Grid.SetRow(commandGroups, 1);
+        Grid.SetRow(commandGroups, 2);
         content.Children.Add(commandGroups);
 
         var historyPanel = BuildHistoryPanel();
-        Grid.SetRow(historyPanel, 2);
+        Grid.SetRow(historyPanel, 3);
         content.Children.Add(historyPanel);
 
         _command.MinHeight = 58;
@@ -103,7 +114,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _command.Background = Brush(15, 23, 42);
         _command.Foreground = Brushes.White;
         _command.BorderBrush = Brush(71, 85, 105);
-        Grid.SetRow(_command, 3);
+        Grid.SetRow(_command, 4);
         content.Children.Add(_command);
 
         var actions = new StackPanel
@@ -118,15 +129,15 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _runButton.Click += async (_, _) => await RunCommandAsync();
         actions.Children.Add(_runButton);
         actions.Children.Add(Button("Clear", () => _command.Clear()));
-        Grid.SetRow(actions, 4);
+        Grid.SetRow(actions, 5);
         content.Children.Add(actions);
 
         var statePanel = BuildStatePanel();
-        Grid.SetRow(statePanel, 5);
+        Grid.SetRow(statePanel, 6);
         content.Children.Add(statePanel);
 
         var approvalPanel = BuildApprovalPanel();
-        Grid.SetRow(approvalPanel, 6);
+        Grid.SetRow(approvalPanel, 7);
         content.Children.Add(approvalPanel);
 
         _output.IsReadOnly = true;
@@ -138,11 +149,11 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _output.Foreground = Brush(203, 213, 225);
         _output.BorderBrush = Brush(51, 65, 85);
         _output.Text = "Ali Companion ready. Commands still use Ali's normal approval gates.";
-        Grid.SetRow(_output, 7);
+        Grid.SetRow(_output, 8);
         content.Children.Add(_output);
 
         var diagnosticsPanel = BuildDiagnosticsPanel();
-        Grid.SetRow(diagnosticsPanel, 8);
+        Grid.SetRow(diagnosticsPanel, 9);
         content.Children.Add(diagnosticsPanel);
 
         root.Children.Add(content);
@@ -363,9 +374,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         {
             var button = Button(item.Label, () =>
             {
-                _command.Text = item.Command;
-                _command.Focus();
-                _command.Select(_command.Text.Length, 0);
+                SetCommand(item.Command);
             });
             button.Margin = new Thickness(0, 0, 6, 6);
             wrap.Children.Add(button);
@@ -475,7 +484,9 @@ public sealed class AliCompanionToolWindowControl : UserControl
             return;
         }
 
-        SetCommand("search workspace for " + query);
+        var packagedQuery = query!;
+        ShowSelectionPackagePreview("Search Selection", "workspace search", packagedQuery, _lastContext.SelectedText);
+        SetCommand("search workspace for " + packagedQuery, clearSelectionPreview: false);
     }
 
     private void FillPlanSelectionCommand()
@@ -496,7 +507,10 @@ public sealed class AliCompanionToolWindowControl : UserControl
         var location = string.IsNullOrWhiteSpace(_lastContext.FilePath)
             ? string.Empty
             : $" in {Path.GetFileName(_lastContext.FilePath)}";
-        SetCommand($"plan coding task {selected}{location}");
+        var packagedPlan = selected!;
+        var planTarget = string.IsNullOrWhiteSpace(_lastContext.FilePath) ? "current solution" : _lastContext.FilePath!;
+        ShowSelectionPackagePreview("Plan Selection", planTarget, packagedPlan, _lastContext.SelectedText);
+        SetCommand($"plan coding task {packagedPlan}{location}", clearSelectionPreview: false);
     }
 
     private void FillPatchSelectionCommand()
@@ -521,7 +535,9 @@ public sealed class AliCompanionToolWindowControl : UserControl
             return;
         }
 
-        SetCommand($"preview replace in file {Quote(filePath!)} {Quote(selected!)} with \"replacement text\"");
+        var packagedPatch = selected!;
+        ShowSelectionPackagePreview("Patch Selection", filePath!, packagedPatch, _lastContext.SelectedText);
+        SetCommand($"preview replace in file {Quote(filePath!)} {Quote(packagedPatch)} with \"replacement text\"", clearSelectionPreview: false);
     }
 
     private async Task SendAsync(Uri uri, string? body, string statusPrefix)
@@ -985,8 +1001,13 @@ public sealed class AliCompanionToolWindowControl : UserControl
         System.Diagnostics.Process.Start(new ProcessStartInfo(GetHelperUri().ToString()) { UseShellExecute = true });
     }
 
-    private void SetCommand(string command)
+    private void SetCommand(string command, bool clearSelectionPreview = true)
     {
+        if (clearSelectionPreview)
+        {
+            ClearSelectionPackagePreview();
+        }
+
         _command.Text = command;
         _command.Focus();
         _command.Select(_command.Text.Length, 0);
@@ -995,6 +1016,25 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private void ShowMissingContext(string message)
     {
         _output.Text = message;
+    }
+
+    private void ShowSelectionPackagePreview(string action, string target, string packagedText, string? originalText)
+    {
+        var originalLength = originalText?.Length ?? 0;
+        var trimmed = originalLength > packagedText.Length;
+        _selectionPreview.Text =
+            "Selection package: " + action +
+            "\r\nTarget: " + Blank(target, "not identified") +
+            "\r\nOriginal length: " + originalLength + " chars; packaged length: " + packagedText.Length + " chars" +
+            (trimmed ? "\r\nTrimmed: yes" : "\r\nTrimmed: no") +
+            "\r\nText: " + packagedText;
+        _selectionPreview.Foreground = Brush(203, 213, 225);
+    }
+
+    private void ClearSelectionPackagePreview()
+    {
+        _selectionPreview.Text = "Selection package: none staged.";
+        _selectionPreview.Foreground = Brush(148, 163, 184);
     }
 
     private static SolidColorBrush Brush(byte r, byte g, byte b) =>
