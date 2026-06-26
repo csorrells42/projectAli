@@ -60,6 +60,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
+    ("coding parser routes roadmap state", TestCodingParserRoutesRoadmapState),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -80,6 +81,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool explores build idea", TestLocalCodingToolExploresBuildIdea),
     ("local coding tool drafts implementation roadmap", TestLocalCodingToolDraftsImplementationRoadmap),
+    ("local coding tool manages approved roadmap", TestLocalCodingToolManagesApprovedRoadmap),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
     ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
@@ -491,6 +493,22 @@ static Task TestCodingParserRoutesImplementationRoadmap()
     Equal(true, CodingToolRequestParser.TryParse("break down coding task add guarded package lookup", out var breakdownRequest));
     Equal(CodingToolAction.DraftImplementationRoadmap, breakdownRequest.Action);
     Equal("add guarded package lookup", breakdownRequest.Query);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesRoadmapState()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show pending roadmap", out var showRequest));
+    Equal(CodingToolAction.ShowLastRoadmap, showRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("discard pending roadmap", out var discardRequest));
+    Equal(CodingToolAction.DiscardLastRoadmap, discardRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("approve last roadmap", out var approveRequest));
+    Equal(CodingToolAction.ApproveLastRoadmap, approveRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("start approved roadmap", out var startRequest));
+    Equal(CodingToolAction.StartApprovedRoadmap, startRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -998,6 +1016,66 @@ static async Task TestLocalCodingToolDraftsImplementationRoadmap()
     Contains("Definition of done", result.Message);
     Contains("Approval checkpoints", result.Message);
     Contains("Safe next commands", result.Message);
+    Equal(0, runner.Runs.Count);
+}
+
+static async Task TestLocalCodingToolManagesApprovedRoadmap()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(projectDirectory, "MainWindow.xaml"), "<Window />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var emptyShow = await service.TryHandleAsync("show pending roadmap", CancellationToken.None);
+    var draft = await service.TryHandleAsync("draft implementation roadmap add package lookup", CancellationToken.None);
+    var showPending = await service.TryHandleAsync("show pending roadmap", CancellationToken.None);
+    var startBeforeApproval = await service.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var approve = await service.TryHandleAsync("approve last roadmap", CancellationToken.None);
+    var start = await service.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var showStarted = await service.TryHandleAsync("show pending roadmap", CancellationToken.None);
+    var discard = await service.TryHandleAsync("discard pending roadmap", CancellationToken.None);
+    var showAfterDiscard = await service.TryHandleAsync("show pending roadmap", CancellationToken.None);
+
+    Equal(true, emptyShow.Succeeded);
+    Contains("No implementation roadmap is pending", emptyShow.Message);
+    Equal(true, draft.Succeeded);
+    Contains("Implementation roadmap", draft.Message);
+    Equal(true, showPending.Succeeded);
+    Contains("Roadmap status: pending approval", showPending.Message);
+    Equal(false, startBeforeApproval.Succeeded);
+    Contains("not approved yet", startBeforeApproval.Message);
+    Equal(true, approve.Succeeded);
+    Contains("Approved implementation roadmap", approve.Message);
+    Equal(true, start.Succeeded);
+    Contains("Approved roadmap execution started", start.Message);
+    Contains("guided phase loop", start.Message);
+    Contains("Phase 1", start.Message);
+    Contains("Stop boundaries", start.Message);
+    Equal(true, showStarted.Succeeded);
+    Contains("Roadmap status: approved and started", showStarted.Message);
+    Equal(true, discard.Succeeded);
+    Contains("Discarded implementation roadmap", discard.Message);
+    Equal(true, showAfterDiscard.Succeeded);
+    Contains("No implementation roadmap is pending", showAfterDiscard.Message);
     Equal(0, runner.Runs.Count);
 }
 

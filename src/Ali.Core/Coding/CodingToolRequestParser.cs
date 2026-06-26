@@ -193,6 +193,52 @@ public static class CodingToolRequestParser
         "clear the pending patch"
     ];
 
+    private static readonly string[] ShowLastRoadmapRequests =
+    [
+        "show last roadmap",
+        "show the last roadmap",
+        "show pending roadmap",
+        "show the pending roadmap",
+        "show approved roadmap",
+        "what roadmap is pending",
+        "what is the pending roadmap"
+    ];
+
+    private static readonly string[] DiscardLastRoadmapRequests =
+    [
+        "discard last roadmap",
+        "discard the last roadmap",
+        "discard pending roadmap",
+        "discard the pending roadmap",
+        "clear last roadmap",
+        "clear pending roadmap"
+    ];
+
+    private static readonly string[] ApproveLastRoadmapRequests =
+    [
+        "approve last roadmap",
+        "approve the last roadmap",
+        "approve pending roadmap",
+        "approve the pending roadmap",
+        "approve roadmap",
+        "accept last roadmap",
+        "accept pending roadmap"
+    ];
+
+    private static readonly string[] StartApprovedRoadmapRequests =
+    [
+        "start approved roadmap",
+        "start the approved roadmap",
+        "begin approved roadmap",
+        "begin the approved roadmap",
+        "execute approved roadmap",
+        "execute the approved roadmap",
+        "start roadmap execution",
+        "begin roadmap execution",
+        "lets do the approved roadmap",
+        "let's do the approved roadmap"
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -540,6 +586,30 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsShowLastRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowLastRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDiscardLastRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DiscardLastRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsApproveLastRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ApproveLastRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsStartApprovedRoadmapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.StartApprovedRoadmap, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
@@ -613,6 +683,18 @@ public static class CodingToolRequestParser
 
     private static bool IsApplyLastPatchPreviewRequest(string text) =>
         ApplyLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsShowLastRoadmapRequest(string text) =>
+        ShowLastRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDiscardLastRoadmapRequest(string text) =>
+        DiscardLastRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsApproveLastRoadmapRequest(string text) =>
+        ApproveLastRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsStartApprovedRoadmapRequest(string text) =>
+        StartApprovedRoadmapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

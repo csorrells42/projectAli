@@ -115,6 +115,9 @@ Useful commands:
 - `analyze solution architecture`
 - `explore build idea SolidWorks BOM helper`
 - `draft implementation roadmap Visual Studio tool window`
+- `show pending roadmap`
+- `approve last roadmap`
+- `start approved roadmap`
 - `show visual studio integration`
 - `generate visual studio integration plan`
 - `list packages`
@@ -176,6 +179,8 @@ Use `generate coding report` to export a local PDF summary of the current coding
 `explore build idea ...` is read-only. It helps compare implementation paths, library/software areas to research, and approval checkpoints for a proposed build. Library names are exploration candidates only; Ali needs an approved internet/package lookup before treating versions or ecosystem state as current.
 
 `draft implementation roadmap ...` is read-only. It expands a goal into architecture fit, phases, likely impact surface, test strategy, risks, definition of done, approval checkpoints, and safe next commands.
+
+Roadmaps can be kept as pending planning state. Use `show pending roadmap`, `approve last roadmap`, `start approved roadmap`, or `discard pending roadmap`. Starting an approved roadmap begins a guided phase loop and proposes the next safe action. It does not silently edit files, install packages, run builds/tests, or write Git history.
 
 Visual Studio integration in this build is launch/configuration integration, not an in-Visual-Studio extension. Ali can open the configured solution in Visual Studio and inspect the project architecture from chat commands. A graphical Visual Studio panel or sidebar is a future extension phase.
 

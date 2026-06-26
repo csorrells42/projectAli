@@ -99,6 +99,14 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Drafting an implementation roadmap is read-only and allowed.");
         }
 
+        if (request.Action is CodingToolAction.ShowLastRoadmap
+            or CodingToolAction.DiscardLastRoadmap
+            or CodingToolAction.ApproveLastRoadmap
+            or CodingToolAction.StartApprovedRoadmap)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Managing an implementation roadmap is local planning state and does not change files.");
+        }
+
         if (request.Action == CodingToolAction.ShowReceipts)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Showing recent coding receipts is read-only and allowed.");

@@ -109,6 +109,9 @@ public sealed class LocalCodingToolService(
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
     private CodingToolRequest? _lastPatchPreviewRequest;
+    private CodingToolRequest? _lastRoadmapRequest;
+    private bool _lastRoadmapApproved;
+    private bool _approvedRoadmapStarted;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
 
@@ -162,6 +165,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ExploreBuildIdea => ExploreBuildIdea(request),
             CodingToolAction.DraftImplementationRoadmap => DraftImplementationRoadmap(request),
+            CodingToolAction.ShowLastRoadmap => ShowLastRoadmap(),
+            CodingToolAction.DiscardLastRoadmap => DiscardLastRoadmap(),
+            CodingToolAction.ApproveLastRoadmap => ApproveLastRoadmap(),
+            CodingToolAction.StartApprovedRoadmap => StartApprovedRoadmap(),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
@@ -192,6 +199,7 @@ public sealed class LocalCodingToolService(
         };
 
         StoreLastPatchPreview(request, result);
+        StoreLastRoadmap(request, result);
         await AppendLogAsync(request, result, permission, cancellationToken).ConfigureAwait(false);
         return result;
     }
@@ -486,6 +494,137 @@ public sealed class LocalCodingToolService(
             true,
             string.Join(Environment.NewLine, lines),
             "Implementation roadmap",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowLastRoadmap()
+    {
+        if (_lastRoadmapRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No implementation roadmap is pending. Draft one first with: draft implementation roadmap <goal>",
+                "Implementation roadmap",
+                Policy.WorkspaceRoot);
+        }
+
+        var roadmap = DraftImplementationRoadmap(_lastRoadmapRequest);
+        var status = _lastRoadmapApproved
+            ? _approvedRoadmapStarted
+                ? "Roadmap status: approved and started."
+                : "Roadmap status: approved and ready to start."
+            : "Roadmap status: pending approval.";
+        var next = _lastRoadmapApproved
+            ? "Next command: start approved roadmap"
+            : "Next command: approve last roadmap";
+
+        return roadmap with
+        {
+            Message = $"{status}{Environment.NewLine}{next}{Environment.NewLine}{Environment.NewLine}{roadmap.Message}",
+            ToolName = "Implementation roadmap"
+        };
+    }
+
+    private CodingToolResult DiscardLastRoadmap()
+    {
+        if (_lastRoadmapRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                true,
+                "No pending implementation roadmap was waiting to be discarded.",
+                "Implementation roadmap",
+                Policy.WorkspaceRoot);
+        }
+
+        var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
+        _lastRoadmapRequest = null;
+        _lastRoadmapApproved = false;
+        _approvedRoadmapStarted = false;
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Discarded implementation roadmap. No files were changed.{Environment.NewLine}Goal: {goal}",
+            "Implementation roadmap",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ApproveLastRoadmap()
+    {
+        if (_lastRoadmapRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No implementation roadmap is pending. Draft one first with: draft implementation roadmap <goal>",
+                "Implementation roadmap",
+                Policy.WorkspaceRoot);
+        }
+
+        _lastRoadmapApproved = true;
+        _approvedRoadmapStarted = false;
+        var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
+        return new CodingToolResult(
+            true,
+            true,
+            $"Approved implementation roadmap. No files were changed.{Environment.NewLine}Goal: {goal}{Environment.NewLine}Next command: start approved roadmap",
+            "Implementation roadmap",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult StartApprovedRoadmap()
+    {
+        if (_lastRoadmapRequest is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No implementation roadmap is pending. Draft and approve a roadmap before starting.",
+                "Roadmap execution",
+                Policy.WorkspaceRoot);
+        }
+
+        if (!_lastRoadmapApproved)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "The pending implementation roadmap is not approved yet. Use: approve last roadmap",
+                "Roadmap execution",
+                Policy.WorkspaceRoot);
+        }
+
+        _approvedRoadmapStarted = true;
+        var goal = _lastRoadmapRequest.Query ?? "unspecified implementation";
+        var lines = new List<string>
+        {
+            "Approved roadmap execution started:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Current execution mode: guided phase loop. Ali will propose the next safe action, then stop at write/build/package/Git approval boundaries.",
+            "Phase 1: clarify owner-visible behavior and non-goals.",
+            "Phase 1 checklist:",
+            "- Restate the exact behavior to build.",
+            "- Name what is intentionally out of scope for this pass.",
+            "- Identify the first read-only inspection command.",
+            "Recommended next Ali commands:",
+            "- analyze solution architecture",
+            "- inspect coding workspace",
+            $"- plan coding task {goal}",
+            "Stop boundaries:",
+            "- Package lookup/install needs explicit approval.",
+            "- File edits must go through preview/apply confirmation.",
+            "- Build/test/run commands need confirmation.",
+            "- Git write/network actions remain behind Git permission gates."
+        };
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Roadmap execution",
             Policy.WorkspaceRoot);
     }
 
@@ -855,7 +994,7 @@ public sealed class LocalCodingToolService(
             "- Bridge endpoints are loopback-only and still use Ali's coding parser, policy gates, and receipts.",
             "Minimum integration contract:",
             "- Show workspace root, primary solution/project, architecture summary, coding receipts, pending patch state, and last dotnet failure state.",
-            "- Accept deterministic Ali coding commands: inspect workspace, analyze architecture, plan coding task, show receipts, preview patch, show pending patch, apply confirmed patch, and generate coding report.",
+            "- Accept deterministic Ali coding commands: inspect workspace, analyze architecture, plan coding task, draft/show/approve/start roadmap, show receipts, preview patch, show pending patch, apply confirmed patch, and generate coding report.",
             "- Pass current solution/file/line as context only after the user invokes the command.",
             "- Route edits, builds, tests, run, restore, and Git writes through Ali's existing confirmation gates.",
             "- Keep Git pull/push blocked unless the configured Git network gate is deliberately enabled.",
@@ -972,6 +1111,22 @@ public sealed class LocalCodingToolService(
         }
 
         lines.Add(string.Empty);
+        lines.Add("Implementation Roadmap");
+        if (_lastRoadmapRequest is null)
+        {
+            lines.Add("No implementation roadmap is pending in this Ali session.");
+        }
+        else
+        {
+            lines.Add(_lastRoadmapApproved
+                ? _approvedRoadmapStarted
+                    ? "Status: approved and started."
+                    : "Status: approved and ready to start."
+                : "Status: pending approval.");
+            lines.Add(TrimForChat(DraftImplementationRoadmap(_lastRoadmapRequest).Message, 8_000));
+        }
+
+        lines.Add(string.Empty);
         lines.Add("Last Dotnet Failure");
         if (_lastDotNetRequest is null || _lastDotNetResult is not { Succeeded: false } lastDotNetResult)
         {
@@ -990,6 +1145,10 @@ public sealed class LocalCodingToolService(
         lines.Add("- inspect coding workspace");
         lines.Add("- analyze solution architecture");
         lines.Add("- plan coding task <goal>");
+        lines.Add("- draft implementation roadmap <goal>");
+        lines.Add("- show pending roadmap");
+        lines.Add("- approve last roadmap");
+        lines.Add("- start approved roadmap");
         lines.Add("- preview replace in file \"path\" \"old text\" with \"new text\"");
         lines.Add("- preview patch bundle");
         lines.Add("- show pending patch preview");
@@ -3265,6 +3424,26 @@ public sealed class LocalCodingToolService(
         _lastPatchPreviewRequest = result.Succeeded
             ? request
             : null;
+    }
+
+    private void StoreLastRoadmap(CodingToolRequest request, CodingToolResult result)
+    {
+        if (request.Action != CodingToolAction.DraftImplementationRoadmap)
+        {
+            return;
+        }
+
+        if (!result.Succeeded)
+        {
+            _lastRoadmapRequest = null;
+            _lastRoadmapApproved = false;
+            _approvedRoadmapStarted = false;
+            return;
+        }
+
+        _lastRoadmapRequest = request;
+        _lastRoadmapApproved = false;
+        _approvedRoadmapStarted = false;
     }
 
     private bool ShouldBuildCodingContext(string userText)

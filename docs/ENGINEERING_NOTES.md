@@ -106,7 +106,7 @@ Current deterministic command groups:
 
 - Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis, project role classification, project dependency graphing, coding tool integration status, and Visual Studio integration handoff planning.
 - Read/search: open file, read file, search workspace.
-- Planning: build a guarded coding task plan, scout proposed build ideas with implementation paths and library exploration candidates, and draft read-only implementation roadmaps with phases, risks, tests, definition of done, and approval checkpoints.
+- Planning: build a guarded coding task plan, scout proposed build ideas with implementation paths and library exploration candidates, draft read-only implementation roadmaps, and manage pending/approved roadmaps through a guided start loop that stops at write/build/package/Git approval boundaries.
 - Packages: list package references and confirmed outdated checks.
 - Build/test/run: confirmed `dotnet build`, `dotnet test`, `dotnet restore`, `dotnet run`.
 - Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line, and suggest narrow preview-only patches from supported diagnostics.
