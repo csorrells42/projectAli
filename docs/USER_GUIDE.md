@@ -121,6 +121,7 @@ Useful commands:
 - `show active roadmap step`
 - `mark roadmap step complete`
 - `recover roadmap state`
+- `show crash recovery status`
 - `show visual studio integration`
 - `generate visual studio integration plan`
 - `list packages`
@@ -189,6 +190,8 @@ Use `generate coding report` to export a local PDF summary of the current coding
 Roadmaps can be kept as pending planning state. Use `show pending roadmap`, `approve last roadmap`, `start approved roadmap`, or `discard pending roadmap`. Starting an approved roadmap begins a guided phase loop and proposes the next safe action. It does not silently edit files, install packages, run builds/tests, or write Git history.
 
 Roadmap execution state is saved under Ali's local coding data. Use `show active roadmap step`, `mark roadmap step complete`, `pause roadmap`, `resume roadmap`, `finish roadmap`, or `recover roadmap state` to continue after interruption or crash. Recovery restores the roadmap goal, status, current step, and last receipt snapshot; it does not replay commands.
+
+Use `show crash recovery status` after a crash or interrupted build. Ali reloads the roadmap state, checks recent coding receipts, runs a read-only Git status check, compares the active roadmap step against receipts, and suggests safe continue/fix/rollback paths. If the evidence supports a concrete fix, Ali can suggest a guarded patch preview for approval; if the evidence is unclear, she should pause and show options before editing.
 
 Visual Studio integration in this build is launch/configuration integration, not an in-Visual-Studio extension. Ali can open the configured solution in Visual Studio and inspect the project architecture from chat commands. A graphical Visual Studio panel or sidebar is a future extension phase.
 

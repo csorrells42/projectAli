@@ -61,6 +61,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
     ("coding parser routes roadmap state", TestCodingParserRoutesRoadmapState),
+    ("coding parser routes crash recovery state", TestCodingParserRoutesCrashRecoveryState),
     ("coding parser routes active roadmap steps", TestCodingParserRoutesActiveRoadmapSteps),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
@@ -84,6 +85,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool drafts implementation roadmap", TestLocalCodingToolDraftsImplementationRoadmap),
     ("local coding tool manages approved roadmap", TestLocalCodingToolManagesApprovedRoadmap),
     ("local coding tool recovers active roadmap state", TestLocalCodingToolRecoversActiveRoadmapState),
+    ("local coding tool diagnoses crash recovery state", TestLocalCodingToolDiagnosesCrashRecoveryState),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
     ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
@@ -512,6 +514,16 @@ static Task TestCodingParserRoutesRoadmapState()
 
     Equal(true, CodingToolRequestParser.TryParse("start approved roadmap", out var startRequest));
     Equal(CodingToolAction.StartApprovedRoadmap, startRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesCrashRecoveryState()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show crash recovery status", out var statusRequest));
+    Equal(CodingToolAction.DiagnoseRecoveryState, statusRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("diagnose interrupted build", out var buildRequest));
+    Equal(CodingToolAction.DiagnoseRecoveryState, buildRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -1168,6 +1180,64 @@ static async Task TestLocalCodingToolRecoversActiveRoadmapState()
     Equal(true, resumed.Succeeded);
     Contains("Status: active", resumed.Message);
     Equal(0, runner.Runs.Count);
+}
+
+static async Task TestLocalCodingToolDiagnosesCrashRecoveryState()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+
+    var firstRunner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Build succeeded.", string.Empty, TimedOut: false));
+    var firstService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        firstRunner);
+
+    var draft = await firstService.TryHandleAsync("draft implementation roadmap improve crash recovery", CancellationToken.None);
+    var approve = await firstService.TryHandleAsync("approve last roadmap", CancellationToken.None);
+    var start = await firstService.TryHandleAsync("start approved roadmap", CancellationToken.None);
+    var dirtyGitRunner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine} M src/Ali.cs", string.Empty, TimedOut: false));
+    var recoveredService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        dirtyGitRunner);
+
+    var recovery = await recoveredService.TryHandleAsync("show crash recovery status", CancellationToken.None);
+
+    Equal(true, draft.Succeeded);
+    Equal(true, approve.Succeeded);
+    Equal(true, start.Succeeded);
+    Equal(true, recovery.Handled);
+    Equal(true, recovery.Succeeded);
+    Contains("Crash recovery diagnostics", recovery.Message);
+    Contains("Active roadmap", recovery.Message);
+    Contains("Interrupted command check", recovery.Message);
+    Contains("Git working tree", recovery.Message);
+    Contains("1 uncommitted change", recovery.Message);
+    Contains("Roadmap versus receipts", recovery.Message);
+    Contains("Suggested continue path", recovery.Message);
+    Contains("Suggested fix path", recovery.Message);
+    Contains("Suggested rollback path", recovery.Message);
+    Contains("do not auto-reset", recovery.Message);
+    Equal(1, dirtyGitRunner.Runs.Count);
+    Equal("git", dirtyGitRunner.Runs[0].FileName);
+    Equal("status --short --branch", string.Join(" ", dirtyGitRunner.Runs[0].Arguments));
 }
 
 static async Task TestLocalCodingToolShowsCodingReceipts()

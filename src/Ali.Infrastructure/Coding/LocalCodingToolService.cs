@@ -182,6 +182,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ResumeRoadmap => ResumeRoadmap(),
             CodingToolAction.FinishRoadmap => FinishRoadmap(),
             CodingToolAction.RecoverRoadmapState => RecoverRoadmapState(),
+            CodingToolAction.DiagnoseRecoveryState => await DiagnoseRecoveryStateAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
@@ -848,6 +849,136 @@ public sealed class LocalCodingToolService(
             _roadmapStatePath);
     }
 
+    private async Task<CodingToolResult> DiagnoseRecoveryStateAsync(CancellationToken cancellationToken)
+    {
+        _roadmapStateLoaded = false;
+        LoadRoadmapStateIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var activeRoadmap = _roadmapState is { Approved: true, Started: true, Finished: false };
+        var validationAfterRoadmapUpdate = _roadmapState is not null
+            && receipts.Any(receipt => receipt.Timestamp >= _roadmapState.UpdatedAt && IsValidationReceipt(receipt));
+
+        var lines = new List<string>
+        {
+            "Crash recovery diagnostics:",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            $"Roadmap state file: {_roadmapStatePath}",
+            $"Action receipt log: {_actionLogPath}",
+            "Active roadmap:"
+        };
+
+        if (_roadmapState is null)
+        {
+            lines.Add("- none recovered");
+        }
+        else
+        {
+            lines.Add($"- status: {DescribeRoadmapState(_roadmapState)}");
+            lines.Add($"- current step: {FormatRoadmapCurrentStep(_roadmapState)}");
+            lines.Add($"- updated: {_roadmapState.UpdatedAt:u}");
+            lines.Add($"- last roadmap note: {_roadmapState.LastReceiptSummary}");
+        }
+
+        lines.Add("Interrupted command check:");
+        if (latestDotNetReceipt is null)
+        {
+            lines.Add("- no dotnet/build/test/package receipt found yet");
+            lines.Add("- if a command was interrupted before it wrote a receipt, rerun the confirmed validation command before marking a step complete");
+        }
+        else
+        {
+            var dotNetStatus = latestDotNetReceipt.Succeeded ? "succeeded" : "failed";
+            var exit = latestDotNetReceipt.ExitCode is null ? string.Empty : $" exit={latestDotNetReceipt.ExitCode.Value}";
+            var target = string.IsNullOrWhiteSpace(latestDotNetReceipt.TargetPath) ? string.Empty : $" target={latestDotNetReceipt.TargetPath}";
+            lines.Add($"- last dotnet-style receipt: {latestDotNetReceipt.Timestamp:u} {latestDotNetReceipt.Action} {dotNetStatus}{exit}{target}");
+
+            if (!latestDotNetReceipt.Succeeded)
+            {
+                lines.Add("- last validation did not pass; do not mark the roadmap step complete yet");
+            }
+            else if (_roadmapState is not null && latestDotNetReceipt.Timestamp < _roadmapState.UpdatedAt)
+            {
+                lines.Add("- last validation is older than the current roadmap state; rerun validation before continuing");
+            }
+            else
+            {
+                lines.Add("- last validation has a success receipt");
+            }
+        }
+
+        lines.Add("Git working tree:");
+        lines.Add($"- {gitStatus.Summary}");
+        foreach (var entry in gitStatus.Entries.Take(8))
+        {
+            lines.Add($"- {entry}");
+        }
+
+        if (gitStatus.Entries.Count > 8)
+        {
+            lines.Add($"- plus {gitStatus.Entries.Count - 8} more change(s)");
+        }
+
+        lines.Add("Roadmap versus receipts:");
+        if (_roadmapState is null)
+        {
+            lines.Add("- no active roadmap state to compare against receipts");
+        }
+        else if (latestReceipt is null)
+        {
+            lines.Add("- no readable receipts yet; use the roadmap state only as a planning marker");
+        }
+        else
+        {
+            lines.Add($"- latest receipt: {latestReceipt.Timestamp:u} {latestReceipt.Action} {(latestReceipt.Succeeded ? "succeeded" : "failed")}");
+            lines.Add(validationAfterRoadmapUpdate
+                ? "- at least one validation/edit receipt exists after the current roadmap update"
+                : "- no validation/edit receipt exists after the current roadmap update");
+        }
+
+        lines.Add("Suggested continue path:");
+        if (gitStatus.HasUncommittedChanges)
+        {
+            lines.Add("- run: git status");
+            lines.Add("- review changed files before continuing the roadmap");
+        }
+        else if (activeRoadmap)
+        {
+            lines.Add("- run: show active roadmap step");
+            lines.Add("- rerun the needed confirmed build/test/package command if no current success receipt exists");
+        }
+        else
+        {
+            lines.Add("- run: plan coding task <goal>");
+        }
+
+        lines.Add("Suggested fix path:");
+        if (latestDotNetReceipt is { Succeeded: false })
+        {
+            lines.Add("- run: diagnose last build failure");
+            lines.Add("- if the diagnosis names an exact code change, run: suggest patch from last failure");
+            lines.Add("- apply only after preview and confirmation");
+        }
+        else
+        {
+            lines.Add("- if Ali has a concrete, receipt-backed fix, ask for a guarded patch preview and confirm before applying");
+            lines.Add("- if the evidence is unclear, pause and compare options before editing");
+        }
+
+        lines.Add("Suggested rollback path:");
+        lines.Add("- do not auto-reset or discard changes");
+        lines.Add("- use git diff / git status to identify what changed, then choose continue, patch, commit, or manual rollback");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Recovery diagnostics",
+            Policy.WorkspaceRoot);
+    }
+
     private void LoadRoadmapStateIfNeeded()
     {
         if (_roadmapStateLoaded)
@@ -956,9 +1087,8 @@ public sealed class LocalCodingToolService(
         return $"{index + 1}/{state.Steps.Count}: {state.Steps[index]}";
     }
 
-    private string FormatRoadmapStatus(RoadmapExecutionState state, bool includeRecoveryPath)
-    {
-        var status = state.Finished
+    private static string DescribeRoadmapState(RoadmapExecutionState state) =>
+        state.Finished
             ? "finished"
             : state.Paused
                 ? "paused"
@@ -967,6 +1097,10 @@ public sealed class LocalCodingToolService(
                     : state.Approved
                         ? "approved"
                         : "pending approval";
+
+    private string FormatRoadmapStatus(RoadmapExecutionState state, bool includeRecoveryPath)
+    {
+        var status = DescribeRoadmapState(state);
         var lines = new List<string>
         {
             "Roadmap execution state:",
@@ -1297,12 +1431,7 @@ public sealed class LocalCodingToolService(
                 _actionLogPath);
         }
 
-        var receipts = File.ReadLines(_actionLogPath)
-            .TakeLast(MaxReceiptEntries)
-            .Select(ParseReceiptLine)
-            .Where(receipt => receipt is not null)
-            .Select(receipt => receipt!)
-            .ToList();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
         if (receipts.Count == 0)
         {
             return new CodingToolResult(
@@ -1411,7 +1540,7 @@ public sealed class LocalCodingToolService(
             "- Bridge endpoints are loopback-only and still use Ali's coding parser, policy gates, and receipts.",
             "Minimum integration contract:",
             "- Show workspace root, primary solution/project, architecture summary, coding receipts, pending patch state, and last dotnet failure state.",
-            "- Accept deterministic Ali coding commands: inspect workspace, analyze architecture, plan coding task, draft/show/approve/start roadmap, show receipts, preview patch, show pending patch, apply confirmed patch, and generate coding report.",
+            "- Accept deterministic Ali coding commands: inspect workspace, analyze architecture, plan coding task, draft/show/approve/start roadmap, show crash recovery status, show receipts, preview patch, show pending patch, apply confirmed patch, and generate coding report.",
             "- Pass current solution/file/line as context only after the user invokes the command.",
             "- Route edits, builds, tests, run, restore, and Git writes through Ali's existing confirmation gates.",
             "- Keep Git pull/push blocked unless the configured Git network gate is deliberately enabled.",
@@ -1566,6 +1695,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- show pending roadmap");
         lines.Add("- show active roadmap step");
         lines.Add("- recover roadmap state");
+        lines.Add("- show crash recovery status");
         lines.Add("- approve last roadmap");
         lines.Add("- start approved roadmap");
         lines.Add("- mark roadmap step complete");
@@ -1579,6 +1709,7 @@ public sealed class LocalCodingToolService(
         lines.Add("- confirm dotnet add package \"Package.Id\" to \"path\"");
         lines.Add("- confirm dotnet build \"path\"");
         lines.Add("- diagnose last build failure");
+        lines.Add("- show crash recovery status");
         lines.Add("- confirm git add all");
         lines.Add("- confirm git commit \"message\"");
         lines.Add("- generate visual studio integration plan");
@@ -3832,6 +3963,49 @@ public sealed class LocalCodingToolService(
         return null;
     }
 
+    private async Task<GitWorkingTreeStatus> InspectGitWorkingTreeAsync(CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return new GitWorkingTreeStatus(false, false, false, $"workspace does not exist: {Policy.WorkspaceRoot}", []);
+        }
+
+        var status = await _commandRunner.RunAsync(
+            "git",
+            ["status", "--short", "--branch"],
+            Policy.WorkspaceRoot,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        var output = MergeCommandOutput(status);
+        if (status.ExitCode != 0 || status.TimedOut)
+        {
+            return new GitWorkingTreeStatus(
+                false,
+                false,
+                false,
+                $"could not read git status{(status.TimedOut ? " before timeout" : string.Empty)}: {TrimForChat(output, 1_000)}",
+                []);
+        }
+
+        var entries = status.StandardOutput
+            .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => !line.StartsWith("##", StringComparison.Ordinal))
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+        if (entries.Count == 0)
+        {
+            return new GitWorkingTreeStatus(true, true, false, "clean", []);
+        }
+
+        return new GitWorkingTreeStatus(
+            true,
+            false,
+            true,
+            $"{entries.Count} uncommitted change(s) detected",
+            entries);
+    }
+
     private static string MergeCommandOutput(CodingCommandRun run)
     {
         var output = string.Join(
@@ -3868,6 +4042,41 @@ public sealed class LocalCodingToolService(
             return null;
         }
     }
+
+    private IReadOnlyList<CodingReceipt> ReadRecentReceipts(int count)
+    {
+        if (!File.Exists(_actionLogPath))
+        {
+            return [];
+        }
+
+        return File.ReadLines(_actionLogPath)
+            .TakeLast(count)
+            .Select(ParseReceiptLine)
+            .Where(receipt => receipt is not null)
+            .Select(receipt => receipt!)
+            .ToList();
+    }
+
+    private static bool IsDotNetReceipt(CodingReceipt receipt) =>
+        receipt.Action is nameof(CodingToolAction.Build)
+            or nameof(CodingToolAction.Test)
+            or nameof(CodingToolAction.Restore)
+            or nameof(CodingToolAction.ListOutdatedPackages)
+            or nameof(CodingToolAction.AddPackage)
+            or nameof(CodingToolAction.RunProject);
+
+    private static bool IsValidationReceipt(CodingReceipt receipt) =>
+        IsDotNetReceipt(receipt)
+        || receipt.Action is nameof(CodingToolAction.CreateFile)
+            or nameof(CodingToolAction.AppendFile)
+            or nameof(CodingToolAction.ReplaceText)
+            or nameof(CodingToolAction.ApplyLastPatchPreview)
+            or nameof(CodingToolAction.GitStatus)
+            or nameof(CodingToolAction.GitDiff)
+            or nameof(CodingToolAction.GitLog)
+            or nameof(CodingToolAction.GitAdd)
+            or nameof(CodingToolAction.GitCommit);
 
     private static string? ReadString(JsonElement root, string propertyName)
     {
@@ -4576,6 +4785,13 @@ public sealed class LocalCodingToolService(
         bool Succeeded,
         string? TargetPath,
         int? ExitCode);
+
+    private sealed record GitWorkingTreeStatus(
+        bool Available,
+        bool Clean,
+        bool HasUncommittedChanges,
+        string Summary,
+        IReadOnlyList<string> Entries);
 }
 
 public interface ICodingProcessLauncher

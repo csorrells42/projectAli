@@ -290,6 +290,18 @@ public static class CodingToolRequestParser
         "show recovered roadmap"
     ];
 
+    private static readonly string[] DiagnoseRecoveryStateRequests =
+    [
+        "diagnose recovery state",
+        "show recovery state",
+        "show crash recovery",
+        "show crash recovery status",
+        "diagnose crash recovery",
+        "diagnose interrupted build",
+        "recover build state",
+        "show recovery guidance"
+    ];
+
     private static readonly string[] SearchPrefixes =
     [
         "search workspace for ",
@@ -706,6 +718,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsDiagnoseRecoveryStateRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DiagnoseRecoveryState, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (TryParseFileEdit(trimmed, userConfirmed, out request))
         {
             return true;
@@ -809,6 +827,9 @@ public static class CodingToolRequestParser
 
     private static bool IsRecoverRoadmapStateRequest(string text) =>
         RecoverRoadmapStateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDiagnoseRecoveryStateRequest(string text) =>
+        DiagnoseRecoveryStateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsToolIntegrationStatusRequest(string text) =>
         ToolIntegrationStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

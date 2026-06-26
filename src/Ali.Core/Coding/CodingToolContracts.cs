@@ -21,6 +21,7 @@ public enum CodingToolAction
     ResumeRoadmap,
     FinishRoadmap,
     RecoverRoadmapState,
+    DiagnoseRecoveryState,
     ShowReceipts,
     GeneratePdf,
     GenerateCodingReport,
