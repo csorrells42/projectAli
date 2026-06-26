@@ -4,6 +4,21 @@
   <Extern href="vsshlids.h" />
 
   <Commands package="guidAliCompanionPackage">
+    <Menus>
+      <Menu guid="guidAliCompanionCommandSet" id="AliCompanionToolsMenu" priority="0x0900" type="Menu">
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_TOOLS_OTHER2" />
+        <Strings>
+          <ButtonText>Ali Companion</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
+
+    <Groups>
+      <Group guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" priority="0x0100">
+        <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsMenu" />
+      </Group>
+    </Groups>
+
     <Buttons>
       <Button guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0100" type="Button">
         <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
@@ -54,6 +69,27 @@
     </Bitmaps>
   </Commands>
 
+  <CommandPlacements>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="OpenAliCompanionCommand" priority="0x0100">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="ReadActiveFileCommand" priority="0x0110">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="BuildActiveSolutionCommand" priority="0x0120">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="SearchSelectionCommand" priority="0x0130">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="PlanSelectionCommand" priority="0x0140">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidAliCompanionCommandSet" id="PreviewReplaceSelectionCommand" priority="0x0150">
+      <Parent guid="guidAliCompanionCommandSet" id="AliCompanionToolsGroup" />
+    </CommandPlacement>
+  </CommandPlacements>
+
   <Symbols>
     <GuidSymbol name="guidAliCompanionPackage" value="{af94ca1b-cbb3-4c03-bd44-9ed0654e6931}" />
     <GuidSymbol name="guidAliCompanionCommandSet" value="{1c60cf1b-8401-43c2-baf1-1636f492dd04}">
@@ -63,6 +99,8 @@
       <IDSymbol name="SearchSelectionCommand" value="0x0103" />
       <IDSymbol name="PlanSelectionCommand" value="0x0104" />
       <IDSymbol name="PreviewReplaceSelectionCommand" value="0x0105" />
+      <IDSymbol name="AliCompanionToolsMenu" value="0x0200" />
+      <IDSymbol name="AliCompanionToolsGroup" value="0x0201" />
     </GuidSymbol>
     <GuidSymbol name="guidAliCompanionImages" value="{d7de1e3b-871f-45bb-9a53-37d050b39d74}">
       <IDSymbol name="AliCompanionCommandIcon" value="1" />
