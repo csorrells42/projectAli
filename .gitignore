@@ -5,6 +5,7 @@ obj/
 TestResults/
 *.user
 *.suo
+**/Properties/launchSettings.json
 outputs/
 work/
 tmp/
