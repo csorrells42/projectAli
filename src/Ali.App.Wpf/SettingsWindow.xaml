@@ -483,6 +483,11 @@
                                             Command="{Binding CheckRuntimeCommand}"
                                             Width="86"
                                             Margin="0,0,8,0" />
+                                    <Button Content="Recommend"
+                                            Command="{Binding RecommendRuntimeSettingsCommand}"
+                                            Width="112"
+                                            Margin="0,0,8,0"
+                                            ToolTip="Estimate low, medium, and aggressive settings for the selected model and this computer." />
                                     <Button Content="Activate"
                                             Command="{Binding ActivateRuntimeCommand}"
                                             IsEnabled="{Binding CanActivateRuntime}"

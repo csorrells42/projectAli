@@ -65,6 +65,7 @@ docs
 - `LocalEndpointPolicy`: refuses public/cloud endpoints in local-only mode
 - `SafeActivatingLocalRuntime`: keeps the fallback active until health passes
 - Runtime settings UI: load/save/check/activate/revert without a model library
+- Runtime recommendation advisor: deterministic low/medium/aggressive setting estimates from the selected runtime model, quantization, context/output settings, current resource meters, and detected local CPU/RAM/GPU/VRAM. It is advisory only and does not benchmark, install, activate, or mutate runtime settings.
 - Image attachment contract: temporary-by-default PNG data passed only through the current chat request
 - WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
 - Voice contracts: recorder, STT provider, TTS provider, speech player
@@ -245,10 +246,29 @@ Environment variable alternative:
 
 ```powershell
 $env:ALI_OPENAI_BASE_URL = "http://127.0.0.1:11434/v1/"
-$env:ALI_OPENAI_MODEL = "qwen3-vl:8b"
+$env:ALI_OPENAI_MODEL = "ali-deepseek-coder-v2:16b-low"
 ```
 
 Do not enable private LAN endpoints until pairing/authentication/encryption exists.
+
+Current saved local coding runtime on Chris's development machine:
+
+```text
+Runtime: Ollama
+Endpoint: http://127.0.0.1:11434/v1/
+Model/package ID: ali-deepseek-coder-v2:16b-low
+Display name: Ali tuned DeepSeek-Coder-V2 16B low
+Size: 16B
+Quantization: Ollama package default, 4096 ctx low-load alias
+Context: 4096
+Max output: 768
+Temperature: 0.1
+Top-p: 0.9
+Streaming: enabled
+Vision: disabled
+```
+
+The Qwen sections below are historical runtime/vision validation records. They are not the current saved coding runtime unless the Runtime tab is changed back to a Qwen model.
 
 ## HTML Helper Process
 

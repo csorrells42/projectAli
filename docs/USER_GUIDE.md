@@ -51,18 +51,20 @@ Ali refuses public/cloud runtime endpoints in local-only mode.
 
 Use `Revert to Stub` any time you want to return to the deterministic local test runtime.
 
-The current certified local proof model is `qwen3-vl:8b` through Ollama's OpenAI-compatible endpoint. The development profile used for the latest certification was:
+Use `Recommend` on the Runtime tab to estimate low, medium, and aggressive settings for the selected model on the current computer. The report uses the selected model string, quantization, context/output settings, current load meters, detected CPU/RAM, and detected GPU/VRAM where Windows or GPU tools expose them. It does not benchmark the model or change settings automatically.
+
+The current saved local coding runtime on Chris's development machine is `ali-deepseek-coder-v2:16b-low` through Ollama's OpenAI-compatible endpoint. The saved profile checked during the latest runtime recommendation pass was:
 
 - Endpoint: `http://127.0.0.1:11434/v1/`
-- Model: `qwen3-vl:8b`
-- Quantization: Ollama package default / lowest Ali runtime settings
-- Context: `2048`
-- Output: `128`
-- Temperature: `0`
-- Top-p: `0.1`
+- Model: `ali-deepseek-coder-v2:16b-low`
+- Quantization: Ollama package default, 4096 ctx low-load alias
+- Context: `4096`
+- Output: `768`
+- Temperature: `0.1`
+- Top-p: `0.9`
 - Streaming: enabled
 
-`qwen3-vl:8b` can emit a separate Ollama reasoning stream before final answer content. Ali hides that reasoning in normal chat. If the model spends the whole low output budget on hidden reasoning, Ali reports that no visible assistant content arrived instead of exposing the reasoning text.
+`qwen3-vl:8b` and `ali-qwen3-vl:8b-low` remain installed vision-capable options on this development machine, but they are not the current saved coding runtime. Qwen-style models can emit a separate Ollama reasoning stream before final answer content. Ali hides that reasoning in normal chat. If the model spends the whole low output budget on hidden reasoning, Ali reports that no visible assistant content arrived instead of exposing the reasoning text.
 
 `qwen3:14b` was removed from this development machine to keep the system responsive.
 

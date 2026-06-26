@@ -134,6 +134,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("endpoint policy allows loopback runtime", TestEndpointPolicyAllowsLoopback),
     ("endpoint policy refuses public runtime", TestEndpointPolicyRefusesPublicEndpoint),
     ("runtime settings save and load", TestRuntimeSettingsSaveAndLoad),
+    ("runtime optimizer uses selected model and hardware", TestRuntimeOptimizerUsesSelectedModelAndHardware),
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
     ("health check retries empty non-streaming probe", TestHealthCheckRetriesEmptyNonStreamingProbe),
@@ -3201,6 +3202,49 @@ static async Task TestRuntimeSettingsSaveAndLoad()
     Equal(options.SupportsVision, loaded.SupportsVision);
 
     await Task.CompletedTask;
+}
+
+static Task TestRuntimeOptimizerUsesSelectedModelAndHardware()
+{
+    const double gib = 1024d * 1024d * 1024d;
+    var options = new OpenAiCompatibleRuntimeOptions(
+        Enabled: true,
+        Endpoint: new Uri("http://127.0.0.1:11434/v1/"),
+        Model: "llama3.1:8b",
+        DisplayName: "Llama 3.1 8B",
+        Family: "llama",
+        Size: "8B",
+        Quantization: "Q4_K_M",
+        ContextTokens: 4096,
+        OutputTokenLimit: 256,
+        Temperature: 0.2,
+        TopP: null,
+        StreamingEnabled: true,
+        SupportsVision: false,
+        SupportsToolCalls: false,
+        AllowPrivateLanEndpoint: false);
+    var machine = new RuntimeMachineResourceSnapshot(
+        CpuPercent: 12,
+        RamPercent: 30,
+        GpuPercent: 10,
+        VramPercent: 20,
+        TotalRamBytes: (ulong)(32 * gib),
+        AvailableRamBytes: (ulong)(20 * gib),
+        VramUsageBytes: 2 * gib,
+        VramLimitBytes: 16 * gib,
+        CpuName: "Intel(R) Core(TM) i7-14700F",
+        LogicalProcessorCount: 28,
+        Gpus: [new RuntimeGpuHardwareInfo("NVIDIA GeForce RTX 5070 Ti", (ulong)(16 * gib))]);
+
+    var report = RuntimeOptimizationAdvisor.BuildReport(options, machine);
+    var text = report.ToDisplayText();
+
+    Equal(3, report.Strategies.Count);
+    Contains("llama3.1:8b", text);
+    Contains("Intel(R) Core(TM) i7-14700F", text);
+    Contains("NVIDIA GeForce RTX 5070 Ti", text);
+    Equal(false, text.Contains("qwen", StringComparison.OrdinalIgnoreCase));
+    return Task.CompletedTask;
 }
 
 static async Task TestFailedHealthCheckDoesNotActivateRuntime()

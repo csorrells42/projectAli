@@ -186,6 +186,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
         CheckRuntimeCommand = CreateAsyncCommand(CheckRuntimeAsync, () => !IsBusy);
         RefreshRuntimeModelsCommand = CreateAsyncCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
+        RecommendRuntimeSettingsCommand = CreateCommand(_ => ShowRuntimeOptimizationReport());
         ActivateRuntimeCommand = CreateCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
         RevertToStubCommand = CreateCommand(_ => RevertToStub(), _ => !IsBusy);
         RevertToLastKnownGoodCommand = CreateCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
@@ -470,6 +471,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand CheckRuntimeCommand { get; }
 
     public ICommand RefreshRuntimeModelsCommand { get; }
+
+    public ICommand RecommendRuntimeSettingsCommand { get; }
 
     public ICommand ActivateRuntimeCommand { get; }
 
@@ -2518,6 +2521,27 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private void ShowRuntimeOptimizationReport()
+    {
+        try
+        {
+            var options = BuildRuntimeOptionsFromUi();
+            var machine = _resourceMonitor.CaptureRuntimeMachineSnapshot();
+            var report = RuntimeOptimizationAdvisor.BuildReport(options, machine);
+            var owner = _settingsWindow ?? System.Windows.Application.Current?.Windows.OfType<Window>().FirstOrDefault(window => window.IsActive);
+            var window = new RuntimeOptimizationWindow(report.ToDisplayText())
+            {
+                Owner = owner
+            };
+            window.ShowDialog();
+            StatusText = "Runtime recommendation report generated.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Runtime recommendation failed: {ex.Message}";
         }
     }
 

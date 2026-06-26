@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Ali.Infrastructure.Runtime;
 
 namespace Ali.App.Wpf.ViewModels;
 
@@ -9,15 +10,46 @@ internal sealed class SystemResourceMonitor
     private CpuTimes? _previousCpuTimes;
     private GpuCounterReader? _gpuCounters;
     private Task<GpuCounterReader?>? _gpuCounterLoadTask;
+    private SystemHardwareInfo? _hardwareInfo;
 
     public SystemResourceSnapshot Sample()
     {
         var gpuCounters = GetGpuCounters();
+        var memory = SampleMemory();
+        var vram = gpuCounters?.SampleVram();
         return new SystemResourceSnapshot(
             CpuPercent: SampleCpuPercent(),
-            RamPercent: SampleRamPercent(),
+            RamPercent: memory?.Percent,
             GpuPercent: gpuCounters?.SampleGpuPercent(),
-            VramPercent: gpuCounters?.SampleVramPercent());
+            VramPercent: vram?.Percent,
+            TotalRamBytes: memory?.TotalBytes,
+            AvailableRamBytes: memory?.AvailableBytes,
+            VramUsageBytes: vram?.UsageBytes,
+            VramLimitBytes: vram?.LimitBytes);
+    }
+
+    public RuntimeMachineResourceSnapshot CaptureRuntimeMachineSnapshot()
+    {
+        var snapshot = Sample();
+        var hardware = GetHardwareInfo();
+        var hardwareVramLimit = hardware.Gpus
+            .Where(gpu => gpu.DedicatedMemoryBytes is > 0)
+            .Select(gpu => (double)gpu.DedicatedMemoryBytes!.Value)
+            .DefaultIfEmpty()
+            .Max();
+
+        return new RuntimeMachineResourceSnapshot(
+            snapshot.CpuPercent,
+            snapshot.RamPercent,
+            snapshot.GpuPercent,
+            snapshot.VramPercent,
+            TotalRamBytes: snapshot.TotalRamBytes ?? hardware.TotalRamBytes,
+            AvailableRamBytes: snapshot.AvailableRamBytes,
+            VramUsageBytes: snapshot.VramUsageBytes,
+            VramLimitBytes: snapshot.VramLimitBytes ?? (hardwareVramLimit > 0 ? hardwareVramLimit : null),
+            CpuName: hardware.CpuName,
+            LogicalProcessorCount: hardware.LogicalProcessorCount,
+            Gpus: hardware.Gpus);
     }
 
     private GpuCounterReader? GetGpuCounters()
@@ -40,6 +72,17 @@ internal sealed class SystemResourceMonitor
 
         _gpuCounters = _gpuCounterLoadTask.Result;
         return _gpuCounters;
+    }
+
+    private SystemHardwareInfo GetHardwareInfo()
+    {
+        if (_hardwareInfo is not null)
+        {
+            return _hardwareInfo;
+        }
+
+        _hardwareInfo = SystemHardwareInfoReader.Read();
+        return _hardwareInfo;
     }
 
     private double? SampleCpuPercent()
@@ -71,7 +114,7 @@ internal sealed class SystemResourceMonitor
         return (1d - (idleDelta / (double)total)) * 100d;
     }
 
-    private static double? SampleRamPercent()
+    private static MemorySnapshot? SampleMemory()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -81,7 +124,7 @@ internal sealed class SystemResourceMonitor
         var memoryStatus = new MemoryStatusEx();
         memoryStatus.dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>();
         return GlobalMemoryStatusEx(ref memoryStatus)
-            ? memoryStatus.dwMemoryLoad
+            ? new MemorySnapshot(memoryStatus.dwMemoryLoad, memoryStatus.ullTotalPhys, memoryStatus.ullAvailPhys)
             : null;
     }
 
@@ -115,6 +158,11 @@ internal sealed class SystemResourceMonitor
     }
 
     private readonly record struct CpuTimes(ulong Idle, ulong Kernel, ulong User);
+
+    private readonly record struct MemorySnapshot(double Percent, ulong TotalBytes, ulong AvailableBytes);
+
+    private readonly record struct VramSnapshot(double Percent, double UsageBytes, double LimitBytes);
+
 
     private sealed class GpuCounterReader
     {
@@ -190,7 +238,7 @@ internal sealed class SystemResourceMonitor
             return value is null ? null : Math.Min(100d, value.Value);
         }
 
-        public double? SampleVramPercent()
+        public VramSnapshot? SampleVram()
         {
             var usage = SumCounters(_vramUsageCounters);
             var limit = SumCounters(_vramLimitCounters);
@@ -199,7 +247,7 @@ internal sealed class SystemResourceMonitor
                 return null;
             }
 
-            return (usage.Value / limit.Value) * 100d;
+            return new VramSnapshot((usage.Value / limit.Value) * 100d, usage.Value, limit.Value);
         }
 
         private double? SumCounters(IReadOnlyList<object> counters)
@@ -295,4 +343,8 @@ internal sealed record SystemResourceSnapshot(
     double? CpuPercent,
     double? RamPercent,
     double? GpuPercent,
-    double? VramPercent);
+    double? VramPercent,
+    ulong? TotalRamBytes = null,
+    ulong? AvailableRamBytes = null,
+    double? VramUsageBytes = null,
+    double? VramLimitBytes = null);
