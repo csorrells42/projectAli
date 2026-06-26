@@ -1,0 +1,305 @@
+<Window x:Class="Ali.App.Installer.InstallerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ali Setup"
+        Width="860"
+        Height="680"
+        MinWidth="760"
+        MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="#F6F7F9">
+    <Window.Resources>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#111827" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style x:Key="InputBox" TargetType="TextBox">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Margin" Value="0,0,0,16" />
+        </Style>
+        <Style x:Key="OptionText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#4B5563" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="24,2,0,14" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Ali Setup"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Foreground="#1F2937" />
+                <TextBlock x:Name="StepDescriptionTextBlock"
+                           Margin="0,6,0,0"
+                           FontSize="14"
+                           Foreground="#4B5563"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+            <TextBlock x:Name="StepProgressTextBlock"
+                       Grid.Column="1"
+                       VerticalAlignment="Top"
+                       Margin="24,8,0,0"
+                       Foreground="#6B7280" />
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="190" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ListBox x:Name="StepListBox"
+                     IsHitTestVisible="False"
+                     BorderBrush="#D1D5DB"
+                     BorderThickness="1"
+                     Background="White"
+                     Margin="0,0,18,0" />
+
+            <Border Grid.Column="1"
+                    Background="White"
+                    BorderBrush="#D1D5DB"
+                    BorderThickness="1"
+                    Padding="22">
+                <Grid>
+                    <StackPanel x:Name="ModeStepPanel">
+                        <TextBlock Text="Choose setup mode"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#111827"
+                                   Margin="0,0,0,16" />
+                        <RadioButton x:Name="InstallModeRadio"
+                                     Content="Install Ali"
+                                     FontWeight="SemiBold"
+                                     Margin="0,0,0,4"
+                                     Checked="ModeChanged" />
+                        <TextBlock Text="Copy the Ali desktop app, keep personal data out of the payload, and set up optional components."
+                                   Style="{StaticResource OptionText}" />
+                        <RadioButton x:Name="RepairModeRadio"
+                                     Content="Repair Ali"
+                                     FontWeight="SemiBold"
+                                     Margin="0,0,0,4"
+                                     Checked="ModeChanged" />
+                        <TextBlock Text="Refresh app binaries and selected optional components while preserving profile data."
+                                   Style="{StaticResource OptionText}" />
+                        <RadioButton x:Name="VsixOnlyModeRadio"
+                                     Content="Install Visual Studio Companion only"
+                                     FontWeight="SemiBold"
+                                     Margin="0,0,0,4"
+                                     Checked="ModeChanged" />
+                        <TextBlock Text="Install the Visual Studio extension without reinstalling Ali or touching assistant data."
+                                   Style="{StaticResource OptionText}" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="AssistantStepPanel" Visibility="Collapsed">
+                        <TextBlock Text="Assistant setup"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#111827"
+                                   Margin="0,0,0,16" />
+                        <TextBlock Text="Install location" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="InstallRootTextBox"
+                                 Style="{StaticResource InputBox}"
+                                 TextChanged="InstallerOptionChanged" />
+                        <TextBlock Text="Assistant name" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="AssistantNameTextBox"
+                                 Style="{StaticResource InputBox}"
+                                 TextChanged="InstallerOptionChanged" />
+                        <TextBlock Text="Leave blank to ask on first launch."
+                                   Foreground="#6B7280"
+                                   Margin="0,-10,0,0" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="DependenciesStepPanel" Visibility="Collapsed">
+                        <TextBlock Text="Dependencies and models"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#111827"
+                                   Margin="0,0,0,16" />
+                        <CheckBox x:Name="InstallOllamaCheckBox"
+                                  Content="Install Ollama if missing"
+                                  Margin="0,0,0,16"
+                                  Checked="InstallerOptionChanged"
+                                  Unchecked="InstallerOptionChanged" />
+                        <CheckBox x:Name="RuntimeModelCheckBox"
+                                  Content="Install runtime model"
+                                  Margin="0,0,0,6"
+                                  Checked="ModelCheckBoxChanged"
+                                  Unchecked="ModelCheckBoxChanged" />
+                        <TextBox x:Name="RuntimeModelTextBox"
+                                 Style="{StaticResource InputBox}"
+                                 Margin="24,0,0,16"
+                                 TextChanged="InstallerOptionChanged" />
+                        <CheckBox x:Name="VisionModelCheckBox"
+                                  Content="Install optional vision model"
+                                  Margin="0,0,0,6"
+                                  Checked="ModelCheckBoxChanged"
+                                  Unchecked="ModelCheckBoxChanged" />
+                        <TextBox x:Name="VisionModelTextBox"
+                                 Style="{StaticResource InputBox}"
+                                 Margin="24,0,0,0"
+                                 TextChanged="InstallerOptionChanged" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="VisualStudioStepPanel" Visibility="Collapsed">
+                        <TextBlock Text="Visual Studio Companion"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#111827"
+                                   Margin="0,0,0,16" />
+                        <CheckBox x:Name="VisualStudioExtensionCheckBox"
+                                  Content="Install Visual Studio Companion extension"
+                                  Margin="0,0,0,8"
+                                  Checked="InstallerOptionChanged"
+                                  Unchecked="InstallerOptionChanged" />
+                        <TextBlock Text="The extension is optional and uses Ali's guarded local bridge."
+                                   Foreground="#6B7280"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="ShortcutsStepPanel" Visibility="Collapsed">
+                        <TextBlock Text="Shortcuts and launch"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#111827"
+                                   Margin="0,0,0,16" />
+                        <CheckBox x:Name="LaunchAfterInstallCheckBox"
+                                  Content="Launch Ali after install"
+                                  Margin="0,0,0,12"
+                                  Checked="InstallerOptionChanged"
+                                  Unchecked="InstallerOptionChanged" />
+                        <CheckBox x:Name="DesktopShortcutCheckBox"
+                                  Content="Create desktop shortcut"
+                                  IsChecked="True"
+                                  Margin="0,0,0,12"
+                                  Checked="InstallerOptionChanged"
+                                  Unchecked="InstallerOptionChanged" />
+                        <CheckBox x:Name="StartMenuShortcutCheckBox"
+                                  Content="Create Start menu shortcut"
+                                  IsChecked="True"
+                                  Checked="InstallerOptionChanged"
+                                  Unchecked="InstallerOptionChanged" />
+                    </StackPanel>
+
+                    <Grid x:Name="ReviewStepPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="110" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="False">
+                            <TextBlock Text="Review"
+                                       DockPanel.Dock="Left"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       Foreground="#111827" />
+                            <Button x:Name="RefreshReadinessButton"
+                                    Content="Refresh"
+                                    DockPanel.Dock="Right"
+                                    Width="92"
+                                    Height="28"
+                                    Click="RefreshReadinessButtonClick" />
+                        </DockPanel>
+                        <ListBox x:Name="ReadinessListBox"
+                                 Grid.Row="1"
+                                 BorderBrush="#D1D5DB"
+                                 BorderThickness="1">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="4">
+                                        <TextBlock Text="{Binding Summary}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#111827" />
+                                        <TextBlock Text="{Binding Message}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="#4B5563"
+                                                   FontSize="12" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <ProgressBar x:Name="InstallProgressBar"
+                                     Grid.Row="2"
+                                     Height="6"
+                                     IsIndeterminate="True"
+                                     Visibility="Collapsed"
+                                     Margin="0,12,0,10" />
+                        <TextBox x:Name="LogTextBox"
+                                 Grid.Row="3"
+                                 Padding="8"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto" />
+                    </Grid>
+
+                    <StackPanel x:Name="FinishStepPanel" Visibility="Collapsed">
+                        <TextBlock Text="Setup complete"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#111827"
+                                   Margin="0,0,0,12" />
+                        <TextBlock x:Name="StatusTextBlock"
+                                   Text="Ready."
+                                   Foreground="#374151"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,12" />
+                        <TextBox x:Name="FinishLogTextBox"
+                                 Height="300"
+                                 Padding="8"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <DockPanel Grid.Row="2" Margin="0,18,0,0" LastChildFill="False">
+            <Button x:Name="CloseButton"
+                    Content="Close"
+                    Width="104"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    Click="CloseButtonClick" />
+            <Button x:Name="BackButton"
+                    Content="Back"
+                    Width="104"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    Click="BackButtonClick" />
+            <Button x:Name="NextButton"
+                    Content="Next"
+                    Width="104"
+                    Height="36"
+                    Margin="0,0,10,0"
+                    FontWeight="SemiBold"
+                    Click="NextButtonClick" />
+            <Button x:Name="InstallButton"
+                    Content="Install"
+                    Width="132"
+                    Height="36"
+                    FontWeight="SemiBold"
+                    Click="InstallButtonClick" />
+        </DockPanel>
+    </Grid>
+</Window>

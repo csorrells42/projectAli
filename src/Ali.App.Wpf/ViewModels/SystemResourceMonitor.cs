@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -10,13 +11,16 @@ internal sealed class SystemResourceMonitor
     private CpuTimes? _previousCpuTimes;
     private GpuCounterReader? _gpuCounters;
     private Task<GpuCounterReader?>? _gpuCounterLoadTask;
+    private readonly NvidiaSmiVramReader _nvidiaSmiVramReader = new();
     private SystemHardwareInfo? _hardwareInfo;
 
     public SystemResourceSnapshot Sample()
     {
         var gpuCounters = GetGpuCounters();
         var memory = SampleMemory();
-        var vram = gpuCounters?.SampleVram();
+        var hardwareVramLimit = GetHardwareVramLimit();
+        var vram = gpuCounters?.SampleVram(hardwareVramLimit)
+                   ?? _nvidiaSmiVramReader.Sample();
         return new SystemResourceSnapshot(
             CpuPercent: SampleCpuPercent(),
             RamPercent: memory?.Percent,
@@ -83,6 +87,18 @@ internal sealed class SystemResourceMonitor
 
         _hardwareInfo = SystemHardwareInfoReader.Read();
         return _hardwareInfo;
+    }
+
+    private double? GetHardwareVramLimit()
+    {
+        var hardware = GetHardwareInfo();
+        var limit = hardware.Gpus
+            .Where(gpu => gpu.DedicatedMemoryBytes is > 0)
+            .Select(gpu => (double)gpu.DedicatedMemoryBytes!.Value)
+            .DefaultIfEmpty()
+            .Max();
+
+        return limit > 0 ? limit : null;
     }
 
     private double? SampleCpuPercent()
@@ -238,16 +254,26 @@ internal sealed class SystemResourceMonitor
             return value is null ? null : Math.Min(100d, value.Value);
         }
 
-        public VramSnapshot? SampleVram()
+        public VramSnapshot? SampleVram(double? fallbackLimitBytes)
         {
             var usage = SumCounters(_vramUsageCounters);
             var limit = SumCounters(_vramLimitCounters);
-            if (usage is null || limit is null || limit <= 0)
+            if (usage is null)
             {
                 return null;
             }
 
-            return new VramSnapshot((usage.Value / limit.Value) * 100d, usage.Value, limit.Value);
+            var effectiveLimit = limit is > 0
+                ? limit.Value
+                : fallbackLimitBytes is > 0
+                    ? fallbackLimitBytes.Value
+                    : 0;
+            if (effectiveLimit <= 0)
+            {
+                return null;
+            }
+
+            return new VramSnapshot((usage.Value / effectiveLimit) * 100d, usage.Value, effectiveLimit);
         }
 
         private double? SumCounters(IReadOnlyList<object> counters)
@@ -334,6 +360,104 @@ internal sealed class SystemResourceMonitor
             catch
             {
                 return false;
+            }
+        }
+    }
+
+    private sealed class NvidiaSmiVramReader
+    {
+        private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(2);
+        private DateTimeOffset _lastSampleAt = DateTimeOffset.MinValue;
+        private VramSnapshot? _lastSample;
+        private bool _unavailable;
+
+        public VramSnapshot? Sample()
+        {
+            if (!OperatingSystem.IsWindows() || _unavailable)
+            {
+                return null;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (now - _lastSampleAt < CacheDuration)
+            {
+                return _lastSample;
+            }
+
+            _lastSampleAt = now;
+            try
+            {
+                using var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "nvidia-smi.exe",
+                        Arguments = "--query-gpu=memory.used,memory.total --format=csv,noheader,nounits",
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    }
+                };
+
+                process.Start();
+                if (!process.WaitForExit(1200))
+                {
+                    TryKillProcess(process);
+                    return _lastSample;
+                }
+
+                if (process.ExitCode != 0)
+                {
+                    _unavailable = true;
+                    return null;
+                }
+
+                var output = process.StandardOutput.ReadToEnd();
+                var usedMib = 0d;
+                var totalMib = 0d;
+                foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var parts = line.Split(',', 2, StringSplitOptions.TrimEntries);
+                    if (parts.Length < 2)
+                    {
+                        continue;
+                    }
+
+                    if (double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var used)
+                        && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var total)
+                        && used >= 0
+                        && total > 0)
+                    {
+                        usedMib += used;
+                        totalMib += total;
+                    }
+                }
+
+                _lastSample = totalMib > 0
+                    ? new VramSnapshot(
+                        usedMib / totalMib * 100d,
+                        usedMib * 1024d * 1024d,
+                        totalMib * 1024d * 1024d)
+                    : null;
+                return _lastSample;
+            }
+            catch
+            {
+                _unavailable = true;
+                return null;
+            }
+        }
+
+        private static void TryKillProcess(Process process)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Best-effort fallback sampling should never disturb the cockpit.
             }
         }
     }

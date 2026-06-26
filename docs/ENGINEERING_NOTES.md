@@ -65,7 +65,7 @@ docs
 - `LocalEndpointPolicy`: refuses public/cloud endpoints in local-only mode
 - `SafeActivatingLocalRuntime`: keeps the fallback active until health passes
 - Runtime settings UI: load/save/check/activate/revert without a model library
-- Runtime recommendation advisor: deterministic low/medium/aggressive setting estimates from the selected runtime model, quantization, context/output settings, current resource meters, and detected local CPU/RAM/GPU/VRAM. It is advisory only and does not benchmark, install, activate, or mutate runtime settings.
+- Runtime recommendation advisor: deterministic low/medium/aggressive setting estimates from the selected runtime model, quantization, context/output settings, current resource meters, and detected local CPU/RAM/GPU/VRAM. VRAM sampling uses Windows GPU adapter counters when available, hardware dedicated-memory totals from DXGI/CIM, and an NVIDIA live-usage fallback through `nvidia-smi`; AMD cards should use the Windows/DXGI path. It is advisory only and does not benchmark, install, activate, or mutate runtime settings.
 - Image attachment contract: temporary-by-default PNG data passed only through the current chat request
 - WPF attachment UX: paste image, capture full screen, preview, retain toggle, remove
 - Voice contracts: recorder, STT provider, TTS provider, speech player
@@ -161,6 +161,10 @@ The final Phase 1 coding companion cockpit groups commands by workflow instead o
 
 Ali source access is source-catalog based and approval-oriented. The app can retrieve approved source excerpts and then instruct the model not to claim it lacks internet/live/current information for that source-backed turn. This is not unrestricted browsing. Visible answers may include a `Sources checked:` appendix owned by the orchestrator; TTS strips that appendix so Piper does not read source plumbing aloud.
 
+The WPF app now exposes this through `Sources & Topics`, opened from the main window `Sources` button. The window intentionally hides JSON and lets users manage source name, URL, trust level, enabled state, notes, and comma-separated topics. The backing `SourceCatalogEntry` has a `Topics` list in addition to the legacy primary `Topic`; the curated retriever matches planned preferred topics against both, scores topic hits, and folds topics into source identity checks. This keeps the existing `%LOCALAPPDATA%\Ali\BootstrapData\Sources\curated_sources.json` storage while making normal source setup a simple GUI task.
+
+`FileSourceRetriever.WriteExample()` now builds a richer starter catalog and writes it to both `curated_sources.example.json` and, only when missing, the live `curated_sources.json`. The starter catalog includes official or standard sources for health, weather, government services, taxes, economy, Windows release health, PowerShell, Python, GitHub, Ollama, AMD/NVIDIA drivers, CISA advisories, college football scores, and the packaged audio setup sources. Existing user catalogs are not overwritten.
+
 The bridge can auto-start `Ali.App.WebHelper` on loopback when the helper is offline, using `ALI_HELPER_URL` or the default `http://127.0.0.1:8765`. Pass `--no-start-helper` for fail-fast behavior. Native VSIX install/update notes live in `tools\visualstudio\ALI_COMPANION_VSIX_INSTALL_UPDATE_NOTES.md`; the optional External Tools fallback guide lives in `tools\visualstudio\ALI_VISUAL_STUDIO_EXTERNAL_TOOLS.md`.
 
 Audio setup references live in `docs\source-catalogs\ali_audio_setup_sources.json` and are intended to be merged into `%LOCALAPPDATA%\Ali\BootstrapData\Sources\curated_sources.json`. The catalog is deliberately just source access for official Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure SH-BROADCAST2 material; it does not grant hardware control or bypass the normal truth/source rules.
@@ -173,15 +177,39 @@ The final product spec calls for SQLite. Add SQLite deliberately once package in
 
 ## Installer, Repair, Backup, Restore
 
-Keep these simple:
+The installer lane is now a GUI-first setup executable backed by deterministic install services:
 
-- Installer: one Windows installer, `Install` and `Repair` modes only.
-- Repair: validate files, recreate missing folders, keep user data.
-- Backup: zip Ali's local data folder plus settings/export metadata.
-- Restore: stop Ali, validate backup manifest, restore local data, restart.
-- Documentation: update user and engineering notes as features land.
-- Current developer install path: build from source, refresh `%LOCALAPPDATA%\Ali\DevRun`, install the local VSIX into Visual Studio Community, start `Ali.App.WebHelper` on loopback, and keep voice/model assets under Ali-owned local folders. `show install doctor` is the read-only dependency checker for DevRun, VSIX, Visual Studio discovery, WebHelper bridge URL, runtime settings, selected model, PDF workspace, .NET runtime, and OS. The current saved coding/chat model is `ali-deepseek-coder-v2:16b-low`; Qwen VL models are optional vision assets.
-- Installer completion status and step-by-step dependency instructions live in `docs\ALI_PROJECT_INSTALLER_COMPLETION.md` and `docs\ALI_PROJECT_INSTALLATION_INSTRUCTIONS.md`.
+- `src\Ali.App.Installer\Ali.App.Installer.csproj` builds `Ali.Setup.exe`.
+- The GUI opens as a wizard with mode, assistant, dependencies/models, Visual Studio, shortcuts, review, and finish steps.
+- Default install copies the packaged WPF payload into `%LOCALAPPDATA%\Ali\DevRun`.
+- Payload copy skips personal data directories and files, including `BootstrapData`, `Profiles`, conversations, memories, reminders, correction queues, session audio/images/speech, and `assistant-profile.json`.
+- User data lives under `%LOCALAPPDATA%\Ali\Profiles\<profileId>`.
+- The assistant name has one persisted source of truth: `%LOCALAPPDATA%\Ali\BootstrapData\assistant-profile.json`.
+- First launch asks for the assistant name unless setup explicitly seeds the profile file.
+- Repair mode refreshes binaries and selected optional components while preserving profile data.
+- Visual Studio Companion-only mode can install the VSIX later without reinstalling the Ali app payload.
+- The packaged payload includes the Ali Companion VSIX under `extras\visualstudio\Ali.App.VisualStudioExtension.vsix`.
+- Ollama install is explicit through `Install Ollama if missing` or CLI flags. Model pulls are explicit and check `ollama list` first so already-installed model IDs are not pulled again.
+- Shortcut creation is explicit in the engine and selected by default in the GUI for desktop and Start menu shortcuts.
+- Receipts include target paths, assistant profile path/existence, selected actions, shortcut/repair/model/Ollama/VSIX settings, installed file count, warnings, dependency messages, and a readiness snapshot.
+- The installer does not change PATH, registry, firewall, signing, trust stores, Windows services, or drivers.
+
+CLI automation remains available:
+
+```powershell
+.\Ali.Setup.exe --payload "C:\path\to\app-publish"
+.\Ali.Setup.exe --repair
+.\Ali.Setup.exe --install-ollama --pull-runtime-model --runtime-model "ali-deepseek-coder-v2:16b-low"
+.\Ali.Setup.exe --install-vsix
+.\Ali.Setup.exe --install-vsix-only
+.\Ali.Setup.exe --desktop-shortcut --start-menu-shortcut
+```
+
+Backup/restore is planned after the installer is finished. Backup should gather Ali state into one staging folder, write `ali-backup-manifest.json` at the staging root, copy captured data under stable relative folders such as `BootstrapData`, `Profiles`, and `Receipts`, then zip that staging folder into one timestamped backup file. Restore should unzip to staging first, validate the manifest, block active Ali writes with a single restore lock/mutex, preserve a pre-restore backup, restore JSON/settings with temp-file-and-rename semantics where possible, and restore selected model IDs atomically so runtime settings, UI selections, and receipts do not disagree. Restore must not pull models; after restore it should run a read-only readiness check and report missing Ollama/models/VSIX.
+
+Current developer install path: build from source, refresh `%LOCALAPPDATA%\Ali\DevRun`, optionally install the local VSIX into Visual Studio Community, start `Ali.App.WebHelper` on loopback, and keep voice/model assets under Ali-owned local folders. `show install doctor` is the read-only dependency checker for DevRun, VSIX, Visual Studio discovery, WebHelper bridge URL, runtime settings, selected model, PDF workspace, .NET runtime, and OS. The current saved coding/chat model is `ali-deepseek-coder-v2:16b-low`; Qwen VL models are optional vision assets.
+
+Installer completion status and step-by-step dependency instructions live in `docs\ALI_PROJECT_INSTALLER_COMPLETION.md` and `docs\ALI_PROJECT_INSTALLATION_INSTRUCTIONS.md`.
 
 ## Package Rule
 
@@ -448,6 +476,8 @@ Push to Talk
 -> Stop Speaking
 -> correction queue voice metadata
 ```
+
+Current WPF polish: the composer voice controls are simplified to `Read replies aloud`, `Enable PTT`, and a PTT-key display button that opens Settings. The old Mic button and mouse-only Hold PTT button were removed to avoid confusing voice entry paths. Keyboard PTT remains the recording path; if the PTT key is pressed while focus is inside a text-entry control, the main window temporarily moves focus out, starts recording, then restores the original focus after release so the PTT key is not typed into the field. Erase-one-chat and erase-all-history confirmations use Ali's dark themed modal instead of the default Windows light MessageBox.
 
 Manual integration status:
 

@@ -9,6 +9,7 @@ TestResults/
 outputs/
 work/
 tmp/
+src/Ali.App.Installer/Payload/
 lib/voice/python-venv/
 lib/voice/piper/*.onnx
 lib/voice/piper/*.onnx.json

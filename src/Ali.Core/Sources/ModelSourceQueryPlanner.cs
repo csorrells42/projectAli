@@ -178,7 +178,7 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
     {
         var lines = new List<string>
         {
-            "You are Ali's source query planner.",
+            "You are the app's source query planner.",
             "Return exactly one JSON object and no other text.",
             "Do not answer the user.",
             "Do not say you lack internet access; decide whether the app should try approved local source retrieval.",

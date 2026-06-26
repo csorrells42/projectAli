@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Ali.Core.Evidence;
+using Ali.Core.Identity;
 using Ali.Core.Models;
 using Ali.Core.Runtime;
 
@@ -18,8 +19,6 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const int MaxAutomaticLengthContinuations = 1;
     private const string HealthProbeExpectedResponse = "OK";
     private const string SourcePlannerConversationId = "source_query_plan";
-    private const string AliPersonaInstruction =
-        "You are Ali, the local desktop assistant in this application. If asked who you are or what your name is, identify yourself as Ali. Do not prepend your name or identity to ordinary answers. Do not argue that your name is Qwen, the model package, or the model provider; those are implementation details. If asked whether you are connected to the internet, answer as Ali: you run on this computer and can use only the local app/runtime features that are enabled; do not claim live web browsing, training cutoffs, or internet limitations unless the user asks specifically about web access. If the app provides source excerpts, treat them as app-provided evidence and do not say you lack real-time data. Keep normal replies concise: usually one short paragraph or a few bullets. Avoid emoji and emoticons in normal replies.";
     private const string VisibleOutputRetryInstruction =
         "The previous runtime attempt produced no visible assistant content. Follow the existing instructions exactly, but write the final result in visible assistant message content only. Do not include hidden reasoning, analysis, or <think> blocks. If the task requires JSON, return only that JSON.";
     private const string ContinueAfterLengthInstruction =
@@ -36,12 +35,17 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     };
     private readonly HttpClient _httpClient;
     private readonly OpenAiCompatibleRuntimeOptions _options;
+    private readonly AssistantProfile _assistantProfile;
     private readonly EndpointValidationResult _endpointValidation;
 
-    public OpenAiCompatibleLocalModelRuntime(HttpClient httpClient, OpenAiCompatibleRuntimeOptions options)
+    public OpenAiCompatibleLocalModelRuntime(
+        HttpClient httpClient,
+        OpenAiCompatibleRuntimeOptions options,
+        AssistantProfile? assistantProfile = null)
     {
         _httpClient = httpClient;
         _options = options;
+        _assistantProfile = (assistantProfile ?? AssistantProfile.CreateDefault()).Normalize();
         _endpointValidation = LocalEndpointPolicy.Validate(options.Endpoint, options.AllowPrivateLanEndpoint);
         ActiveProfile = options.ToModelProfile(isLastKnownGood: false);
     }
@@ -584,7 +588,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             messages.Add(new
             {
                 role = "system",
-                content = (object)AliPersonaInstruction
+                content = (object)BuildAssistantPersonaInstruction()
             });
             messages.Add(new
             {
@@ -627,6 +631,12 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         return ShouldDisableThinking()
             ? Math.Max(_options.OutputTokenLimit, QwenVisibleOutputTokenFloor)
             : _options.OutputTokenLimit;
+    }
+
+    private string BuildAssistantPersonaInstruction()
+    {
+        var assistantName = _assistantProfile.AssistantName;
+        return $"You are {assistantName}, the local desktop assistant in this application. If asked who you are or what your name is, identify yourself as {assistantName}. Do not prepend your name or identity to ordinary answers. Do not argue that your name is Qwen, the model package, or the model provider; those are implementation details. If asked whether you are connected to the internet, answer as {assistantName}: you run on this computer and can use only the local app/runtime features that are enabled; do not claim live web browsing, training cutoffs, or internet limitations unless the user asks specifically about web access. If the app provides source excerpts, treat them as app-provided evidence and do not say you lack real-time data. Keep normal replies concise: usually one short paragraph or a few bullets. Avoid emoji and emoticons in normal replies.";
     }
 
     private static string BuildCurrentDateInstruction()

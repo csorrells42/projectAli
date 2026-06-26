@@ -18,6 +18,7 @@ Use a JSON array:
     "type": "web",
     "trustLevel": "primary",
     "keywords": ["health", "respiratory", "cdc", "virus", "flu", "covid"],
+    "topics": ["health", "respiratory viruses", "flu", "covid"],
     "notes": "Primary US public-health source.",
     "enabled": true
   }
@@ -33,6 +34,7 @@ Fields:
 - `type`: `web`, `rss`, `docs`, `reference`, `nws-point-forecast`, or another short label.
 - `trustLevel`: `primary`, `official`, `standard`, or `watch`.
 - `keywords`: words Ali matches against the user question.
+- `topics`: user-facing search topics the source is useful for. The app keeps this behind the Sources & Topics window so users do not need to edit JSON.
 - `notes`: short human note about why this source exists.
 - `enabled`: `true` to use it, `false` to keep it in the catalog but skip retrieval.
 

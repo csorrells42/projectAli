@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ali.Infrastructure\Ali.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('Payload\ali-payload.zip')">
+    <EmbeddedResource Include="Payload\ali-payload.zip" LogicalName="Ali.App.Installer.Payload.ali-payload.zip" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Ali.Setup</AssemblyName>
+  </PropertyGroup>
+
+</Project>

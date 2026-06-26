@@ -33,9 +33,16 @@ public static class LocalVoiceResourceLocator
 
     public static string? FindPiperVoiceDirectory(string appBaseDirectory, string? searchRoot = null)
     {
-        var voiceRoot = FindVoiceRoot(appBaseDirectory, searchRoot);
-        var candidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "piper");
-        return Directory.Exists(candidate) ? Path.GetFullPath(candidate) : null;
+        foreach (var voiceRoot in EnumerateVoiceRootCandidates(appBaseDirectory, searchRoot))
+        {
+            var candidate = Path.Combine(voiceRoot, "piper");
+            if (IsPiperVoiceDirectory(candidate))
+            {
+                return Path.GetFullPath(candidate);
+            }
+        }
+
+        return null;
     }
 
     public static string? FindWhisperPythonExecutable(string appBaseDirectory, string? searchRoot = null)
@@ -142,10 +149,35 @@ public static class LocalVoiceResourceLocator
             yield return Path.Combine(currentDirectory, "lib", "voice");
         }
 
-        var codexRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Codex");
-        foreach (var candidate in EnumerateVoiceRootsUnder(codexRoot, maxDepth: 5))
+        foreach (var codexRoot in EnumerateCodexRoots())
         {
-            yield return candidate;
+            foreach (var candidate in EnumerateVoiceRootsUnder(codexRoot, maxDepth: 5))
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateCodexRoots()
+    {
+        var roots = new List<string>();
+        AddIfPresent(roots, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Codex"));
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            AddIfPresent(roots, Path.Combine(userProfile, "Documents", "Codex"));
+            AddIfPresent(roots, Path.Combine(userProfile, "OneDrive", "Documents", "Codex"));
+        }
+
+        return roots.Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void AddIfPresent(List<string> paths, string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+        {
+            paths.Add(path);
         }
     }
 
@@ -252,6 +284,19 @@ public static class LocalVoiceResourceLocator
             return File.Exists(piperExecutable)
                 || Directory.EnumerateFiles(piperVoiceDirectory, "en_US-*.onnx").Any()
                 || Directory.Exists(whisperDirectory);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPiperVoiceDirectory(string candidate)
+    {
+        try
+        {
+            return Directory.Exists(candidate)
+                && Directory.EnumerateFiles(candidate, "en_US-*.onnx").Any();
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
         {

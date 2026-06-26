@@ -2,6 +2,7 @@ namespace Ali.App.Wpf.ViewModels;
 
 public sealed class ResourceMeterViewModel(string label) : ObservableObject
 {
+    private const double Gib = 1024d * 1024d * 1024d;
     private double _percent;
     private string _displayText = "--";
     private string _toolTip = $"{label}: unavailable";
@@ -26,7 +27,7 @@ public sealed class ResourceMeterViewModel(string label) : ObservableObject
         private set => SetProperty(ref _toolTip, value);
     }
 
-    public void Update(double? percent, string unavailableReason)
+    public void Update(double? percent, string unavailableReason, double? usageBytes = null, double? limitBytes = null)
     {
         if (percent is null)
         {
@@ -39,6 +40,8 @@ public sealed class ResourceMeterViewModel(string label) : ObservableObject
         var clamped = Math.Clamp(percent.Value, 0d, 100d);
         Percent = clamped;
         DisplayText = $"{clamped:0}%";
-        ToolTip = $"{Label}: {clamped:0.0}%";
+        ToolTip = usageBytes is > 0 && limitBytes is > 0
+            ? $"{Label}: {clamped:0.0}% ({usageBytes.Value / Gib:0.0} / {limitBytes.Value / Gib:0.0} GB)"
+            : $"{Label}: {clamped:0.0}%";
     }
 }

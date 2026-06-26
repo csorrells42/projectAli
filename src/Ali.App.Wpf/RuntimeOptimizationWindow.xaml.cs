@@ -4,10 +4,11 @@ namespace Ali.App.Wpf;
 
 public partial class RuntimeOptimizationWindow : Window
 {
-    public RuntimeOptimizationWindow(string report)
+    public RuntimeOptimizationWindow(string report, string assistantName)
     {
         NativeTitleBarTheme.ApplyDarkTitleBar(this);
         InitializeComponent();
+        Title = $"{assistantName} Runtime Recommendations";
         ReportTextBox.Text = report;
     }
 

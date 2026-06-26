@@ -5,6 +5,7 @@ using Ali.Core.Conversations;
 using Ali.Core.Coding;
 using Ali.Core.Evidence;
 using Ali.Core.Feedback;
+using Ali.Core.Identity;
 using Ali.Core.Memory;
 using Ali.Core.Models;
 using Ali.Core.Orchestration;
@@ -16,6 +17,8 @@ using Ali.Core.Truthfulness;
 using Ali.Core.Voice;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Coding;
+using Ali.Infrastructure.Identity;
+using Ali.Infrastructure.Installation;
 using Ali.Infrastructure.Sources;
 using Ali.Infrastructure.Storage;
 using Ali.Infrastructure.Voice;
@@ -135,6 +138,15 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("endpoint policy allows loopback runtime", TestEndpointPolicyAllowsLoopback),
     ("endpoint policy refuses public runtime", TestEndpointPolicyRefusesPublicEndpoint),
     ("runtime settings save and load", TestRuntimeSettingsSaveAndLoad),
+    ("assistant profile stores name in one file", TestAssistantProfileStoresNameInOneFile),
+    ("desktop installer deploys app without carrying personal data", TestDesktopInstallerDeploysAppWithoutCarryingPersonalData),
+    ("desktop installer can preseed assistant profile explicitly", TestDesktopInstallerCanPreseedAssistantProfileExplicitly),
+    ("desktop installer skips Visual Studio extension by default", TestDesktopInstallerSkipsVisualStudioExtensionByDefault),
+    ("desktop installer supports Visual Studio extension only mode", TestDesktopInstallerSupportsVisualStudioExtensionOnlyMode),
+    ("desktop installer skips Ollama installer when executable exists", TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists),
+    ("desktop installer repair preserves profile data", TestDesktopInstallerRepairPreservesProfileData),
+    ("desktop installer readiness reports payload and first launch profile", TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile),
+    ("desktop installer readiness reports missing VSIX installer", TestDesktopInstallerReadinessReportsMissingVsixInstaller),
     ("runtime optimizer uses selected model and hardware", TestRuntimeOptimizerUsesSelectedModelAndHardware),
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
@@ -149,6 +161,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI response parser extracts message content", TestOpenAiResponseParserExtractsMessageContent),
     ("OpenAI runtime preserves normal prompt text", TestRuntimePreservesNormalPromptText),
     ("OpenAI runtime pins Ali persona", TestRuntimePinsAliPersona),
+    ("OpenAI runtime uses configured assistant name", TestRuntimeUsesConfiguredAssistantName),
     ("OpenAI runtime includes current local date", TestRuntimeIncludesCurrentLocalDate),
     ("OpenAI runtime omits Ali persona for source planner", TestRuntimeOmitsAliPersonaForSourcePlanner),
     ("OpenAI runtime disables qwen thinking", TestRuntimeDisablesQwenThinking),
@@ -186,6 +199,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local vector library retrieves indexed folder document", TestLocalVectorLibraryRetrievesIndexedFolderDocument),
     ("local vector library refuses outside folder document", TestLocalVectorLibraryRefusesOutsideFolderDocument),
     ("curated source retriever fetches matching approved source", TestCuratedSourceRetrieverFetchesMatchingApprovedSource),
+    ("curated source retriever matches user-facing topics", TestCuratedSourceRetrieverMatchesUserFacingTopics),
     ("curated source retriever ignores generic news when tech is requested", TestCuratedSourceRetrieverIgnoresGenericNewsWhenTechRequested),
     ("curated source retriever prefers sports for game score", TestCuratedSourceRetrieverPrefersSportsForGameScore),
     ("curated source retriever prefers official Alabama football record source", TestCuratedSourceRetrieverPrefersOfficialAlabamaFootballRecordSource),
@@ -232,6 +246,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("speech streaming buffer emits clean segments", TestSpeechStreamingBufferEmitsCleanSegments),
     ("voice settings persist microphone and preset", TestVoiceSettingsPersistMicrophoneAndPreset),
     ("local voice resource locator repairs DevRun paths", TestLocalVoiceResourceLocatorRepairsDevRunPaths),
+    ("local voice resource locator skips whisper-only piper roots", TestLocalVoiceResourceLocatorSkipsWhisperOnlyPiperRoots),
     ("missing saved microphone warns and falls back", TestMissingSavedMicrophoneWarnsAndFallsBack),
     ("input channel catalog supports Scarlett-style inputs", TestInputChannelCatalogSupportsScarlettInputs),
     ("diagnostic sample service records plays and deletes", TestDiagnosticSampleServiceRecordsPlaysAndDeletes),
@@ -3239,6 +3254,203 @@ static async Task TestRuntimeSettingsSaveAndLoad()
     await Task.CompletedTask;
 }
 
+static Task TestAssistantProfileStoresNameInOneFile()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var profile = AssistantProfile.Create("Nova");
+
+    var saved = AssistantProfileStore.Save(directory, profile);
+    var loaded = AssistantProfileStore.Load(directory);
+
+    Equal(Path.Combine(directory, "assistant-profile.json"), AssistantProfileStore.GetProfilePath(directory));
+    Equal(1, Directory.GetFiles(directory, "assistant-profile.json").Length);
+    Equal("Nova", saved.AssistantName);
+    NotNull(loaded, "Loaded assistant profile should not be null.");
+    Equal("Nova", loaded!.AssistantName);
+    Equal(saved.ProfileId, loaded.ProfileId);
+    Equal(Path.Combine(Ali.Infrastructure.Bootstrap.AliServices.LocalAliRoot, "Profiles", saved.ProfileId), Ali.Infrastructure.Bootstrap.AliServices.GetProfileDataRoot(saved));
+    return Task.CompletedTask;
+}
+
+static async Task TestDesktopInstallerDeploysAppWithoutCarryingPersonalData()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.Core.dll"), "fake core");
+    Directory.CreateDirectory(Path.Combine(payload, "BootstrapData"));
+    await File.WriteAllTextAsync(Path.Combine(payload, "BootstrapData", "assistant-profile.json"), "should not copy");
+    Directory.CreateDirectory(Path.Combine(payload, "Profiles", "Chris"));
+    await File.WriteAllTextAsync(Path.Combine(payload, "Profiles", "Chris", "memories.json"), "should not copy");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(payload, localRoot));
+
+    Equal(true, result.Succeeded);
+    Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "Ali.App.Wpf.exe")));
+    Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "Ali.Core.dll")));
+    Equal(false, File.Exists(Path.Combine(localRoot, "DevRun", "BootstrapData", "assistant-profile.json")));
+    Equal(false, File.Exists(Path.Combine(localRoot, "DevRun", "Profiles", "Chris", "memories.json")));
+    Equal(false, File.Exists(Path.Combine(localRoot, "BootstrapData", "assistant-profile.json")));
+    Equal(true, File.Exists(result.ReceiptPath));
+    Contains("first app launch will ask", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopInstallerCanPreseedAssistantProfileExplicitly()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(payload, localRoot, AssistantName: "Nova"));
+    var profile = AssistantProfileStore.Load(Path.Combine(localRoot, "BootstrapData"));
+
+    Equal(true, result.Succeeded);
+    NotNull(profile, "Installer should create assistant profile when --assistant-name is explicitly supplied.");
+    Equal("Nova", profile!.AssistantName);
+    Equal(true, File.Exists(Path.Combine(localRoot, "BootstrapData", "assistant-profile.json")));
+}
+
+static async Task TestDesktopInstallerSkipsVisualStudioExtensionByDefault()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    Directory.CreateDirectory(Path.Combine(payload, "extras", "visualstudio"));
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(
+        Path.Combine(payload, "extras", "visualstudio", "Ali.App.VisualStudioExtension.vsix"),
+        "fake vsix");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(payload, localRoot));
+
+    Equal(true, result.Succeeded);
+    Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "Ali.App.Wpf.exe")));
+    Contains("Visual Studio extension install was not requested", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopInstallerSupportsVisualStudioExtensionOnlyMode()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        AssistantName: "Nova",
+        PullRuntimeModel: true,
+        InstallApplication: false,
+        InstallVisualStudioExtension: true));
+
+    Equal(true, result.Succeeded);
+    Equal(false, File.Exists(Path.Combine(localRoot, "DevRun", "Ali.App.Wpf.exe")));
+    Equal(false, File.Exists(Path.Combine(localRoot, "BootstrapData", "assistant-profile.json")));
+    Contains("Ali app payload install was not requested", string.Join(Environment.NewLine, result.DependencyMessages));
+    Contains("no Ali Companion VSIX package was found", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var fakeOllama = Path.Combine(root, "ollama.exe");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(fakeOllama, "fake ollama");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        OllamaExecutablePath: fakeOllama,
+        InstallOllamaIfMissing: true));
+
+    Equal(true, result.Succeeded);
+    Contains("Ollama is available", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopInstallerRepairPreservesProfileData()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var dataRoot = Path.Combine(localRoot, "BootstrapData");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fresh app");
+    var profile = AssistantProfile.Create("Nova");
+    AssistantProfileStore.Save(dataRoot, profile);
+    var memoryPath = Path.Combine(localRoot, "Profiles", profile.ProfileId, "memories.json");
+    Directory.CreateDirectory(Path.GetDirectoryName(memoryPath)!);
+    await File.WriteAllTextAsync(memoryPath, "keep me");
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        AssistantName: "Other",
+        RepairExistingInstall: true));
+    var loaded = AssistantProfileStore.Load(dataRoot);
+
+    Equal(true, result.Succeeded);
+    Equal("Nova", loaded!.AssistantName);
+    Equal("keep me", await File.ReadAllTextAsync(memoryPath));
+    Contains("Repair mode selected", string.Join(Environment.NewLine, result.DependencyMessages));
+    Contains("already exists; installer did not overwrite", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+
+    var service = new AliDesktopInstallReadinessService();
+    var readiness = await service.EvaluateAsync(new AliDesktopInstallOptions(payload, localRoot));
+    var text = string.Join(Environment.NewLine, readiness.Items.Select(item => item.Message));
+
+    Equal(true, readiness.IsReadyForSelectedActions);
+    Contains("Payload found", text);
+    Contains("First Ali launch will ask", text);
+}
+
+static async Task TestDesktopInstallerReadinessReportsMissingVsixInstaller()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var vsixPath = Path.Combine(root, "Ali.App.VisualStudioExtension.vsix");
+    var missingVsixInstaller = Path.Combine(root, "VSIXInstaller.exe");
+    Directory.CreateDirectory(payload);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(vsixPath, "fake vsix");
+
+    var service = new AliDesktopInstallReadinessService();
+    var readiness = await service.EvaluateAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        InstallVisualStudioExtension: true,
+        VsixPath: vsixPath,
+        VsixInstallerPath: missingVsixInstaller));
+    var text = string.Join(Environment.NewLine, readiness.Items.Select(item => item.Message));
+
+    Equal(false, readiness.IsReadyForSelectedActions);
+    Contains("VSIX package found", text);
+    Contains("VSIXInstaller.exe was not found", text);
+}
+
 static Task TestRuntimeOptimizerUsesSelectedModelAndHardware()
 {
     const double gib = 1024d * 1024d * 1024d;
@@ -3406,6 +3618,23 @@ static async Task TestRuntimePinsAliPersona()
     Contains("Keep normal replies concise", handler.LastChatBody);
 }
 
+static async Task TestRuntimeUsesConfiguredAssistantName()
+{
+    var options = CreateRuntimeOptions("qwen3-vl:8b");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(
+        new HttpClient(handler),
+        options,
+        AssistantProfile.Create("Nova"));
+
+    var answer = await StreamToStringAsync(runtime, "What is your name?", CancellationToken.None);
+
+    Equal("OK", answer);
+    Contains("You are Nova", handler.LastChatBody);
+    Contains("identify yourself as Nova", handler.LastChatBody);
+    Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
+}
+
 static async Task TestRuntimeIncludesCurrentLocalDate()
 {
     var options = CreateRuntimeOptions("fake-local-model");
@@ -3433,7 +3662,7 @@ static async Task TestRuntimeOmitsAliPersonaForSourcePlanner()
             new ChatMessage(
                 "source_planner_system",
                 ChatRole.System,
-                "You are Ali's source query planner. Return exactly one JSON object.",
+                "You are the app's source query planner. Return exactly one JSON object.",
                 DateTimeOffset.UtcNow)
         ]);
 
@@ -4119,6 +4348,40 @@ static async Task TestCuratedSourceRetrieverFetchesMatchingApprovedSource()
     Equal(true, result.RequiresSourceGrounding);
     Equal("CDC Flu", result.Excerpts[0].Name);
     Contains("Flu guidance from approved source.", result.Excerpts[0].Excerpt);
+}
+
+static async Task TestCuratedSourceRetrieverMatchesUserFacingTopics()
+{
+    var directory = NewTestDirectory();
+    var sourceStore = new FileSourceRetriever(
+        directory,
+        new HttpClient(new StaticPageHandler("<html><body><p>Manual setup source.</p></body></html>")));
+    Directory.CreateDirectory(sourceStore.RootDirectory);
+    var catalog = new[]
+    {
+        new SourceCatalogEntry(
+            Id: "focusrite-help",
+            Topic: "audio",
+            Name: "Focusrite Help",
+            Url: "https://example.test/focusrite",
+            Keywords: ["scarlett", "interface", "focusrite"],
+            Topics: ["scarlett setup", "audio interface", "home studio"],
+            Enabled: true)
+    };
+    await File.WriteAllTextAsync(sourceStore.CatalogPath, JsonSerializer.Serialize(catalog));
+    var plan = new SourceQueryPlan(
+        true,
+        true,
+        "official_guidance",
+        "setup scarlett",
+        ["scarlett", "setup"],
+        ["home studio"]);
+
+    var result = await sourceStore.CreateRetriever().RetrieveAsync(plan, CancellationToken.None);
+
+    Equal(1, result.Excerpts.Count);
+    Equal("Focusrite Help", result.Excerpts[0].Name);
+    Contains("Manual setup source.", result.Excerpts[0].Excerpt);
 }
 
 static async Task TestCuratedSourceRetrieverIgnoresGenericNewsWhenTechRequested()
@@ -5403,6 +5666,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
         ExtraInputGainDb: 6,
         NormalizeBeforeStt: true,
         RetainDebugAudio: true,
+        AssistantReadsRepliesOutLoud: true,
         AutoSendVoiceTranscripts: true,
         WhisperExecutablePath: @"C:\Ali\lib\voice\whisper.exe",
         WhisperModelPath: @"C:\Ali\lib\voice\faster-whisper",
@@ -5420,6 +5684,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(6d, loaded.ExtraInputGainDb);
     Equal(true, loaded.NormalizeBeforeStt);
     Equal(true, loaded.RetainDebugAudio);
+    Equal(true, loaded.AssistantReadsRepliesOutLoud);
     Equal(true, loaded.AutoSendVoiceTranscripts);
     Equal(@"C:\Ali\lib\voice\whisper.exe", loaded.WhisperExecutablePath);
     Equal(@"C:\Ali\lib\voice\en_US.onnx", loaded.PiperModelPath);
@@ -5470,6 +5735,26 @@ static Task TestLocalVoiceResourceLocatorRepairsDevRunPaths()
     Equal(Path.GetFullPath(whisperPython), LocalVoiceResourceLocator.FindWhisperPythonExecutable(appBase, root));
     Equal(Path.GetFullPath(whisperScript), LocalVoiceResourceLocator.FindWhisperScript(appBase, root));
     Equal(Path.GetFullPath(piperModel), LocalVoiceResourceLocator.ToPortablePath(appBase, stalePortableModel, root));
+    return Task.CompletedTask;
+}
+
+static Task TestLocalVoiceResourceLocatorSkipsWhisperOnlyPiperRoots()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var appBase = Path.Combine(root, "AppData", "Local", "Ali", "DevRun");
+    var whisperOnlyVoiceRoot = Path.Combine(root, "newer", "lib", "voice");
+    var piperVoiceRoot = Path.Combine(root, "older", "lib", "voice");
+    var expectedPiperDirectory = Path.Combine(piperVoiceRoot, "piper");
+
+    Directory.CreateDirectory(appBase);
+    Directory.CreateDirectory(Path.Combine(whisperOnlyVoiceRoot, "whisper"));
+    Directory.CreateDirectory(expectedPiperDirectory);
+    File.WriteAllText(Path.Combine(expectedPiperDirectory, "en_US-hfc_female-medium.onnx"), "fake model");
+
+    Directory.SetLastWriteTimeUtc(Path.Combine(root, "newer"), DateTime.UtcNow);
+    Directory.SetLastWriteTimeUtc(Path.Combine(root, "older"), DateTime.UtcNow.AddMinutes(-5));
+
+    Equal(Path.GetFullPath(expectedPiperDirectory), LocalVoiceResourceLocator.FindPiperVoiceDirectory(appBase, root));
     return Task.CompletedTask;
 }
 

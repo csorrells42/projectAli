@@ -2,8 +2,10 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using Ali.Core.Identity;
 using Ali.App.Wpf.ViewModels;
 using Ali.Infrastructure.Bootstrap;
+using Ali.Infrastructure.Identity;
 
 namespace Ali.App.Wpf;
 
@@ -18,10 +20,28 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
 
         ShutdownMode = ShutdownMode.OnMainWindowClose;
-        var services = AliServices.CreateForDesktop();
+        var assistantProfile = LoadOrCreateAssistantProfile();
+        var services = AliServices.CreateForDesktop(assistantProfile);
         var mainWindow = new MainWindow(new MainWindowViewModel(services));
         MainWindow = mainWindow;
         mainWindow.Show();
+    }
+
+    private static AssistantProfile LoadOrCreateAssistantProfile()
+    {
+        var dataRoot = AliServices.DesktopDataRoot;
+        var existing = AssistantProfileStore.Load(dataRoot);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var setupWindow = new AssistantSetupWindow();
+        var result = setupWindow.ShowDialog();
+        var selectedProfile = result == true
+            ? setupWindow.AssistantProfile
+            : AssistantProfile.CreateDefault();
+        return AssistantProfileStore.Save(dataRoot, selectedProfile);
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

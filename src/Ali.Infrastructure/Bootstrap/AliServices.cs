@@ -1,4 +1,5 @@
 using Ali.Core.Feedback;
+using Ali.Core.Identity;
 using Ali.Core.Orchestration;
 using Ali.Core.Permissions;
 using Ali.Core.Runtime;
@@ -6,6 +7,7 @@ using Ali.Core.Sources;
 using Ali.Core.Voice;
 using Ali.Core.Coding;
 using Ali.Infrastructure.Coding;
+using Ali.Infrastructure.Identity;
 using Ali.Infrastructure.Runtime;
 using Ali.Infrastructure.Sources;
 using Ali.Infrastructure.Storage;
@@ -19,6 +21,8 @@ public sealed class AliServices
 
     public AliServices(
         string dataRoot,
+        string profileDataRoot,
+        AssistantProfile assistantProfile,
         SafeActivatingLocalRuntime runtimeController,
         ConversationOrchestrator orchestrator,
         HttpClient httpClient,
@@ -32,6 +36,8 @@ public sealed class AliServices
         ILocalCodingTool localCodingTool)
     {
         DataRoot = dataRoot;
+        ProfileDataRoot = profileDataRoot;
+        AssistantProfile = assistantProfile.Normalize();
         RuntimeController = runtimeController;
         Orchestrator = orchestrator;
         _httpClient = httpClient;
@@ -47,6 +53,12 @@ public sealed class AliServices
 
     public string DataRoot { get; }
 
+    public string ProfileDataRoot { get; }
+
+    public AssistantProfile AssistantProfile { get; }
+
+    public string AssistantProfilePath => AssistantProfileStore.GetProfilePath(DataRoot);
+
     public string RuntimeSettingsPath => RuntimeSettingsStore.GetSettingsPath(DataRoot);
 
     public string RuntimeSettingsExamplePath => RuntimeSettingsStore.GetExamplePath(DataRoot);
@@ -54,6 +66,8 @@ public sealed class AliServices
     public string LocalVectorLibrarySettingsPath => LocalVectorLibrarySettingsStore.GetSettingsPath(DataRoot);
 
     public string LocalVectorLibraryIndexPath => LocalVectorLibrarySettingsStore.GetIndexPath(DataRoot);
+
+    public string CuratedSourcesCatalogPath => CreateFileSourceRetriever().CatalogPath;
 
     public string CodingToolSettingsPath => CodingToolSettingsStore.GetSettingsPath(DataRoot);
 
@@ -104,10 +118,19 @@ public sealed class AliServices
     public LocalVectorLibraryRetriever CreateLocalVectorLibraryRetriever() =>
         new(DataRoot, _httpClient, LoadLocalVectorLibrarySettings());
 
+    public FileSourceRetriever CreateFileSourceRetriever() =>
+        new(DataRoot, _httpClient);
+
+    public IReadOnlyList<SourceCatalogEntry> LoadCuratedSources() =>
+        CreateFileSourceRetriever().LoadCatalog();
+
+    public void SaveCuratedSources(IEnumerable<SourceCatalogEntry> sources) =>
+        CreateFileSourceRetriever().SaveCatalog(sources);
+
     public void ConfigureRuntimeCandidate(OpenAiCompatibleRuntimeOptions options)
     {
         ILocalModelRuntime? candidateRuntime = options.Enabled
-            ? new OpenAiCompatibleLocalModelRuntime(_httpClient, options)
+            ? new OpenAiCompatibleLocalModelRuntime(_httpClient, options, AssistantProfile)
             : null;
 
         RuntimeController.ConfigureCandidate(candidateRuntime);
@@ -121,21 +144,26 @@ public sealed class AliServices
         TextToSpeech = new PiperCliTextToSpeechProvider(textToSpeechOptions);
     }
 
-    public static AliServices CreateForDesktop()
-    {
-        var dataRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Ali",
-            "BootstrapData");
+    public static string LocalAliRoot => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Ali");
 
-        var correctionStore = new FileCorrectionQueueStore(dataRoot);
+    public static string DesktopDataRoot => Path.Combine(LocalAliRoot, "BootstrapData");
+
+    public static string GetProfileDataRoot(AssistantProfile assistantProfile) =>
+        Path.Combine(LocalAliRoot, "Profiles", assistantProfile.Normalize().ProfileId);
+
+    public static AliServices CreateForDesktop(AssistantProfile? assistantProfile = null)
+    {
+        var dataRoot = DesktopDataRoot;
+        var profile = (assistantProfile ?? AssistantProfileStore.LoadOrDefault(dataRoot)).Normalize();
+        var profileDataRoot = GetProfileDataRoot(profile);
+
+        var correctionStore = new FileCorrectionQueueStore(profileDataRoot);
         var correctionQueue = new CorrectionQueueService(correctionStore);
-        var localAliRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Ali");
-        var conversations = new FileConversationStore(localAliRoot);
-        var memories = new FileMemoryStore(localAliRoot);
-        var reminders = new FileReminderStore(localAliRoot);
+        var conversations = new FileConversationStore(profileDataRoot);
+        var memories = new FileMemoryStore(profileDataRoot);
+        var reminders = new FileReminderStore(profileDataRoot);
         RuntimeSettingsStore.WriteExample(dataRoot);
 
         var fallbackRuntime = new DevelopmentLocalModelRuntime();
@@ -149,7 +177,7 @@ public sealed class AliServices
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, httpClient);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
-            ? new OpenAiCompatibleLocalModelRuntime(httpClient, configuredOptions)
+            ? new OpenAiCompatibleLocalModelRuntime(httpClient, configuredOptions, profile)
             : null;
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
@@ -176,6 +204,8 @@ public sealed class AliServices
 
         return new AliServices(
             dataRoot,
+            profileDataRoot,
+            profile,
             runtime,
             orchestrator,
             httpClient,

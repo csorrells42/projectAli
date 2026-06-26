@@ -21,6 +21,7 @@ public partial class LocalLibraryWindow : Window
         NativeTitleBarTheme.ApplyDarkTitleBar(this);
         InitializeComponent();
         _services = services;
+        Title = $"{_services.AssistantProfile.AssistantName} Local Library";
         _settings = _services.LoadLocalVectorLibrarySettings();
         LoadSettingsIntoView();
     }
@@ -31,7 +32,7 @@ public partial class LocalLibraryWindow : Window
         EmbeddingModelText.Text = _settings.EmbeddingModel;
         SettingsPathText.Text = $"Settings: {_services.LocalVectorLibrarySettingsPath}";
         RefreshIndexSummary();
-        StatusText.Text = "Ali will only index supported text documents from this approved local folder.";
+        StatusText.Text = $"{_services.AssistantProfile.AssistantName} will only index supported text documents from this approved local folder.";
     }
 
     private void SaveButton_OnClick(object sender, RoutedEventArgs e)
@@ -43,7 +44,7 @@ public partial class LocalLibraryWindow : Window
     {
         using var dialog = new Forms.FolderBrowserDialog
         {
-            Description = "Choose Ali's approved local RAG folder",
+            Description = $"Choose {_services.AssistantProfile.AssistantName}'s approved local RAG folder",
             UseDescriptionForTitle = true,
             SelectedPath = Directory.Exists(FolderTextBox.Text)
                 ? FolderTextBox.Text

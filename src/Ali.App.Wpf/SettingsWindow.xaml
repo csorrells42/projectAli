@@ -1,7 +1,7 @@
 <Window x:Class="Ali.App.Wpf.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Ali Settings"
+        Title="{Binding AssistantSettingsWindowTitle}"
         Height="700"
         Width="960"
         MinHeight="620"
@@ -233,6 +233,34 @@
         <Style TargetType="{x:Type TabControl}">
             <Setter Property="Background" Value="{StaticResource AppBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TabControl}">
+                        <Grid ClipToBounds="False" SnapsToDevicePixels="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TabPanel Grid.Row="0"
+                                      IsItemsHost="True"
+                                      KeyboardNavigation.TabIndex="1"
+                                      Margin="0,0,0,-1"
+                                      Panel.ZIndex="1" />
+                            <Border Grid.Row="1"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    SnapsToDevicePixels="True">
+                                <ContentPresenter x:Name="PART_SelectedContentHost"
+                                                  ContentSource="SelectedContent"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style TargetType="{x:Type TabItem}">
@@ -297,7 +325,8 @@
 
         <TabControl x:Name="SettingsTabs"
                     Grid.Row="1"
-                    Margin="0,0,10,0"
+                    Margin="0"
+                    Padding="0"
                     ClipToBounds="False">
             <TabItem x:Name="RuntimeTab" Header="Runtime">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource AppBackgroundBrush}">
@@ -330,7 +359,7 @@
                                     <TextBlock Text="Advanced runtime settings"
                                                FontWeight="SemiBold"
                                                Foreground="{StaticResource TextBrush}" />
-                                    <TextBlock Text="These settings can break local model startup, slow Ali down, or make owner testing confusing if changed accidentally."
+                                    <TextBlock Text="These settings can break local model startup, slow the assistant down, or make owner testing confusing if changed accidentally."
                                                TextWrapping="Wrap"
                                                FontSize="12"
                                                Foreground="{StaticResource MutedTextBrush}"
@@ -363,7 +392,7 @@
                                 <ComboBox ItemsSource="{Binding RuntimeModelChoices}"
                                           SelectedItem="{Binding SelectedRuntimeModelChoice}"
                                           Margin="0,2,0,4" />
-                                <TextBlock Text="Ali will use this model only after Check passes and Activate is clicked."
+                                <TextBlock Text="{Binding AssistantWillUseSelectedModelText}"
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"
@@ -419,7 +448,7 @@
                                         <ComboBox ItemsSource="{Binding RuntimeTemperatureChoices}"
                                                   SelectedItem="{Binding RuntimeTemperatureText}"
                                                   Margin="0,2,0,2"
-                                                  ToolTip="Lower is steadier. Use 0.0-1.0 for normal Ali testing." />
+                                                  ToolTip="Lower is steadier. Use 0.0-1.0 for normal assistant testing." />
                                         <TextBlock Text="Lower is steadier; presets stay in range."
                                                    TextWrapping="Wrap"
                                                    FontSize="11"
@@ -672,7 +701,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <TextBlock Text="Ali voice"
+                            <TextBlock Text="{Binding AssistantVoiceLabel}"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="18"
                                        FontWeight="SemiBold"
@@ -1025,7 +1054,7 @@
                                            FontSize="18"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Text="Ali can open, inspect, and later assist with projects in this folder. Keep this as the main coding domain."
+                                <TextBlock Text="{Binding AssistantCodingWorkspaceDescription}"
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,3,0,12" />
@@ -1066,7 +1095,7 @@
                                             Margin="0"
                                             Padding="8,5" />
                                 </Grid>
-                                <TextBlock Text="Ali creates, inspects, combines, and splits PDFs from this folder by default. Leave the default if you want Ali-owned generated documents."
+                                <TextBlock Text="{Binding AssistantPdfWorkspaceDescription}"
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"
@@ -1119,7 +1148,7 @@
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource TextBrush}"
                                            Margin="0,4,0,4" />
-                                <TextBlock Text="These are Ali's coding guardrails. Locked rows are shown for clarity and require a separate high-trust workflow before they can change."
+                                <TextBlock Text="{Binding AssistantCodingGuardrailsDescription}"
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"
@@ -1238,7 +1267,7 @@
                                               Margin="0,0,12,8" />
                                     <TextBlock Grid.Row="5"
                                                Grid.Column="2"
-                                               Text="Future destructive file behavior. Extra confirmation means Ali must ask before proceeding."
+                                               Text="{Binding AssistantExtraConfirmationDescription}"
                                                TextWrapping="Wrap"
                                                FontSize="11"
                                                Foreground="{StaticResource SubtleTextBrush}"

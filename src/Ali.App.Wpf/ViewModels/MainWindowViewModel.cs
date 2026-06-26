@@ -75,6 +75,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeSpeech;
     private SettingsWindow? _settingsWindow;
     private LocalLibraryWindow? _localLibraryWindow;
+    private SourcesTopicsWindow? _sourcesTopicsWindow;
     private bool _voiceMonitorRequested;
     private bool _suppressInputMonitorRestart;
     private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
@@ -136,6 +137,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _extraInputGainDb;
     private bool _normalizeBeforeStt;
     private bool _retainDebugAudio;
+    private bool _assistantReadsRepliesOutLoud;
     private bool _autoSendVoiceTranscripts;
     private string _pushToTalkKeyText = "NumPad0";
     private bool _isAssigningPushToTalkKey;
@@ -194,13 +196,12 @@ public sealed class MainWindowViewModel : ObservableObject
         RevertToLastKnownGoodCommand = CreateCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
         PasteImageCommand = CreateAsyncCommand(AddClipboardImageAsync);
         RemoveAttachmentCommand = CreateCommand(RemoveAttachment);
-        ToggleVoiceRecordingCommand = CreateAsyncCommand(ToggleVoiceRecordingAsync, () => !IsBusy || IsRecording || IsTranscribing);
-        ToggleVoiceModeCommand = CreateCommand(_ => AutoSendVoiceTranscripts = !AutoSendVoiceTranscripts);
         BeginAssignPushToTalkKeyCommand = CreateCommand(_ => BeginAssignPushToTalkKey());
         SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
+        OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
         PlayPiperSampleCommand = CreateAsyncCommand(PlayPiperSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -224,6 +225,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
         _normalizeBeforeStt = _voiceSettings.NormalizeBeforeStt;
         _retainDebugAudio = _voiceSettings.RetainDebugAudio;
+        _assistantReadsRepliesOutLoud = _voiceSettings.AssistantReadsRepliesOutLoud;
         _autoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
         _pushToTalkKeyText = NormalizePushToTalkKey(_voiceSettings.PushToTalkKey);
         LoadSpeechToolSettings();
@@ -452,6 +454,35 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> CodingPdfModifyModeChoices { get; } = new();
 
+    public string AssistantName => _services.AssistantProfile.AssistantName;
+
+    public string AssistantWindowTitle => AssistantName;
+
+    public string AssistantSettingsWindowTitle => $"{AssistantName} Settings";
+
+    public string AssistantLocalLibraryToolTip =>
+        $"Open {AssistantName}'s approved local RAG folder and vector index.";
+
+    public string AssistantSourcesTopicsToolTip =>
+        $"Manage approved sources and topics {AssistantName} can use for source-backed answers.";
+
+    public string AssistantVoiceLabel => $"{AssistantName} voice";
+
+    public string AssistantWillUseSelectedModelText =>
+        $"{AssistantName} will use this model only after Check passes and Activate is clicked.";
+
+    public string AssistantCodingWorkspaceDescription =>
+        $"{AssistantName} can open, inspect, and later assist with projects in this folder. Keep this as the main coding domain.";
+
+    public string AssistantPdfWorkspaceDescription =>
+        $"{AssistantName} creates, inspects, combines, and splits PDFs from this folder by default. Leave the default if you want assistant-owned generated documents.";
+
+    public string AssistantCodingGuardrailsDescription =>
+        $"These are {AssistantName}'s coding guardrails. Locked rows are shown for clarity and require a separate high-trust workflow before they can change.";
+
+    public string AssistantExtraConfirmationDescription =>
+        $"Future destructive file behavior. Extra confirmation means {AssistantName} must ask before proceeding.";
+
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
@@ -486,10 +517,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RemoveAttachmentCommand { get; }
 
-    public ICommand ToggleVoiceRecordingCommand { get; }
-
-    public ICommand ToggleVoiceModeCommand { get; }
-
     public ICommand BeginAssignPushToTalkKeyCommand { get; }
 
     public ICommand SendTranscriptCommand { get; }
@@ -499,6 +526,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenSettingsCommand { get; }
 
     public ICommand OpenLocalLibraryCommand { get; }
+
+    public ICommand OpenSourcesTopicsCommand { get; }
 
     public ICommand PlayPiperSampleCommand { get; }
 
@@ -739,11 +768,17 @@ public sealed class MainWindowViewModel : ObservableObject
                 $"PDF combine/split/modify: {CodingPdfModifyMode}."
             ]);
 
-    public string MicButtonText => IsRecording ? "Stop Mic" : IsTranscribing ? "Transcribing" : "Mic";
+    public string VoiceReadAloudToolTip =>
+        AssistantReadsRepliesOutLoud
+            ? $"{AssistantName} will read assistant replies out loud when local TTS is configured."
+            : $"{AssistantName} will keep assistant replies silent.";
 
-    public string VoiceModeButtonText => AutoSendVoiceTranscripts
-        ? $"PTT On ({PushToTalkKeyLabel})"
-        : $"PTT Off ({PushToTalkKeyLabel})";
+    public string PushToTalkEnabledToolTip =>
+        AutoSendVoiceTranscripts
+            ? $"Push to Talk enabled. Hold {PushToTalkKeyLabel} to record and send."
+            : "Push to Talk disabled.";
+
+    public string PushToTalkKeyButtonText => $"PTT {PushToTalkKeyLabel}";
 
     public string PushToTalkHintText => $"Hold {PushToTalkKeyLabel} to record. Release to transcribe and send.";
 
@@ -1032,6 +1067,26 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool AssistantReadsRepliesOutLoud
+    {
+        get => _assistantReadsRepliesOutLoud;
+        set
+        {
+            if (SetProperty(ref _assistantReadsRepliesOutLoud, value))
+            {
+                OnPropertyChanged(nameof(VoiceReadAloudToolTip));
+                SaveVoiceSettings(assistantReadsRepliesOutLoud: value);
+                VoiceStatus = value
+                    ? $"{AssistantName} will read replies out loud when local TTS is configured."
+                    : $"{AssistantName} will keep replies silent.";
+                if (!value)
+                {
+                    StopSpeaking();
+                }
+            }
+        }
+    }
+
     public bool AutoSendVoiceTranscripts
     {
         get => _autoSendVoiceTranscripts;
@@ -1039,12 +1094,13 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _autoSendVoiceTranscripts, value))
             {
-                OnPropertyChanged(nameof(VoiceModeButtonText));
+                OnPropertyChanged(nameof(PushToTalkEnabledToolTip));
                 OnPropertyChanged(nameof(PushToTalkHintText));
+                OnPropertyChanged(nameof(PushToTalkKeyButtonText));
                 SaveVoiceSettings(autoSendVoiceTranscripts: value);
                 VoiceStatus = value
                     ? $"Push to Talk enabled. Hold {PushToTalkKeyLabel} to speak."
-                    : "Push to Talk disabled. Mic button still transcribes into the chat bar.";
+                    : "Push to Talk disabled.";
                 RaiseCommandStates();
             }
         }
@@ -1059,8 +1115,9 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _pushToTalkKeyText, normalized))
             {
                 OnPropertyChanged(nameof(PushToTalkKeyLabel));
-                OnPropertyChanged(nameof(VoiceModeButtonText));
+                OnPropertyChanged(nameof(PushToTalkEnabledToolTip));
                 OnPropertyChanged(nameof(PushToTalkHintText));
+                OnPropertyChanged(nameof(PushToTalkKeyButtonText));
                 SaveVoiceSettings(pushToTalkKey: normalized);
             }
         }
@@ -1177,7 +1234,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isRecording, value))
             {
-                OnPropertyChanged(nameof(MicButtonText));
+                OnPropertyChanged(nameof(PushToTalkKeyButtonText));
                 RaiseCommandStates();
             }
         }
@@ -1190,7 +1247,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isTranscribing, value))
             {
-                OnPropertyChanged(nameof(MicButtonText));
+                OnPropertyChanged(nameof(PushToTalkKeyButtonText));
                 RaiseCommandStates();
             }
         }
@@ -2142,7 +2199,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Description = "Choose Ali's coding workspace folder",
+            Description = $"Choose {AssistantName}'s coding workspace folder",
             SelectedPath = selectedPath,
             ShowNewFolderButton = true
         };
@@ -2161,7 +2218,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         using var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Description = "Choose Ali's PDF workspace folder",
+            Description = $"Choose {AssistantName}'s PDF workspace folder",
             SelectedPath = selectedPath,
             ShowNewFolderButton = true
         };
@@ -2266,9 +2323,9 @@ public sealed class MainWindowViewModel : ObservableObject
             messages);
     }
 
-    private static bool ShouldPersistMessage(ChatMessageViewModel message) =>
+    private bool ShouldPersistMessage(ChatMessageViewModel message) =>
         !string.IsNullOrWhiteSpace(message.Text)
-        && !message.Text.StartsWith("Ali bootstrap ready.", StringComparison.Ordinal);
+        && !message.Text.StartsWith($"{AssistantName} bootstrap ready.", StringComparison.Ordinal);
 
     private static StoredAttachmentMetadata ToStoredAttachmentMetadata(ImageAttachmentViewModel attachment) =>
         new(
@@ -2309,19 +2366,22 @@ public sealed class MainWindowViewModel : ObservableObject
         CpuMeter.Update(snapshot.CpuPercent, "CPU counter unavailable");
         RamMeter.Update(snapshot.RamPercent, "RAM counter unavailable");
         GpuMeter.Update(snapshot.GpuPercent, "GPU counter unavailable");
-        VramMeter.Update(snapshot.VramPercent, "VRAM counter unavailable");
+        VramMeter.Update(
+            snapshot.VramPercent,
+            "VRAM counter unavailable",
+            snapshot.VramUsageBytes,
+            snapshot.VramLimitBytes);
     }
 
     private void EraseHistory()
     {
-        var result = System.Windows.MessageBox.Show(
-            "Erase saved chat history on this computer? This removes saved conversations and recent chat entries. It does not remove local models, settings, voice resources, correction reports, memories, reminders, or the app itself.",
+        var confirmed = DarkConfirmationWindow.Show(
+            System.Windows.Application.Current?.MainWindow,
             "Erase saved chat history",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
+            "Erase saved chat history on this computer? This removes saved conversations and recent chat entries. It does not remove local models, settings, voice resources, correction reports, memories, reminders, or the app itself.",
+            "Erase History");
 
-        if (result != MessageBoxResult.Yes)
+        if (!confirmed)
         {
             return;
         }
@@ -2345,14 +2405,13 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var result = System.Windows.MessageBox.Show(
-            $"Erase saved chat \"{item.Title}\" from this computer? This does not remove settings, local models, voice resources, correction reports, memories, reminders, or the app itself.",
+        var confirmed = DarkConfirmationWindow.Show(
+            System.Windows.Application.Current?.MainWindow,
             "Erase saved chat",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
+            $"Erase saved chat \"{item.Title}\" from this computer? This does not remove settings, local models, voice resources, correction reports, memories, reminders, or the app itself.",
+            "Erase Chat");
 
-        if (result != MessageBoxResult.Yes)
+        if (!confirmed)
         {
             return;
         }
@@ -2410,10 +2469,12 @@ public sealed class MainWindowViewModel : ObservableObject
         && TryParsePushToTalkKey(_pushToTalkKeyText, out var configuredKey)
         && key == configuredKey;
 
+    public bool IsPushToTalkActive => _pushToTalkKeyDown;
+
     public void BeginAssignPushToTalkKey()
     {
         IsAssigningPushToTalkKey = true;
-        VoiceSettingsStatusText = "Press the key to use for Push to Talk. Ali will save the next keypress.";
+        VoiceSettingsStatusText = $"Press the key to use for Push to Talk. {AssistantName} will save the next keypress.";
     }
 
     public void AssignPushToTalkKey(Key key)
@@ -2437,6 +2498,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _pushToTalkKeyDown = true;
+        OnPropertyChanged(nameof(PushToTalkKeyButtonText));
         _currentVoiceInputShouldAutoSend = true;
         try
         {
@@ -2445,6 +2507,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch
         {
             _pushToTalkKeyDown = false;
+            OnPropertyChanged(nameof(PushToTalkKeyButtonText));
             _currentVoiceInputShouldAutoSend = false;
             throw;
         }
@@ -2458,6 +2521,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _pushToTalkKeyDown = false;
+        OnPropertyChanged(nameof(PushToTalkKeyButtonText));
         if (IsRecording || IsTranscribing)
         {
             await StopVoiceRecordingOrTranscriptionAsync().ConfigureAwait(true);
@@ -2611,7 +2675,7 @@ public sealed class MainWindowViewModel : ObservableObject
             var machine = _resourceMonitor.CaptureRuntimeMachineSnapshot();
             var report = RuntimeOptimizationAdvisor.BuildReport(options, machine);
             var owner = _settingsWindow ?? System.Windows.Application.Current?.Windows.OfType<Window>().FirstOrDefault(window => window.IsActive);
-            var window = new RuntimeOptimizationWindow(report.ToDisplayText())
+            var window = new RuntimeOptimizationWindow(report.ToDisplayText(), AssistantName)
             {
                 Owner = owner
             };
@@ -3178,7 +3242,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             shouldAutoSend = routing.SendAutomatically;
             VoiceStatus = shouldAutoSend
-                ? "Transcript accepted; sending to Ali."
+                ? $"Transcript accepted; sending to {AssistantName}."
                 : "Transcript placed in the chat bar.";
             SttStatus = $"Transcript created by {transcript.ProviderName}.";
         }
@@ -3272,7 +3336,7 @@ public sealed class MainWindowViewModel : ObservableObject
             RejectionReason = null
         };
 
-        VoiceStatus = "Voice transcript sent to Ali.";
+        VoiceStatus = $"Voice transcript sent to {AssistantName}.";
         try
         {
             await SendTextAsync(transcript, VoiceInputOrigin.Voice, voiceMetadata).ConfigureAwait(true);
@@ -3286,7 +3350,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private StreamingSpeechState? StartStreamingSpeechIfNeeded(VoiceInputOrigin inputOrigin)
     {
-        if (inputOrigin != VoiceInputOrigin.Voice)
+        if (!AssistantReadsRepliesOutLoud)
         {
             return null;
         }
@@ -3448,7 +3512,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             TtsStatus = $"Testing {PiperVoiceText}...";
             speech = await _services.TextToSpeech.SynthesizeAsync(
-                "Hello, I am Ali. This is what my selected voice sounds like.",
+                $"Hello, I am {AssistantName}. This is what my selected voice sounds like.",
                 new VoiceSettings(PiperVoiceText, Rate: 1.0, RetainAudio: false),
                 _activeSpeech.Token).ConfigureAwait(true);
 
@@ -3555,6 +3619,29 @@ public sealed class MainWindowViewModel : ObservableObject
         _localLibraryWindow.Closed += (_, _) => _localLibraryWindow = null;
         _localLibraryWindow.Show();
         _localLibraryWindow.Activate();
+    }
+
+    private void OpenSourcesTopics()
+    {
+        if (_sourcesTopicsWindow is not null)
+        {
+            if (!_sourcesTopicsWindow.IsVisible)
+            {
+                _sourcesTopicsWindow.Show();
+            }
+
+            _sourcesTopicsWindow.Activate();
+            return;
+        }
+
+        var owner = System.Windows.Application.Current?.MainWindow;
+        _sourcesTopicsWindow = new SourcesTopicsWindow(_services)
+        {
+            Owner = owner
+        };
+        _sourcesTopicsWindow.Closed += (_, _) => _sourcesTopicsWindow = null;
+        _sourcesTopicsWindow.Show();
+        _sourcesTopicsWindow.Activate();
     }
 
     private void RefreshVoiceSettingsChoices()
@@ -3762,7 +3849,7 @@ public sealed class MainWindowViewModel : ObservableObject
             RefreshSpeechToolStatuses();
             if (reportStatus)
             {
-                VoiceSettingsStatusText = "Voice tool settings applied for this Ali session.";
+                VoiceSettingsStatusText = $"Voice tool settings applied for this {AssistantName} session.";
             }
         }
         catch (Exception ex)
@@ -3856,7 +3943,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (applySettings)
         {
             ApplyVoiceToolSettings(saveSettings: true, reportStatus: false);
-            VoiceSettingsStatusText = $"Ali voice set to {choice.Label}.";
+            VoiceSettingsStatusText = $"{AssistantName} voice set to {choice.Label}.";
         }
     }
 
@@ -4637,6 +4724,7 @@ public sealed class MainWindowViewModel : ObservableObject
         double? extraInputGainDb = null,
         bool? normalizeBeforeStt = null,
         bool? retainDebugAudio = null,
+        bool? assistantReadsRepliesOutLoud = null,
         bool? autoSendVoiceTranscripts = null,
         string? pushToTalkKey = null)
     {
@@ -4660,6 +4748,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ExtraInputGainDb = extraInputGainDb ?? _voiceSettings.ExtraInputGainDb,
             NormalizeBeforeStt = normalizeBeforeStt ?? _voiceSettings.NormalizeBeforeStt,
             RetainDebugAudio = retainDebugAudio ?? _voiceSettings.RetainDebugAudio,
+            AssistantReadsRepliesOutLoud = assistantReadsRepliesOutLoud ?? _voiceSettings.AssistantReadsRepliesOutLoud,
             AutoSendVoiceTranscripts = autoSendVoiceTranscripts ?? _voiceSettings.AutoSendVoiceTranscripts,
             PushToTalkKey = NormalizePushToTalkKey(pushToTalkKey ?? _voiceSettings.PushToTalkKey)
         };

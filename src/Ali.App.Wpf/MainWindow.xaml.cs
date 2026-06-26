@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using Ali.App.Wpf.ViewModels;
 
 namespace Ali.App.Wpf;
@@ -9,6 +10,7 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private bool _closing;
     private Task? _startupTask;
+    private IInputElement? _prePushToTalkFocus;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -93,13 +95,26 @@ public partial class MainWindow : Window
 
     private async void MainWindow_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.IsRepeat || DataContext is not MainWindowViewModel viewModel || !viewModel.IsPushToTalkKey(e.Key))
+        if (e.IsRepeat
+            || DataContext is not MainWindowViewModel viewModel
+            || !viewModel.IsPushToTalkKey(e.Key)
+            || IsTextEntryFocus())
         {
             return;
         }
 
         e.Handled = true;
+        if (_prePushToTalkFocus is null && TryGetTextEntryFocus(out var focusedElement))
+        {
+            _prePushToTalkFocus = focusedElement;
+            MoveFocusOutOfTextEntry();
+        }
+
         await viewModel.StartPushToTalkAsync().ConfigureAwait(true);
+        if (!viewModel.IsPushToTalkActive)
+        {
+            RestoreFocusAfterPushToTalk();
+        }
     }
 
     private async void MainWindow_OnPreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
@@ -111,6 +126,56 @@ public partial class MainWindow : Window
 
         e.Handled = true;
         await viewModel.StopPushToTalkAsync().ConfigureAwait(true);
+        RestoreFocusAfterPushToTalk();
+    }
+
+    private static bool IsTextEntryFocus()
+    {
+        return TryGetTextEntryFocus(out _);
+    }
+
+    private static bool TryGetTextEntryFocus(out IInputElement? focusedElement)
+    {
+        var current = Keyboard.FocusedElement as DependencyObject;
+        while (current is not null)
+        {
+            if (current is System.Windows.Controls.Primitives.TextBoxBase
+                or System.Windows.Controls.PasswordBox
+                or System.Windows.Controls.ComboBox)
+            {
+                focusedElement = Keyboard.FocusedElement;
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        focusedElement = null;
+        return false;
+    }
+
+    private void MoveFocusOutOfTextEntry()
+    {
+        FocusManager.SetFocusedElement(this, this);
+        Keyboard.ClearFocus();
+        Focus();
+    }
+
+    private void RestoreFocusAfterPushToTalk()
+    {
+        if (_prePushToTalkFocus is not { } focus)
+        {
+            return;
+        }
+
+        _prePushToTalkFocus = null;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (focus is UIElement { IsVisible: true, IsEnabled: true } element)
+            {
+                element.Focus();
+            }
+        }));
     }
 
     private void HistoryMenuButton_OnClick(object sender, RoutedEventArgs e)

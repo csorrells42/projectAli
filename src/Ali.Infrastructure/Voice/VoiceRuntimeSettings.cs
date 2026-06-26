@@ -14,6 +14,7 @@ public sealed record VoiceRuntimeSettings(
     double ExtraInputGainDb = 6,
     bool NormalizeBeforeStt = true,
     bool RetainDebugAudio = false,
+    bool AssistantReadsRepliesOutLoud = false,
     bool AutoSendVoiceTranscripts = false,
     string PushToTalkKey = "NumPad0",
     string? WhisperExecutablePath = null,

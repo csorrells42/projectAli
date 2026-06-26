@@ -10,6 +10,7 @@ public sealed record SourceCatalogEntry(
     string Type = "web",
     string TrustLevel = "standard",
     IReadOnlyList<string>? Keywords = null,
+    IReadOnlyList<string>? Topics = null,
     string? Notes = null,
     bool Enabled = true);
 

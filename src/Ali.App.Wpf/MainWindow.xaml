@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:Ali.App.Wpf.ViewModels"
         mc:Ignorable="d"
-        Title="Ali"
+        Title="{Binding AssistantWindowTitle}"
         Height="820"
         MinHeight="640"
         Width="1320"
@@ -107,7 +107,7 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
-                    <TextBlock Text="Ali" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                    <TextBlock Text="{Binding AssistantName}" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
                     <TextBlock Text="Local assistant" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,14" />
 
                     <Button Content="New chat"
@@ -229,26 +229,20 @@
                     BorderThickness="0,0,0,1">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-
-                    <TextBlock Text="Ali"
-                               FontSize="18"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextBrush}"
-                               VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1"
+                    <TextBlock Grid.Column="0"
                                Text="{Binding StatusText}"
                                Foreground="{StaticResource MutedTextBrush}"
-                               Margin="12,0,14,0"
+                               Margin="0,0,14,0"
                                TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center" />
-                    <Border Grid.Column="2"
+                    <Border Grid.Column="1"
                             BorderBrush="{Binding ModelConnectionStatusBrush}"
                             BorderThickness="1"
                             CornerRadius="8"
@@ -268,7 +262,7 @@
                                        VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
-                    <ItemsControl Grid.Column="3"
+                    <ItemsControl Grid.Column="2"
                                   ItemsSource="{Binding ResourceMeters}"
                                   VerticalAlignment="Center"
                                   Margin="0,0,14,0">
@@ -302,6 +296,15 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <Button Grid.Column="3"
+                            Content="Sources"
+                            Command="{Binding OpenSourcesTopicsCommand}"
+                            Height="34"
+                            MinHeight="34"
+                            Margin="0,0,8,0"
+                            Padding="12,0"
+                            VerticalAlignment="Center"
+                            ToolTip="{Binding AssistantSourcesTopicsToolTip}" />
                     <Button Grid.Column="4"
                             Content="Local Library"
                             Command="{Binding OpenLocalLibraryCommand}"
@@ -310,7 +313,7 @@
                             Margin="0,0,8,0"
                             Padding="12,0"
                             VerticalAlignment="Center"
-                            ToolTip="Open Ali's approved local RAG folder and vector index." />
+                            ToolTip="{Binding AssistantLocalLibraryToolTip}" />
                     <Button Grid.Column="5"
                             Content="Settings"
                             Command="{Binding OpenSettingsCommand}"
@@ -405,6 +408,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <Button Grid.Column="0"
@@ -429,21 +433,25 @@
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
-                        <Button Grid.Column="2"
-                                Command="{Binding ToggleVoiceRecordingCommand}"
-                                ToolTip="Record speech into the chat bar"
-                                Style="{StaticResource ComposerButton}">
-                            <TextBlock Text="{Binding MicButtonText}"
-                                       Foreground="#EF4444"
-                                       FontWeight="SemiBold" />
-                        </Button>
-                        <Button Grid.Column="3"
-                                Content="{Binding VoiceModeButtonText}"
-                                Command="{Binding ToggleVoiceModeCommand}"
-                                ToolTip="{Binding PushToTalkHintText}"
-                                Style="{StaticResource ComposerButton}"
-                                MinWidth="150" />
+                        <CheckBox Grid.Column="2"
+                                  Content="Read replies aloud"
+                                  IsChecked="{Binding AssistantReadsRepliesOutLoud, Mode=TwoWay}"
+                                  ToolTip="{Binding VoiceReadAloudToolTip}"
+                                  VerticalAlignment="Center"
+                                  Margin="10,0,12,0" />
+                        <CheckBox Grid.Column="3"
+                                  Content="Enable PTT"
+                                  IsChecked="{Binding AutoSendVoiceTranscripts, Mode=TwoWay}"
+                                  ToolTip="{Binding PushToTalkEnabledToolTip}"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,12,0" />
                         <Button Grid.Column="4"
+                                Content="{Binding PushToTalkKeyButtonText}"
+                                Command="{Binding OpenSettingsCommand}"
+                                ToolTip="Open Settings to change the Push to Talk key."
+                                Style="{StaticResource ComposerButton}"
+                                MinWidth="116" />
+                        <Button Grid.Column="5"
                                 Content="{Binding SendButtonText}"
                                 Command="{Binding SendCommand}"
                                 ToolTip="{Binding SendButtonToolTip}"

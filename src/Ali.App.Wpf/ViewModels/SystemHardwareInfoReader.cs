@@ -21,6 +21,11 @@ internal static class SystemHardwareInfoReader
         var gpus = ReadNvidiaSmiGpus();
         if (gpus.Count == 0)
         {
+            gpus = ReadDxgiGpus();
+        }
+
+        if (gpus.Count == 0)
+        {
             gpus = ReadWindowsVideoControllers();
         }
 
@@ -79,6 +84,80 @@ internal static class SystemHardwareInfoReader
         }
 
         return gpus;
+    }
+
+    private static IReadOnlyList<RuntimeGpuHardwareInfo> ReadDxgiGpus()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Array.Empty<RuntimeGpuHardwareInfo>();
+        }
+
+        var factory = IntPtr.Zero;
+        try
+        {
+            var factoryId = DxgiFactory1Id;
+            if (CreateDXGIFactory1(ref factoryId, out factory) < 0 || factory == IntPtr.Zero)
+            {
+                return Array.Empty<RuntimeGpuHardwareInfo>();
+            }
+
+            var factoryVTable = Marshal.ReadIntPtr(factory);
+            var enumAdaptersPointer = Marshal.ReadIntPtr(factoryVTable, IntPtr.Size * 12);
+            var enumAdapters = Marshal.GetDelegateForFunctionPointer<EnumAdapters1Delegate>(enumAdaptersPointer);
+            var gpus = new List<RuntimeGpuHardwareInfo>();
+            for (var index = 0u; index < 16; index++)
+            {
+                var result = enumAdapters(factory, index, out var adapter);
+                if (result == DxgiErrorNotFound)
+                {
+                    break;
+                }
+
+                if (result < 0 || adapter == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var adapterVTable = Marshal.ReadIntPtr(adapter);
+                    var getDescPointer = Marshal.ReadIntPtr(adapterVTable, IntPtr.Size * 10);
+                    var getDesc = Marshal.GetDelegateForFunctionPointer<GetDesc1Delegate>(getDescPointer);
+                    if (getDesc(adapter, out var desc) < 0)
+                    {
+                        continue;
+                    }
+
+                    if ((desc.Flags & DxgiAdapterFlagSoftware) != 0 || string.IsNullOrWhiteSpace(desc.Description))
+                    {
+                        continue;
+                    }
+
+                    var dedicatedBytes = desc.DedicatedVideoMemory.ToUInt64();
+                    gpus.Add(new RuntimeGpuHardwareInfo(
+                        desc.Description.Trim(),
+                        dedicatedBytes > 0 ? dedicatedBytes : null));
+                }
+                finally
+                {
+                    Marshal.Release(adapter);
+                }
+            }
+
+            return gpus;
+        }
+        catch
+        {
+            return Array.Empty<RuntimeGpuHardwareInfo>();
+        }
+        finally
+        {
+            if (factory != IntPtr.Zero)
+            {
+                Marshal.Release(factory);
+            }
+        }
     }
 
     private static IReadOnlyList<RuntimeGpuHardwareInfo> ReadWindowsVideoControllers()
@@ -185,6 +264,33 @@ internal static class SystemHardwareInfoReader
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
+
+    [DllImport("dxgi.dll")]
+    private static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr factory);
+
+    private static readonly Guid DxgiFactory1Id = new("770aae78-f26f-4dba-a829-253c83d1b387");
+    private const int DxgiErrorNotFound = unchecked((int)0x887A0002);
+    private const uint DxgiAdapterFlagSoftware = 2;
+
+    private delegate int EnumAdapters1Delegate(IntPtr factory, uint adapterIndex, out IntPtr adapter);
+
+    private delegate int GetDesc1Delegate(IntPtr adapter, out DxgiAdapterDesc1 desc);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DxgiAdapterDesc1
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string Description;
+        public uint VendorId;
+        public uint DeviceId;
+        public uint SubSysId;
+        public uint Revision;
+        public UIntPtr DedicatedVideoMemory;
+        public UIntPtr DedicatedSystemMemory;
+        public UIntPtr SharedSystemMemory;
+        public long AdapterLuid;
+        public uint Flags;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MemoryStatusEx

@@ -14,14 +14,17 @@ You can:
 - Use `Capture Screen` to attach a full-screen screenshot.
 - Preview and remove image attachments before sending.
 - Check `Retain` on an attachment only when you want Ali to keep it after the current send.
-- Use `Push to Talk` to start local voice recording.
-- Use `Stop Recording` to stop recording and ask Ali to transcribe locally.
+- Check `Read replies aloud` when you want Ali to speak assistant replies with local TTS.
+- Check `Enable PTT` when you want the configured Push to Talk key active.
+- Use the configured Push to Talk key to record, transcribe locally, and send on key release.
+- If the PTT key is pressed while a text field has focus, Ali moves focus out while recording and restores it afterward so the key is not typed into the field.
 - Review or edit the transcript before clicking `Send Transcript`.
 - Use `Stop Speaking` to stop local spoken playback.
 - Stop an active response.
 - Flag an assistant answer as incorrect.
+- Use the dark themed confirmation boxes when erasing one chat or all saved chat history.
 
-Assistant text now appears as the local runtime streams chunks. Voice replies use the same streamed answer path: Ali updates the visible answer and queues cleaned sentence-sized speech segments from the same chunks, so Piper can start speaking before the full answer is finished. Source appendices remain visible in text but are not read aloud.
+Assistant text now appears as the local runtime streams chunks. When `Read replies aloud` is checked, spoken replies use the same streamed answer path: Ali updates the visible answer and queues cleaned sentence-sized speech segments from the same chunks, so Piper can start speaking before the full answer is finished. Source appendices remain visible in text but are not read aloud.
 
 The first runtime is a safe local bootstrap stub. It exists to prove the app flow and correction queue before a real local model is activated.
 
@@ -68,6 +71,45 @@ The current saved local coding runtime on Chris's development machine is `ali-de
 
 `qwen3:14b` was removed from this development machine to keep the system responsive.
 
+## Installer And First-Run Setup
+
+Ali now has a single-file Windows setup executable:
+
+```text
+Ali.Setup.exe
+```
+
+Running it with no arguments opens the GUI setup wizard. The wizard walks through:
+
+- setup mode: install Ali, repair Ali, or install only the Visual Studio Companion extension
+- install location, normally `%LOCALAPPDATA%\Ali`
+- optional assistant name seed
+- optional Ollama install if missing
+- optional runtime model pull
+- optional vision model pull
+- optional Visual Studio Companion VSIX install
+- desktop and Start menu shortcut choices
+- readiness review before install
+- finish log and receipt path
+
+Fresh installs do not carry over Chris's chats, memories, reminders, correction queue, session audio, images, speech output, or assistant profile from the build payload. Personal data is stored under profile-specific folders:
+
+```text
+%LOCALAPPDATA%\Ali\Profiles\<profileId>
+```
+
+The user-facing assistant name has one persisted source of truth:
+
+```text
+%LOCALAPPDATA%\Ali\BootstrapData\assistant-profile.json
+```
+
+By default, setup does not create that file. First launch asks the user to name the assistant. If setup is run with an explicit assistant name, it seeds only that profile file and does not duplicate the name into chats, memories, runtime settings, or installer settings.
+
+Repair mode refreshes app binaries and selected optional components while preserving user data. Visual Studio Companion-only mode can install the VSIX later without reinstalling Ali or touching profile data.
+
+Ollama installation and model pulls are explicit. If requested, setup can install Ollama from the official Windows installer path and then pull selected models. If a selected model is already installed, setup reports that instead of pulling it again. Restore and backup are not yet implemented in the app UI; the planned backup shape is a single zip file containing a manifest plus Ali's important local state.
+
 ## HTML Helper
 
 Ali also has a small web helper for basic ask/answer access.
@@ -100,11 +142,22 @@ The helper includes a local Programming Companion panel for deterministic Ali co
 
 The helper does not add cloud fallback, voice, user-isolated accounts, or direct ungated file authority. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 
-## Audio Setup Sources
+## Sources And Topics
 
-Ali includes a curated source catalog for the audio kit Chris plans to ship with the AI computer. The catalog points at official sources for the Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure Gator Low Profile Boom Arm SH-BROADCAST2.
+Ali includes a curated starter source catalog so source-backed answers begin from approved places instead of open-ended browsing. On a fresh profile, Ali seeds a rounded set of sources for health, weather, US government services, taxes, economy, Windows status, PowerShell, Python, GitHub, Ollama, GPU drivers, cybersecurity advisories, college football scores, and the audio kit Chris plans to ship with the AI computer.
 
-This is source-backed reference material, not a special hardware setup feature. Ali may use it for ordinary questions about signal chain, drivers, phantom power, gain-staging procedure, mounting notes, and where to find official manuals. Ali should still ask for exact interface generation and avoid claiming one universal gain setting.
+The audio entries point at official sources for the Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure Gator Low Profile Boom Arm SH-BROADCAST2. This is source-backed reference material, not a special hardware setup feature. Ali may use it for ordinary questions about signal chain, drivers, phantom power, gain-staging procedure, mounting notes, and where to find official manuals. Ali should still ask for exact interface generation and avoid claiming one universal gain setting.
+
+Use the `Sources` button in the main window to open `Sources & Topics`. This is the normal user-facing way to add an approved source without editing JSON. Each source has:
+
+- source name
+- web address
+- trust level
+- enabled/disabled state
+- notes
+- topics that tell Ali what the source is useful for
+
+The Topics field accepts simple comma-separated items such as `weather, local forecast, software docs, sports scores`. Ali uses those topics during source-backed lookup. The raw catalog still lives under Ali's local app data, but users should not need to open or edit that file for normal setup. Existing user catalogs are preserved; the starter catalog is only created automatically when no catalog exists yet.
 
 ## Coding Assistant
 
@@ -494,11 +547,11 @@ Raw voice audio is not stored in the correction queue.
 
 ## Coming Next
 
-- Installer-managed signing/repair so Smart App Control accepts refreshed Ali binaries without manual certificate work
+- Fresh-machine installer validation on the target computer
+- Zip-backed backup and restore for Ali user data, conversations, settings, memories, reminders, receipts, and selected model settings
+- Installer-managed signing later if Ali is shared beyond local/personal use
 - Owner visual review
 - Live voice/mic/Piper certification with Chris present
 - Real local Whisper/Piper install picker
 - Source/search controls
 - Memory controls
-- Backup and restore
-- Simple installer with repair mode

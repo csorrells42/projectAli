@@ -153,13 +153,26 @@ public sealed class FileSourceRetriever
     public void WriteExample()
     {
         Directory.CreateDirectory(RootDirectory);
+        var defaultCatalog = BuildDefaultCatalog();
+        if (!File.Exists(CatalogPath))
+        {
+            using var catalogStream = File.Create(CatalogPath);
+            JsonSerializer.Serialize(catalogStream, defaultCatalog, JsonOptions);
+        }
+
         if (File.Exists(ExamplePath))
         {
             return;
         }
 
-        var example = new[]
-        {
+        using var stream = File.Create(ExamplePath);
+        JsonSerializer.Serialize(stream, defaultCatalog, JsonOptions);
+    }
+
+    private static SourceCatalogEntry[] BuildDefaultCatalog()
+    {
+        return
+        [
             new SourceCatalogEntry(
                 Id: "cdc-respiratory-viruses",
                 Topic: "health",
@@ -168,12 +181,230 @@ public sealed class FileSourceRetriever
                 Type: "web",
                 TrustLevel: "primary",
                 Keywords: ["health", "respiratory", "cdc", "virus", "flu", "covid"],
+                Topics: ["health", "respiratory viruses", "flu", "covid"],
                 Notes: "Primary US public-health source.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "national-weather-service",
+                Topic: "weather",
+                Name: "National Weather Service",
+                Url: "https://www.weather.gov/",
+                Type: "web",
+                TrustLevel: "official",
+                Keywords: ["weather", "forecast", "warnings", "alerts", "radar", "storm", "temperature", "rain", "snow", "hurricane", "tornado"],
+                Topics: ["weather", "forecast", "alerts", "radar", "storms", "local weather"],
+                Notes: "Official NOAA/NWS weather portal for forecasts, alerts, radar, and weather safety.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "usa-gov-services",
+                Topic: "government",
+                Name: "USA.gov Government Services",
+                Url: "https://www.usa.gov/",
+                Type: "web",
+                TrustLevel: "official",
+                Keywords: ["government", "benefits", "passport", "taxes", "travel", "voting", "housing", "jobs", "services", "usa.gov"],
+                Topics: ["government services", "benefits", "passport", "taxes", "travel", "voting"],
+                Notes: "Official US government guide for federal services and public information.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "irs-newsroom",
+                Topic: "taxes",
+                Name: "IRS Newsroom",
+                Url: "https://www.irs.gov/newsroom",
+                Type: "web",
+                TrustLevel: "official",
+                Keywords: ["irs", "tax", "refund", "filing", "tax credit", "deduction", "forms", "tax news"],
+                Topics: ["taxes", "irs", "refunds", "tax filing", "tax news"],
+                Notes: "Official IRS news and tax update source.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "bls-cpi",
+                Topic: "economy",
+                Name: "BLS Consumer Price Index",
+                Url: "https://www.bls.gov/cpi/",
+                Type: "web",
+                TrustLevel: "official",
+                Keywords: ["bls", "cpi", "inflation", "prices", "consumer price index", "economy", "cost of living"],
+                Topics: ["economy", "inflation", "consumer prices", "cpi"],
+                Notes: "Official Bureau of Labor Statistics CPI landing page.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "federal-reserve-monetary-policy",
+                Topic: "economy",
+                Name: "Federal Reserve Monetary Policy",
+                Url: "https://www.federalreserve.gov/monetarypolicy.htm",
+                Type: "web",
+                TrustLevel: "official",
+                Keywords: ["federal reserve", "fed", "interest rates", "monetary policy", "fomc", "economy"],
+                Topics: ["economy", "interest rates", "monetary policy", "federal reserve"],
+                Notes: "Official Federal Reserve monetary policy source.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "windows-release-health",
+                Topic: "software",
+                Name: "Windows Release Health",
+                Url: "https://learn.microsoft.com/en-us/windows/release-health/",
+                Type: "docs",
+                TrustLevel: "official",
+                Keywords: ["windows", "update", "release health", "known issue", "safeguard", "windows 11", "windows update"],
+                Topics: ["windows", "windows update", "release health", "known issues"],
+                Notes: "Official Microsoft page for Windows update status, known issues, and release health.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "microsoft-powershell-docs",
+                Topic: "software",
+                Name: "Microsoft PowerShell Documentation",
+                Url: "https://learn.microsoft.com/en-us/powershell/",
+                Type: "docs",
+                TrustLevel: "official",
+                Keywords: ["powershell", "microsoft", "script", "command", "windows terminal", "automation", "cmdlet"],
+                Topics: ["powershell", "windows scripting", "automation", "microsoft docs"],
+                Notes: "Official Microsoft PowerShell documentation.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "python-docs",
+                Topic: "software",
+                Name: "Python Documentation",
+                Url: "https://docs.python.org/3/",
+                Type: "docs",
+                TrustLevel: "official",
+                Keywords: ["python", "standard library", "language reference", "tutorial", "docs", "package", "pip"],
+                Topics: ["python", "programming", "standard library", "developer docs"],
+                Notes: "Official Python 3 documentation.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "github-docs",
+                Topic: "software",
+                Name: "GitHub Docs",
+                Url: "https://docs.github.com/",
+                Type: "docs",
+                TrustLevel: "official",
+                Keywords: ["github", "git", "repository", "pull request", "actions", "issues", "codespaces", "github docs"],
+                Topics: ["github", "git", "repositories", "pull requests", "github actions"],
+                Notes: "Official GitHub product documentation.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "ollama-github",
+                Topic: "software",
+                Name: "Ollama GitHub Repository",
+                Url: "https://github.com/ollama/ollama",
+                Type: "docs",
+                TrustLevel: "official",
+                Keywords: ["ollama", "local model", "model runtime", "llm", "api", "openai compatible", "modelfile"],
+                Topics: ["ollama", "local models", "model runtime", "llm setup"],
+                Notes: "Official Ollama repository and project documentation.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "amd-driver-support",
+                Topic: "hardware",
+                Name: "AMD Drivers and Support",
+                Url: "https://www.amd.com/en/support",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["amd", "radeon", "driver", "gpu", "graphics", "adrenalin", "chipset", "support"],
+                Topics: ["amd", "gpu drivers", "radeon", "hardware support"],
+                Notes: "Official AMD driver and hardware support page.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "nvidia-drivers",
+                Topic: "hardware",
+                Name: "NVIDIA Drivers",
+                Url: "https://www.nvidia.com/en-us/drivers/",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["nvidia", "geforce", "rtx", "driver", "gpu", "graphics", "studio driver", "game ready"],
+                Topics: ["nvidia", "gpu drivers", "geforce", "hardware support"],
+                Notes: "Official NVIDIA driver download page.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "cisa-cybersecurity-advisories",
+                Topic: "security",
+                Name: "CISA Cybersecurity Advisories",
+                Url: "https://www.cisa.gov/news-events/cybersecurity-advisories",
+                Type: "web",
+                TrustLevel: "official",
+                Keywords: ["cisa", "cybersecurity", "advisory", "vulnerability", "patch", "security alert", "exploit"],
+                Topics: ["cybersecurity", "vulnerabilities", "security advisories", "patching"],
+                Notes: "Official CISA advisory source for cybersecurity alerts and vulnerability guidance.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "ncaa-football-scoreboard",
+                Topic: "sports",
+                Name: "NCAA FBS Football Scoreboard",
+                Url: "https://www.ncaa.com/scoreboard/football/fbs",
+                Type: "web",
+                TrustLevel: "standard",
+                Keywords: ["ncaa", "football", "fbs", "college football", "score", "schedule", "game"],
+                Topics: ["sports", "college football", "scores", "schedule", "ncaa"],
+                Notes: "NCAA scoreboard page for college football scores and schedules.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "espn-college-football-scoreboard",
+                Topic: "sports",
+                Name: "ESPN College Football Scoreboard",
+                Url: "https://www.espn.com/college-football/scoreboard",
+                Type: "web",
+                TrustLevel: "standard",
+                Keywords: ["espn", "college football", "football", "score", "scores", "schedule", "teams", "alabama", "tennessee"],
+                Topics: ["sports", "college football", "scores", "schedule", "espn"],
+                Notes: "Standard sports scoreboard source for college football scores and schedules.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "focusrite-scarlett-solo-4th-gen-downloads",
+                Topic: "audio",
+                Name: "Focusrite Scarlett Solo 4th Gen Downloads and User Guide",
+                Url: "https://downloads.focusrite.com/focusrite/scarlett-4th-gen/scarlett-solo-4th-gen",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["focusrite", "scarlett", "solo", "4th gen", "audio interface", "gain", "air", "halo", "driver", "control 2", "microphone setup"],
+                Topics: ["audio", "focusrite", "scarlett solo", "microphone setup", "audio interface"],
+                Notes: "Official Focusrite downloads page for Scarlett Solo 4th Gen, including user guide and software links.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "focusrite-scarlett-2i2-4th-gen-downloads",
+                Topic: "audio",
+                Name: "Focusrite Scarlett 2i2 4th Gen Downloads and User Guide",
+                Url: "https://downloads.focusrite.com/focusrite/scarlett-4th-gen/scarlett-2i2-4th-gen",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["focusrite", "scarlett", "2i2", "4th gen", "audio interface", "gain", "air", "halo", "driver", "control 2", "microphone setup"],
+                Topics: ["audio", "focusrite", "scarlett 2i2", "microphone setup", "audio interface"],
+                Notes: "Official Focusrite downloads page for Scarlett 2i2 4th Gen, including user guide and software links.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "audio-technica-at2040-product",
+                Topic: "audio",
+                Name: "Audio-Technica AT2040 Product Page",
+                Url: "https://www.audio-technica.com/en-us/at2040",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["audio-technica", "at2040", "dynamic microphone", "hypercardioid", "podcast microphone", "xlr", "gain", "mic technique"],
+                Topics: ["audio", "microphone", "at2040", "dynamic microphone", "mic technique"],
+                Notes: "Official Audio-Technica product page for AT2040 microphone specifications and documents.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "tritonaudio-fethead-product",
+                Topic: "audio",
+                Name: "TritonAudio FetHead Product Page",
+                Url: "https://tritonaudio.com/product/fethead/",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["tritonaudio", "fethead", "inline preamp", "microphone preamp", "phantom power", "dynamic microphone", "gain", "xlr"],
+                Topics: ["audio", "fethead", "inline preamp", "phantom power", "microphone gain"],
+                Notes: "Official TritonAudio FetHead product page for inline preamp behavior and power requirements.",
+                Enabled: true),
+            new SourceCatalogEntry(
+                Id: "shure-gator-broadcast2-boom",
+                Topic: "audio",
+                Name: "Shure Gator Low Profile Boom Arm SH-BROADCAST2",
+                Url: "https://www.shure.com/en-US/products/accessories/gator-broadcast2-boom?variant=SH-BROADCAST2",
+                Type: "reference",
+                TrustLevel: "official",
+                Keywords: ["shure", "gator", "sh-broadcast2", "broadcast2", "low profile boom arm", "microphone arm", "desk clamp", "direct mount", "cable channel", "at2040"],
+                Topics: ["audio", "boom arm", "microphone arm", "shure", "gator broadcast2"],
+                Notes: "Official Shure product page for the Gator Low Profile Boom Arm, SKU SH-BROADCAST2.",
                 Enabled: true)
-        };
-
-        using var stream = File.Create(ExamplePath);
-        JsonSerializer.Serialize(stream, example, JsonOptions);
+        ];
     }
 
     public IReadOnlyList<SourceCatalogEntry> LoadCatalog()
@@ -185,6 +416,13 @@ public sealed class FileSourceRetriever
 
         using var stream = File.OpenRead(CatalogPath);
         return JsonSerializer.Deserialize<List<SourceCatalogEntry>>(stream, JsonOptions) ?? [];
+    }
+
+    public void SaveCatalog(IEnumerable<SourceCatalogEntry> sources)
+    {
+        Directory.CreateDirectory(RootDirectory);
+        using var stream = File.Create(CatalogPath);
+        JsonSerializer.Serialize(stream, sources.ToList(), JsonOptions);
     }
 
     public ISourceRetriever CreateRetriever() => new Retriever(this, _httpClient);
@@ -250,7 +488,7 @@ public sealed class FileSourceRetriever
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var sources = LoadCatalog()
             .Where(source => source.Enabled && Uri.TryCreate(source.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
-            .Where(source => preferredTopics.Count == 0 || preferredTopics.Contains(NormalizeToken(source.Topic)))
+            .Where(source => preferredTopics.Count == 0 || SourceMatchesPreferredTopics(source, preferredTopics))
             .Where(source => SourceIdentityMatchesPlannedQuery(source, plan, queryTerms))
             .Select(source => new
             {
@@ -271,6 +509,11 @@ public sealed class FileSourceRetriever
     {
         var score = 0;
         score += ScoreText(source.Topic, queryTerms) * 3;
+        foreach (var topic in source.Topics ?? Array.Empty<string>())
+        {
+            score += ScoreText(topic, queryTerms) * 3;
+        }
+
         score += ScoreText(source.Name, queryTerms) * 2;
         score += ScoreText(source.Notes ?? string.Empty, queryTerms);
         foreach (var keyword in source.Keywords ?? Array.Empty<string>())
@@ -289,7 +532,10 @@ public sealed class FileSourceRetriever
         var keywords = source.Keywords is null
             ? string.Empty
             : string.Join(' ', source.Keywords);
-        var sourceTerms = Tokenize($"{source.Topic} {source.Name} {source.Notes ?? string.Empty} {keywords}", removeGenericTerms: false);
+        var topics = source.Topics is null
+            ? string.Empty
+            : string.Join(' ', source.Topics);
+        var sourceTerms = Tokenize($"{source.Topic} {topics} {source.Name} {source.Notes ?? string.Empty} {keywords}", removeGenericTerms: false);
         return sourceTerms.Overlaps(requiredTerms);
     }
 
@@ -319,7 +565,25 @@ public sealed class FileSourceRetriever
         var keywords = source.Keywords is null
             ? string.Empty
             : string.Join(' ', source.Keywords);
-        return Tokenize($"{source.Id} {source.Topic} {source.Name} {source.Notes ?? string.Empty} {keywords}", removeGenericTerms: false);
+        var topics = source.Topics is null
+            ? string.Empty
+            : string.Join(' ', source.Topics);
+        return Tokenize($"{source.Id} {source.Topic} {topics} {source.Name} {source.Notes ?? string.Empty} {keywords}", removeGenericTerms: false);
+    }
+
+    private static bool SourceMatchesPreferredTopics(SourceCatalogEntry source, IReadOnlySet<string> preferredTopics) =>
+        SourceTopicTokens(source).Overlaps(preferredTopics);
+
+    private static HashSet<string> SourceTopicTokens(SourceCatalogEntry source)
+    {
+        var topics = source.Topics is null
+            ? Array.Empty<string>()
+            : source.Topics;
+        return new[] { source.Topic }
+            .Concat(topics)
+            .Select(NormalizeToken)
+            .Where(topic => !string.IsNullOrWhiteSpace(topic))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static HashSet<string> CanonicalSportsIdentities(IEnumerable<string> terms)
