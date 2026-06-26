@@ -161,6 +161,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ExploreBuildIdea => ExploreBuildIdea(request),
+            CodingToolAction.DraftImplementationRoadmap => DraftImplementationRoadmap(request),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
@@ -440,6 +441,54 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult DraftImplementationRoadmap(CodingToolRequest request)
+    {
+        var goal = string.IsNullOrWhiteSpace(request.Query)
+            ? "unspecified implementation"
+            : request.Query.Trim();
+        var files = Directory.Exists(Policy.WorkspaceRoot)
+            ? EnumerateWorkspaceFiles().Take(10_000).ToList()
+            : [];
+        var summaries = files
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadProjectSummary)
+            .ToList();
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : null;
+
+        var lines = new List<string>
+        {
+            "Implementation roadmap:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            $"Workspace root: {Policy.WorkspaceRoot}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            lines.Add($"Primary solution/project: {primaryTarget}");
+        }
+
+        AddRoadmapArchitectureFit(lines, summaries);
+        AddRoadmapPhases(lines, goal);
+        AddRoadmapImpactSurface(lines, goal);
+        AddRoadmapTestStrategy(lines, goal);
+        AddRoadmapRiskRegister(lines, goal);
+        AddRoadmapDefinitionOfDone(lines);
+        AddApprovalCheckpoints(lines);
+        AddRoadmapNextCommands(lines, goal);
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Implementation roadmap",
+            Policy.WorkspaceRoot);
+    }
+
     private static void AddBuildIdeaWorkspaceFit(List<string> lines, IReadOnlyList<ProjectSummary> summaries)
     {
         var roleCounts = summaries
@@ -528,6 +577,138 @@ public sealed class LocalCodingToolService(
 
         lines.Add("- Version/source check: approve an internet or package-registry lookup before treating any library/version as current.");
     }
+
+    private static void AddRoadmapArchitectureFit(List<string> lines, IReadOnlyList<ProjectSummary> summaries)
+    {
+        lines.Add("Current architecture fit:");
+        if (summaries.Count == 0)
+        {
+            lines.Add("- No local project files were available for a fit check.");
+            return;
+        }
+
+        var appProjects = summaries
+            .Where(summary => summary.ProjectRole.Contains("app", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+        var testProjects = summaries
+            .Where(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+        var libraryProjects = summaries
+            .Where(summary => summary.ProjectRole.Equals("library", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+
+        lines.Add($"- Projects scanned: {summaries.Count}");
+        lines.Add($"- App/UI projects: {FormatRoadmapList(appProjects)}");
+        lines.Add($"- Library projects: {FormatRoadmapList(libraryProjects)}");
+        lines.Add($"- Test projects: {FormatRoadmapList(testProjects)}");
+    }
+
+    private static void AddRoadmapPhases(List<string> lines, string goal)
+    {
+        lines.Add("Recommended phase sequence:");
+        lines.Add("1. Clarify owner-visible behavior and non-goals.");
+        lines.Add("2. Inspect the smallest relevant files and project references.");
+        lines.Add("3. Choose the core boundary: command, service, adapter, UI, or bridge.");
+        lines.Add("4. Prototype the narrowest observable workflow behind existing permission gates.");
+        lines.Add("5. Add focused parser/service tests before widening behavior.");
+        lines.Add("6. Run confirmed build/test validation and record receipts.");
+        lines.Add("7. Update owner docs with exact commands and truth boundaries.");
+
+        if (MentionsAny(goal, "library", "package", "dependency", "nuget", "sdk"))
+        {
+            lines.Add("8. Only after approval, verify library candidates against current sources/package metadata.");
+        }
+    }
+
+    private static void AddRoadmapImpactSurface(List<string> lines, string goal)
+    {
+        lines.Add("Likely impact surface:");
+        lines.Add("- Parser: add deterministic phrases only when the action shape is clear.");
+        lines.Add("- Policy: keep read-only planning allowed and writes/builds/package actions gated.");
+        lines.Add("- Service: keep receipts and explicit truth boundaries in every tool result.");
+        lines.Add("- Tests: cover parser routing, service output, and permission behavior.");
+        lines.Add("- Docs: add owner commands and state what is not implemented yet.");
+
+        if (MentionsAny(goal, "visual studio", "vsix", "ide", "extension", "tool window"))
+        {
+            lines.Add("- Visual Studio: preserve the existing bridge contract before adding VSIX-specific UI.");
+        }
+
+        if (MentionsAny(goal, "solidworks", "cad", "drawing", "model", "assembly", "part", "bom"))
+        {
+            lines.Add("- CAD tooling: separate SolidWorks automation adapters from Ali's core planning and permission logic.");
+        }
+
+        if (MentionsAny(goal, "voice", "piper", "microphone", "speech", "stt", "tts"))
+        {
+            lines.Add("- Voice: keep local-only STT/TTS settings and avoid mixing voice repair with coding tool authority.");
+        }
+    }
+
+    private static void AddRoadmapTestStrategy(List<string> lines, string goal)
+    {
+        lines.Add("Test strategy:");
+        lines.Add("- Parser tests for every new owner phrase.");
+        lines.Add("- Service tests that assert output sections and no command runner calls for read-only planning.");
+        lines.Add("- Policy tests when an action changes permission behavior.");
+        lines.Add("- Full harness after command-surface changes.");
+
+        if (MentionsAny(goal, "build", "test", "compile", "restore", "run"))
+        {
+            lines.Add("- Dotnet command tests should prove confirmation is required before execution.");
+        }
+
+        if (MentionsAny(goal, "patch", "edit", "file", "write", "apply"))
+        {
+            lines.Add("- Patch/edit tests should prove preview, stale-check, and explicit confirmation behavior.");
+        }
+    }
+
+    private static void AddRoadmapRiskRegister(List<string> lines, string goal)
+    {
+        lines.Add("Risk register:");
+        lines.Add("- Scope creep: keep each phase owner-visible and testable.");
+        lines.Add("- False authority: do not claim installs, versions, IDE state, or external app state without receipts.");
+        lines.Add("- Permission drift: do not let planning commands become execution commands.");
+
+        if (MentionsAny(goal, "package", "library", "dependency", "nuget", "download", "install"))
+        {
+            lines.Add("- Dependency currency: source/package lookup needs approval before selecting versions.");
+        }
+
+        if (MentionsAny(goal, "solidworks", "cad", "drawing", "model", "assembly", "part", "bom"))
+        {
+            lines.Add("- External automation: SolidWorks control must be proven with a small adapter before broad workflow claims.");
+        }
+    }
+
+    private static void AddRoadmapDefinitionOfDone(List<string> lines)
+    {
+        lines.Add("Definition of done:");
+        lines.Add("- The command or workflow has an owner-facing phrase and predictable output.");
+        lines.Add("- The implementation has focused tests.");
+        lines.Add("- Build and full harness pass after changes.");
+        lines.Add("- DevRun is refreshed when app behavior changes.");
+        lines.Add("- Docs state the capability and the boundary.");
+        lines.Add("- The owner can ask `show coding receipts` or `generate coding report` to review what actually happened.");
+    }
+
+    private static void AddRoadmapNextCommands(List<string> lines, string goal)
+    {
+        lines.Add("Safe next commands:");
+        lines.Add($"- explore build idea {goal}");
+        lines.Add("- analyze solution architecture");
+        lines.Add("- show visual studio integration");
+        lines.Add("- show coding receipts");
+    }
+
+    private static string FormatRoadmapList(IReadOnlyList<string> values) =>
+        values.Count == 0
+            ? "none detected"
+            : string.Join(", ", values.Take(6));
 
     private static void AddApprovalCheckpoints(List<string> lines)
     {

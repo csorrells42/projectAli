@@ -59,6 +59,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
+    ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -78,6 +79,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
     ("local coding tool explores build idea", TestLocalCodingToolExploresBuildIdea),
+    ("local coding tool drafts implementation roadmap", TestLocalCodingToolDraftsImplementationRoadmap),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
     ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
@@ -476,6 +478,19 @@ static Task TestCodingParserRoutesBuildIdeaScouting()
     Equal(true, CodingToolRequestParser.TryParse("suggest software libraries for a desktop CAD helper", out var libraryRequest));
     Equal(CodingToolAction.ExploreBuildIdea, libraryRequest.Action);
     Equal("a desktop CAD helper", libraryRequest.Query);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesImplementationRoadmap()
+{
+    Equal(true, CodingToolRequestParser.TryParse("draft implementation roadmap Visual Studio tool window", out var roadmapRequest));
+    Equal(CodingToolAction.DraftImplementationRoadmap, roadmapRequest.Action);
+    Equal("Visual Studio tool window", roadmapRequest.Query);
+    Equal(false, roadmapRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("break down coding task add guarded package lookup", out var breakdownRequest));
+    Equal(CodingToolAction.DraftImplementationRoadmap, breakdownRequest.Action);
+    Equal("add guarded package lookup", breakdownRequest.Query);
     return Task.CompletedTask;
 }
 
@@ -921,6 +936,66 @@ static async Task TestLocalCodingToolExploresBuildIdea()
     Contains("Possible implementation paths", result.Message);
     Contains("Library/software areas to explore for approval", result.Message);
     Contains("SOLIDWORKS API via COM interop", result.Message);
+    Contains("Approval checkpoints", result.Message);
+    Contains("Safe next commands", result.Message);
+    Equal(0, runner.Runs.Count);
+}
+
+static async Task TestLocalCodingToolDraftsImplementationRoadmap()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    var coreDirectory = Path.Combine(workspace, "Demo.Core");
+    Directory.CreateDirectory(appDirectory);
+    Directory.CreateDirectory(coreDirectory);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+          <ItemGroup>
+            <ProjectReference Include="..\Demo.Core\Demo.Core.csproj" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(coreDirectory, "Demo.Core.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "MainWindow.xaml"), "<Window />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("draft implementation roadmap Visual Studio tool window", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Implementation roadmap", result.Message);
+    Contains("Goal: Visual Studio tool window", result.Message);
+    Contains("No files were changed", result.Message);
+    Contains("Current architecture fit", result.Message);
+    Contains("App/UI projects", result.Message);
+    Contains("Recommended phase sequence", result.Message);
+    Contains("Likely impact surface", result.Message);
+    Contains("Visual Studio: preserve the existing bridge contract", result.Message);
+    Contains("Test strategy", result.Message);
+    Contains("Risk register", result.Message);
+    Contains("Definition of done", result.Message);
     Contains("Approval checkpoints", result.Message);
     Contains("Safe next commands", result.Message);
     Equal(0, runner.Runs.Count);

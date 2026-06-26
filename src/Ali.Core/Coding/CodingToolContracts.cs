@@ -10,6 +10,7 @@ public enum CodingToolAction
     AnalyzeArchitecture,
     PlanTask,
     ExploreBuildIdea,
+    DraftImplementationRoadmap,
     ShowReceipts,
     GeneratePdf,
     GenerateCodingReport,

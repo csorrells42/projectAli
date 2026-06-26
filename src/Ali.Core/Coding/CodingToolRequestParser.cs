@@ -259,6 +259,23 @@ public static class CodingToolRequestParser
         "help me choose stack for"
     ];
 
+    private static readonly string[] ImplementationRoadmapPrefixes =
+    [
+        "draft implementation roadmap",
+        "make implementation roadmap",
+        "create implementation roadmap",
+        "plan implementation roadmap",
+        "draft coding roadmap",
+        "make coding roadmap",
+        "create coding roadmap",
+        "plan coding roadmap",
+        "break down implementation",
+        "break down coding task",
+        "break down build",
+        "roadmap coding task",
+        "roadmap for"
+    ];
+
     private static readonly string[] ReceiptRequests =
     [
         "show coding receipts",
@@ -430,6 +447,11 @@ public static class CodingToolRequestParser
         }
 
         if (TryParseExploreBuildIdea(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParseImplementationRoadmap(trimmed, userConfirmed, out request))
         {
             return true;
         }
@@ -612,6 +634,26 @@ public static class CodingToolRequestParser
         var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
         request = new CodingToolRequest(
             CodingToolAction.PlanTask,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseImplementationRoadmap(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = ImplementationRoadmapPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.DraftImplementationRoadmap,
             null,
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);
