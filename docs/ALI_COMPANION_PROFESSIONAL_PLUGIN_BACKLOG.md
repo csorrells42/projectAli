@@ -17,10 +17,11 @@ This list tracks the Visual Studio plugin polish path while keeping Ali's curren
 - Diagnostic list with double-click open for compiler-style file/line output.
 - Visual Studio options page for helper URL, command history limit, and selected-text context behavior.
 - Real icon, Project Ali branding metadata, and packaged extension identity polish.
+- Installer/update notes for Community versus future Visual Studio editions.
 
 ## Next
 
-- Installer/update notes for Community versus future Visual Studio editions.
+- Choose the next Visual Studio companion polish target after owner review.
 
 ## Guardrails
 

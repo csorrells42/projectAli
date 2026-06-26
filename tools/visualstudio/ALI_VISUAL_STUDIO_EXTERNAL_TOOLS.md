@@ -1,8 +1,8 @@
 # Ali Visual Studio External Tools
 
-This is the current Visual Studio integration path. It works with Visual Studio Community stable or Insiders because Visual Studio only launches the bridge executable.
+This is the optional Visual Studio External Tools bridge. It works with Visual Studio Community stable or Insiders because Visual Studio only launches the bridge executable.
 
-It is not a VSIX extension yet. It uses Visual Studio External Tools to call `Ali.App.VisualStudioBridge.exe`, which sends deterministic commands to Ali's loopback coding bridge.
+Ali also has a native developer VSIX named `Ali Companion`. Use `tools\visualstudio\ALI_COMPANION_VSIX_INSTALL_UPDATE_NOTES.md` for the native tool window. This External Tools path remains useful as a simple fallback because it calls `Ali.App.VisualStudioBridge.exe`, which sends deterministic commands to Ali's loopback coding bridge.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ Bridge executable:
 
 The bridge will try to start `Ali.App.WebHelper` on loopback if it is not already running.
 
-External Tools entries are stored per Visual Studio instance/profile. If you switch from Insiders to regular Community later, add the same External Tools entries in the Community instance.
+External Tools entries are stored per Visual Studio instance/profile. If you switch Visual Studio instances later, add the same External Tools entries in the new instance.
 
 ## Suggested External Tools
 

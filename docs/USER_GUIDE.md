@@ -211,6 +211,12 @@ Install it into Visual Studio Community with Visual Studio's VSIX Installer, the
 dotnet run --project .\src\Ali.App.WebHelper\Ali.App.WebHelper.csproj --no-build
 ```
 
+Install and update notes for the native VSIX live at:
+
+```text
+tools\visualstudio\ALI_COMPANION_VSIX_INSTALL_UPDATE_NOTES.md
+```
+
 Visual Studio can also call the current bridge through `Ali.App.VisualStudioBridge.exe`, which is designed for Visual Studio External Tools. Build the solution, start the WebHelper on loopback, then add an External Tool that points at:
 
 ```text
