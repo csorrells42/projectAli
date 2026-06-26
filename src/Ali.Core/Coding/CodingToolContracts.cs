@@ -9,6 +9,7 @@ public enum CodingToolAction
     InspectWorkspace,
     AnalyzeArchitecture,
     PlanTask,
+    ExploreBuildIdea,
     ShowReceipts,
     GeneratePdf,
     GenerateCodingReport,

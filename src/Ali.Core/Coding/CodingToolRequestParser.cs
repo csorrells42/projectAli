@@ -245,6 +245,20 @@ public static class CodingToolRequestParser
         "plan fix"
     ];
 
+    private static readonly string[] ExploreBuildIdeaPrefixes =
+    [
+        "explore build idea",
+        "explore coding idea",
+        "scout build idea",
+        "scout coding idea",
+        "suggest build paths for",
+        "suggest coding paths for",
+        "suggest architecture for",
+        "suggest software libraries for",
+        "help me choose a stack for",
+        "help me choose stack for"
+    ];
+
     private static readonly string[] ReceiptRequests =
     [
         "show coding receipts",
@@ -411,6 +425,11 @@ public static class CodingToolRequestParser
         }
 
         if (TryParsePlanTask(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (TryParseExploreBuildIdea(trimmed, userConfirmed, out request))
         {
             return true;
         }
@@ -593,6 +612,26 @@ public static class CodingToolRequestParser
         var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
         request = new CodingToolRequest(
             CodingToolAction.PlanTask,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: string.IsNullOrWhiteSpace(query) ? null : query);
+        return true;
+    }
+
+    private static bool TryParseExploreBuildIdea(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = ExploreBuildIdeaPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        request = new CodingToolRequest(
+            CodingToolAction.ExploreBuildIdea,
             null,
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);

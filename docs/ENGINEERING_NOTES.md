@@ -74,7 +74,7 @@ docs
 - Spoken response cleaner: removes URLs, markdown clutter, code blocks, stack traces, metadata, and citation markers
 - Correction reports now carry optional voice transcript/provider metadata without retaining raw audio
 - Local coding workspace policy: limits coding file actions to the approved programming workspace unless explicitly configured
-- Local coding tool service: workspace inspection, file open/read/search, package listing, guarded build/test/run/restore, guarded Git, receipts, patch preview/apply, last-failure diagnosis, and simple PDF generation
+- Local coding tool service: workspace inspection, build-idea scouting, file open/read/search, package listing, guarded build/test/run/restore, guarded Git, receipts, patch preview/apply, last-failure diagnosis, and simple PDF generation
 
 ## Coding Assistant Flow
 
@@ -104,9 +104,9 @@ For explicit coding commands, Ali handles the request deterministically before c
 
 Current deterministic command groups:
 
-- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis, coding tool integration status, and Visual Studio integration handoff planning.
+- Workspace: open/list/inspect approved coding workspace, including deterministic solution architecture analysis, project role classification, project dependency graphing, coding tool integration status, and Visual Studio integration handoff planning.
 - Read/search: open file, read file, search workspace.
-- Planning: build a guarded coding task plan.
+- Planning: build a guarded coding task plan and scout proposed build ideas with implementation paths, library exploration candidates, and approval checkpoints.
 - Packages: list package references and confirmed outdated checks.
 - Build/test/run: confirmed `dotnet build`, `dotnet test`, `dotnet restore`, `dotnet run`.
 - Diagnostics: summarize dotnet diagnostics, diagnose last failure, open the first diagnostic file at the reported line, and suggest narrow preview-only patches from supported diagnostics.

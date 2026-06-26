@@ -58,6 +58,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
     ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
+    ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes coding receipts", TestCodingParserRoutesCodingReceipts),
     ("coding parser routes tool integration status", TestCodingParserRoutesToolIntegrationStatus),
     ("coding parser routes visual studio handoff", TestCodingParserRoutesVisualStudioHandoff),
@@ -76,6 +77,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens file with safe launcher", TestLocalCodingToolOpensFileWithSafeLauncher),
     ("local coding tool opens primary solution", TestLocalCodingToolOpensPrimarySolution),
     ("local coding tool plans guarded task", TestLocalCodingToolPlansGuardedTask),
+    ("local coding tool explores build idea", TestLocalCodingToolExploresBuildIdea),
     ("local coding tool shows coding receipts", TestLocalCodingToolShowsCodingReceipts),
     ("local coding tool shows tool integration status", TestLocalCodingToolShowsToolIntegrationStatus),
     ("local coding tool generates visual studio handoff", TestLocalCodingToolGeneratesVisualStudioHandoff),
@@ -461,6 +463,19 @@ static Task TestCodingParserRoutesGuardedTaskPlanning()
     Equal(CodingToolAction.PlanTask, confirmedPlanRequest.Action);
     Equal("for the broken build", confirmedPlanRequest.Query);
     Equal(true, confirmedPlanRequest.UserConfirmed);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesBuildIdeaScouting()
+{
+    Equal(true, CodingToolRequestParser.TryParse("explore build idea SolidWorks BOM helper", out var exploreRequest));
+    Equal(CodingToolAction.ExploreBuildIdea, exploreRequest.Action);
+    Equal("SolidWorks BOM helper", exploreRequest.Query);
+    Equal(false, exploreRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("suggest software libraries for a desktop CAD helper", out var libraryRequest));
+    Equal(CodingToolAction.ExploreBuildIdea, libraryRequest.Action);
+    Equal("a desktop CAD helper", libraryRequest.Query);
     return Task.CompletedTask;
 }
 
@@ -865,6 +880,52 @@ static async Task TestLocalCodingToolPlansGuardedTask()
     Equal(0, runner.Runs.Count);
 }
 
+static async Task TestLocalCodingToolExploresBuildIdea()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(projectDirectory, "MainWindow.xaml"), "<Window />");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Should not run.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("explore build idea SolidWorks BOM helper", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Build idea scout", result.Message);
+    Contains("Goal: SolidWorks BOM helper", result.Message);
+    Contains("No files were changed", result.Message);
+    Contains("Truth boundary", result.Message);
+    Contains("Workspace fit", result.Message);
+    Contains("Possible implementation paths", result.Message);
+    Contains("Library/software areas to explore for approval", result.Message);
+    Contains("SOLIDWORKS API via COM interop", result.Message);
+    Contains("Approval checkpoints", result.Message);
+    Contains("Safe next commands", result.Message);
+    Equal(0, runner.Runs.Count);
+}
+
 static async Task TestLocalCodingToolShowsCodingReceipts()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -1080,10 +1141,19 @@ static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
     Contains("Solutions found: 1", result.Message);
     Contains("Projects found: 2", result.Message);
     Contains(Path.Combine("Demo.App", "Demo.App.csproj"), result.Message);
+    Contains("Role: desktop app/UI", result.Message);
     Contains("Targets: net10.0-windows", result.Message);
     Contains("Source files: 1 C#, 1 XAML", result.Message);
     Contains(Path.Combine("Demo.Core", "Demo.Core.csproj"), result.Message);
+    Contains("Role: library", result.Message);
     Contains("CommunityToolkit.Mvvm 8.4.0", result.Message);
+    Contains("Project dependency graph", result.Message);
+    Contains($"{Path.Combine("Demo.App", "Demo.App.csproj")} -> {Path.Combine("Demo.Core", "Demo.Core.csproj")}", result.Message);
+    Contains("Estimated project build order", result.Message);
+    Contains($"1. {Path.Combine("Demo.Core", "Demo.Core.csproj")}", result.Message);
+    Contains($"2. {Path.Combine("Demo.App", "Demo.App.csproj")}", result.Message);
+    Contains("Project role summary: desktop app/UI: 1, library: 1", result.Message);
+    Contains($"App/UI entry projects: {Path.Combine("Demo.App", "Demo.App.csproj")}", result.Message);
     Contains("Suggested guarded next steps", result.Message);
 }
 

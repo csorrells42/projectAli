@@ -160,6 +160,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ExploreBuildIdea => ExploreBuildIdea(request),
             CodingToolAction.ShowReceipts => ShowReceipts(),
             CodingToolAction.ShowToolIntegrationStatus => ShowToolIntegrationStatus(),
             CodingToolAction.GenerateVisualStudioHandoff => GenerateVisualStudioHandoff(),
@@ -382,6 +383,169 @@ public sealed class LocalCodingToolService(
             plan.HasPlan ? plan.Text : "Coding task planner needs a clearer coding goal.",
             "Coding task planner",
             Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ExploreBuildIdea(CodingToolRequest request)
+    {
+        var goal = string.IsNullOrWhiteSpace(request.Query)
+            ? "unspecified build idea"
+            : request.Query.Trim();
+
+        var files = Directory.Exists(Policy.WorkspaceRoot)
+            ? EnumerateWorkspaceFiles().Take(10_000).ToList()
+            : [];
+        var summaries = files
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadProjectSummary)
+            .ToList();
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : null;
+
+        var lines = new List<string>
+        {
+            "Build idea scout:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Truth boundary: library names below are exploration candidates, not installed packages or verified latest versions.",
+            $"Workspace root: {Policy.WorkspaceRoot}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            lines.Add($"Primary solution/project: {primaryTarget}");
+        }
+
+        if (summaries.Count > 0)
+        {
+            AddBuildIdeaWorkspaceFit(lines, summaries);
+        }
+        else
+        {
+            lines.Add("Workspace fit: no project files were available for a local fit check.");
+        }
+
+        AddImplementationPaths(lines, goal);
+        AddLibraryExploration(lines, goal);
+        AddApprovalCheckpoints(lines);
+        AddBuildIdeaNextCommands(lines, goal);
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Build idea scout",
+            Policy.WorkspaceRoot);
+    }
+
+    private static void AddBuildIdeaWorkspaceFit(List<string> lines, IReadOnlyList<ProjectSummary> summaries)
+    {
+        var roleCounts = summaries
+            .GroupBy(summary => summary.ProjectRole, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key}: {group.Count()}")
+            .ToList();
+        var packageCount = summaries.Sum(summary => summary.PackageReferences.Count);
+        var projectReferenceCount = summaries.Sum(summary => summary.ProjectReferences.Count);
+
+        lines.Add("Workspace fit:");
+        lines.Add($"- Project roles already present: {string.Join(", ", roleCounts)}");
+        lines.Add($"- Known package references: {packageCount}");
+        lines.Add($"- Project-to-project references: {projectReferenceCount}");
+        foreach (var summary in summaries.Take(6))
+        {
+            lines.Add($"- {summary.RelativePath}: {summary.ProjectRole}");
+        }
+    }
+
+    private static void AddImplementationPaths(List<string> lines, string goal)
+    {
+        lines.Add("Possible implementation paths to compare:");
+        lines.Add("- Path A: prototype inside the existing app with a narrow command, one service, and one testable workflow.");
+        lines.Add("- Path B: create a separate library for the core logic, then call it from UI, CLI, or Visual Studio tooling.");
+        lines.Add("- Path C: build a companion process or bridge only when the feature must talk to external software.");
+
+        if (MentionsAny(goal, "solidworks", "cad", "drawing", "model", "assembly", "part", "bom"))
+        {
+            lines.Add("- CAD lane: start with a small SolidWorks macro/API proof before attempting a full add-in.");
+        }
+
+        if (MentionsAny(goal, "visual studio", "vsix", "ide", "extension", "tool window"))
+        {
+            lines.Add("- Visual Studio lane: keep Ali's existing guarded command surface and add a thin VS tool window or external-tool bridge.");
+        }
+
+        if (MentionsAny(goal, "web", "api", "dashboard", "site", "portal", "server"))
+        {
+            lines.Add("- Web/API lane: separate server endpoints from UI so auth, data, and tests stay inspectable.");
+        }
+
+        if (MentionsAny(goal, "ai", "assistant", "rag", "chat", "agent", "llm", "model"))
+        {
+            lines.Add("- AI lane: isolate prompts, retrieval, tool calls, and receipts so model output does not become hidden authority.");
+        }
+
+        if (MentionsAny(goal, "database", "data", "report", "inventory", "search", "history"))
+        {
+            lines.Add("- Data lane: decide early between local file storage, embedded storage, and a client/server storage service.");
+        }
+    }
+
+    private static void AddLibraryExploration(List<string> lines, string goal)
+    {
+        lines.Add("Library/software areas to explore for approval:");
+        lines.Add("- .NET app structure: Microsoft.Extensions.Hosting, dependency injection, logging, and options.");
+        lines.Add("- Desktop UI: WPF, CommunityToolkit.Mvvm, and Windows App SDK/WinUI as a comparison path.");
+        lines.Add("- Testing: xUnit/NUnit/MSTest, snapshot/golden-output tests, and small integration harnesses.");
+
+        if (MentionsAny(goal, "solidworks", "cad", "drawing", "model", "assembly", "part", "bom"))
+        {
+            lines.Add("- SolidWorks: SOLIDWORKS API via COM interop, macro prototypes, add-in templates, and Document Manager API if licensing fits.");
+            lines.Add("- CAD documents/data: STEP/DXF/export automation, BOM extraction, ClosedXML for spreadsheets, and PDF export tooling.");
+        }
+
+        if (MentionsAny(goal, "web", "api", "dashboard", "site", "portal", "server"))
+        {
+            lines.Add("- Web/API: ASP.NET Core, Minimal APIs, Blazor, OpenAPI/Swagger, and auth middleware.");
+        }
+
+        if (MentionsAny(goal, "database", "data", "report", "inventory", "search", "history"))
+        {
+            lines.Add("- Data: local file stores, lightweight embedded storage, object mapping, search indexes, and migration tooling.");
+        }
+
+        if (MentionsAny(goal, "ai", "assistant", "rag", "chat", "agent", "llm", "model"))
+        {
+            lines.Add("- AI/RAG: Semantic Kernel, Microsoft.Extensions.AI, local Ollama/OpenAI adapters, vector search, and prompt receipt logging.");
+        }
+
+        if (MentionsAny(goal, "pdf", "word", "excel", "document", "spreadsheet", "report"))
+        {
+            lines.Add("- Documents: Open XML SDK, ClosedXML, QuestPDF, PDF inspection/extraction libraries, and template-based report generation.");
+        }
+
+        lines.Add("- Version/source check: approve an internet or package-registry lookup before treating any library/version as current.");
+    }
+
+    private static void AddApprovalCheckpoints(List<string> lines)
+    {
+        lines.Add("Approval checkpoints:");
+        lines.Add("1. Pick the path to prototype first.");
+        lines.Add("2. Approve any internet/package lookup before Ali claims library currency.");
+        lines.Add("3. Approve package restore/install commands before Ali changes dependencies.");
+        lines.Add("4. Approve file edits or patch previews before Ali changes code.");
+        lines.Add("5. Approve build/test/run commands before execution.");
+    }
+
+    private static void AddBuildIdeaNextCommands(List<string> lines, string goal)
+    {
+        lines.Add("Safe next commands:");
+        lines.Add("- analyze solution architecture");
+        lines.Add("- list packages");
+        lines.Add($"- plan coding task {goal}");
+        lines.Add("- generate coding report");
     }
 
     private CodingToolResult ShowReceipts()
@@ -824,6 +988,7 @@ public sealed class LocalCodingToolService(
             foreach (var summary in summaries)
             {
                 lines.Add($"- {summary.RelativePath}");
+                lines.Add($"  Role: {summary.ProjectRole}");
                 lines.Add(summary.TargetFrameworks.Count == 0
                     ? "  Targets: not declared"
                     : $"  Targets: {string.Join(", ", summary.TargetFrameworks)}");
@@ -862,6 +1027,8 @@ public sealed class LocalCodingToolService(
             }
         }
 
+        AddArchitectureDependencySections(lines, summaries);
+
         if (projects.Count > MaxWorkspaceSummaryEntries)
         {
             lines.Add($"...{projects.Count - MaxWorkspaceSummaryEntries} more project file(s) omitted.");
@@ -899,6 +1066,7 @@ public sealed class LocalCodingToolService(
         foreach (var summary in projectFiles.Take(MaxWorkspaceSummaryEntries).Select(ReadProjectSummary))
         {
             lines.Add($"- {summary.RelativePath}");
+            lines.Add($"  Role: {summary.ProjectRole}");
             if (summary.TargetFrameworks.Count > 0)
             {
                 lines.Add($"  Target: {string.Join(", ", summary.TargetFrameworks)}");
@@ -2175,6 +2343,7 @@ public sealed class LocalCodingToolService(
         foreach (var summary in projectFiles.Take(MaxWorkspaceSummaryEntries).Select(ReadProjectSummary))
         {
             lines.Add($"- {summary.RelativePath}");
+            lines.Add($"  Role: {summary.ProjectRole}");
             if (summary.TargetFrameworks.Count > 0)
             {
                 lines.Add($"  Target: {string.Join(", ", summary.TargetFrameworks)}");
@@ -2237,9 +2406,26 @@ public sealed class LocalCodingToolService(
             var csharpSourceCount = CountProjectFiles(projectDirectory, ".cs");
             var xamlFileCount = CountProjectFiles(projectDirectory, ".xaml");
             var jsonFileCount = CountProjectFiles(projectDirectory, ".json");
+            var outputTypes = document
+                .Descendants()
+                .Where(element => element.Name.LocalName == "OutputType")
+                .Select(element => element.Value.Trim())
+                .Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var useWpf = ReadBooleanProperty(document, "UseWPF");
+            var useWindowsForms = ReadBooleanProperty(document, "UseWindowsForms");
+            var projectRole = ClassifyProjectRole(
+                relativePath,
+                outputTypes,
+                packageReferences,
+                useWpf,
+                useWindowsForms,
+                xamlFileCount);
 
             return new ProjectSummary(
                 relativePath,
+                projectRole,
                 targetFrameworks,
                 packageReferences,
                 projectReferences,
@@ -2264,6 +2450,153 @@ public sealed class LocalCodingToolService(
 
     private string RelativeToWorkspace(string path) =>
         Path.GetRelativePath(Policy.WorkspaceRoot, path);
+
+    private static void AddArchitectureDependencySections(List<string> lines, IReadOnlyList<ProjectSummary> summaries)
+    {
+        if (summaries.Count == 0)
+        {
+            return;
+        }
+
+        var knownProjects = summaries
+            .Select(summary => summary.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var edges = summaries
+            .SelectMany(summary => summary.ProjectReferences
+                .Where(reference => knownProjects.Contains(reference))
+                .Select(reference => new ProjectDependency(summary.RelativePath, reference)))
+            .OrderBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(edge => edge.To, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        lines.Add("Project dependency graph:");
+        if (edges.Count == 0)
+        {
+            lines.Add("- No project-to-project references found among listed projects.");
+        }
+        else
+        {
+            lines.AddRange(edges.Take(MaxWorkspaceSummaryEntries).Select(edge => $"- {edge.From} -> {edge.To}"));
+            if (edges.Count > MaxWorkspaceSummaryEntries)
+            {
+                lines.Add($"- ...{edges.Count - MaxWorkspaceSummaryEntries} more dependency edge(s) omitted.");
+            }
+        }
+
+        var buildOrder = EstimateBuildOrder(summaries, edges);
+        if (buildOrder.Count > 0)
+        {
+            lines.Add("Estimated project build order:");
+            lines.AddRange(buildOrder.Take(MaxWorkspaceSummaryEntries).Select((project, index) => $"{index + 1}. {project}"));
+            if (buildOrder.Count > MaxWorkspaceSummaryEntries)
+            {
+                lines.Add($"...{buildOrder.Count - MaxWorkspaceSummaryEntries} more project(s) omitted.");
+            }
+        }
+
+        var roleCounts = summaries
+            .GroupBy(summary => summary.ProjectRole, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key}: {group.Count()}")
+            .ToList();
+        lines.Add($"Project role summary: {string.Join(", ", roleCounts)}");
+
+        var appProjects = summaries
+            .Where(summary => summary.ProjectRole.Contains("app", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+        var testProjects = summaries
+            .Where(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+        if (appProjects.Count > 0)
+        {
+            lines.Add($"App/UI entry projects: {string.Join(", ", appProjects.Take(6))}");
+        }
+
+        if (testProjects.Count > 0)
+        {
+            lines.Add($"Test projects: {string.Join(", ", testProjects.Take(6))}");
+        }
+    }
+
+    private static IReadOnlyList<string> EstimateBuildOrder(
+        IReadOnlyList<ProjectSummary> summaries,
+        IReadOnlyList<ProjectDependency> edges)
+    {
+        var remaining = summaries
+            .Select(summary => summary.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<string>();
+        while (remaining.Count > 0)
+        {
+            var ready = remaining
+                .Where(project => edges
+                    .Where(edge => edge.From.Equals(project, StringComparison.OrdinalIgnoreCase))
+                    .All(edge => !remaining.Contains(edge.To)))
+                .OrderBy(project => project, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ready.Count == 0)
+            {
+                ordered.AddRange(remaining.OrderBy(project => project, StringComparer.OrdinalIgnoreCase));
+                break;
+            }
+
+            foreach (var project in ready)
+            {
+                ordered.Add(project);
+                remaining.Remove(project);
+            }
+        }
+
+        return ordered;
+    }
+
+    private static bool ReadBooleanProperty(XDocument document, string propertyName)
+    {
+        var value = document
+            .Descendants()
+            .FirstOrDefault(element => element.Name.LocalName.Equals(propertyName, StringComparison.OrdinalIgnoreCase))
+            ?.Value
+            .Trim();
+        return bool.TryParse(value, out var parsed) && parsed;
+    }
+
+    private static string ClassifyProjectRole(
+        string relativePath,
+        IReadOnlyList<string> outputTypes,
+        IReadOnlyList<string> packageReferences,
+        bool useWpf,
+        bool useWindowsForms,
+        int xamlFileCount)
+    {
+        var name = Path.GetFileNameWithoutExtension(relativePath);
+        var isTest = name.Contains("test", StringComparison.OrdinalIgnoreCase)
+                     || relativePath.Contains($"{Path.DirectorySeparatorChar}test", StringComparison.OrdinalIgnoreCase)
+                     || packageReferences.Any(package =>
+                         package.StartsWith("Microsoft.NET.Test.Sdk", StringComparison.OrdinalIgnoreCase)
+                         || package.StartsWith("xunit", StringComparison.OrdinalIgnoreCase)
+                         || package.StartsWith("NUnit", StringComparison.OrdinalIgnoreCase)
+                         || package.StartsWith("MSTest", StringComparison.OrdinalIgnoreCase));
+        if (isTest)
+        {
+            return "test";
+        }
+
+        if (useWpf || useWindowsForms || xamlFileCount > 0)
+        {
+            return "desktop app/UI";
+        }
+
+        if (outputTypes.Any(outputType =>
+                outputType.Equals("Exe", StringComparison.OrdinalIgnoreCase)
+                || outputType.Equals("WinExe", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "app/host";
+        }
+
+        return "library";
+    }
 
     private static bool IsLikelyEntryPoint(string file)
     {
@@ -3344,6 +3677,7 @@ public sealed class LocalCodingToolService(
 
     private sealed record ProjectSummary(
         string RelativePath,
+        string ProjectRole,
         IReadOnlyList<string> TargetFrameworks,
         IReadOnlyList<string> PackageReferences,
         IReadOnlyList<string> ProjectReferences,
@@ -3353,8 +3687,12 @@ public sealed class LocalCodingToolService(
         string? Warning)
     {
         public static ProjectSummary WithWarning(string relativePath, string warning) =>
-            new(relativePath, [], [], [], 0, 0, 0, warning);
+            new(relativePath, "unknown", [], [], [], 0, 0, 0, warning);
     }
+
+    private sealed record ProjectDependency(
+        string From,
+        string To);
 
     private sealed record DiagnosticFileReference(
         string Path,
