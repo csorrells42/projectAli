@@ -34,10 +34,11 @@ This is the approved build-skills path for the overnight sprint.
 28. Scaffold apply planning: `plan scaffold apply <goal>`.
 29. Post-edit validation loop: `plan post edit validation`.
 30. Builder command surfaces: `show coding skill command index` and `show coding session summary`.
+31. Phase 1 coding companion stopping-point polish: WebHelper and VSIX command groups now surface the guided builder flow first, then deeper planning, execution, diagnostics, and reports.
 
 ## Approved Next Road Completed
 
-The second approved sprint moved Windows troubleshooting and build readiness into deterministic Ali commands while preserving the same approval gates. The third approved sprint moved builder planning into deterministic Ali commands without adding uncontrolled execution authority.
+The second approved sprint moved Windows troubleshooting and build readiness into deterministic Ali commands while preserving the same approval gates. The third approved sprint moved builder planning into deterministic Ali commands without adding uncontrolled execution authority. The final polish pass made the current coding helper and Visual Studio integration a good Phase 1 stopping point before installer, dependencies, and model installation work resumes.
 
 ## Guardrails
 

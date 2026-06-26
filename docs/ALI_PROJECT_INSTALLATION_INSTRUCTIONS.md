@@ -142,13 +142,18 @@ After WebHelper and Visual Studio are running, verify these commands:
 
 ```text
 show visual studio integration
-show packet commands
-show packet ledger
-resume build plan
+show coding skill command index
+interpret build goal Visual Studio companion upgrade
+show architecture options Visual Studio companion upgrade
+write acceptance criteria Visual Studio companion upgrade
+suggest tests for Visual Studio companion upgrade
+draft implementation roadmap Visual Studio companion upgrade
+show next coding action
+show execution packet
+plan post edit validation
 plan package lookup Visual Studio tool window
-preview project scaffold SolidWorks BOM helper
-show windows troubleshooting toolkit
-plan rogue process hunt port 8765
+plan dependency install packet Visual Studio tool window
+show install doctor
 generate morning report
 ```
 

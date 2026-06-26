@@ -1021,12 +1021,20 @@ public sealed class LocalCodingToolService(
         if (_roadmapState is null)
         {
             lines.Add("Roadmap state: none active.");
-            lines.Add("Recommended action: draft and approve a roadmap before execution.");
-            lines.Add("Exact safe commands:");
-            lines.Add("- explore build idea <goal>");
+            lines.Add("Recommended action: use the guided builder flow, then approve a roadmap before execution.");
+            lines.Add("Guided builder flow:");
+            lines.Add("- interpret build goal <goal>");
+            lines.Add("- show architecture options <goal>");
+            lines.Add("- write acceptance criteria <goal>");
+            lines.Add("- suggest tests for <goal>");
             lines.Add("- draft implementation roadmap <goal>");
             lines.Add("- approve last roadmap");
             lines.Add("- start approved roadmap");
+            lines.Add("Useful support commands:");
+            lines.Add("- detect codebase patterns");
+            lines.Add("- plan feature files <goal>");
+            lines.Add("- show refactor safety checklist <goal>");
+            lines.Add("- show coding skill command index");
             lines.Add("Confidence: high. Ali has no active roadmap to continue yet.");
             lines.Add("Stop rule: do not edit, install packages, build, test, or commit until an approved roadmap or explicit confirmed command exists.");
             return new CodingToolResult(
@@ -1668,6 +1676,17 @@ public sealed class LocalCodingToolService(
         {
             "Ali coding skill command index:",
             "No files were changed.",
+            "Fast builder path:",
+            "1. interpret build goal <goal>",
+            "2. show architecture options <goal>",
+            "3. write acceptance criteria <goal>",
+            "4. suggest tests for <goal>",
+            "5. draft implementation roadmap <goal>",
+            "6. approve last roadmap",
+            "7. start approved roadmap",
+            "8. show next coding action",
+            "9. show execution packet",
+            "10. plan post edit validation",
             "Scout and choose:",
             "- interpret build goal <goal>",
             "- explore build idea <goal>",

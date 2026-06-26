@@ -49,6 +49,19 @@ dotnet build .\src\Ali.App.VisualStudioExtension\Ali.App.VisualStudioExtension.c
 http://127.0.0.1:8765
 ```
 
+The expected tool window command groups are:
+
+```text
+Awareness
+Guided Flow
+Plan Tools
+Execute
+Diagnostics
+Reports
+```
+
+The first guided workflow is Goal -> Options -> Criteria -> Tests -> Roadmap -> Next -> Packet -> Validate.
+
 ## How Updates Work
 
 Visual Studio installs the extension per Visual Studio instance and extension identity:
