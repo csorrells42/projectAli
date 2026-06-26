@@ -32,12 +32,15 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private readonly TextBlock _status = new();
     private readonly TextBlock _context = new();
     private readonly TextBlock _state = new();
+    private readonly TextBlock _approval = new();
+    private readonly Button _approvalCommandButton = new();
     private readonly ComboBox _history = new();
     private readonly TextBox _command = new();
     private readonly TextBox _output = new();
     private readonly ListBox _diagnostics = new();
     private readonly ProgressBar _progress = new();
     private readonly Button _runButton = new();
+    private string? _pendingConfirmationCommand;
     private VsContext _lastContext = VsContext.Empty;
 
     public AliCompanionToolWindowControl()
@@ -65,6 +68,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
         root.Children.Add(toolbar);
 
         var content = new Grid { Margin = new Thickness(10) };
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -120,6 +124,10 @@ public sealed class AliCompanionToolWindowControl : UserControl
         Grid.SetRow(statePanel, 5);
         content.Children.Add(statePanel);
 
+        var approvalPanel = BuildApprovalPanel();
+        Grid.SetRow(approvalPanel, 6);
+        content.Children.Add(approvalPanel);
+
         _output.IsReadOnly = true;
         _output.AcceptsReturn = true;
         _output.TextWrapping = TextWrapping.Wrap;
@@ -129,11 +137,11 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _output.Foreground = Brush(203, 213, 225);
         _output.BorderBrush = Brush(51, 65, 85);
         _output.Text = "Ali Companion ready. Commands still use Ali's normal approval gates.";
-        Grid.SetRow(_output, 6);
+        Grid.SetRow(_output, 7);
         content.Children.Add(_output);
 
         var diagnosticsPanel = BuildDiagnosticsPanel();
-        Grid.SetRow(diagnosticsPanel, 7);
+        Grid.SetRow(diagnosticsPanel, 8);
         content.Children.Add(diagnosticsPanel);
 
         root.Children.Add(content);
@@ -192,6 +200,39 @@ public sealed class AliCompanionToolWindowControl : UserControl
         _state.Foreground = Brush(148, 163, 184);
         _state.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_state);
+        return panel;
+    }
+
+    private UIElement BuildApprovalPanel()
+    {
+        var panel = new DockPanel
+        {
+            LastChildFill = true,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+
+        _approvalCommandButton.Content = "Use Confirm";
+        _approvalCommandButton.MinWidth = 94;
+        _approvalCommandButton.Height = 28;
+        _approvalCommandButton.Margin = new Thickness(0, 0, 8, 0);
+        _approvalCommandButton.Visibility = Visibility.Collapsed;
+        _approvalCommandButton.Click += (_, _) =>
+        {
+            var confirmationCommand = _pendingConfirmationCommand;
+            if (confirmationCommand is not null && !string.IsNullOrWhiteSpace(confirmationCommand))
+            {
+                SetCommand(confirmationCommand);
+            }
+        };
+        DockPanel.SetDock(_approvalCommandButton, Dock.Left);
+        panel.Children.Add(_approvalCommandButton);
+
+        _approval.Text = "Approval: none pending.";
+        _approval.Foreground = Brush(148, 163, 184);
+        _approval.Background = Brush(15, 23, 42);
+        _approval.Padding = new Thickness(8);
+        _approval.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_approval);
         return panel;
     }
 
@@ -486,6 +527,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
             _output.Text = message;
             UpdateDiagnostics(message);
             UpdateCommandState(command, message, response.IsSuccessStatusCode);
+            UpdateApprovalState(command, message, response.IsSuccessStatusCode);
             _status.Text = response.IsSuccessStatusCode
                 ? "Ali bridge responded."
                 : $"Ali bridge returned HTTP {(int)response.StatusCode}.";
@@ -495,6 +537,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
             _status.Text = "Ali bridge unavailable.";
             _output.Text = "Could not reach Ali WebHelper at http://127.0.0.1:8765/.\r\nStart it, then press Status.";
             _state.Text = "State: helper unavailable.";
+            ClearApprovalState();
             _diagnostics.Items.Clear();
         }
         finally
@@ -543,6 +586,56 @@ public sealed class AliCompanionToolWindowControl : UserControl
         {
             _state.Text = "State: command completed.";
         }
+    }
+
+    private void UpdateApprovalState(string command, string message, bool succeeded)
+    {
+        if (!succeeded)
+        {
+            ShowApproval(new ApprovalSummary(
+                RequestedCommand: command,
+                Risk: "Command refused or failed",
+                Target: ExtractTarget(command, message),
+                ConfirmationCommand: ExtractConfirmationCommand(message)));
+            return;
+        }
+
+        if (command.StartsWith("confirm ", StringComparison.OrdinalIgnoreCase))
+        {
+            ClearApprovalState();
+            return;
+        }
+
+        var summary = DetectApprovalSummary(command, message);
+        if (summary is null)
+        {
+            ClearApprovalState();
+            return;
+        }
+
+        ShowApproval(summary);
+    }
+
+    private void ShowApproval(ApprovalSummary summary)
+    {
+        _pendingConfirmationCommand = summary.ConfirmationCommand;
+        _approval.Text =
+            "Approval pending: " + Blank(summary.RequestedCommand, "unknown command") +
+            "\r\nRisk: " + Blank(summary.Risk, "review required") +
+            "\r\nTarget: " + Blank(summary.Target, "not identified") +
+            "\r\nNext: " + Blank(summary.ConfirmationCommand, "review Ali output for the confirmation command");
+        _approval.Foreground = Brush(253, 224, 71);
+        _approvalCommandButton.Visibility = string.IsNullOrWhiteSpace(_pendingConfirmationCommand)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void ClearApprovalState()
+    {
+        _pendingConfirmationCommand = null;
+        _approval.Text = "Approval: none pending.";
+        _approval.Foreground = Brush(148, 163, 184);
+        _approvalCommandButton.Visibility = Visibility.Collapsed;
     }
 
     private void UpdateDiagnostics(string message)
@@ -617,6 +710,114 @@ public sealed class AliCompanionToolWindowControl : UserControl
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static ApprovalSummary? DetectApprovalSummary(string command, string message)
+    {
+        var lower = message.ToLowerInvariant();
+        var confirmationCommand = ExtractConfirmationCommand(message);
+        var isPending =
+            lower.Contains("requires confirmation") ||
+            lower.Contains("needs confirmation") ||
+            lower.Contains("pending patch") ||
+            lower.Contains("confirm apply last patch preview") ||
+            !string.IsNullOrWhiteSpace(confirmationCommand);
+        if (!isPending)
+        {
+            return null;
+        }
+
+        var requested = string.IsNullOrWhiteSpace(command) ? ExtractRequestedCommand(message) : command;
+        return new ApprovalSummary(
+            RequestedCommand: requested,
+            Risk: ClassifyRisk(requested, message),
+            Target: ExtractTarget(requested, message),
+            ConfirmationCommand: confirmationCommand);
+    }
+
+    private static string? ExtractConfirmationCommand(string message)
+    {
+        var patterns = new[]
+        {
+            "(?im)^\\s*-\\s*(?<command>confirm\\s+[^\\r\\n]+)",
+            "(?im)^\\s*(?<command>confirm\\s+[^\\r\\n]+)",
+            "(?<command>confirm\\s+apply\\s+last\\s+patch\\s+preview)",
+            "(?<command>confirm\\s+dotnet\\s+(?:build|restore|add package|test|run)[^\\r\\n]*)",
+            "(?<command>confirm\\s+git\\s+(?:add|commit|merge)[^\\r\\n]*)",
+            "(?<command>confirm\\s+(?:create|append to|replace in)\\s+file[^\\r\\n]*)"
+        };
+
+        foreach (var pattern in patterns)
+        {
+            var match = Regex.Match(message, pattern, RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                return CleanCommand(match.Groups["command"].Value);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExtractRequestedCommand(string message)
+    {
+        var match = Regex.Match(message, "(?im)^\\s*(?:requested command|command)\\s*:\\s*(?<command>.+)$");
+        return match.Success ? CleanCommand(match.Groups["command"].Value) : null;
+    }
+
+    private static string ClassifyRisk(string? command, string message)
+    {
+        var text = ((command ?? string.Empty) + "\n" + message).ToLowerInvariant();
+        if (text.Contains("patch") || text.Contains("replace in file") || text.Contains("create file") || text.Contains("append to file"))
+        {
+            return "File edit";
+        }
+
+        if (text.Contains("dotnet add package") || text.Contains("dotnet restore") || text.Contains("package"))
+        {
+            return "Package/dependency change";
+        }
+
+        if (text.Contains("dotnet build") || text.Contains("dotnet test") || text.Contains("dotnet run"))
+        {
+            return "Build/test/run";
+        }
+
+        if (text.Contains("git commit") || text.Contains("git add") || text.Contains("git merge"))
+        {
+            return "Git write";
+        }
+
+        return "Owner confirmation";
+    }
+
+    private static string? ExtractTarget(string? command, string message)
+    {
+        var text = (command ?? string.Empty) + "\n" + message;
+        var quotedPath = Regex.Match(text, "\"(?<path>[A-Za-z]:\\\\[^\"]+)\"");
+        if (quotedPath.Success)
+        {
+            return quotedPath.Groups["path"].Value;
+        }
+
+        var barePath = Regex.Match(text, "(?<path>[A-Za-z]:\\\\[^\\r\\n\"']+)");
+        if (barePath.Success)
+        {
+            return barePath.Groups["path"].Value.TrimEnd('.', ';', ',');
+        }
+
+        if (text.Contains("patch preview", StringComparison.OrdinalIgnoreCase))
+        {
+            return "pending patch preview";
+        }
+
+        return null;
+    }
+
+    private static string CleanCommand(string value) =>
+        value.Trim().TrimEnd('.', ';');
+
+    private static string Blank(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value!;
 
     private static Button Button(string text, Action action)
     {
@@ -790,6 +991,29 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
         public override string ToString() =>
             $"{Kind} {Code}: {Path.GetFileName(FilePath)}:{Line}";
+    }
+
+    private sealed class ApprovalSummary
+    {
+        public ApprovalSummary(
+            string? RequestedCommand,
+            string? Risk,
+            string? Target,
+            string? ConfirmationCommand)
+        {
+            this.RequestedCommand = RequestedCommand;
+            this.Risk = Risk;
+            this.Target = Target;
+            this.ConfirmationCommand = ConfirmationCommand;
+        }
+
+        public string? RequestedCommand { get; }
+
+        public string? Risk { get; }
+
+        public string? Target { get; }
+
+        public string? ConfirmationCommand { get; }
     }
 
     private sealed class VsContext
