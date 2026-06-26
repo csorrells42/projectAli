@@ -32,6 +32,7 @@ public sealed class AliCompanionToolWindowControl : UserControl
     private readonly TextBlock _status = new();
     private readonly TextBlock _context = new();
     private readonly TextBlock _state = new();
+    private readonly TextBlock _runSummary = new();
     private readonly TextBlock _approval = new();
     private readonly Button _approvalCommandButton = new();
     private readonly ComboBox _history = new();
@@ -182,24 +183,37 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private UIElement BuildStatePanel()
     {
-        var panel = new DockPanel
+        var panel = new Grid
         {
-            LastChildFill = true,
             Margin = new Thickness(0, 0, 0, 8)
         };
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         _progress.Width = 96;
         _progress.Height = 14;
         _progress.IsIndeterminate = true;
         _progress.Visibility = Visibility.Collapsed;
         _progress.Margin = new Thickness(0, 3, 8, 0);
-        DockPanel.SetDock(_progress, Dock.Left);
+        Grid.SetRowSpan(_progress, 2);
+        Grid.SetColumn(_progress, 0);
         panel.Children.Add(_progress);
 
         _state.Text = "State: idle.";
         _state.Foreground = Brush(148, 163, 184);
         _state.TextWrapping = TextWrapping.Wrap;
+        Grid.SetColumn(_state, 1);
+        Grid.SetRow(_state, 0);
         panel.Children.Add(_state);
+
+        _runSummary.Text = "Run: none yet.";
+        _runSummary.Foreground = Brush(148, 163, 184);
+        _runSummary.TextWrapping = TextWrapping.Wrap;
+        Grid.SetColumn(_runSummary, 1);
+        Grid.SetRow(_runSummary, 1);
+        panel.Children.Add(_runSummary);
         return panel;
     }
 
@@ -512,20 +526,25 @@ public sealed class AliCompanionToolWindowControl : UserControl
 
     private async Task SendAsync(Uri uri, string? body, string statusPrefix)
     {
-        SetBusy(true, statusPrefix);
-        _status.Text = statusPrefix;
         var command = body is null ? string.Empty : _command.Text.Trim();
+        var startedAt = DateTimeOffset.Now;
+        var stopwatch = Stopwatch.StartNew();
+        SetBusy(true, statusPrefix, startedAt, command);
+        _status.Text = statusPrefix;
         try
         {
             HttpResponseMessage response = body is null
                 ? await _http.GetAsync(uri)
                 : await _http.PostAsync(uri, new StringContent(body, Encoding.UTF8, "application/json"));
+            stopwatch.Stop();
             var json = await response.Content.ReadAsStringAsync();
             var message = ExtractJsonString(json, "message")
                 ?? ExtractJsonString(json, "error")
                 ?? json;
             _output.Text = message;
             UpdateDiagnostics(message);
+            var outcome = SummarizeRun(command, message, response.IsSuccessStatusCode, stopwatch.Elapsed);
+            UpdateRunSummary(outcome);
             UpdateCommandState(command, message, response.IsSuccessStatusCode);
             UpdateApprovalState(command, message, response.IsSuccessStatusCode);
             _status.Text = response.IsSuccessStatusCode
@@ -534,19 +553,25 @@ public sealed class AliCompanionToolWindowControl : UserControl
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
         {
+            stopwatch.Stop();
             _status.Text = "Ali bridge unavailable.";
             _output.Text = "Could not reach Ali WebHelper at http://127.0.0.1:8765/.\r\nStart it, then press Status.";
             _state.Text = "State: helper unavailable.";
+            UpdateRunSummary(new RunOutcome(
+                CommandKind: ClassifyCommand(command),
+                Result: "helper unavailable",
+                Elapsed: stopwatch.Elapsed,
+                Receipt: null));
             ClearApprovalState();
             _diagnostics.Items.Clear();
         }
         finally
         {
-            SetBusy(false, null);
+            SetBusy(false, null, null, command);
         }
     }
 
-    private void SetBusy(bool busy, string? status)
+    private void SetBusy(bool busy, string? status, DateTimeOffset? startedAt, string command)
     {
         _runButton.IsEnabled = !busy;
         _progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
@@ -554,7 +579,117 @@ public sealed class AliCompanionToolWindowControl : UserControl
         {
             _state.Text = "State: " + status;
         }
+
+        if (busy && startedAt is not null)
+        {
+            _runSummary.Text = $"Run: {ClassifyCommand(command)} started {startedAt.Value:HH:mm:ss}.";
+            _runSummary.Foreground = Brush(203, 213, 225);
+        }
     }
+
+    private void UpdateRunSummary(RunOutcome outcome)
+    {
+        var receipt = string.IsNullOrWhiteSpace(outcome.Receipt)
+            ? string.Empty
+            : "; " + outcome.Receipt;
+        _runSummary.Text = $"Run: {outcome.CommandKind} {outcome.Result} in {FormatElapsed(outcome.Elapsed)}{receipt}.";
+        _runSummary.Foreground = outcome.Result.Contains("failed", StringComparison.OrdinalIgnoreCase)
+            || outcome.Result.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+            ? Brush(248, 113, 113)
+            : Brush(125, 211, 252);
+    }
+
+    private static RunOutcome SummarizeRun(string command, string message, bool httpSucceeded, TimeSpan elapsed)
+    {
+        var lower = message.ToLowerInvariant();
+        var result =
+            !httpSucceeded ? "failed" :
+            lower.Contains("build succeeded") || lower.Contains("test harness passed") || lower.Contains("0 error") ? "succeeded" :
+            lower.Contains("build failed") || lower.Contains("error ") || lower.Contains("failed") ? "failed" :
+            lower.Contains("requires confirmation") || lower.Contains("needs confirmation") || lower.Contains("pending") ? "awaiting approval" :
+            "completed";
+        return new RunOutcome(
+            CommandKind: ClassifyCommand(command),
+            Result: result,
+            Elapsed: elapsed,
+            Receipt: ExtractReceiptCue(message));
+    }
+
+    private static string ClassifyCommand(string command)
+    {
+        var lower = command.ToLowerInvariant();
+        if (lower.Contains("dotnet build"))
+        {
+            return "build";
+        }
+
+        if (lower.Contains("dotnet test") || lower.Contains("test"))
+        {
+            return "test";
+        }
+
+        if (lower.Contains("restore") || lower.Contains("add package") || lower.Contains("packages"))
+        {
+            return "package";
+        }
+
+        if (lower.Contains("git"))
+        {
+            return "git";
+        }
+
+        if (lower.Contains("patch") || lower.Contains("replace in file") || lower.Contains("create file") || lower.Contains("append to file"))
+        {
+            return "edit";
+        }
+
+        if (lower.Contains("report"))
+        {
+            return "report";
+        }
+
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return "status";
+        }
+
+        return "command";
+    }
+
+    private static string? ExtractReceiptCue(string message)
+    {
+        var path = Regex.Match(
+            message,
+            "(?<path>[A-Za-z]:\\\\[^\\r\\n]+\\.(?:json|txt|md|pdf|log))",
+            RegexOptions.IgnoreCase);
+        if (path.Success)
+        {
+            return "receipt " + Path.GetFileName(path.Groups["path"].Value.TrimEnd('.', ';', ','));
+        }
+
+        var receiptLine = Regex.Match(message, "(?im)^\\s*(?:receipt|report|diagnostic)\\s*:\\s*(?<value>.+)$");
+        if (receiptLine.Success)
+        {
+            return receiptLine.Groups["value"].Value.Trim();
+        }
+
+        if (message.Contains("coding receipts", StringComparison.OrdinalIgnoreCase))
+        {
+            return "receipts updated";
+        }
+
+        if (message.Contains("coding report", StringComparison.OrdinalIgnoreCase))
+        {
+            return "report available";
+        }
+
+        return null;
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        elapsed.TotalSeconds < 1
+            ? elapsed.TotalMilliseconds.ToString("0") + " ms"
+            : elapsed.TotalSeconds.ToString("0.0") + " s";
 
     private void UpdateCommandState(string command, string message, bool succeeded)
     {
@@ -1014,6 +1149,25 @@ public sealed class AliCompanionToolWindowControl : UserControl
         public string? Target { get; }
 
         public string? ConfirmationCommand { get; }
+    }
+
+    private sealed class RunOutcome
+    {
+        public RunOutcome(string CommandKind, string Result, TimeSpan Elapsed, string? Receipt)
+        {
+            this.CommandKind = CommandKind;
+            this.Result = Result;
+            this.Elapsed = Elapsed;
+            this.Receipt = Receipt;
+        }
+
+        public string CommandKind { get; }
+
+        public string Result { get; }
+
+        public TimeSpan Elapsed { get; }
+
+        public string? Receipt { get; }
     }
 
     private sealed class VsContext
