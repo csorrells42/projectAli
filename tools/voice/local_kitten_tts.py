@@ -52,7 +52,8 @@ def main() -> int:
     try:
         from kittentts import KittenTTS
 
-        model = KittenTTS(args.model)
+        model_path = Path(args.model)
+        model = KittenTTS(cache_dir=str(model_path)) if model_path.is_dir() else KittenTTS(args.model)
         audio = model.generate(text, voice=args.voice)
         write_wav(Path(args.output), audio, args.sample_rate)
         return 0
