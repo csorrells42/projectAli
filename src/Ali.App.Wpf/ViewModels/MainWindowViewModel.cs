@@ -95,7 +95,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _spectrumVisualCeiling = 0.25d;
     private double _lastSpectrumPeakLevel;
     private string _composerText = string.Empty;
-    private bool _isComputerManagementPanelOpen;
+    private bool _isCommandExplorerOpen;
+    private CommandExplorerNodeViewModel? _selectedCommandExplorerNode;
     private bool _isBusy;
     private bool _isRecording;
     private bool _isTranscribing;
@@ -220,8 +221,8 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
-        ToggleComputerManagementPanelCommand = CreateCommand(_ => IsComputerManagementPanelOpen = !IsComputerManagementPanelOpen);
-        RunComputerManagementActionCommand = CreateCommand(parameter => _ = RunComputerManagementActionSafelyAsync(parameter), _ => !IsBusy);
+        ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
+        RunSelectedCommandExplorerCommand = CreateCommand(parameter => _ = RunCommandExplorerNodeSafelyAsync(parameter), parameter => CanRunCommandExplorerNode(parameter));
         PlayVoiceSampleCommand = CreateAsyncCommand(PlayVoiceSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -242,10 +243,12 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
-        foreach (var action in BuildComputerManagementActions())
+        foreach (var topic in BuildCommandExplorerRoots())
         {
-            ComputerManagementActions.Add(action);
+            CommandExplorerRoots.Add(topic);
         }
+
+        SelectedCommandExplorerNode = CommandExplorerRoots.FirstOrDefault();
 
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
         _normalizeBeforeStt = _voiceSettings.NormalizeBeforeStt;
@@ -339,7 +342,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
 
-    public ObservableCollection<ComputerManagementActionViewModel> ComputerManagementActions { get; } = new();
+    public ObservableCollection<CommandExplorerNodeViewModel> CommandExplorerRoots { get; } = new();
 
     public ObservableCollection<CorrectionReviewItemViewModel> CorrectionReviewItems { get; } = new();
 
@@ -560,9 +563,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand OpenSourcesTopicsCommand { get; }
 
-    public ICommand ToggleComputerManagementPanelCommand { get; }
+    public ICommand ToggleCommandExplorerCommand { get; }
 
-    public ICommand RunComputerManagementActionCommand { get; }
+    public ICommand RunSelectedCommandExplorerCommand { get; }
 
     public ICommand PlayVoiceSampleCommand { get; }
 
@@ -1391,19 +1394,31 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    public bool IsComputerManagementPanelOpen
+    public bool IsCommandExplorerOpen
     {
-        get => _isComputerManagementPanelOpen;
+        get => _isCommandExplorerOpen;
         set
         {
-            if (SetProperty(ref _isComputerManagementPanelOpen, value))
+            if (SetProperty(ref _isCommandExplorerOpen, value))
             {
-                OnPropertyChanged(nameof(ComputerManagementPanelToggleText));
+                OnPropertyChanged(nameof(CommandExplorerToggleText));
             }
         }
     }
 
-    public string ComputerManagementPanelToggleText => IsComputerManagementPanelOpen ? "Hide Computer" : "Computer";
+    public string CommandExplorerToggleText => IsCommandExplorerOpen ? "Hide Commands" : "Commands";
+
+    public CommandExplorerNodeViewModel? SelectedCommandExplorerNode
+    {
+        get => _selectedCommandExplorerNode;
+        set
+        {
+            if (SetProperty(ref _selectedCommandExplorerNode, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
 
     public bool IsBusy
     {
@@ -1737,11 +1752,11 @@ public sealed class MainWindowViewModel : ObservableObject
         await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
     }
 
-    private async Task RunComputerManagementActionSafelyAsync(object? parameter)
+    private async Task RunCommandExplorerNodeSafelyAsync(object? parameter)
     {
         try
         {
-            await RunComputerManagementActionAsync(parameter).ConfigureAwait(true);
+            await RunCommandExplorerNodeAsync(parameter).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1749,27 +1764,37 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task RunComputerManagementActionAsync(object? parameter)
+    private async Task RunCommandExplorerNodeAsync(object? parameter)
     {
         if (IsBusy)
         {
             return;
         }
 
-        var commandText = parameter switch
+        var node = parameter switch
         {
-            ComputerManagementActionViewModel action => action.CommandText,
-            string text => text,
-            _ => null
+            CommandExplorerNodeViewModel commandNode => commandNode,
+            _ => SelectedCommandExplorerNode
         };
 
-        if (string.IsNullOrWhiteSpace(commandText))
+        if (node is not { IsCommand: true } || string.IsNullOrWhiteSpace(node.CommandText))
         {
             return;
         }
 
         ComposerText = string.Empty;
-        await SendTextAsync(commandText.Trim(), VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+        await SendTextAsync(node.CommandText.Trim(), VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+    }
+
+    private bool CanRunCommandExplorerNode(object? parameter)
+    {
+        if (IsBusy)
+        {
+            return false;
+        }
+
+        var node = parameter as CommandExplorerNodeViewModel ?? SelectedCommandExplorerNode;
+        return node is { IsCommand: true };
     }
 
     private async Task SendTextAsync(
@@ -4796,9 +4821,9 @@ public sealed class MainWindowViewModel : ObservableObject
             stopSpeaking.RaiseCanExecuteChanged();
         }
 
-        if (RunComputerManagementActionCommand is RelayCommand runComputerManagementAction)
+        if (RunSelectedCommandExplorerCommand is RelayCommand runSelectedCommandExplorer)
         {
-            runComputerManagementAction.RaiseCanExecuteChanged();
+            runSelectedCommandExplorer.RaiseCanExecuteChanged();
         }
 
         if (PlayVoiceSampleCommand is AsyncRelayCommand playPiperSample)
@@ -4837,21 +4862,107 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private static IReadOnlyList<ComputerManagementActionViewModel> BuildComputerManagementActions() =>
+    private static IReadOnlyList<CommandExplorerNodeViewModel> BuildCommandExplorerRoots() =>
     [
-        new("Overview", "Status", "Show local computer help boundaries.", "show computer assistant status"),
-        new("Overview", "Command Index", "List deterministic computer-management commands.", "show computer assistant commands"),
-        new("Processes", "Running Processes", "Read-only snapshot of top local processes by memory.", "collect process evidence"),
-        new("Processes", "Build Lock Check", "Find common build helper processes holding files.", "diagnose build lock"),
-        new("Processes", "Port Owner", "Check which process owns a local port.", "diagnose port 8765"),
-        new("Windows", "Services & Startup", "Inspect service and startup evidence.", "inspect services and startup"),
-        new("Windows", "Event Logs", "Triage recent Windows event log clues.", "triage event logs"),
-        new("Windows", "Install Doctor", "Check Ali install and dependency readiness.", "show install doctor"),
-        new("Troubleshooting", "Slow Computer Plan", "Plan safe first checks for performance issues.", "plan slow computer troubleshooting"),
-        new("Troubleshooting", "Wi-Fi Plan", "Plan safe checks for connection drops.", "troubleshoot wifi dropping connection"),
-        new("Troubleshooting", "Suspicious Activity Plan", "Plan evidence gathering for unknown startup/process activity.", "plan suspicious activity check unknown startup item"),
-        new("Cleanup", "Disk Cleanup Plan", "Plan cleanup without deleting files automatically.", "plan disk cleanup")
+        new(
+            "Chat",
+            "Conversation and local chat controls.",
+            children:
+            [
+                new("New chat", "Start a fresh local conversation.", usage: "Use the New chat button in the left sidebar."),
+                new("Erase history", "Erase saved local conversations after confirmation.", usage: "Use the Erase History button in the left sidebar.")
+            ]),
+        new(
+            "Sources",
+            "Approved web sources, topics, and local RAG library.",
+            children:
+            [
+                new("Open sources and topics", "Manage source URLs and topic labels.", usage: "Use the Sources button in the top bar."),
+                new("Open local library", "Manage the approved local RAG folder and scan status.", usage: "Use the Local Library button in the top bar.")
+            ]),
+        new(
+            "Voice",
+            "Speech, push-to-talk, and local TTS/STT controls.",
+            children:
+            [
+                new("Voice settings", "Open microphone, PTT, and voice engine settings.", usage: "Use Settings -> Voice / Mic."),
+                new("Hear sample", "Play the selected local voice sample.", usage: "Use Settings -> Voice / Mic -> Hear Sample.")
+            ]),
+        new(
+            "Runtime",
+            "Local model configuration, health checks, and model selection.",
+            children:
+            [
+                new("Check runtime", "Run local model runtime health checks.", usage: "Use Settings -> Runtime -> Check."),
+                Command("Show install doctor", "Report install, runtime, model, VSIX, and dependency readiness.", "show install doctor", "show install doctor")
+            ]),
+        new(
+            "Programming",
+            "Coding workspace, guarded builds, tests, packages, Git, and project reports.",
+            children:
+            [
+                Command("Command index", "Show deterministic coding commands Ali supports.", "show coding skill command index", "show coding skill command index"),
+                Command("Inspect workspace", "Inspect the approved coding workspace.", "inspect coding workspace", "inspect coding workspace"),
+                Command("Analyze solution", "Analyze solution architecture.", "analyze solution architecture", "analyze solution architecture"),
+                Command("List packages", "List package references.", "list packages", "list packages"),
+                Command("Plan coding task", "Draft a guarded implementation plan.", "plan coding task <goal>", "plan coding task add a settings button"),
+                Command("Build", "Run a confirmed dotnet build.", "confirm dotnet build \"C:\\path\\to\\solution.sln\"", "confirm dotnet build \"C:\\path\\to\\solution.sln\""),
+                Command("Test", "Run a confirmed dotnet test.", "confirm dotnet test \"C:\\path\\to\\solution-or-project\"", "confirm dotnet test \"C:\\path\\to\\solution-or-project\""),
+                Command("Coding report", "Generate a coding session report.", "generate coding report", "generate coding report")
+            ]),
+        new(
+            "Computer",
+            "Read-only diagnostics and plan-first computer troubleshooting.",
+            children:
+            [
+                Command("Status", "Show local computer help boundaries.", "show computer assistant status", "show computer assistant status"),
+                Command("Command index", "List deterministic computer-management commands.", "show computer assistant commands", "show computer assistant commands"),
+                Command("Running processes", "Read-only snapshot of top local processes by memory.", "collect process evidence", "collect process evidence"),
+                Command("Build lock check", "Find common build helper processes holding files.", "diagnose build lock", "diagnose build lock"),
+                Command("Port owner", "Check which process owns a local port.", "diagnose port 8765", "diagnose port 8765"),
+                Command("Services and startup", "Inspect service and startup evidence.", "inspect services and startup", "inspect services and startup"),
+                Command("Event logs", "Triage recent Windows event log clues.", "triage event logs", "triage event logs"),
+                Command("Slow computer plan", "Plan safe first checks for performance issues.", "plan slow computer troubleshooting", "plan slow computer troubleshooting"),
+                Command("Wi-Fi plan", "Plan safe checks for connection drops.", "troubleshoot wifi dropping connection", "troubleshoot wifi dropping connection"),
+                Command("Suspicious activity plan", "Plan evidence gathering for unknown startup/process activity.", "plan suspicious activity check unknown startup item", "plan suspicious activity check unknown startup item"),
+                Command("Disk cleanup plan", "Plan cleanup without deleting files automatically.", "plan disk cleanup", "plan disk cleanup")
+            ]),
+        new(
+            "PDF",
+            "Local PDF inspect, create, combine, split, and report commands.",
+            children:
+            [
+                Command("PDF status", "Show PDF tool readiness.", "show pdf tool status", "show pdf tool status"),
+                Command("PDF commands", "Show PDF command index.", "show pdf commands", "show pdf commands"),
+                Command("Generate PDF", "Create a PDF in the approved PDF workspace.", "generate pdf \"name.pdf\" with text \"content\"", "generate pdf \"demo.pdf\" with text \"One page summary.\""),
+                Command("Inspect PDF", "Inspect a PDF document.", "inspect pdf \"file.pdf\"", "inspect pdf \"demo.pdf\""),
+                Command("Extract text", "Extract text from a PDF.", "extract text from pdf \"file.pdf\"", "extract text from pdf \"demo.pdf\""),
+                Command("Combine PDFs", "Combine PDFs after confirmation.", "confirm combine pdfs \"a.pdf\" \"b.pdf\" \"combined.pdf\"", "confirm combine pdfs \"a.pdf\" \"b.pdf\" \"combined.pdf\"")
+            ]),
+        new(
+            "Memory / Reminders",
+            "Local memory and reminder review controls.",
+            children:
+            [
+                new("Review memories", "Open Settings to review saved local memories.", usage: "Use Settings -> Memory / Reminders."),
+                new("Review reminders", "Open Settings to review reminders.", usage: "Use Settings -> Memory / Reminders.")
+            ]),
+        new(
+            "Visual Studio",
+            "Ali Companion VSIX and loopback bridge helpers.",
+            children:
+            [
+                Command("Integration status", "Show Visual Studio integration and bridge status.", "show visual studio integration", "show visual studio integration"),
+                Command("VS handoff", "Generate a Visual Studio integration plan.", "generate visual studio integration plan", "generate visual studio integration plan")
+            ])
     ];
+
+    private static CommandExplorerNodeViewModel Command(
+        string title,
+        string summary,
+        string commandText,
+        string usage) =>
+        new(title, summary, commandText, usage);
 
     private string FormatRuntimeDisplay()
     {

@@ -48,6 +48,22 @@
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="#46464D" />
         </Style>
+        <Style TargetType="TreeView">
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+        </Style>
+        <Style TargetType="TreeViewItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Padding" Value="3" />
+        </Style>
+        <HierarchicalDataTemplate DataType="{x:Type vm:CommandExplorerNodeViewModel}"
+                                  ItemsSource="{Binding Children}">
+            <TextBlock Text="{Binding Title}"
+                       Foreground="{StaticResource TextBrush}"
+                       TextTrimming="CharacterEllipsis"
+                       Padding="2" />
+        </HierarchicalDataTemplate>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
@@ -317,14 +333,14 @@
                             VerticalAlignment="Center"
                             ToolTip="{Binding AssistantLocalLibraryToolTip}" />
                     <Button Grid.Column="5"
-                            Content="{Binding ComputerManagementPanelToggleText}"
-                            Command="{Binding ToggleComputerManagementPanelCommand}"
+                            Content="{Binding CommandExplorerToggleText}"
+                            Command="{Binding ToggleCommandExplorerCommand}"
                             Height="34"
                             MinHeight="34"
                             Margin="0,0,8,0"
                             Padding="12,0"
                             VerticalAlignment="Center"
-                            ToolTip="Open computer management and troubleshooting commands." />
+                            ToolTip="Open Ali's feature and command explorer." />
                     <Button Grid.Column="6"
                             Content="Settings"
                             Command="{Binding OpenSettingsCommand}"
@@ -507,12 +523,12 @@
         </Grid>
 
         <Border Grid.Column="2"
-                Width="320"
+                Width="560"
                 Background="{StaticResource SidebarBrush}"
                 BorderBrush="{StaticResource BorderBrushDark}"
                 BorderThickness="1,0,0,0"
                 Padding="14"
-                Visibility="{Binding IsComputerManagementPanelOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+                Visibility="{Binding IsCommandExplorerOpen, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -525,18 +541,18 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel>
-                        <TextBlock Text="Computer"
+                        <TextBlock Text="Commands"
                                    Foreground="{StaticResource TextBrush}"
                                    FontSize="20"
                                    FontWeight="SemiBold" />
-                        <TextBlock Text="Management and troubleshooting"
+                        <TextBlock Text="Feature and command explorer"
                                    Foreground="{StaticResource MutedTextBrush}"
                                    FontSize="12"
                                    Margin="0,2,0,0" />
                     </StackPanel>
                     <Button Grid.Column="1"
                             Content="Close"
-                            Command="{Binding ToggleComputerManagementPanelCommand}"
+                            Command="{Binding ToggleCommandExplorerCommand}"
                             Height="30"
                             MinHeight="30"
                             Padding="10,0"
@@ -544,39 +560,78 @@
                             VerticalAlignment="Top" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="1"
-                              VerticalScrollBarVisibility="Auto"
-                              Padding="0,0,6,0">
-                    <ItemsControl ItemsSource="{Binding ComputerManagementActions}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:ComputerManagementActionViewModel}">
-                                <Button Command="{Binding DataContext.RunComputerManagementActionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                        CommandParameter="{Binding}"
-                                        HorizontalContentAlignment="Stretch"
-                                        Padding="10,8"
-                                        Margin="0,0,0,8"
-                                        ToolTip="{Binding CommandText}">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding Category}"
-                                                   Foreground="{StaticResource AccentBrush}"
-                                                   FontSize="10"
-                                                   FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding Title}"
-                                                   Foreground="{StaticResource TextBrush}"
-                                                   FontWeight="SemiBold"
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,2,0,0" />
-                                        <TextBlock Text="{Binding Description}"
-                                                   Foreground="{StaticResource MutedTextBrush}"
-                                                   FontSize="11"
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="230" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TreeView Grid.Column="0"
+                              ItemsSource="{Binding CommandExplorerRoots}"
+                              SelectedItemChanged="CommandExplorerTree_OnSelectedItemChanged"
+                              BorderThickness="1"
+                              Padding="6" />
+
+                    <Border Grid.Column="1"
+                            Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            Padding="14"
+                            Margin="12,0,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Text="{Binding SelectedCommandExplorerNode.Title}"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="1"
+                                       Text="{Binding SelectedCommandExplorerNode.Summary}"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,8,0,12" />
+                            <StackPanel Grid.Row="2">
+                                <TextBlock Text="Usage"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Margin="0,0,0,5" />
+                                <TextBox Text="{Binding SelectedCommandExplorerNode.Usage, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         TextWrapping="Wrap"
+                                         AcceptsReturn="True"
+                                         MinHeight="90"
+                                         Margin="0"
+                                         VerticalScrollBarVisibility="Auto" />
+                                <TextBlock Text="Command"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Margin="0,14,0,5"
+                                           Visibility="{Binding SelectedCommandExplorerNode.IsCommand, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                <TextBox Text="{Binding SelectedCommandExplorerNode.CommandText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         TextWrapping="Wrap"
+                                         Margin="0"
+                                         Visibility="{Binding SelectedCommandExplorerNode.IsCommand, Converter={StaticResource BoolToVisibilityConverter}}" />
+                            </StackPanel>
+                            <Button Grid.Row="3"
+                                    Content="Use Command"
+                                    Command="{Binding RunSelectedCommandExplorerCommand}"
+                                    CommandParameter="{Binding SelectedCommandExplorerNode}"
+                                    HorizontalAlignment="Right"
+                                    Padding="14,8"
+                                    Margin="0,12,0,0"
+                                    Visibility="{Binding SelectedCommandExplorerNode.IsCommand, Converter={StaticResource BoolToVisibilityConverter}}" />
+                        </Grid>
+                    </Border>
+                </Grid>
             </Grid>
         </Border>
     </Grid>

@@ -190,4 +190,12 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void CommandExplorerTree_OnSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (DataContext is MainWindowViewModel viewModel && e.NewValue is CommandExplorerNodeViewModel node)
+        {
+            viewModel.SelectedCommandExplorerNode = node;
+        }
+    }
+
 }
