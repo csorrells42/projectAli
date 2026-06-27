@@ -149,6 +149,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer supports Visual Studio extension only mode", TestDesktopInstallerSupportsVisualStudioExtensionOnlyMode),
     ("desktop installer skips Ollama installer when executable exists", TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists),
     ("desktop installer repair preserves profile data", TestDesktopInstallerRepairPreservesProfileData),
+    ("desktop installer repair merges starter sources", TestDesktopInstallerRepairMergesStarterSources),
     ("desktop installer installs sidecar voice resources", TestDesktopInstallerInstallsSidecarVoiceResources),
     ("desktop installer repairs sidecar voice resources", TestDesktopInstallerRepairsSidecarVoiceResources),
     ("desktop uninstaller removes app and preserves user data", TestDesktopUninstallerRemovesAppAndPreservesUserData),
@@ -3588,6 +3589,49 @@ static async Task TestDesktopInstallerRepairPreservesProfileData()
     Equal("keep me", await File.ReadAllTextAsync(memoryPath));
     Contains("Repair mode selected", string.Join(Environment.NewLine, result.DependencyMessages));
     Contains("already exists; installer did not overwrite", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopInstallerRepairMergesStarterSources()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var sourcesRoot = Path.Combine(localRoot, "BootstrapData", "Sources");
+    Directory.CreateDirectory(payload);
+    Directory.CreateDirectory(sourcesRoot);
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fresh app");
+    var existing = new[]
+    {
+        new SourceCatalogEntry(
+            Id: "owner-source",
+            Topic: "custom",
+            Name: "Owner Source",
+            Url: "https://example.test/owner",
+            Type: "web",
+            TrustLevel: "owner",
+            Keywords: ["owner"],
+            Topics: ["owner topic"],
+            Notes: "Preserve this.",
+            Enabled: true)
+    };
+    await File.WriteAllTextAsync(
+        Path.Combine(sourcesRoot, "curated_sources.json"),
+        JsonSerializer.Serialize(existing));
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        RepairExistingInstall: true));
+    var repairedJson = await File.ReadAllTextAsync(Path.Combine(sourcesRoot, "curated_sources.json"));
+    var repaired = JsonSerializer.Deserialize<List<SourceCatalogEntry>>(repairedJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+
+    Equal(true, result.Succeeded);
+    Equal(true, repaired.Any(source => source.Id == "owner-source"));
+    Equal(true, repaired.Any(source => source.Id == "national-weather-service"));
+    Equal(true, repaired.Any(source => source.Id == "python-docs"));
+    Equal(true, repaired.Count > existing.Length + 10);
+    Contains("Starter Sources & Topics repaired", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
 static async Task TestDesktopInstallerInstallsSidecarVoiceResources()

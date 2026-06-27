@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Ali.Core.Identity;
 using Ali.Infrastructure.Identity;
+using Ali.Infrastructure.Sources;
 using Ali.Infrastructure.Voice;
 
 namespace Ali.Infrastructure.Installation;
@@ -88,6 +89,7 @@ public sealed class AliDesktopInstaller
                     dependencyMessages.Add("Assistant profile not created; first app launch will ask for the assistant name.");
                 }
 
+                RepairStarterSources(normalizedOptions, dependencyMessages, warnings);
                 await HandleOllamaAsync(normalizedOptions, dependencyMessages, cancellationToken).ConfigureAwait(false);
                 CreateShortcuts(normalizedOptions, targetDirectory, dependencyMessages, warnings);
             }
@@ -546,6 +548,44 @@ public sealed class AliDesktopInstaller
             .OrderByDescending(path => Path.GetFileNameWithoutExtension(path).Equals("en_US-hfc_female-medium", StringComparison.OrdinalIgnoreCase))
             .ThenBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
+    }
+
+    private static void RepairStarterSources(
+        AliDesktopInstallOptions options,
+        List<string> dependencyMessages,
+        List<string> warnings)
+    {
+        try
+        {
+            using var httpClient = new HttpClient();
+            var sourceStore = new FileSourceRetriever(
+                Path.Combine(options.LocalAliRoot, "BootstrapData"),
+                httpClient);
+            var result = sourceStore.RepairStarterCatalog();
+            sourceStore.WriteExample();
+
+            if (result.CatalogCreated)
+            {
+                dependencyMessages.Add($"Starter Sources & Topics catalog created with {result.AddedStarterSourceCount} approved source(s).");
+            }
+            else if (result.AddedStarterSourceCount > 0)
+            {
+                dependencyMessages.Add($"Starter Sources & Topics repaired: added {result.AddedStarterSourceCount} missing approved source(s), preserved {result.ExistingSourceCount} existing source(s).");
+            }
+            else
+            {
+                dependencyMessages.Add($"Starter Sources & Topics verified: {result.ExistingSourceCount} approved source(s) already present.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.BackupPath))
+            {
+                warnings.Add($"Invalid Sources & Topics catalog was backed up before repair: {result.BackupPath}");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        {
+            warnings.Add($"Starter Sources & Topics could not be repaired: {ex.Message}");
+        }
     }
 
     private static async Task HandleOllamaAsync(

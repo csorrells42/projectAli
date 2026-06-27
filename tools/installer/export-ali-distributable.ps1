@@ -53,7 +53,7 @@ echo.
 echo This repairs the installed Ali app, voice Python runtime, voice bridge scripts, voice settings, and starter Sources ^& Topics.
 echo It preserves user chats, memories, settings, and installed voice models.
 echo.
-Ali.Setup.exe --install-voice-resources --voice-resources .\Ali.VoicePatch.zip --repair
+start "" /wait "%~dp0Ali.Setup.exe" --install-voice-resources --voice-resources "%~dp0Ali.VoicePatch.zip" --repair
 echo.
 if errorlevel 1 (
   echo Patch failed. Please send the output above back to Chris.

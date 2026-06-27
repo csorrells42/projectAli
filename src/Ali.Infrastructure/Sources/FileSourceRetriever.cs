@@ -7,6 +7,12 @@ using Ali.Core.Sources;
 
 namespace Ali.Infrastructure.Sources;
 
+public sealed record SourceCatalogRepairResult(
+    int ExistingSourceCount,
+    int AddedStarterSourceCount,
+    bool CatalogCreated,
+    string? BackupPath);
+
 public sealed class FileSourceRetriever
 {
     private const int MaxSourcesPerRequest = 3;
@@ -152,28 +158,8 @@ public sealed class FileSourceRetriever
 
     public void WriteExample()
     {
-        Directory.CreateDirectory(RootDirectory);
+        RepairStarterCatalog();
         var defaultCatalog = BuildDefaultCatalog();
-        if (!File.Exists(CatalogPath))
-        {
-            using var catalogStream = File.Create(CatalogPath);
-            JsonSerializer.Serialize(catalogStream, defaultCatalog, JsonOptions);
-        }
-        else
-        {
-            var currentCatalog = LoadCatalog();
-            var existingIds = currentCatalog
-                .Select(source => source.Id)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var missingDefaults = defaultCatalog
-                .Where(source => !existingIds.Contains(source.Id))
-                .ToArray();
-            if (missingDefaults.Length > 0)
-            {
-                SaveCatalog(currentCatalog.Concat(missingDefaults));
-            }
-        }
-
         if (File.Exists(ExamplePath))
         {
             return;
@@ -181,6 +167,50 @@ public sealed class FileSourceRetriever
 
         using var stream = File.Create(ExamplePath);
         JsonSerializer.Serialize(stream, defaultCatalog, JsonOptions);
+    }
+
+    public SourceCatalogRepairResult RepairStarterCatalog()
+    {
+        Directory.CreateDirectory(RootDirectory);
+        var defaultCatalog = BuildDefaultCatalog();
+        if (!File.Exists(CatalogPath))
+        {
+            SaveCatalog(defaultCatalog);
+            return new SourceCatalogRepairResult(0, defaultCatalog.Length, CatalogCreated: true, BackupPath: null);
+        }
+
+        SourceCatalogEntry[] currentCatalog;
+        try
+        {
+            currentCatalog = LoadCatalog().ToArray();
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            var backupPath = Path.Combine(
+                RootDirectory,
+                $"curated_sources.invalid-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.json");
+            File.Copy(CatalogPath, backupPath, overwrite: false);
+            SaveCatalog(defaultCatalog);
+            return new SourceCatalogRepairResult(0, defaultCatalog.Length, CatalogCreated: true, backupPath);
+        }
+
+        var existingIds = currentCatalog
+            .Select(source => source.Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingDefaults = defaultCatalog
+            .Where(source => !existingIds.Contains(source.Id))
+            .ToArray();
+        if (missingDefaults.Length > 0)
+        {
+            SaveCatalog(currentCatalog.Concat(missingDefaults));
+        }
+
+        return new SourceCatalogRepairResult(
+            currentCatalog.Length,
+            missingDefaults.Length,
+            CatalogCreated: false,
+            BackupPath: null);
     }
 
     private static SourceCatalogEntry[] BuildDefaultCatalog()
