@@ -20,7 +20,12 @@ public sealed record VoiceRuntimeSettings(
     string? WhisperExecutablePath = null,
     string? WhisperModelPath = null,
     string? WhisperArgumentsTemplate = null,
+    string TextToSpeechEngine = TextToSpeechEngines.Piper,
     string? PiperExecutablePath = null,
     string? PiperModelPath = null,
     string? PiperVoiceId = null,
-    string? PiperArgumentsTemplate = null);
+    string? PiperArgumentsTemplate = null,
+    string? KittenExecutablePath = null,
+    string? KittenModelPath = null,
+    string? KittenVoiceId = null,
+    string? KittenArgumentsTemplate = null);

@@ -74,7 +74,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _ollamaStartInProgress;
     private DateTimeOffset _nextOllamaStartAttemptAt = DateTimeOffset.MinValue;
     private readonly HashSet<int> _ollamaProcessIdsStartedByAli = new();
-    private readonly Dictionary<string, PiperVoiceChoice> _piperVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TextToSpeechVoiceChoice> _textToSpeechVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
     private VoiceRuntimeSettings _voiceSettings;
     private bool _loadingVoiceSettings;
@@ -142,8 +142,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _piperExecutableText = string.Empty;
     private string _piperModelText = string.Empty;
     private string _piperVoiceText = "default";
-    private string _selectedPiperVoiceChoice = string.Empty;
     private string _piperArgumentsText = string.Empty;
+    private string _textToSpeechEngineText = TextToSpeechEngines.Piper;
+    private string _kittenExecutableText = string.Empty;
+    private string _kittenModelText = string.Empty;
+    private string _kittenVoiceText = KittenVoiceCatalog.DefaultVoiceId;
+    private string _selectedTextToSpeechVoiceChoice = string.Empty;
+    private string _kittenArgumentsText = string.Empty;
     private string _voiceSettingsStatusText = "Voice settings loaded.";
     private double _extraInputGainDb;
     private bool _normalizeBeforeStt;
@@ -213,7 +218,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
-        PlayPiperSampleCommand = CreateAsyncCommand(PlayPiperSampleAsync, () => !IsSpeaking);
+        PlayVoiceSampleCommand = CreateAsyncCommand(PlayVoiceSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
         MarkCorrectionUnresolvedCommand = CreateAsyncCommand(MarkSelectedCorrectionUnresolvedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -239,6 +244,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _assistantReadsRepliesOutLoud = _voiceSettings.AssistantReadsRepliesOutLoud;
         _autoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
         _pushToTalkKeyText = NormalizePushToTalkKey(_voiceSettings.PushToTalkKey);
+        ReplaceChoices(TextToSpeechEngineChoices, TextToSpeechEngines.All);
         LoadSpeechToolSettings();
         ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
         foreach (var preset in VoiceInputPreset.All)
@@ -421,7 +427,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> VoiceInputChannelModes { get; } = new();
 
-    public ObservableCollection<string> PiperVoiceChoices { get; } = new();
+    public ObservableCollection<string> TextToSpeechEngineChoices { get; } = new();
+
+    public ObservableCollection<string> TextToSpeechVoiceChoices { get; } = new();
 
     public ObservableCollection<string> RuntimeModelChoices { get; } = new();
 
@@ -540,7 +548,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand OpenSourcesTopicsCommand { get; }
 
-    public ICommand PlayPiperSampleCommand { get; }
+    public ICommand PlayVoiceSampleCommand { get; }
 
     public ICommand RefreshCorrectionsCommand { get; }
 
@@ -1214,14 +1222,37 @@ public sealed class MainWindowViewModel : ObservableObject
         set => SetProperty(ref _piperVoiceText, value);
     }
 
-    public string SelectedPiperVoiceChoice
+    public string TextToSpeechEngineText
     {
-        get => _selectedPiperVoiceChoice;
+        get => _textToSpeechEngineText;
         set
         {
-            if (SetProperty(ref _selectedPiperVoiceChoice, value))
+            var normalized = TextToSpeechEngines.Normalize(value);
+            if (SetProperty(ref _textToSpeechEngineText, normalized))
             {
-                ApplySelectedPiperVoiceChoice(value, applySettings: !_loadingSpeechToolSettings);
+                var wasLoading = _loadingSpeechToolSettings;
+                if (!wasLoading)
+                {
+                    _loadingSpeechToolSettings = true;
+                }
+
+                try
+                {
+                    RefreshTextToSpeechVoiceChoices();
+                }
+                finally
+                {
+                    if (!wasLoading)
+                    {
+                        _loadingSpeechToolSettings = false;
+                    }
+                }
+
+                if (!wasLoading)
+                {
+                    ApplyVoiceToolSettings(saveSettings: true, reportStatus: false);
+                    VoiceSettingsStatusText = $"Text-to-speech engine set to {normalized}.";
+                }
             }
         }
     }
@@ -1230,6 +1261,42 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _piperArgumentsText;
         set => SetProperty(ref _piperArgumentsText, value);
+    }
+
+    public string KittenExecutableText
+    {
+        get => _kittenExecutableText;
+        set => SetProperty(ref _kittenExecutableText, value);
+    }
+
+    public string KittenModelText
+    {
+        get => _kittenModelText;
+        set => SetProperty(ref _kittenModelText, value);
+    }
+
+    public string KittenVoiceText
+    {
+        get => _kittenVoiceText;
+        set => SetProperty(ref _kittenVoiceText, value);
+    }
+
+    public string SelectedTextToSpeechVoiceChoice
+    {
+        get => _selectedTextToSpeechVoiceChoice;
+        set
+        {
+            if (SetProperty(ref _selectedTextToSpeechVoiceChoice, value))
+            {
+                ApplySelectedTextToSpeechVoiceChoice(value, applySettings: !_loadingSpeechToolSettings);
+            }
+        }
+    }
+
+    public string KittenArgumentsText
+    {
+        get => _kittenArgumentsText;
+        set => SetProperty(ref _kittenArgumentsText, value);
     }
 
     public string VoiceSettingsStatusText
@@ -3600,7 +3667,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private async Task PlayPiperSampleAsync()
+    private async Task PlayVoiceSampleAsync()
     {
         if (IsSpeaking)
         {
@@ -3610,7 +3677,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplyVoiceToolSettings(saveSettings: true, reportStatus: false);
         if (!_services.TextToSpeech.IsConfigured)
         {
-            TtsStatus = "Piper is not configured yet.";
+            TtsStatus = $"{TextToSpeechEngineText} is not configured yet.";
             return;
         }
 
@@ -3623,14 +3690,15 @@ public sealed class MainWindowViewModel : ObservableObject
         IsSpeaking = true;
         try
         {
-            TtsStatus = $"Testing {PiperVoiceText}...";
+            var voiceId = CurrentTextToSpeechVoiceId();
+            TtsStatus = $"Testing {voiceId}...";
             speech = await _services.TextToSpeech.SynthesizeAsync(
                 $"Hello, I am {AssistantName}. This is what my selected voice sounds like.",
-                new VoiceSettings(PiperVoiceText, Rate: 1.0, RetainAudio: false),
+                new VoiceSettings(voiceId, Rate: 1.0, RetainAudio: false),
                 _activeSpeech.Token).ConfigureAwait(true);
 
             await _services.SpeechPlayer.PlayAsync(speech.AudioPath, _activeSpeech.Token).ConfigureAwait(true);
-            TtsStatus = $"Voice sample complete: {PiperVoiceText}.";
+            TtsStatus = $"Voice sample complete: {voiceId}.";
             SaveLastSuccessfulTtsDevice();
         }
         catch (OperationCanceledException)
@@ -3788,28 +3856,7 @@ public sealed class MainWindowViewModel : ObservableObject
             _suppressInputMonitorRestart = false;
         }
 
-        try
-        {
-            LoadPiperVoiceChoices();
-            var selectedPiperVoice = FindPiperVoiceLabelForModel(PiperModelText)
-                ?? PiperVoiceChoices.FirstOrDefault()
-                ?? string.Empty;
-            if (!string.Equals(SelectedPiperVoiceChoice, selectedPiperVoice, StringComparison.Ordinal))
-            {
-                SelectedPiperVoiceChoice = selectedPiperVoice;
-            }
-            else
-            {
-                OnPropertyChanged(nameof(SelectedPiperVoiceChoice));
-            }
-        }
-        catch (Exception ex)
-        {
-            _piperVoiceChoices.Clear();
-            PiperVoiceChoices.Clear();
-            SelectedPiperVoiceChoice = string.Empty;
-            VoiceSettingsStatusText = $"Piper voice list unavailable: {ex.Message}";
-        }
+        RefreshTextToSpeechVoiceChoices();
 
         RefreshSpeechToolStatuses();
     }
@@ -3896,7 +3943,10 @@ public sealed class MainWindowViewModel : ObservableObject
         _loadingSpeechToolSettings = true;
         var whisperDefaults = WhisperCliSpeechToTextOptions.FromEnvironment();
         var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
-        LoadPiperVoiceChoices();
+        var kittenDefaults = KittenCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
+        var savedTextToSpeechEngine = TextToSpeechEngines.Normalize(_voiceSettings.TextToSpeechEngine);
+        _textToSpeechEngineText = TextToSpeechEngines.Piper;
+        LoadTextToSpeechVoiceChoices();
 
         WhisperExecutableText = ToPortablePath(PreferValidConfiguredPath(
             _voiceSettings.WhisperExecutablePath,
@@ -3920,8 +3970,18 @@ public sealed class MainWindowViewModel : ObservableObject
             _voiceSettings.PiperArgumentsTemplate,
             BuildLocalPiperArgumentsTemplate(),
             piperDefaults.ArgumentsTemplate);
-        SelectedPiperVoiceChoice = FindPiperVoiceLabelForModel(PiperModelText) ?? PiperVoiceChoices.FirstOrDefault() ?? string.Empty;
-        ApplySelectedPiperVoiceChoice(SelectedPiperVoiceChoice, applySettings: false);
+        KittenExecutableText = ToPortablePath(PreferValidConfiguredPath(
+            _voiceSettings.KittenExecutablePath,
+            PreferConfigured(FindLocalKittenPythonExecutable(), kittenDefaults.ExecutablePath))) ?? string.Empty;
+        KittenModelText = ToPortablePath(PreferValidConfiguredPath(
+            _voiceSettings.KittenModelPath,
+            PreferConfigured(FindLocalKittenModelRoot(), kittenDefaults.ModelPath))) ?? string.Empty;
+        KittenVoiceText = KittenVoiceCatalog.Normalize(PreferConfigured(_voiceSettings.KittenVoiceId, kittenDefaults.VoiceId));
+        KittenArgumentsText = PreferConfigured(
+            _voiceSettings.KittenArgumentsTemplate,
+            BuildLocalKittenArgumentsTemplate() ?? kittenDefaults.ArgumentsTemplate);
+        TextToSpeechEngineText = savedTextToSpeechEngine;
+        RefreshTextToSpeechVoiceChoices();
         _loadingSpeechToolSettings = false;
     }
 
@@ -3932,28 +3992,20 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             var sttOptions = BuildWhisperOptionsFromUi();
-            var ttsOptions = BuildPiperOptionsFromUi();
+            var ttsProvider = BuildTextToSpeechProviderFromUi();
 
             LocalSpeechToolPolicy.EnsureLocalOnly(
                 "Speech-to-text",
                 sttOptions.ExecutablePath,
                 sttOptions.ModelPath,
                 sttOptions.ArgumentsTemplate);
-            LocalSpeechToolPolicy.EnsureLocalOnly(
-                "Text-to-speech",
-                ttsOptions.ExecutablePath,
-                ttsOptions.ModelPath,
-                ttsOptions.ArgumentsTemplate);
 
             SetProcessEnvironment("ALI_WHISPER_EXE", sttOptions.ExecutablePath);
             SetProcessEnvironment("ALI_WHISPER_MODEL", sttOptions.ModelPath);
             SetProcessEnvironment("ALI_WHISPER_ARGS", sttOptions.ArgumentsTemplate);
-            SetProcessEnvironment("ALI_PIPER_EXE", ttsOptions.ExecutablePath);
-            SetProcessEnvironment("ALI_PIPER_MODEL", ttsOptions.ModelPath);
-            SetProcessEnvironment("ALI_PIPER_VOICE", ttsOptions.VoiceId);
-            SetProcessEnvironment("ALI_PIPER_ARGS", ttsOptions.ArgumentsTemplate);
+            ApplyTextToSpeechEnvironment();
 
-            _services.ConfigureSpeechTools(sttOptions, ttsOptions);
+            _services.ConfigureSpeechTools(sttOptions, ttsProvider);
             if (saveSettings)
             {
                 SaveVoiceToolSettings();
@@ -4008,6 +4060,15 @@ public sealed class MainWindowViewModel : ObservableObject
     private static string BuildLocalPiperArgumentsTemplate() =>
         "-m piper --model \"{model}\" --output_file \"{output}\"";
 
+    private static string? BuildLocalKittenArgumentsTemplate()
+    {
+        var script = FindLocalKittenScript();
+        var portableScript = File.Exists(script) ? ToPortablePath(script) : null;
+        return string.IsNullOrWhiteSpace(portableScript)
+            ? null
+            : $"\"{{script}}\" --model \"{{model}}\" --voice \"{{voice}}\" --output \"{{output}}\"";
+    }
+
     private static string? FindLocalWhisperScript()
     {
         return LocalVoiceResourceLocator.FindWhisperScript(AppBaseDirectory);
@@ -4024,10 +4085,76 @@ public sealed class MainWindowViewModel : ObservableObject
             defaults.OutputDirectory);
     }
 
-    private void LoadPiperVoiceChoices()
+    private KittenCliTextToSpeechOptions BuildKittenOptionsFromUi()
     {
-        _piperVoiceChoices.Clear();
-        PiperVoiceChoices.Clear();
+        var defaults = KittenCliTextToSpeechOptions.FromEnvironment(_services.DataRoot);
+        return new KittenCliTextToSpeechOptions(
+            ResolvePortablePath(KittenExecutableText),
+            ResolvePortablePath(KittenModelText),
+            KittenVoiceCatalog.Normalize(PreferConfigured(KittenVoiceText, defaults.VoiceId)),
+            PreferConfigured(KittenArgumentsText, defaults.ArgumentsTemplate),
+            defaults.OutputDirectory);
+    }
+
+    private ITextToSpeechProvider BuildTextToSpeechProviderFromUi()
+    {
+        if (TextToSpeechEngines.Normalize(TextToSpeechEngineText) == TextToSpeechEngines.Kitten)
+        {
+            var kittenOptions = BuildKittenOptionsFromUi();
+            LocalSpeechToolPolicy.EnsureLocalOnly(
+                "Text-to-speech",
+                kittenOptions.ExecutablePath,
+                kittenOptions.ModelPath,
+                kittenOptions.ArgumentsTemplate,
+                FindLocalKittenScript());
+            return new KittenCliTextToSpeechProvider(kittenOptions);
+        }
+
+        var piperOptions = BuildPiperOptionsFromUi();
+        LocalSpeechToolPolicy.EnsureLocalOnly(
+            "Text-to-speech",
+            piperOptions.ExecutablePath,
+            piperOptions.ModelPath,
+            piperOptions.ArgumentsTemplate);
+        return new PiperCliTextToSpeechProvider(piperOptions);
+    }
+
+    private void ApplyTextToSpeechEnvironment()
+    {
+        SetProcessEnvironment("ALI_TTS_ENGINE", TextToSpeechEngines.Normalize(TextToSpeechEngineText));
+        var piperOptions = BuildPiperOptionsFromUi();
+        SetProcessEnvironment("ALI_PIPER_EXE", piperOptions.ExecutablePath);
+        SetProcessEnvironment("ALI_PIPER_MODEL", piperOptions.ModelPath);
+        SetProcessEnvironment("ALI_PIPER_VOICE", piperOptions.VoiceId);
+        SetProcessEnvironment("ALI_PIPER_ARGS", piperOptions.ArgumentsTemplate);
+
+        var kittenOptions = BuildKittenOptionsFromUi();
+        SetProcessEnvironment("ALI_KITTEN_EXE", kittenOptions.ExecutablePath);
+        SetProcessEnvironment("ALI_KITTEN_MODEL", kittenOptions.ModelPath);
+        SetProcessEnvironment("ALI_KITTEN_VOICE", kittenOptions.VoiceId);
+        SetProcessEnvironment("ALI_KITTEN_ARGS", kittenOptions.ArgumentsTemplate);
+    }
+
+    private void LoadTextToSpeechVoiceChoices()
+    {
+        _textToSpeechVoiceChoices.Clear();
+        TextToSpeechVoiceChoices.Clear();
+
+        if (TextToSpeechEngines.Normalize(TextToSpeechEngineText) == TextToSpeechEngines.Kitten)
+        {
+            var modelPath = ToPortablePath(PreferConfigured(KittenModelText, FindLocalKittenModelRoot())) ?? KittenModelText;
+            foreach (var voice in KittenVoiceCatalog.All)
+            {
+                _textToSpeechVoiceChoices[voice.Label] = new TextToSpeechVoiceChoice(
+                    voice.Label,
+                    TextToSpeechEngines.Kitten,
+                    voice.VoiceId,
+                    modelPath);
+                TextToSpeechVoiceChoices.Add(voice.Label);
+            }
+
+            return;
+        }
 
         var voiceDirectory = FindLocalPiperVoiceDirectory();
         if (voiceDirectory is null)
@@ -4039,25 +4166,71 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var voiceId = Path.GetFileNameWithoutExtension(modelPath);
             var label = FormatPiperVoiceLabel(voiceId);
-            _piperVoiceChoices[label] = new PiperVoiceChoice(label, voiceId, ToPortablePath(modelPath) ?? modelPath);
-            PiperVoiceChoices.Add(label);
+            _textToSpeechVoiceChoices[label] = new TextToSpeechVoiceChoice(
+                label,
+                TextToSpeechEngines.Piper,
+                voiceId,
+                ToPortablePath(modelPath) ?? modelPath);
+            TextToSpeechVoiceChoices.Add(label);
         }
     }
 
-    private void ApplySelectedPiperVoiceChoice(string label, bool applySettings)
+    private void RefreshTextToSpeechVoiceChoices()
     {
-        if (!_piperVoiceChoices.TryGetValue(label, out var choice))
+        try
+        {
+            LoadTextToSpeechVoiceChoices();
+            var selectedVoice = FindSelectedTextToSpeechVoiceLabel()
+                ?? TextToSpeechVoiceChoices.FirstOrDefault()
+                ?? string.Empty;
+            if (!string.Equals(SelectedTextToSpeechVoiceChoice, selectedVoice, StringComparison.Ordinal))
+            {
+                SelectedTextToSpeechVoiceChoice = selectedVoice;
+            }
+            else
+            {
+                OnPropertyChanged(nameof(SelectedTextToSpeechVoiceChoice));
+            }
+        }
+        catch (Exception ex)
+        {
+            _textToSpeechVoiceChoices.Clear();
+            TextToSpeechVoiceChoices.Clear();
+            SelectedTextToSpeechVoiceChoice = string.Empty;
+            VoiceSettingsStatusText = $"Voice list unavailable: {ex.Message}";
+        }
+    }
+
+    private void ApplySelectedTextToSpeechVoiceChoice(string label, bool applySettings)
+    {
+        if (!_textToSpeechVoiceChoices.TryGetValue(label, out var choice))
         {
             return;
         }
 
-        PiperVoiceText = choice.VoiceId;
-        PiperModelText = choice.ModelPath;
+        if (choice.Engine == TextToSpeechEngines.Kitten)
+        {
+            KittenVoiceText = KittenVoiceCatalog.Normalize(choice.VoiceId);
+            KittenModelText = choice.ModelPath;
+        }
+        else
+        {
+            PiperVoiceText = choice.VoiceId;
+            PiperModelText = choice.ModelPath;
+        }
+
         if (applySettings)
         {
             ApplyVoiceToolSettings(saveSettings: true, reportStatus: false);
             VoiceSettingsStatusText = $"{AssistantName} voice set to {choice.Label}.";
         }
+    }
+
+    private string? FindSelectedTextToSpeechVoiceLabel()
+    {
+        return TextToSpeechEngines.Normalize(TextToSpeechEngineText) == TextToSpeechEngines.Kitten
+            ? FindKittenVoiceLabel(KittenVoiceText)
+            : FindPiperVoiceLabelForModel(PiperModelText);
     }
 
     private string? FindPiperVoiceLabelForModel(string? modelPath)
@@ -4073,16 +4246,52 @@ public sealed class MainWindowViewModel : ObservableObject
             return null;
         }
 
-        return _piperVoiceChoices.Values.FirstOrDefault(choice =>
-            string.Equals(ResolvePortablePath(choice.ModelPath), normalized, StringComparison.OrdinalIgnoreCase))?.Label;
+        return _textToSpeechVoiceChoices.Values.FirstOrDefault(choice =>
+            choice.Engine == TextToSpeechEngines.Piper
+            && string.Equals(ResolvePortablePath(choice.ModelPath), normalized, StringComparison.OrdinalIgnoreCase))?.Label;
+    }
+
+    private static string? FindKittenVoiceLabel(string? voiceId)
+    {
+        if (string.IsNullOrWhiteSpace(voiceId))
+        {
+            return null;
+        }
+
+        return KittenVoiceCatalog.All.FirstOrDefault(voice =>
+            voice.VoiceId.Equals(voiceId, StringComparison.OrdinalIgnoreCase))?.Label;
     }
 
     private string? PreferredPiperModelPath()
     {
-        var preferred = _piperVoiceChoices.Values.FirstOrDefault(choice =>
-            choice.VoiceId.Equals("en_US-hfc_female-medium", StringComparison.OrdinalIgnoreCase));
-        preferred ??= _piperVoiceChoices.Values.FirstOrDefault();
+        var preferred = _textToSpeechVoiceChoices.Values.FirstOrDefault(choice =>
+            choice.Engine == TextToSpeechEngines.Piper
+            && choice.VoiceId.Equals("en_US-hfc_female-medium", StringComparison.OrdinalIgnoreCase));
+        preferred ??= _textToSpeechVoiceChoices.Values.FirstOrDefault(choice => choice.Engine == TextToSpeechEngines.Piper);
         return preferred?.ModelPath;
+    }
+
+    private string? PreferredKittenModelPath()
+    {
+        var configured = PreferConfigured(KittenModelText, FindLocalKittenModelRoot());
+        return string.IsNullOrWhiteSpace(configured) ? null : configured;
+    }
+
+    private string? FindTextToSpeechVoiceLabelForModel(string? modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            return null;
+        }
+
+        var normalized = ResolvePortablePath(modelPath);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        return _textToSpeechVoiceChoices.Values.FirstOrDefault(choice =>
+            string.Equals(ResolvePortablePath(choice.ModelPath), normalized, StringComparison.OrdinalIgnoreCase))?.Label;
     }
 
     private void SaveVoiceToolSettings()
@@ -4092,10 +4301,15 @@ public sealed class MainWindowViewModel : ObservableObject
             WhisperExecutablePath = ToPortablePath(WhisperExecutableText),
             WhisperModelPath = ToPortablePath(WhisperModelText),
             WhisperArgumentsTemplate = NullIfWhiteSpace(WhisperArgumentsText),
+            TextToSpeechEngine = TextToSpeechEngines.Normalize(TextToSpeechEngineText),
             PiperExecutablePath = ToPortablePath(PiperExecutableText),
             PiperModelPath = ToPortablePath(PiperModelText),
             PiperVoiceId = NullIfWhiteSpace(PiperVoiceText),
-            PiperArgumentsTemplate = NullIfWhiteSpace(PiperArgumentsText)
+            PiperArgumentsTemplate = NullIfWhiteSpace(PiperArgumentsText),
+            KittenExecutablePath = ToPortablePath(KittenExecutableText),
+            KittenModelPath = ToPortablePath(KittenModelText),
+            KittenVoiceId = NullIfWhiteSpace(KittenVoiceText),
+            KittenArgumentsTemplate = NullIfWhiteSpace(KittenArgumentsText)
         };
 
         VoiceRuntimeSettingsStore.Save(_services.DataRoot, _voiceSettings);
@@ -4108,7 +4322,7 @@ public sealed class MainWindowViewModel : ObservableObject
             : "STT not configured. Set the local Whisper executable.";
         TtsStatus = _services.TextToSpeech.IsConfigured
             ? $"TTS ready: {_services.TextToSpeech.ProviderName} ({_services.TextToSpeech.VoiceId})"
-            : "TTS not configured. Set the local Piper executable and voice model.";
+            : $"TTS not configured. Set the local {TextToSpeechEngineText} executable and voice model.";
     }
 
     private static void DeleteVoiceAudioIfTemporary(VoiceAudioInput audioInput)
@@ -4500,7 +4714,7 @@ public sealed class MainWindowViewModel : ObservableObject
             stopSpeaking.RaiseCanExecuteChanged();
         }
 
-        if (PlayPiperSampleCommand is AsyncRelayCommand playPiperSample)
+        if (PlayVoiceSampleCommand is AsyncRelayCommand playPiperSample)
         {
             playPiperSample.RaiseCanExecuteChanged();
         }
@@ -4933,7 +5147,17 @@ public sealed class MainWindowViewModel : ObservableObject
         _services.SpeechToText is WhisperCliSpeechToTextProvider whisper ? whisper.ModelPath : string.Empty;
 
     private string CurrentTextToSpeechModel() =>
-        _services.TextToSpeech is PiperCliTextToSpeechProvider piper ? piper.ModelPath : string.Empty;
+        _services.TextToSpeech switch
+        {
+            PiperCliTextToSpeechProvider piper => piper.ModelPath,
+            KittenCliTextToSpeechProvider kitten => kitten.ModelPath,
+            _ => string.Empty
+        };
+
+    private string CurrentTextToSpeechVoiceId() =>
+        TextToSpeechEngines.Normalize(TextToSpeechEngineText) == TextToSpeechEngines.Kitten
+            ? KittenVoiceCatalog.Normalize(KittenVoiceText)
+            : PreferConfigured(PiperVoiceText, PiperCliTextToSpeechOptions.FromEnvironment(_services.DataRoot).VoiceId);
 
     private VoiceTurnMetadata CreateVoiceMetadata(
         string? transcript,
@@ -5151,6 +5375,23 @@ public sealed class MainWindowViewModel : ObservableObject
         return Directory.Exists(candidate) ? candidate : null;
     }
 
+    private static string? FindLocalKittenPythonExecutable()
+    {
+        var candidate = LocalVoiceResourceLocator.FindKittenPythonExecutable(AppBaseDirectory);
+        return File.Exists(candidate) ? ToPortablePath(candidate) : null;
+    }
+
+    private static string? FindLocalKittenModelRoot()
+    {
+        var candidate = LocalVoiceResourceLocator.FindKittenModelRoot(AppBaseDirectory);
+        return Directory.Exists(candidate) ? ToPortablePath(candidate) : null;
+    }
+
+    private static string? FindLocalKittenScript()
+    {
+        return LocalVoiceResourceLocator.FindKittenScript(AppBaseDirectory);
+    }
+
     private static string? FindLocalVoiceResourceDirectory()
     {
         return LocalVoiceResourceLocator.FindVoiceRoot(AppBaseDirectory);
@@ -5204,4 +5445,4 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 }
 
-internal sealed record PiperVoiceChoice(string Label, string VoiceId, string ModelPath);
+internal sealed record TextToSpeechVoiceChoice(string Label, string Engine, string VoiceId, string ModelPath);

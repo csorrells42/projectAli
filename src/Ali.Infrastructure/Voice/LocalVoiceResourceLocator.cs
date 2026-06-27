@@ -65,6 +65,26 @@ public static class LocalVoiceResourceLocator
         return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
     }
 
+    public static string? FindKittenPythonExecutable(string appBaseDirectory, string? searchRoot = null)
+    {
+        return FindPythonExecutable(appBaseDirectory, searchRoot);
+    }
+
+    public static string? FindKittenModelRoot(string appBaseDirectory, string? searchRoot = null)
+    {
+        var voiceRoot = FindVoiceRoot(appBaseDirectory, searchRoot);
+        var candidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "kitten");
+        return Directory.Exists(candidate) ? Path.GetFullPath(candidate) : null;
+    }
+
+    public static string? FindKittenScript(string appBaseDirectory, string? searchRoot = null)
+    {
+        var voiceRoot = FindVoiceRoot(appBaseDirectory, searchRoot);
+        var repoRoot = TryGetRepositoryRootFromVoiceRoot(voiceRoot);
+        var candidate = repoRoot is null ? null : Path.Combine(repoRoot, "tools", "voice", "local_kitten_tts.py");
+        return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
+    }
+
     public static string? ResolvePath(string appBaseDirectory, string? value, string? searchRoot = null)
     {
         var trimmed = NullIfWhiteSpace(value);
@@ -281,9 +301,11 @@ public static class LocalVoiceResourceLocator
             var piperExecutable = Path.Combine(candidate, "python-venv", "Scripts", "piper.exe");
             var piperVoiceDirectory = Path.Combine(candidate, "piper");
             var whisperDirectory = Path.Combine(candidate, "whisper");
+            var kittenDirectory = Path.Combine(candidate, "kitten");
             return File.Exists(piperExecutable)
-                || Directory.EnumerateFiles(piperVoiceDirectory, "en_US-*.onnx").Any()
-                || Directory.Exists(whisperDirectory);
+                || HasPiperVoices(piperVoiceDirectory)
+                || Directory.Exists(whisperDirectory)
+                || Directory.Exists(kittenDirectory);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
         {
@@ -292,6 +314,19 @@ public static class LocalVoiceResourceLocator
     }
 
     private static bool IsPiperVoiceDirectory(string candidate)
+    {
+        try
+        {
+            return Directory.Exists(candidate)
+                && Directory.EnumerateFiles(candidate, "en_US-*.onnx").Any();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasPiperVoices(string candidate)
     {
         try
         {

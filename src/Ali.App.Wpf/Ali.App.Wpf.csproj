@@ -5,6 +5,13 @@
     <ProjectReference Include="..\Ali.Infrastructure\Ali.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\tools\voice\local_kitten_tts.py"
+             Link="tools\voice\local_kitten_tts.py"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>

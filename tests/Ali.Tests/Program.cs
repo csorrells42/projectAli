@@ -5801,9 +5801,14 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
         AutoSendVoiceTranscripts: true,
         WhisperExecutablePath: @"C:\Ali\lib\voice\whisper.exe",
         WhisperModelPath: @"C:\Ali\lib\voice\faster-whisper",
+        TextToSpeechEngine: TextToSpeechEngines.Kitten,
         PiperExecutablePath: @"C:\Ali\lib\voice\piper.exe",
         PiperModelPath: @"C:\Ali\lib\voice\en_US.onnx",
-        PiperVoiceId: "en_US-test");
+        PiperVoiceId: "en_US-test",
+        KittenExecutablePath: @"C:\Ali\lib\voice\python-venv\Scripts\python.exe",
+        KittenModelPath: @"C:\Ali\lib\voice\kitten",
+        KittenVoiceId: "Luna",
+        KittenArgumentsTemplate: "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\"");
 
     VoiceRuntimeSettingsStore.Save(directory, settings);
     var loaded = VoiceRuntimeSettingsStore.LoadOrDefault(directory);
@@ -5818,8 +5823,12 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(true, loaded.AssistantReadsRepliesOutLoud);
     Equal(true, loaded.AutoSendVoiceTranscripts);
     Equal(@"C:\Ali\lib\voice\whisper.exe", loaded.WhisperExecutablePath);
+    Equal(TextToSpeechEngines.Kitten, loaded.TextToSpeechEngine);
     Equal(@"C:\Ali\lib\voice\en_US.onnx", loaded.PiperModelPath);
     Equal("en_US-test", loaded.PiperVoiceId);
+    Equal(@"C:\Ali\lib\voice\kitten", loaded.KittenModelPath);
+    Equal("Luna", loaded.KittenVoiceId);
+    Contains("{script}", loaded.KittenArgumentsTemplate ?? string.Empty);
     Equal(3, loaded.LastSuccessfulSttDeviceNumber);
     return Task.CompletedTask;
 }
@@ -5836,16 +5845,20 @@ static Task TestLocalVoiceResourceLocatorRepairsDevRunPaths()
     var whisperRoot = Path.Combine(voiceRoot, "whisper");
     var whisperPython = Path.Combine(voiceRoot, "python-venv", "Scripts", "python.exe");
     var whisperScript = Path.Combine(repoRoot, "tools", "voice", "local_whisper_stt.py");
+    var kittenRoot = Path.Combine(voiceRoot, "kitten");
+    var kittenScript = Path.Combine(repoRoot, "tools", "voice", "local_kitten_tts.py");
 
     Directory.CreateDirectory(appBase);
     Directory.CreateDirectory(piperVoiceDirectory);
     Directory.CreateDirectory(Path.GetDirectoryName(piperExecutable)!);
     Directory.CreateDirectory(whisperRoot);
+    Directory.CreateDirectory(kittenRoot);
     Directory.CreateDirectory(Path.GetDirectoryName(whisperScript)!);
     File.WriteAllText(piperExecutable, "fake piper");
     File.WriteAllText(whisperPython, "fake python");
     File.WriteAllText(piperModel, "fake model");
     File.WriteAllText(whisperScript, "print('fake')");
+    File.WriteAllText(kittenScript, "print('fake')");
 
     var stalePortableModel = Path.Combine(
         "..",
@@ -5865,6 +5878,9 @@ static Task TestLocalVoiceResourceLocatorRepairsDevRunPaths()
     Equal(Path.GetFullPath(whisperRoot), LocalVoiceResourceLocator.FindWhisperModelRoot(appBase, root));
     Equal(Path.GetFullPath(whisperPython), LocalVoiceResourceLocator.FindWhisperPythonExecutable(appBase, root));
     Equal(Path.GetFullPath(whisperScript), LocalVoiceResourceLocator.FindWhisperScript(appBase, root));
+    Equal(Path.GetFullPath(kittenRoot), LocalVoiceResourceLocator.FindKittenModelRoot(appBase, root));
+    Equal(Path.GetFullPath(whisperPython), LocalVoiceResourceLocator.FindKittenPythonExecutable(appBase, root));
+    Equal(Path.GetFullPath(kittenScript), LocalVoiceResourceLocator.FindKittenScript(appBase, root));
     Equal(Path.GetFullPath(piperModel), LocalVoiceResourceLocator.ToPortablePath(appBase, stalePortableModel, root));
     return Task.CompletedTask;
 }

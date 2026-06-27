@@ -138,10 +138,17 @@ public sealed class AliServices
 
     public void ConfigureSpeechTools(
         WhisperCliSpeechToTextOptions speechToTextOptions,
-        PiperCliTextToSpeechOptions textToSpeechOptions)
+        ITextToSpeechProvider textToSpeechProvider)
     {
         SpeechToText = new WhisperCliSpeechToTextProvider(speechToTextOptions);
-        TextToSpeech = new PiperCliTextToSpeechProvider(textToSpeechOptions);
+        TextToSpeech = textToSpeechProvider;
+    }
+
+    public void ConfigureSpeechTools(
+        WhisperCliSpeechToTextOptions speechToTextOptions,
+        PiperCliTextToSpeechOptions textToSpeechOptions)
+    {
+        ConfigureSpeechTools(speechToTextOptions, new PiperCliTextToSpeechProvider(textToSpeechOptions));
     }
 
     public static string LocalAliRoot => Path.Combine(
@@ -199,7 +206,8 @@ public sealed class AliServices
 
         var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions.FromEnvironment());
-        var textToSpeech = new PiperCliTextToSpeechProvider(PiperCliTextToSpeechOptions.FromEnvironment(dataRoot));
+        var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
+        var textToSpeech = CreateTextToSpeechProvider(dataRoot, voiceSettings);
         var speechPlayer = new NAudioWaveSpeechPlayer();
 
         return new AliServices(
@@ -217,5 +225,30 @@ public sealed class AliServices
             memories,
             reminders,
             localCodingTool);
+    }
+
+    private static ITextToSpeechProvider CreateTextToSpeechProvider(
+        string dataRoot,
+        VoiceRuntimeSettings voiceSettings)
+    {
+        var engine = TextToSpeechEngines.Normalize(voiceSettings.TextToSpeechEngine);
+        if (engine == TextToSpeechEngines.Kitten)
+        {
+            var defaults = KittenCliTextToSpeechOptions.FromEnvironment(dataRoot);
+            return new KittenCliTextToSpeechProvider(new KittenCliTextToSpeechOptions(
+                voiceSettings.KittenExecutablePath ?? defaults.ExecutablePath,
+                voiceSettings.KittenModelPath ?? defaults.ModelPath,
+                KittenVoiceCatalog.Normalize(voiceSettings.KittenVoiceId ?? defaults.VoiceId),
+                voiceSettings.KittenArgumentsTemplate ?? defaults.ArgumentsTemplate,
+                defaults.OutputDirectory));
+        }
+
+        var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(dataRoot);
+        return new PiperCliTextToSpeechProvider(new PiperCliTextToSpeechOptions(
+            voiceSettings.PiperExecutablePath ?? piperDefaults.ExecutablePath,
+            voiceSettings.PiperModelPath ?? piperDefaults.ModelPath,
+            voiceSettings.PiperVoiceId ?? piperDefaults.VoiceId,
+            voiceSettings.PiperArgumentsTemplate ?? piperDefaults.ArgumentsTemplate,
+            piperDefaults.OutputDirectory));
     }
 }
