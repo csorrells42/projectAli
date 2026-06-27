@@ -152,6 +152,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer installs sidecar voice resources", TestDesktopInstallerInstallsSidecarVoiceResources),
     ("desktop uninstaller removes app and preserves user data", TestDesktopUninstallerRemovesAppAndPreservesUserData),
     ("desktop uninstaller can remove user data explicitly", TestDesktopUninstallerCanRemoveUserDataExplicitly),
+    ("desktop uninstaller does not create missing target root", TestDesktopUninstallerDoesNotCreateMissingTargetRoot),
+    ("desktop uninstaller refuses unsafe root", TestDesktopUninstallerRefusesUnsafeRoot),
     ("desktop installer readiness reports payload and first launch profile", TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile),
     ("desktop installer readiness reports voice resources", TestDesktopInstallerReadinessReportsVoiceResources),
     ("desktop installer readiness reports missing VSIX installer", TestDesktopInstallerReadinessReportsMissingVsixInstaller),
@@ -3655,6 +3657,33 @@ static async Task TestDesktopUninstallerCanRemoveUserDataExplicitly()
     Equal(false, Directory.Exists(localRoot));
     Equal(true, File.Exists(result.ReceiptPath));
     Contains("user data were removed", result.Message);
+}
+
+static async Task TestDesktopUninstallerDoesNotCreateMissingTargetRoot()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var localRoot = Path.Combine(root, "MissingAliRoot");
+
+    var uninstaller = new AliDesktopUninstaller();
+    var result = await uninstaller.UninstallAsync(new AliDesktopUninstallOptions(localRoot));
+
+    Equal(true, result.Succeeded);
+    Equal(false, Directory.Exists(localRoot));
+    Equal(true, File.Exists(result.ReceiptPath));
+    Equal(false, result.ReceiptPath.StartsWith(localRoot, StringComparison.OrdinalIgnoreCase));
+    Contains("Nothing was removed", result.Message);
+}
+
+static async Task TestDesktopUninstallerRefusesUnsafeRoot()
+{
+    var unsafeRoot = Path.GetPathRoot(Path.GetTempPath())!;
+
+    var uninstaller = new AliDesktopUninstaller();
+    var result = await uninstaller.UninstallAsync(new AliDesktopUninstallOptions(unsafeRoot, RemoveUserData: true));
+
+    Equal(false, result.Succeeded);
+    Equal(true, File.Exists(result.ReceiptPath));
+    Contains("unsafe Ali root", result.Message);
 }
 
 static async Task TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile()

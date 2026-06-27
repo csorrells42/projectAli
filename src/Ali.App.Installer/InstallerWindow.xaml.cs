@@ -359,6 +359,16 @@ public partial class InstallerWindow : Window
             ? AliDesktopUninstallOptions.CreateDefault().LocalAliRoot
             : Path.GetFullPath(options.LocalAliRoot);
         var devRun = Path.Combine(localRoot, "DevRun");
+        if (AliDesktopUninstaller.IsUnsafeLocalRoot(localRoot))
+        {
+            return
+            [
+                new(
+                    "Missing - Ali root",
+                    $"Setup will refuse to uninstall from this unsafe root: {localRoot}")
+            ];
+        }
+
         var items = new List<ReadinessDisplayItem>
         {
             new(

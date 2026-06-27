@@ -31,10 +31,15 @@ public sealed class AliDesktopUninstaller
         var removedPaths = new List<string>();
         var preservedPaths = new List<string>();
         var warnings = new List<string>();
-        var receiptPath = CreateReceiptPath(localRoot, options.RemoveUserData);
+        var receiptPath = string.Empty;
 
         try
         {
+            if (IsUnsafeLocalRoot(localRoot))
+            {
+                throw new InvalidOperationException($"Refusing to uninstall from unsafe Ali root: {localRoot}");
+            }
+
             var devRun = Path.Combine(localRoot, "DevRun");
             DeleteDirectoryIfExists(devRun, removedPaths);
             DeleteShortcutIfExists(
@@ -50,11 +55,6 @@ public sealed class AliDesktopUninstaller
 
             if (options.RemoveUserData)
             {
-                if (IsUnsafeDeleteRoot(localRoot))
-                {
-                    throw new InvalidOperationException($"Refusing to remove unsafe Ali data root: {localRoot}");
-                }
-
                 DeleteDirectoryIfExists(localRoot, removedPaths);
             }
             else
@@ -65,6 +65,7 @@ public sealed class AliDesktopUninstaller
                 AddPreservedIfExists(localRoot, preservedPaths);
             }
 
+            receiptPath = CreateReceiptPath(localRoot, options.RemoveUserData, preservedPaths.Count > 0);
             await WriteReceiptAsync(
                     receiptPath,
                     localRoot,
@@ -75,7 +76,9 @@ public sealed class AliDesktopUninstaller
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            var message = options.RemoveUserData
+            var message = removedPaths.Count == 0 && preservedPaths.Count == 0
+                ? "No Ali app files were found. Nothing was removed."
+                : options.RemoveUserData
                 ? "Ali app and user data were removed."
                 : "Ali app was removed. User data was preserved.";
             return new AliDesktopUninstallResult(true, message, localRoot, receiptPath, removedPaths, preservedPaths, warnings);
@@ -85,6 +88,9 @@ public sealed class AliDesktopUninstaller
             warnings.Add(ex.Message);
             try
             {
+                receiptPath = string.IsNullOrWhiteSpace(receiptPath)
+                    ? CreateReceiptPath(localRoot, removeUserData: true, useLocalReceipt: false)
+                    : receiptPath;
                 await WriteReceiptAsync(
                         receiptPath,
                         localRoot,
@@ -202,7 +208,7 @@ public sealed class AliDesktopUninstaller
         }
     }
 
-    private static bool IsUnsafeDeleteRoot(string localRoot)
+    public static bool IsUnsafeLocalRoot(string localRoot)
     {
         var fullPath = Path.GetFullPath(localRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var pathRoot = Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -227,12 +233,11 @@ public sealed class AliDesktopUninstaller
             .Any(path => string.Equals(fullPath, path, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string CreateReceiptPath(string localRoot, bool removeUserData)
+    private static string CreateReceiptPath(string localRoot, bool removeUserData, bool useLocalReceipt)
     {
-        var receiptsRoot = removeUserData
+        var receiptsRoot = removeUserData || !useLocalReceipt
             ? Path.Combine(Path.GetTempPath(), "Ali.UninstallReceipts")
             : Path.Combine(localRoot, "BootstrapData", "install-receipts");
-        Directory.CreateDirectory(receiptsRoot);
         return Path.Combine(receiptsRoot, $"uninstall-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.json");
     }
 
