@@ -7,9 +7,9 @@
         mc:Ignorable="d"
         Title="{Binding AssistantWindowTitle}"
         Height="820"
-        MinHeight="640"
+        MinHeight="820"
         Width="1320"
-        MinWidth="1080"
+        MinWidth="1349"
         Background="#0B0B0D"
         FontFamily="Segoe UI">
     <Window.Resources>
