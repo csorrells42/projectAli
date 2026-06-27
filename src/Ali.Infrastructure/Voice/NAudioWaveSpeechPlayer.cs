@@ -84,13 +84,18 @@ public sealed class NAudioWaveSpeechPlayer : ISpeechPlayer, IDisposable
 
     private static IWaveProvider CreatePlaybackProvider(WaveFileReader reader)
     {
-        if (reader.WaveFormat.Channels != 1)
+        ISampleProvider sampleProvider = reader.ToSampleProvider();
+        if (reader.WaveFormat.Channels == 1)
         {
-            return reader;
+            sampleProvider = new MonoToStereoSampleProvider(sampleProvider);
         }
 
-        var stereo = new MonoToStereoSampleProvider(reader.ToSampleProvider());
-        return new SampleToWaveProvider16(stereo);
+        if (sampleProvider.WaveFormat.SampleRate != 48000)
+        {
+            sampleProvider = new WdlResamplingSampleProvider(sampleProvider, 48000);
+        }
+
+        return new SampleToWaveProvider16(sampleProvider);
     }
 
     private static IWavePlayer CreateOutputDevice(int outputDeviceNumber)
