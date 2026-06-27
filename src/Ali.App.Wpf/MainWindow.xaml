@@ -96,6 +96,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="292" />
             <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" Padding="14">
@@ -235,6 +236,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0"
                                Text="{Binding StatusText}"
@@ -315,6 +317,15 @@
                             VerticalAlignment="Center"
                             ToolTip="{Binding AssistantLocalLibraryToolTip}" />
                     <Button Grid.Column="5"
+                            Content="{Binding ComputerManagementPanelToggleText}"
+                            Command="{Binding ToggleComputerManagementPanelCommand}"
+                            Height="34"
+                            MinHeight="34"
+                            Margin="0,0,8,0"
+                            Padding="12,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Open computer management and troubleshooting commands." />
+                    <Button Grid.Column="6"
                             Content="Settings"
                             Command="{Binding OpenSettingsCommand}"
                             Height="34"
@@ -494,5 +505,79 @@
                 </Grid>
             </Grid>
         </Grid>
+
+        <Border Grid.Column="2"
+                Width="320"
+                Background="{StaticResource SidebarBrush}"
+                BorderBrush="{StaticResource BorderBrushDark}"
+                BorderThickness="1,0,0,0"
+                Padding="14"
+                Visibility="{Binding IsComputerManagementPanelOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Computer"
+                                   Foreground="{StaticResource TextBrush}"
+                                   FontSize="20"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="Management and troubleshooting"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="12"
+                                   Margin="0,2,0,0" />
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="Close"
+                            Command="{Binding ToggleComputerManagementPanelCommand}"
+                            Height="30"
+                            MinHeight="30"
+                            Padding="10,0"
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Top" />
+                </Grid>
+
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto"
+                              Padding="0,0,6,0">
+                    <ItemsControl ItemsSource="{Binding ComputerManagementActions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ComputerManagementActionViewModel}">
+                                <Button Command="{Binding DataContext.RunComputerManagementActionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                        HorizontalContentAlignment="Stretch"
+                                        Padding="10,8"
+                                        Margin="0,0,0,8"
+                                        ToolTip="{Binding CommandText}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Category}"
+                                                   Foreground="{StaticResource AccentBrush}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Title}"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   FontWeight="SemiBold"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,2,0,0" />
+                                        <TextBlock Text="{Binding Description}"
+                                                   Foreground="{StaticResource MutedTextBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,3,0,0" />
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

@@ -812,6 +812,10 @@ static Task TestCodingParserRoutesWindowsTroubleshooting()
     Equal(CodingToolAction.CollectProcessEvidence, processRequest.Action);
     Equal("dotnet", processRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("can you look at the processes running", out var runningProcessesRequest));
+    Equal(CodingToolAction.CollectProcessEvidence, runningProcessesRequest.Action);
+    Equal(null, runningProcessesRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("diagnose port 8765", out var portRequest));
     Equal(CodingToolAction.DiagnosePortOwner, portRequest.Action);
     Equal("8765", portRequest.Query);

@@ -777,6 +777,12 @@ public static class CodingToolRequestParser
     [
         "collect process evidence",
         "show process evidence",
+        "can you look at the processes running",
+        "look at the processes running",
+        "look at running processes",
+        "show running processes",
+        "list running processes",
+        "what processes are running",
         "inspect process",
         "inspect processes",
         "diagnose process",

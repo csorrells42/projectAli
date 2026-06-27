@@ -95,6 +95,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private double _spectrumVisualCeiling = 0.25d;
     private double _lastSpectrumPeakLevel;
     private string _composerText = string.Empty;
+    private bool _isComputerManagementPanelOpen;
     private bool _isBusy;
     private bool _isRecording;
     private bool _isTranscribing;
@@ -219,6 +220,8 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
+        ToggleComputerManagementPanelCommand = CreateCommand(_ => IsComputerManagementPanelOpen = !IsComputerManagementPanelOpen);
+        RunComputerManagementActionCommand = CreateCommand(parameter => _ = RunComputerManagementActionSafelyAsync(parameter), _ => !IsBusy);
         PlayVoiceSampleCommand = CreateAsyncCommand(PlayVoiceSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -239,6 +242,11 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
+        foreach (var action in BuildComputerManagementActions())
+        {
+            ComputerManagementActions.Add(action);
+        }
+
         _extraInputGainDb = _voiceSettings.ExtraInputGainDb;
         _normalizeBeforeStt = _voiceSettings.NormalizeBeforeStt;
         _retainDebugAudio = _voiceSettings.RetainDebugAudio;
@@ -330,6 +338,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
 
     public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
+
+    public ObservableCollection<ComputerManagementActionViewModel> ComputerManagementActions { get; } = new();
 
     public ObservableCollection<CorrectionReviewItemViewModel> CorrectionReviewItems { get; } = new();
 
@@ -549,6 +559,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenLocalLibraryCommand { get; }
 
     public ICommand OpenSourcesTopicsCommand { get; }
+
+    public ICommand ToggleComputerManagementPanelCommand { get; }
+
+    public ICommand RunComputerManagementActionCommand { get; }
 
     public ICommand PlayVoiceSampleCommand { get; }
 
@@ -1377,6 +1391,20 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool IsComputerManagementPanelOpen
+    {
+        get => _isComputerManagementPanelOpen;
+        set
+        {
+            if (SetProperty(ref _isComputerManagementPanelOpen, value))
+            {
+                OnPropertyChanged(nameof(ComputerManagementPanelToggleText));
+            }
+        }
+    }
+
+    public string ComputerManagementPanelToggleText => IsComputerManagementPanelOpen ? "Hide Computer" : "Computer";
+
     public bool IsBusy
     {
         get => _isBusy;
@@ -1707,6 +1735,41 @@ public sealed class MainWindowViewModel : ObservableObject
 
         ComposerText = string.Empty;
         await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+    }
+
+    private async Task RunComputerManagementActionSafelyAsync(object? parameter)
+    {
+        try
+        {
+            await RunComputerManagementActionAsync(parameter).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            HandleCommandException(ex);
+        }
+    }
+
+    private async Task RunComputerManagementActionAsync(object? parameter)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        var commandText = parameter switch
+        {
+            ComputerManagementActionViewModel action => action.CommandText,
+            string text => text,
+            _ => null
+        };
+
+        if (string.IsNullOrWhiteSpace(commandText))
+        {
+            return;
+        }
+
+        ComposerText = string.Empty;
+        await SendTextAsync(commandText.Trim(), VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
     }
 
     private async Task SendTextAsync(
@@ -4733,6 +4796,11 @@ public sealed class MainWindowViewModel : ObservableObject
             stopSpeaking.RaiseCanExecuteChanged();
         }
 
+        if (RunComputerManagementActionCommand is RelayCommand runComputerManagementAction)
+        {
+            runComputerManagementAction.RaiseCanExecuteChanged();
+        }
+
         if (PlayVoiceSampleCommand is AsyncRelayCommand playPiperSample)
         {
             playPiperSample.RaiseCanExecuteChanged();
@@ -4768,6 +4836,22 @@ public sealed class MainWindowViewModel : ObservableObject
             completeReminder.RaiseCanExecuteChanged();
         }
     }
+
+    private static IReadOnlyList<ComputerManagementActionViewModel> BuildComputerManagementActions() =>
+    [
+        new("Overview", "Status", "Show local computer help boundaries.", "show computer assistant status"),
+        new("Overview", "Command Index", "List deterministic computer-management commands.", "show computer assistant commands"),
+        new("Processes", "Running Processes", "Read-only snapshot of top local processes by memory.", "collect process evidence"),
+        new("Processes", "Build Lock Check", "Find common build helper processes holding files.", "diagnose build lock"),
+        new("Processes", "Port Owner", "Check which process owns a local port.", "diagnose port 8765"),
+        new("Windows", "Services & Startup", "Inspect service and startup evidence.", "inspect services and startup"),
+        new("Windows", "Event Logs", "Triage recent Windows event log clues.", "triage event logs"),
+        new("Windows", "Install Doctor", "Check Ali install and dependency readiness.", "show install doctor"),
+        new("Troubleshooting", "Slow Computer Plan", "Plan safe first checks for performance issues.", "plan slow computer troubleshooting"),
+        new("Troubleshooting", "Wi-Fi Plan", "Plan safe checks for connection drops.", "troubleshoot wifi dropping connection"),
+        new("Troubleshooting", "Suspicious Activity Plan", "Plan evidence gathering for unknown startup/process activity.", "plan suspicious activity check unknown startup item"),
+        new("Cleanup", "Disk Cleanup Plan", "Plan cleanup without deleting files automatically.", "plan disk cleanup")
+    ];
 
     private string FormatRuntimeDisplay()
     {
