@@ -23,6 +23,10 @@
         <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
         <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
         <SolidColorBrush x:Key="AccentBrush" Color="#00BEE6" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#24404A" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#202024" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#F8FAFC" />
         <Style TargetType="Button">
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="Margin" Value="0,4,0,0" />
@@ -110,12 +114,15 @@
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="292" />
+            <ColumnDefinition Width="{Binding HistorySidebarColumnWidth}" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Background="{StaticResource SidebarBrush}" Padding="14">
+        <Border Grid.Column="0"
+                Background="{StaticResource SidebarBrush}"
+                Padding="14"
+                Visibility="{Binding IsHistorySidebarVisible, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />

@@ -1402,11 +1402,19 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _isCommandExplorerOpen, value))
             {
                 OnPropertyChanged(nameof(CommandExplorerToggleText));
+                OnPropertyChanged(nameof(HistorySidebarColumnWidth));
+                OnPropertyChanged(nameof(IsHistorySidebarVisible));
             }
         }
     }
 
     public string CommandExplorerToggleText => IsCommandExplorerOpen ? "Hide Commands" : "Commands";
+
+    public GridLength HistorySidebarColumnWidth => IsCommandExplorerOpen
+        ? new GridLength(0)
+        : new GridLength(292);
+
+    public bool IsHistorySidebarVisible => !IsCommandExplorerOpen;
 
     public CommandExplorerNodeViewModel? SelectedCommandExplorerNode
     {
