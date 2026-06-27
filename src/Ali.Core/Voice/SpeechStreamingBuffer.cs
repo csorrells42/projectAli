@@ -8,7 +8,7 @@ public sealed class SpeechStreamingBuffer
     private readonly int _minimumSegmentCharacters;
     private readonly int _maximumSegmentCharacters;
 
-    public SpeechStreamingBuffer(int minimumSegmentCharacters = 120, int maximumSegmentCharacters = 420)
+    public SpeechStreamingBuffer(int minimumSegmentCharacters = 180, int maximumSegmentCharacters = 700)
     {
         if (minimumSegmentCharacters < 20)
         {

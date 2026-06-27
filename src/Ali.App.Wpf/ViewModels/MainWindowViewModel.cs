@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
@@ -32,8 +33,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private const double SpectrumRenderHeight = 130d;
     private const double SpectrumRenderInset = 12d;
     private const string RuntimeTopPModelDefault = "Model default";
+    private const int StreamingTextFlushCharacters = 32;
+    private const int StreamingTextDisplaySliceCharacters = 72;
     private static readonly TimeSpan ModelStatusPingTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan StreamingTextFlushInterval = TimeSpan.FromMilliseconds(45);
+    private static readonly TimeSpan StreamingTextPaceDelay = TimeSpan.FromMilliseconds(12);
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
     private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
     private static readonly string[] CodingWorkspaceAccessModeChoiceValues = [CodingPermissionModes.Allowed];
@@ -1667,6 +1672,34 @@ public sealed class MainWindowViewModel : ObservableObject
         var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
         var reachedOutputLimit = false;
+        var pendingVisibleText = new StringBuilder();
+        var lastVisibleTextFlush = DateTimeOffset.UtcNow;
+
+        async Task FlushVisibleTextAsync(bool force, bool pace)
+        {
+            if (pendingVisibleText.Length == 0)
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (!force
+                && pendingVisibleText.Length < StreamingTextFlushCharacters
+                && now - lastVisibleTextFlush < StreamingTextFlushInterval)
+            {
+                return;
+            }
+
+            assistantMessage.Text += pendingVisibleText.ToString();
+            pendingVisibleText.Clear();
+            lastVisibleTextFlush = now;
+            await Task.Yield();
+
+            if (pace && _activeResponse is not null && !_activeResponse.IsCancellationRequested)
+            {
+                await Task.Delay(StreamingTextPaceDelay, _activeResponse.Token).ConfigureAwait(true);
+            }
+        }
 
         try
         {
@@ -1679,12 +1712,20 @@ public sealed class MainWindowViewModel : ObservableObject
                                attachments,
                                _activeResponse.Token))
             {
-                assistantMessage.Text += chunk.Text;
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
                 reachedOutputLimit |= chunk.ReachedOutputLimit;
                 QueueStreamingSpeech(streamingSpeech, chunk.Text);
+
+                foreach (var textSlice in SplitStreamingTextForDisplay(chunk.Text))
+                {
+                    pendingVisibleText.Append(textSlice);
+                    await FlushVisibleTextAsync(
+                        force: pendingVisibleText.Length >= StreamingTextFlushCharacters,
+                        pace: true).ConfigureAwait(true);
+                }
             }
 
+            await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             CompleteStreamingSpeechInput(streamingSpeech);
 
             if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
@@ -1709,12 +1750,14 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             assistantMessage.Text += "\n\nStopped by user.";
             CancelStreamingSpeech(streamingSpeech);
             StatusText = "Response stopped.";
         }
         catch (HttpRequestException ex)
         {
+            await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
             CancelStreamingSpeech(streamingSpeech);
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
@@ -3381,6 +3424,20 @@ public sealed class MainWindowViewModel : ObservableObject
         return state;
     }
 
+    private static IEnumerable<string> SplitStreamingTextForDisplay(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            yield break;
+        }
+
+        for (var offset = 0; offset < text.Length; offset += StreamingTextDisplaySliceCharacters)
+        {
+            var length = Math.Min(StreamingTextDisplaySliceCharacters, text.Length - offset);
+            yield return text.Substring(offset, length);
+        }
+    }
+
     private static void QueueStreamingSpeech(StreamingSpeechState? state, string chunkText)
     {
         if (state is null)
@@ -3424,6 +3481,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task ConsumeStreamingSpeechAsync(StreamingSpeechState state)
     {
+        SpeechSynthesisResult? currentSpeech = null;
         try
         {
             await foreach (var segment in state.Queue.Reader.ReadAllAsync(state.Cancellation.Token).ConfigureAwait(true))
@@ -3433,31 +3491,43 @@ public sealed class MainWindowViewModel : ObservableObject
                     continue;
                 }
 
-                SpeechSynthesisResult? speech = null;
+                TtsStatus = currentSpeech is null
+                    ? "Synthesizing streamed speech..."
+                    : "Preparing next speech segment...";
+
+                var nextSpeechTask = SynthesizeStreamingSpeechSegmentAsync(segment, state.Cancellation.Token);
                 try
                 {
-                    TtsStatus = "Synthesizing streamed speech...";
-                    var settings = new VoiceSettings(
-                        _services.TextToSpeech.VoiceId,
-                        Rate: 1.0,
-                        RetainAudio: false);
-
-                    speech = await _services.TextToSpeech.SynthesizeAsync(
-                        segment,
-                        settings,
-                        state.Cancellation.Token).ConfigureAwait(true);
-
-                    TtsStatus = "Speaking streamed response...";
-                    await _services.SpeechPlayer.PlayAsync(speech.AudioPath, state.Cancellation.Token).ConfigureAwait(true);
-                    SaveLastSuccessfulTtsDevice();
-                }
-                finally
-                {
-                    if (speech is not null && !speech.RetainAudio && File.Exists(speech.AudioPath))
+                    if (currentSpeech is not null)
                     {
-                        TryDeleteFile(speech.AudioPath);
+                        await PlayAndDeleteSpeechAsync(currentSpeech, state.Cancellation.Token).ConfigureAwait(true);
+                        currentSpeech = null;
                     }
+
+                    currentSpeech = await nextSpeechTask.ConfigureAwait(true);
                 }
+                catch
+                {
+                    _ = nextSpeechTask.ContinueWith(
+                        task =>
+                        {
+                            if (task.Status == TaskStatus.RanToCompletion)
+                            {
+                                TryDeleteSpeechFile(task.Result);
+                            }
+                        },
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+
+                    throw;
+                }
+            }
+
+            if (currentSpeech is not null)
+            {
+                await PlayAndDeleteSpeechAsync(currentSpeech, state.Cancellation.Token).ConfigureAwait(true);
+                currentSpeech = null;
             }
 
             TtsStatus = "Speech complete.";
@@ -3473,12 +3543,49 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         finally
         {
+            TryDeleteSpeechFile(currentSpeech);
             IsSpeaking = false;
             if (ReferenceEquals(_activeSpeech, state.Cancellation))
             {
                 _activeSpeech.Dispose();
                 _activeSpeech = null;
             }
+        }
+    }
+
+    private Task<SpeechSynthesisResult> SynthesizeStreamingSpeechSegmentAsync(
+        string segment,
+        CancellationToken cancellationToken)
+    {
+        var settings = new VoiceSettings(
+            _services.TextToSpeech.VoiceId,
+            Rate: 1.0,
+            RetainAudio: false);
+
+        return _services.TextToSpeech.SynthesizeAsync(segment, settings, cancellationToken);
+    }
+
+    private async Task PlayAndDeleteSpeechAsync(
+        SpeechSynthesisResult speech,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            TtsStatus = "Speaking streamed response...";
+            await _services.SpeechPlayer.PlayAsync(speech.AudioPath, cancellationToken).ConfigureAwait(true);
+            SaveLastSuccessfulTtsDevice();
+        }
+        finally
+        {
+            TryDeleteSpeechFile(speech);
+        }
+    }
+
+    private static void TryDeleteSpeechFile(SpeechSynthesisResult? speech)
+    {
+        if (speech is not null && !speech.RetainAudio && File.Exists(speech.AudioPath))
+        {
+            TryDeleteFile(speech.AudioPath);
         }
     }
 
