@@ -150,6 +150,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer skips Ollama installer when executable exists", TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists),
     ("desktop installer repair preserves profile data", TestDesktopInstallerRepairPreservesProfileData),
     ("desktop installer installs sidecar voice resources", TestDesktopInstallerInstallsSidecarVoiceResources),
+    ("desktop installer repairs sidecar voice resources", TestDesktopInstallerRepairsSidecarVoiceResources),
     ("desktop uninstaller removes app and preserves user data", TestDesktopUninstallerRemovesAppAndPreservesUserData),
     ("desktop uninstaller can remove user data explicitly", TestDesktopUninstallerCanRemoveUserDataExplicitly),
     ("desktop uninstaller does not create missing target root", TestDesktopUninstallerDoesNotCreateMissingTargetRoot),
@@ -208,6 +209,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local vector library reads direct approved document", TestLocalVectorLibraryReadsDirectApprovedDocument),
     ("local vector library retrieves indexed folder document", TestLocalVectorLibraryRetrievesIndexedFolderDocument),
     ("local vector library refuses outside folder document", TestLocalVectorLibraryRefusesOutsideFolderDocument),
+    ("curated source catalog merges missing starter sources", TestCuratedSourceCatalogMergesMissingStarterSources),
     ("curated source retriever fetches matching approved source", TestCuratedSourceRetrieverFetchesMatchingApprovedSource),
     ("curated source retriever matches user-facing topics", TestCuratedSourceRetrieverMatchesUserFacingTopics),
     ("curated source retriever ignores generic news when tech is requested", TestCuratedSourceRetrieverIgnoresGenericNewsWhenTechRequested),
@@ -3614,6 +3616,65 @@ static async Task TestDesktopInstallerInstallsSidecarVoiceResources()
     Contains("Local voice resources installed: 1 Piper voice", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
+static async Task TestDesktopInstallerRepairsSidecarVoiceResources()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var payload = Path.Combine(root, "payload");
+    var localRoot = Path.Combine(root, "LocalAli");
+    var devVoiceRoot = Path.Combine(localRoot, "DevRun", "lib", "voice");
+    var patchVoiceRoot = Path.Combine(root, "voice-patch", "lib", "voice");
+    Directory.CreateDirectory(payload);
+    Directory.CreateDirectory(Path.Combine(payload, "tools", "voice"));
+    await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(Path.Combine(payload, "tools", "voice", "local_kitten_tts.py"), "print('kitten')");
+    await File.WriteAllTextAsync(Path.Combine(payload, "tools", "voice", "local_whisper_stt.py"), "print('whisper')");
+
+    Directory.CreateDirectory(Path.Combine(devVoiceRoot, "piper"));
+    Directory.CreateDirectory(Path.Combine(devVoiceRoot, "python-venv", "Scripts"));
+    Directory.CreateDirectory(Path.Combine(devVoiceRoot, "whisper"));
+    Directory.CreateDirectory(Path.Combine(devVoiceRoot, "kitten"));
+    await File.WriteAllTextAsync(Path.Combine(devVoiceRoot, "piper", "en_US-hfc_female-medium.onnx"), "existing model");
+    await File.WriteAllTextAsync(Path.Combine(devVoiceRoot, "python-venv", "Scripts", "python.exe"), "fake python");
+    await File.WriteAllTextAsync(
+        Path.Combine(devVoiceRoot, "python-venv", "pyvenv.cfg"),
+        "home = C:\\Users\\clsor\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python");
+
+    Directory.CreateDirectory(Path.Combine(patchVoiceRoot, "python-runtime"));
+    await File.WriteAllTextAsync(Path.Combine(patchVoiceRoot, "python-runtime", "python.exe"), "fake runtime");
+    await File.WriteAllTextAsync(Path.Combine(patchVoiceRoot, "local_kitten_tts.py"), "print('patched kitten')");
+    await File.WriteAllTextAsync(Path.Combine(patchVoiceRoot, "local_whisper_stt.py"), "print('patched whisper')");
+
+    VoiceRuntimeSettingsStore.Save(
+        Path.Combine(localRoot, "BootstrapData"),
+        new VoiceRuntimeSettings(
+            SelectedInputDeviceNumber: 7,
+            WhisperExecutablePath: @"C:\Users\Charley\AppData\Local\Programs\Python\Python312\python.exe",
+            WhisperModelPath: "lib\\voice\\whisper",
+            TextToSpeechEngine: TextToSpeechEngines.Kitten,
+            KittenExecutablePath: @"C:\Users\Charley\AppData\Local\Programs\Python\Python312\python.exe",
+            KittenModelPath: "lib\\voice\\kitten"));
+
+    var installer = new AliDesktopInstaller();
+    var result = await installer.InstallAsync(new AliDesktopInstallOptions(
+        payload,
+        localRoot,
+        InstallVoiceResources: true,
+        VoiceResourcesPath: Path.Combine(root, "voice-patch")));
+    var repairedSettings = VoiceRuntimeSettingsStore.LoadOrDefault(Path.Combine(localRoot, "BootstrapData"));
+    var repairedPyVenv = await File.ReadAllTextAsync(Path.Combine(devVoiceRoot, "python-venv", "pyvenv.cfg"));
+
+    Equal(true, result.Succeeded);
+    Equal(true, File.Exists(Path.Combine(devVoiceRoot, "piper", "en_US-hfc_female-medium.onnx")));
+    Equal(true, File.Exists(Path.Combine(devVoiceRoot, "python-runtime", "python.exe")));
+    Equal(true, File.Exists(Path.Combine(devVoiceRoot, "local_kitten_tts.py")));
+    Equal(true, File.Exists(Path.Combine(devVoiceRoot, "local_whisper_stt.py")));
+    Contains("python-runtime", repairedPyVenv);
+    Contains("python-venv\\Scripts\\python.exe", repairedSettings.WhisperExecutablePath ?? string.Empty);
+    Contains("python-venv\\Scripts\\python.exe", repairedSettings.KittenExecutablePath ?? string.Empty);
+    Equal(7, repairedSettings.SelectedInputDeviceNumber);
+    Contains("Local voice repair resources installed", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
 static async Task TestDesktopUninstallerRemovesAppAndPreservesUserData()
 {
     var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -4651,6 +4712,36 @@ static async Task TestCuratedSourceRetrieverFetchesMatchingApprovedSource()
     Equal(true, result.RequiresSourceGrounding);
     Equal("CDC Flu", result.Excerpts[0].Name);
     Contains("Flu guidance from approved source.", result.Excerpts[0].Excerpt);
+}
+
+static async Task TestCuratedSourceCatalogMergesMissingStarterSources()
+{
+    var directory = NewTestDirectory();
+    var sourceStore = new FileSourceRetriever(directory, new HttpClient(new StaticPageHandler("unused")));
+    Directory.CreateDirectory(sourceStore.RootDirectory);
+    var existing = new[]
+    {
+        new SourceCatalogEntry(
+            Id: "custom-owner-source",
+            Topic: "custom",
+            Name: "Owner Custom Source",
+            Url: "https://example.test/custom",
+            Type: "web",
+            TrustLevel: "owner",
+            Keywords: ["custom"],
+            Topics: ["custom topic"],
+            Notes: "Keep this owner source.",
+            Enabled: true)
+    };
+    await File.WriteAllTextAsync(sourceStore.CatalogPath, JsonSerializer.Serialize(existing));
+
+    sourceStore.WriteExample();
+    var catalog = sourceStore.LoadCatalog();
+
+    Equal(true, catalog.Any(source => source.Id == "custom-owner-source"));
+    Equal(true, catalog.Any(source => source.Id == "national-weather-service"));
+    Equal(true, catalog.Any(source => source.Id == "python-docs"));
+    Equal(true, catalog.Count > existing.Length + 10);
 }
 
 static async Task TestCuratedSourceRetrieverMatchesUserFacingTopics()

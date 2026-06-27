@@ -10,6 +10,10 @@
              Link="tools\voice\local_kitten_tts.py"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\tools\voice\local_whisper_stt.py"
+             Link="tools\voice\local_whisper_stt.py"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Ali.Core.Identity;
 using Ali.Infrastructure.Identity;
+using Ali.Infrastructure.Voice;
 
 namespace Ali.Infrastructure.Installation;
 
@@ -68,6 +69,7 @@ public sealed class AliDesktopInstaller
                         targetDirectory,
                         installedFiles,
                         dependencyMessages,
+                        warnings,
                         cancellationToken)
                     .ConfigureAwait(false);
 
@@ -303,6 +305,7 @@ public sealed class AliDesktopInstaller
         string targetDirectory,
         List<string> installedFiles,
         List<string> dependencyMessages,
+        List<string> warnings,
         CancellationToken cancellationToken)
     {
         if (!options.InstallVoiceResources)
@@ -319,16 +322,22 @@ public sealed class AliDesktopInstaller
         }
 
         var voiceCount = AliDesktopInstallDiscovery.CountPiperVoices(source);
-        if (voiceCount == 0)
+        var hasRepairResources = AliDesktopInstallDiscovery.HasVoiceRepairResources(source);
+        if (voiceCount == 0 && !hasRepairResources)
         {
-            dependencyMessages.Add($"Local voice resources skipped; no Piper .onnx voices were found in {source}.");
+            dependencyMessages.Add($"Local voice resources skipped; no Piper voices or voice repair resources were found in {source}.");
             return;
         }
 
         var voiceRoot = await MaterializeVoiceResourcesAsync(source, stagingRoot, cancellationToken).ConfigureAwait(false);
         var targetVoiceRoot = Path.Combine(targetDirectory, "lib", "voice");
         CopyDirectory(voiceRoot, targetVoiceRoot, installedFiles);
-        dependencyMessages.Add($"Local voice resources installed: {voiceCount} Piper voice(s) from {source}.");
+        RepairInstalledVoicePython(targetVoiceRoot, dependencyMessages, warnings);
+        CopyVoiceBridgeScripts(targetDirectory, targetVoiceRoot, installedFiles, dependencyMessages);
+        RepairVoiceSettings(options, targetDirectory, targetVoiceRoot, dependencyMessages);
+        dependencyMessages.Add(voiceCount > 0
+            ? $"Local voice resources installed: {voiceCount} Piper voice(s) from {source}."
+            : $"Local voice repair resources installed from {source}.");
     }
 
     private static async Task<string> MaterializeVoiceResourcesAsync(
@@ -365,6 +374,178 @@ public sealed class AliDesktopInstaller
             File.Copy(sourcePath, targetPath, overwrite: true);
             installedFiles.Add(targetPath);
         }
+    }
+
+    private static void RepairInstalledVoicePython(
+        string targetVoiceRoot,
+        List<string> dependencyMessages,
+        List<string> warnings)
+    {
+        var venvRoot = Path.Combine(targetVoiceRoot, "python-venv");
+        var runtimeRoot = Path.Combine(targetVoiceRoot, "python-runtime");
+        var runtimePython = Path.Combine(runtimeRoot, "python.exe");
+        var pyvenvPath = Path.Combine(venvRoot, "pyvenv.cfg");
+        if (!File.Exists(runtimePython) || !Directory.Exists(venvRoot))
+        {
+            dependencyMessages.Add("Bundled voice Python runtime was not found; voice venv repair was skipped.");
+            return;
+        }
+
+        try
+        {
+            var version = TryReadPythonVersion(runtimePython) ?? "3.12";
+            Directory.CreateDirectory(venvRoot);
+            File.WriteAllLines(
+                pyvenvPath,
+                [
+                    $"home = {runtimeRoot}",
+                    "include-system-site-packages = false",
+                    $"version = {version}",
+                    $"executable = {runtimePython}",
+                    $"command = {runtimePython} -m venv {venvRoot}"
+                ],
+                Encoding.UTF8);
+            dependencyMessages.Add("Local voice Python venv repaired to use the bundled DevRun voice runtime.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            warnings.Add($"Local voice Python venv could not be repaired: {ex.Message}");
+        }
+    }
+
+    private static string? TryReadPythonVersion(string pythonExecutable)
+    {
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = pythonExecutable,
+                    ArgumentList = { "--version" },
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            process.Start();
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(entireProcessTree: true);
+                return null;
+            }
+
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            var text = string.IsNullOrWhiteSpace(output) ? error : output;
+            return text.Trim().Replace("Python ", string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    private static void CopyVoiceBridgeScripts(
+        string targetDirectory,
+        string targetVoiceRoot,
+        List<string> installedFiles,
+        List<string> dependencyMessages)
+    {
+        foreach (var scriptName in new[] { "local_kitten_tts.py", "local_whisper_stt.py" })
+        {
+            var source = new[]
+                {
+                    Path.Combine(targetDirectory, "tools", "voice", scriptName),
+                    Path.Combine(AppContext.BaseDirectory, "tools", "voice", scriptName)
+                }
+                .FirstOrDefault(File.Exists);
+            var target = Path.Combine(targetVoiceRoot, scriptName);
+            if (source is null || File.Exists(target))
+            {
+                continue;
+            }
+
+            File.Copy(source, target, overwrite: true);
+            installedFiles.Add(target);
+            dependencyMessages.Add($"Local voice bridge script installed: {scriptName}.");
+        }
+    }
+
+    private static void RepairVoiceSettings(
+        AliDesktopInstallOptions options,
+        string targetDirectory,
+        string targetVoiceRoot,
+        List<string> dependencyMessages)
+    {
+        var dataRoot = Path.Combine(options.LocalAliRoot, "BootstrapData");
+        var settingsPath = VoiceRuntimeSettingsStore.GetSettingsPath(dataRoot);
+        var python = Path.Combine(targetVoiceRoot, "python-venv", "Scripts", "python.exe");
+        var whisperRoot = Path.Combine(targetVoiceRoot, "whisper");
+        var whisperScript = Path.Combine(targetVoiceRoot, "local_whisper_stt.py");
+        var kittenRoot = Path.Combine(targetVoiceRoot, "kitten");
+        var kittenScript = Path.Combine(targetVoiceRoot, "local_kitten_tts.py");
+        var piperModel = PreferredPiperModelPath(targetVoiceRoot);
+        var existing = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
+        var settings = new VoiceRuntimeSettings(
+            SelectedInputDeviceNumber: existing.SelectedInputDeviceNumber,
+            SelectedInputDeviceName: existing.SelectedInputDeviceName,
+            SelectedOutputDeviceNumber: existing.SelectedOutputDeviceNumber,
+            SelectedOutputDeviceName: existing.SelectedOutputDeviceName,
+            LastSuccessfulSttDeviceNumber: existing.LastSuccessfulSttDeviceNumber,
+            LastSuccessfulSttDeviceName: existing.LastSuccessfulSttDeviceName,
+            LastSuccessfulTtsDeviceNumber: existing.LastSuccessfulTtsDeviceNumber,
+            LastSuccessfulTtsDeviceName: existing.LastSuccessfulTtsDeviceName,
+            SelectedInputPreset: existing.SelectedInputPreset,
+            SelectedInputChannelMode: existing.SelectedInputChannelMode,
+            ExtraInputGainDb: existing.ExtraInputGainDb,
+            NormalizeBeforeStt: existing.NormalizeBeforeStt,
+            RetainDebugAudio: existing.RetainDebugAudio,
+            AssistantReadsRepliesOutLoud: existing.AssistantReadsRepliesOutLoud,
+            AutoSendVoiceTranscripts: existing.AutoSendVoiceTranscripts,
+            SpeechRate: existing.SpeechRate,
+            PushToTalkKey: existing.PushToTalkKey,
+            WhisperExecutablePath: File.Exists(python) ? Path.GetRelativePath(targetDirectory, python) : null,
+            WhisperModelPath: Directory.Exists(whisperRoot)
+                ? Path.GetRelativePath(targetDirectory, whisperRoot)
+                : existing.WhisperModelPath,
+            WhisperArgumentsTemplate: File.Exists(whisperScript)
+                ? $"\"{Path.GetRelativePath(targetDirectory, whisperScript)}\" --audio \"{{audio}}\" --model-root \"{{model}}\" --model-id small.en --output-base \"{{outputBase}}\" --vad-filter"
+                : existing.WhisperArgumentsTemplate,
+            TextToSpeechEngine: Directory.Exists(kittenRoot)
+                ? TextToSpeechEngines.Kitten
+                : TextToSpeechEngines.Normalize(existing.TextToSpeechEngine),
+            PiperExecutablePath: File.Exists(python) ? Path.GetRelativePath(targetDirectory, python) : null,
+            PiperModelPath: piperModel is null ? existing.PiperModelPath : Path.GetRelativePath(targetDirectory, piperModel),
+            PiperVoiceId: piperModel is null ? existing.PiperVoiceId : Path.GetFileNameWithoutExtension(piperModel),
+            PiperArgumentsTemplate: "-m piper --model \"{model}\" --output_file \"{output}\"",
+            KittenExecutablePath: File.Exists(python) ? Path.GetRelativePath(targetDirectory, python) : null,
+            KittenModelPath: Directory.Exists(kittenRoot)
+                ? Path.GetRelativePath(targetDirectory, kittenRoot)
+                : existing.KittenModelPath,
+            KittenVoiceId: existing.KittenVoiceId ?? KittenVoiceCatalog.DefaultVoiceId,
+            KittenArgumentsTemplate: File.Exists(kittenScript)
+                ? "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\" --rate \"{rate}\""
+                : existing.KittenArgumentsTemplate);
+        VoiceRuntimeSettingsStore.Save(dataRoot, settings);
+        dependencyMessages.Add(File.Exists(settingsPath)
+            ? "Voice settings repaired to prefer installed DevRun voice resources."
+            : "Voice settings seeded to the installed DevRun voice resources.");
+    }
+
+    private static string? PreferredPiperModelPath(string targetVoiceRoot)
+    {
+        var piperRoot = Path.Combine(targetVoiceRoot, "piper");
+        if (!Directory.Exists(piperRoot))
+        {
+            return null;
+        }
+
+        return Directory.EnumerateFiles(piperRoot, "en_US-*.onnx", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(path => Path.GetFileNameWithoutExtension(path).Equals("en_US-hfc_female-medium", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 
     private static async Task HandleOllamaAsync(

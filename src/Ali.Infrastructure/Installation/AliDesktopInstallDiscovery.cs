@@ -18,8 +18,11 @@ public static class AliDesktopInstallDiscovery
     private static readonly string[] VoiceResourceRelativePaths =
     [
         "Ali.VoicePack.zip",
+        "Ali.VoicePatch.zip",
         "ali-voice-pack.zip",
+        "ali-voice-patch.zip",
         "voice-pack.zip",
+        "voice-patch.zip",
         Path.Combine("lib", "voice"),
         "voice"
     ];
@@ -226,16 +229,51 @@ public static class AliDesktopInstallDiscovery
         }
     }
 
+    public static bool HasVoiceRepairResources(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+
+        if (Directory.Exists(source))
+        {
+            var voiceRoot = ResolveVoiceRootFromDirectory(source);
+            return voiceRoot is not null && HasVoiceRepairResourcesInDirectory(voiceRoot);
+        }
+
+        if (!File.Exists(source))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var archive = ZipFile.OpenRead(source);
+            return archive.Entries.Any(entry =>
+            {
+                var name = entry.FullName.Replace('\\', '/');
+                return name.Contains("/python-runtime/python.exe", StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith("/local_kitten_tts.py", StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith("/local_whisper_stt.py", StringComparison.OrdinalIgnoreCase);
+            });
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     public static string? ResolveVoiceRootFromDirectory(string directory)
     {
         var fullPath = Path.GetFullPath(directory);
-        if (Directory.Exists(Path.Combine(fullPath, "piper")))
+        if (IsVoiceRoot(fullPath))
         {
             return fullPath;
         }
 
         var nested = Path.Combine(fullPath, "lib", "voice");
-        if (Directory.Exists(Path.Combine(nested, "piper")))
+        if (IsVoiceRoot(nested))
         {
             return nested;
         }
@@ -311,6 +349,20 @@ public static class AliDesktopInstallDiscovery
             ? Directory.EnumerateFiles(piperRoot, "en_US-*.onnx", SearchOption.TopDirectoryOnly).Count()
             : 0;
     }
+
+    private static bool HasVoiceRepairResourcesInDirectory(string voiceRoot) =>
+        File.Exists(Path.Combine(voiceRoot, "python-runtime", "python.exe"))
+        || File.Exists(Path.Combine(voiceRoot, "local_kitten_tts.py"))
+        || File.Exists(Path.Combine(voiceRoot, "local_whisper_stt.py"));
+
+    private static bool IsVoiceRoot(string path) =>
+        Directory.Exists(Path.Combine(path, "piper"))
+        || Directory.Exists(Path.Combine(path, "python-runtime"))
+        || Directory.Exists(Path.Combine(path, "python-venv"))
+        || Directory.Exists(Path.Combine(path, "kitten"))
+        || Directory.Exists(Path.Combine(path, "whisper"))
+        || File.Exists(Path.Combine(path, "local_kitten_tts.py"))
+        || File.Exists(Path.Combine(path, "local_whisper_stt.py"));
 
     private static bool IsPiperVoiceEntry(ZipArchiveEntry entry)
     {

@@ -159,6 +159,20 @@ public sealed class FileSourceRetriever
             using var catalogStream = File.Create(CatalogPath);
             JsonSerializer.Serialize(catalogStream, defaultCatalog, JsonOptions);
         }
+        else
+        {
+            var currentCatalog = LoadCatalog();
+            var existingIds = currentCatalog
+                .Select(source => source.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missingDefaults = defaultCatalog
+                .Where(source => !existingIds.Contains(source.Id))
+                .ToArray();
+            if (missingDefaults.Length > 0)
+            {
+                SaveCatalog(currentCatalog.Concat(missingDefaults));
+            }
+        }
 
         if (File.Exists(ExamplePath))
         {

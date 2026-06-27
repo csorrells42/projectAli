@@ -60,6 +60,12 @@ public static class LocalVoiceResourceLocator
     public static string? FindWhisperScript(string appBaseDirectory, string? searchRoot = null)
     {
         var voiceRoot = FindVoiceRoot(appBaseDirectory, searchRoot);
+        var installedCandidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "local_whisper_stt.py");
+        if (File.Exists(installedCandidate))
+        {
+            return Path.GetFullPath(installedCandidate);
+        }
+
         var repoRoot = TryGetRepositoryRootFromVoiceRoot(voiceRoot);
         var candidate = repoRoot is null ? null : Path.Combine(repoRoot, "tools", "voice", "local_whisper_stt.py");
         return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
@@ -80,6 +86,12 @@ public static class LocalVoiceResourceLocator
     public static string? FindKittenScript(string appBaseDirectory, string? searchRoot = null)
     {
         var voiceRoot = FindVoiceRoot(appBaseDirectory, searchRoot);
+        var installedCandidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "local_kitten_tts.py");
+        if (File.Exists(installedCandidate))
+        {
+            return Path.GetFullPath(installedCandidate);
+        }
+
         var repoRoot = TryGetRepositoryRootFromVoiceRoot(voiceRoot);
         var candidate = repoRoot is null ? null : Path.Combine(repoRoot, "tools", "voice", "local_kitten_tts.py");
         return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;

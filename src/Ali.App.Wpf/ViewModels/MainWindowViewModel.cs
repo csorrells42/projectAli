@@ -4239,9 +4239,10 @@ public sealed class MainWindowViewModel : ObservableObject
         _textToSpeechEngineText = TextToSpeechEngines.Piper;
         LoadTextToSpeechVoiceChoices();
 
-        WhisperExecutableText = ToPortablePath(PreferValidConfiguredPath(
+        WhisperExecutableText = ToPortablePath(PreferInstalledVoicePath(
             _voiceSettings.WhisperExecutablePath,
-            PreferConfigured(FindLocalWhisperPythonExecutable(), whisperDefaults.ExecutablePath))) ?? string.Empty;
+            FindLocalWhisperPythonExecutable(),
+            whisperDefaults.ExecutablePath)) ?? string.Empty;
         WhisperModelText = ToPortablePath(PreferValidConfiguredPath(
             _voiceSettings.WhisperModelPath,
             PreferConfigured(FindLocalWhisperModelRoot(), whisperDefaults.ModelPath))) ?? string.Empty;
@@ -4261,9 +4262,10 @@ public sealed class MainWindowViewModel : ObservableObject
             _voiceSettings.PiperArgumentsTemplate,
             BuildLocalPiperArgumentsTemplate(),
             piperDefaults.ArgumentsTemplate);
-        KittenExecutableText = ToPortablePath(PreferValidConfiguredPath(
+        KittenExecutableText = ToPortablePath(PreferInstalledVoicePath(
             _voiceSettings.KittenExecutablePath,
-            PreferConfigured(FindLocalKittenPythonExecutable(), kittenDefaults.ExecutablePath))) ?? string.Empty;
+            FindLocalKittenPythonExecutable(),
+            kittenDefaults.ExecutablePath)) ?? string.Empty;
         KittenModelText = ToPortablePath(PreferValidConfiguredPath(
             _voiceSettings.KittenModelPath,
             PreferConfigured(FindLocalKittenModelRoot(), kittenDefaults.ModelPath))) ?? string.Empty;
@@ -5612,6 +5614,17 @@ public sealed class MainWindowViewModel : ObservableObject
         return !string.IsNullOrWhiteSpace(configured) && LocalPathExists(resolved)
             ? configured.Trim()
             : fallback ?? string.Empty;
+    }
+
+    private static string PreferInstalledVoicePath(string? configured, string? installed, string? fallback)
+    {
+        var resolvedInstalled = ResolvePortablePath(installed);
+        if (LocalPathExists(resolvedInstalled))
+        {
+            return installed ?? resolvedInstalled ?? string.Empty;
+        }
+
+        return PreferValidConfiguredPath(configured, fallback);
     }
 
     private static string PreferPiperExecutablePath(string? configured, string? fallback)

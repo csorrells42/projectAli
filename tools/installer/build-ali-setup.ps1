@@ -3,6 +3,7 @@ param(
     [string]$Runtime = "win-x64",
     [string]$PackageSource = "https://api.nuget.org/v3/index.json",
     [switch]$BuildVoicePack,
+    [switch]$BuildVoicePatch,
     [ValidateSet("Piper", "Full")]
     [string]$VoicePackMode = "Piper"
 )
@@ -20,14 +21,47 @@ $vsixProject = Join-Path $repoRoot "src\Ali.App.VisualStudioExtension\Ali.App.Vi
 $vsixOutput = Join-Path $repoRoot "src\Ali.App.VisualStudioExtension\bin\$Configuration\net472\Ali.App.VisualStudioExtension.vsix"
 $vsixPayloadDirectory = Join-Path $appPublish "extras\visualstudio"
 $voiceRoot = Join-Path $repoRoot "lib\voice"
+$voicePythonRuntime = Join-Path $voiceRoot "python-runtime"
+$localPythonRuntime = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python"
 $voicePackStage = Join-Path $publishRoot "voice-pack-stage"
 $voicePackOutputDirectory = Join-Path $publishRoot "voice-pack"
 $voicePackOutput = Join-Path $voicePackOutputDirectory "Ali.VoicePack.zip"
+$voicePatchStage = Join-Path $publishRoot "voice-patch-stage"
+$voicePatchOutput = Join-Path $voicePackOutputDirectory "Ali.VoicePatch.zip"
 
 function Invoke-DotNet {
     dotnet @args
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet command failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Copy-VoicePythonRuntime {
+    param([string]$DestinationVoiceRoot)
+
+    $runtimeSource = $null
+    if (Test-Path $voicePythonRuntime) {
+        $runtimeSource = $voicePythonRuntime
+    }
+    elseif (Test-Path $localPythonRuntime) {
+        $runtimeSource = $localPythonRuntime
+    }
+
+    if ($null -eq $runtimeSource) {
+        throw "Voice Python runtime was not found. Expected $voicePythonRuntime or $localPythonRuntime"
+    }
+
+    Copy-Item -LiteralPath $runtimeSource -Destination (Join-Path $DestinationVoiceRoot "python-runtime") -Recurse -Force
+}
+
+function Copy-VoiceBridgeScripts {
+    param([string]$DestinationVoiceRoot)
+
+    foreach ($scriptName in @("local_kitten_tts.py", "local_whisper_stt.py")) {
+        $scriptSource = Join-Path $repoRoot "tools\voice\$scriptName"
+        if (Test-Path $scriptSource) {
+            Copy-Item -LiteralPath $scriptSource -Destination (Join-Path $DestinationVoiceRoot $scriptName) -Force
+        }
     }
 }
 
@@ -111,9 +145,34 @@ if ($BuildVoicePack) {
         }
     }
 
+    Copy-VoicePythonRuntime $stageVoiceRoot
+    Copy-VoiceBridgeScripts $stageVoiceRoot
+
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $voicePackStage,
         $voicePackOutput,
+        [System.IO.Compression.CompressionLevel]::Fastest,
+        $false)
+}
+
+if ($BuildVoicePatch) {
+    if (Test-Path $voicePatchStage) {
+        Remove-Item -LiteralPath $voicePatchStage -Recurse -Force
+    }
+
+    if (Test-Path $voicePatchOutput) {
+        Remove-Item -LiteralPath $voicePatchOutput -Force
+    }
+
+    $patchVoiceRoot = Join-Path $voicePatchStage "lib\voice"
+    New-Item -ItemType Directory -Force -Path $patchVoiceRoot | Out-Null
+    New-Item -ItemType Directory -Force -Path $voicePackOutputDirectory | Out-Null
+    Copy-VoicePythonRuntime $patchVoiceRoot
+    Copy-VoiceBridgeScripts $patchVoiceRoot
+
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $voicePatchStage,
+        $voicePatchOutput,
         [System.IO.Compression.CompressionLevel]::Fastest,
         $false)
 }
@@ -124,4 +183,9 @@ Get-ChildItem -Path $setupPublish -Filter "Ali.Setup.exe" | Select-Object -Expan
 if ($BuildVoicePack) {
     Write-Host "Ali voice pack sidecar:"
     Get-Item -LiteralPath $voicePackOutput | Select-Object -ExpandProperty FullName
+}
+
+if ($BuildVoicePatch) {
+    Write-Host "Ali voice repair patch sidecar:"
+    Get-Item -LiteralPath $voicePatchOutput | Select-Object -ExpandProperty FullName
 }

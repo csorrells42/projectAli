@@ -207,9 +207,9 @@ public sealed class AliServices
             memoryStore: memories,
             localCodingTool: localCodingTool);
 
-        var voiceRecorder = new NAudioVoiceRecorder();
-        var speechToText = new WhisperCliSpeechToTextProvider(WhisperCliSpeechToTextOptions.FromEnvironment());
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
+        var voiceRecorder = new NAudioVoiceRecorder();
+        var speechToText = new WhisperCliSpeechToTextProvider(CreateSpeechToTextOptions(dataRoot, voiceSettings));
         var textToSpeech = CreateTextToSpeechProvider(dataRoot, voiceSettings);
         var speechPlayer = new NAudioWaveSpeechPlayer();
 
@@ -239,19 +239,88 @@ public sealed class AliServices
         {
             var defaults = KittenCliTextToSpeechOptions.FromEnvironment(dataRoot);
             return new KittenCliTextToSpeechProvider(new KittenCliTextToSpeechOptions(
-                voiceSettings.KittenExecutablePath ?? defaults.ExecutablePath,
-                voiceSettings.KittenModelPath ?? defaults.ModelPath,
+                PreferInstalledPath(voiceSettings.KittenExecutablePath, LocalVoiceResourceLocator.FindKittenPythonExecutable(AppContext.BaseDirectory), defaults.ExecutablePath),
+                PreferInstalledPath(voiceSettings.KittenModelPath, LocalVoiceResourceLocator.FindKittenModelRoot(AppContext.BaseDirectory), defaults.ModelPath),
                 KittenVoiceCatalog.Normalize(voiceSettings.KittenVoiceId ?? defaults.VoiceId),
-                voiceSettings.KittenArgumentsTemplate ?? defaults.ArgumentsTemplate,
+                PreferInstalledKittenArguments(voiceSettings.KittenArgumentsTemplate, defaults.ArgumentsTemplate),
                 defaults.OutputDirectory));
         }
 
         var piperDefaults = PiperCliTextToSpeechOptions.FromEnvironment(dataRoot);
         return new PiperCliTextToSpeechProvider(new PiperCliTextToSpeechOptions(
-            voiceSettings.PiperExecutablePath ?? piperDefaults.ExecutablePath,
-            voiceSettings.PiperModelPath ?? piperDefaults.ModelPath,
+            PreferInstalledPath(voiceSettings.PiperExecutablePath, LocalVoiceResourceLocator.FindPythonExecutable(AppContext.BaseDirectory), piperDefaults.ExecutablePath),
+            PreferInstalledPath(voiceSettings.PiperModelPath, PreferredInstalledPiperModelPath(), piperDefaults.ModelPath),
             voiceSettings.PiperVoiceId ?? piperDefaults.VoiceId,
-            voiceSettings.PiperArgumentsTemplate ?? piperDefaults.ArgumentsTemplate,
+            string.IsNullOrWhiteSpace(voiceSettings.PiperArgumentsTemplate) ? "-m piper --model \"{model}\" --output_file \"{output}\"" : voiceSettings.PiperArgumentsTemplate,
             piperDefaults.OutputDirectory));
     }
+
+    private static WhisperCliSpeechToTextOptions CreateSpeechToTextOptions(
+        string dataRoot,
+        VoiceRuntimeSettings voiceSettings)
+    {
+        var defaults = WhisperCliSpeechToTextOptions.FromEnvironment();
+        var script = LocalVoiceResourceLocator.FindWhisperScript(AppContext.BaseDirectory);
+        var localArguments = File.Exists(script)
+            ? $"\"{script}\" --audio \"{{audio}}\" --model-root \"{{model}}\" --model-id small.en --output-base \"{{outputBase}}\" --vad-filter"
+            : null;
+        return new WhisperCliSpeechToTextOptions(
+            PreferInstalledPath(voiceSettings.WhisperExecutablePath, LocalVoiceResourceLocator.FindWhisperPythonExecutable(AppContext.BaseDirectory), defaults.ExecutablePath),
+            PreferInstalledPath(voiceSettings.WhisperModelPath, LocalVoiceResourceLocator.FindWhisperModelRoot(AppContext.BaseDirectory), defaults.ModelPath),
+            PreferInstalledScriptArguments(voiceSettings.WhisperArgumentsTemplate, localArguments, defaults.ArgumentsTemplate, "local_whisper_stt.py"),
+            defaults.OutputTextSuffix);
+    }
+
+    private static string? PreferInstalledPath(string? configured, string? installed, string? fallback)
+    {
+        if (LocalPathExists(installed))
+        {
+            return installed;
+        }
+
+        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+    }
+
+    private static string PreferInstalledKittenArguments(string? configured, string fallback)
+    {
+        var script = LocalVoiceResourceLocator.FindKittenScript(AppContext.BaseDirectory);
+        var localArguments = File.Exists(script)
+            ? "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\" --rate \"{rate}\""
+            : null;
+        return PreferInstalledScriptArguments(configured, localArguments, fallback, "local_kitten_tts.py");
+    }
+
+    private static string PreferInstalledScriptArguments(
+        string? configured,
+        string? installedArguments,
+        string fallback,
+        string scriptName)
+    {
+        if (!string.IsNullOrWhiteSpace(installedArguments)
+            && (string.IsNullOrWhiteSpace(configured)
+                || configured.Contains(scriptName, StringComparison.OrdinalIgnoreCase)
+                || configured.Contains("{script}", StringComparison.OrdinalIgnoreCase)))
+        {
+            return installedArguments;
+        }
+
+        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+    }
+
+    private static string? PreferredInstalledPiperModelPath()
+    {
+        var directory = LocalVoiceResourceLocator.FindPiperVoiceDirectory(AppContext.BaseDirectory);
+        if (directory is null)
+        {
+            return null;
+        }
+
+        return Directory.EnumerateFiles(directory, "en_US-*.onnx", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(path => Path.GetFileNameWithoutExtension(path).Equals("en_US-hfc_female-medium", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private static bool LocalPathExists(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path));
 }
