@@ -22,6 +22,7 @@ using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
 using Ali.Infrastructure.Coding;
 using Ali.Infrastructure.Runtime;
+using Ali.Infrastructure.Storage;
 using Ali.Infrastructure.Voice;
 using MediaBrushes = System.Windows.Media.Brushes;
 
@@ -189,6 +190,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _codingNotepadPlusPlusPathText = string.Empty;
     private string _codingVisualStudioPathText = string.Empty;
     private string _codingPermissionsStatusText = "Coding permissions not loaded yet.";
+    private string _maintenanceStatusText = "Backups include conversations, memories, reminders, settings, sources, local indexes, voice settings, runtime settings, and generated documents. Temporary session audio/images are skipped.";
 
     public MainWindowViewModel(AliServices services)
     {
@@ -241,6 +243,8 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseCodingPdfWorkspaceRootCommand = CreateCommand(_ => BrowseCodingPdfWorkspaceRoot());
         BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
+        BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
 
         _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
         foreach (var topic in BuildCommandExplorerRoots())
@@ -603,6 +607,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand BrowseVisualStudioPathCommand { get; }
 
+    public ICommand BackupUserDataCommand { get; }
+
+    public ICommand RestoreUserDataCommand { get; }
+
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
     public string CodingToolSettingsPath => _services.CodingToolSettingsPath;
@@ -779,6 +787,12 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _codingPermissionsStatusText;
         private set => SetProperty(ref _codingPermissionsStatusText, value);
+    }
+
+    public string MaintenanceStatusText
+    {
+        get => _maintenanceStatusText;
+        private set => SetProperty(ref _maintenanceStatusText, value);
     }
 
     public string CodingPermissionSummaryText =>
@@ -2380,6 +2394,169 @@ public sealed class MainWindowViewModel : ObservableObject
         _services.SaveCodingToolSettings(settings);
         ApplyCodingToolSettings(settings);
         CodingPermissionsStatusText = "Coding permissions reset to default.";
+    }
+
+    private async Task BackupUserDataAsync()
+    {
+        try
+        {
+            SaveActiveConversation();
+            var backupDirectory = DefaultBackupDirectory();
+            Directory.CreateDirectory(backupDirectory);
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save Ali backup",
+                Filter = "Ali backup (*.zip)|*.zip|Zip files (*.zip)|*.zip|All files (*.*)|*.*",
+                FileName = $"Ali-backup-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.zip",
+                InitialDirectory = backupDirectory,
+                AddExtension = true,
+                DefaultExt = ".zip",
+                OverwritePrompt = true
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                MaintenanceStatusText = "Backup cancelled.";
+                return;
+            }
+
+            IsBusy = true;
+            StatusText = "Creating Ali backup...";
+            MaintenanceStatusText = "Creating backup...";
+            var backupService = _services.CreateUserDataBackupService();
+            var result = await Task.Run(() => backupService.CreateBackup(dialog.FileName)).ConfigureAwait(true);
+            MaintenanceStatusText = $"Backup saved: {result.BackupPath} ({result.FileCount} file(s), {FormatBytes(result.TotalBytes)} before compression).";
+            StatusText = "Ali backup saved.";
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = $"Backup failed: {ex.Message}";
+            StatusText = "Ali backup failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RestoreUserDataAsync()
+    {
+        try
+        {
+            var backupDirectory = DefaultBackupDirectory();
+            Directory.CreateDirectory(backupDirectory);
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Restore Ali backup",
+                Filter = "Ali backup (*.zip)|*.zip|Zip files (*.zip)|*.zip|All files (*.*)|*.*",
+                InitialDirectory = backupDirectory,
+                CheckFileExists = true,
+                Multiselect = false
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                MaintenanceStatusText = "Restore cancelled.";
+                return;
+            }
+
+            var backupService = _services.CreateUserDataBackupService();
+            var manifest = backupService.InspectBackup(dialog.FileName);
+            var confirmation = System.Windows.MessageBox.Show(
+                $"Restore this Ali backup?\n\nCreated: {manifest.CreatedAt.LocalDateTime:g}\n\nThis overwrites Ali conversations, memories, reminders, settings, sources, local indexes, voice settings, runtime settings, and generated documents from the backup. Ollama models are not changed.\n\nAli will pause active work before restoring.",
+                "Restore Ali Backup",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirmation != MessageBoxResult.Yes)
+            {
+                MaintenanceStatusText = "Restore cancelled.";
+                return;
+            }
+
+            IsBusy = true;
+            StatusText = "Restoring Ali backup...";
+            MaintenanceStatusText = "Restoring backup...";
+            Stop();
+            StopInputLevelMonitor();
+            _services.ConfigureRuntimeCandidate(RuntimeSettingsStore.GetDefaultOptions());
+
+            var result = await Task.Run(() => backupService.RestoreBackup(dialog.FileName)).ConfigureAwait(true);
+            ReloadAfterUserDataRestore(result);
+            MaintenanceStatusText = $"Backup restored from {result.BackupCreatedAt.LocalDateTime:g}. Restart Ali if the restored assistant name/profile differs from this session.";
+            StatusText = "Ali backup restored.";
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = $"Restore failed: {ex.Message}";
+            StatusText = "Ali restore failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void ReloadAfterUserDataRestore(UserDataRestoreResult restore)
+    {
+        LoadRuntimeSettings();
+        LoadCodingPermissions();
+        ReloadVoiceSettingsFromDisk();
+        RefreshConversationHistory();
+        RefreshMemoryReminders();
+        if (string.Equals(Path.GetFullPath(restore.RestoredProfileDataRoot), Path.GetFullPath(_services.ProfileDataRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            ResetToFreshConversation("Backup restored. Start a new message or open a restored chat from history.");
+        }
+    }
+
+    private void ReloadVoiceSettingsFromDisk()
+    {
+        _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
+        _loadingVoiceSettings = true;
+        try
+        {
+            ExtraInputGainDb = _voiceSettings.ExtraInputGainDb;
+            NormalizeBeforeStt = _voiceSettings.NormalizeBeforeStt;
+            RetainDebugAudio = _voiceSettings.RetainDebugAudio;
+            AssistantReadsRepliesOutLoud = _voiceSettings.AssistantReadsRepliesOutLoud;
+            AutoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
+            SpeechRate = NormalizeSpeechRate(_voiceSettings.SpeechRate);
+            PushToTalkKeyText = NormalizePushToTalkKey(_voiceSettings.PushToTalkKey);
+        }
+        finally
+        {
+            _loadingVoiceSettings = false;
+        }
+
+        RefreshVoiceSettingsChoices();
+        ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
+        RefreshSpeechToolStatuses();
+        VoiceSettingsStatusText = "Voice settings reloaded from restored backup.";
+    }
+
+    private static string DefaultBackupDirectory()
+    {
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (string.IsNullOrWhiteSpace(documents))
+        {
+            documents = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        return Path.Combine(documents, "Ali Backups");
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        var value = (double)Math.Max(0, bytes);
+        var unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return $"{value:0.##} {units[unitIndex]}";
     }
 
     private void ApplyCodingToolSettings(CodingToolSettings settings)
@@ -4852,6 +5029,16 @@ public sealed class MainWindowViewModel : ObservableObject
         if (ExportSelectedCorrectionCommand is AsyncRelayCommand exportSelectedCorrection)
         {
             exportSelectedCorrection.RaiseCanExecuteChanged();
+        }
+
+        if (BackupUserDataCommand is AsyncRelayCommand backupUserData)
+        {
+            backupUserData.RaiseCanExecuteChanged();
+        }
+
+        if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
+        {
+            restoreUserData.RaiseCanExecuteChanged();
         }
 
         if (DeleteSelectedMemoryCommand is RelayCommand deleteMemory)

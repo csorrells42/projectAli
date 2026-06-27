@@ -1127,6 +1127,70 @@
                 </Grid>
             </TabItem>
 
+            <TabItem Header="Maintenance">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource AppBackgroundBrush}">
+                    <Border Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            Padding="16"
+                            Margin="0,12,10,0">
+                        <StackPanel>
+                            <TextBlock Text="Backup &amp; Restore"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Text="Create a zip backup of Ali's user data, or restore one after reinstalling. Ollama models are not included or changed."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,3,0,12" />
+
+                            <Border Background="#14191C"
+                                    BorderBrush="{StaticResource BorderBrushDark}"
+                                    BorderThickness="1"
+                                    Padding="12"
+                                    Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Included"
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="Conversations, memories, reminders, assistant profile/name, app settings, sources/topics, local library settings and index metadata, voice settings, runtime/model selection settings, receipts, and generated documents."
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,0" />
+                                    <TextBlock Text="Temporary session audio and temporary screenshots are skipped."
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               TextWrapping="Wrap"
+                                               FontSize="12"
+                                               Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,0,0,12">
+                                <Button Content="Create Backup"
+                                        Command="{Binding BackupUserDataCommand}"
+                                        MinWidth="130"
+                                        Margin="0,0,10,0" />
+                                <Button Content="Restore Backup"
+                                        Command="{Binding RestoreUserDataCommand}"
+                                        MinWidth="130"
+                                        BorderBrush="#7F1D1D"
+                                        Background="#2A1517" />
+                            </StackPanel>
+
+                            <Border BorderBrush="{StaticResource BorderBrushDark}"
+                                    BorderThickness="1"
+                                    Padding="10">
+                                <TextBlock Text="{Binding MaintenanceStatusText}"
+                                           Foreground="{StaticResource TextBrush}"
+                                           TextWrapping="Wrap" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="Coding / Permissions">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource AppBackgroundBrush}">
                     <StackPanel Margin="0,12,10,0">

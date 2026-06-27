@@ -127,6 +127,9 @@ public sealed class AliServices
     public void SaveCuratedSources(IEnumerable<SourceCatalogEntry> sources) =>
         CreateFileSourceRetriever().SaveCatalog(sources);
 
+    public UserDataBackupService CreateUserDataBackupService() =>
+        new(DataRoot, ProfileDataRoot);
+
     public void ConfigureRuntimeCandidate(OpenAiCompatibleRuntimeOptions options)
     {
         ILocalModelRuntime? candidateRuntime = options.Enabled

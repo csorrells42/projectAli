@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Ali.Core.Conversations;
@@ -141,6 +142,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("endpoint policy refuses public runtime", TestEndpointPolicyRefusesPublicEndpoint),
     ("runtime settings save and load", TestRuntimeSettingsSaveAndLoad),
     ("assistant profile stores name in one file", TestAssistantProfileStoresNameInOneFile),
+    ("user data backup restores profile and settings", TestUserDataBackupRestoresProfileAndSettings),
     ("desktop installer deploys app without carrying personal data", TestDesktopInstallerDeploysAppWithoutCarryingPersonalData),
     ("desktop installer can preseed assistant profile explicitly", TestDesktopInstallerCanPreseedAssistantProfileExplicitly),
     ("desktop installer skips Visual Studio extension by default", TestDesktopInstallerSkipsVisualStudioExtensionByDefault),
@@ -3367,6 +3369,82 @@ static Task TestAssistantProfileStoresNameInOneFile()
     Equal(saved.ProfileId, loaded.ProfileId);
     Equal(Path.Combine(Ali.Infrastructure.Bootstrap.AliServices.LocalAliRoot, "Profiles", saved.ProfileId), Ali.Infrastructure.Bootstrap.AliServices.GetProfileDataRoot(saved));
     return Task.CompletedTask;
+}
+
+static async Task TestUserDataBackupRestoresProfileAndSettings()
+{
+    var root = NewTestDirectory();
+    var localRoot = Path.Combine(root, "LocalAli");
+    var dataRoot = Path.Combine(localRoot, "BootstrapData");
+    var profile = AssistantProfile.Create("Nova");
+    var profileRoot = Path.Combine(localRoot, "Profiles", profile.ProfileId);
+    var backupPath = Path.Combine(root, "Ali-backup.zip");
+    AssistantProfileStore.Save(dataRoot, profile);
+    RuntimeSettingsStore.Save(dataRoot, RuntimeSettingsStore.GetDefaultOptions() with
+    {
+        Enabled = true,
+        Model = "ali-test-model",
+        DisplayName = "Ali test model"
+    });
+    VoiceRuntimeSettingsStore.Save(dataRoot, new VoiceRuntimeSettings(
+        AssistantReadsRepliesOutLoud: true,
+        AutoSendVoiceTranscripts: true,
+        SpeechRate: 1.15,
+        PushToTalkKey: "NumPad0"));
+    LocalVectorLibrarySettingsStore.Save(dataRoot, new LocalVectorLibrarySettings
+    {
+        RootDirectory = Path.Combine(root, "Rag"),
+        EmbeddingModel = "test-embed"
+    });
+    Directory.CreateDirectory(Path.Combine(dataRoot, "Sources"));
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "Sources", "curated_sources.json"), "sources");
+    Directory.CreateDirectory(Path.Combine(dataRoot, "GeneratedDocuments"));
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "GeneratedDocuments", "report.pdf"), "pdf");
+    Directory.CreateDirectory(Path.Combine(dataRoot, "SessionAudio"));
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "SessionAudio", "temporary.wav"), "temp");
+
+    var conversations = new FileConversationStore(profileRoot);
+    conversations.Save(CreateStoredConversation("conv_one", "One", "question", "answer"));
+    var memories = new FileMemoryStore(profileRoot);
+    var now = DateTimeOffset.UtcNow;
+    memories.Save(new MemoryEntry("mem_one", "Remember this", "general", now, now, MemorySource.ExplicitUserRequest, MemorySensitivity.Normal, true));
+    var reminders = new FileReminderStore(profileRoot);
+    reminders.Save(new ReminderEntry("rem_one", "Reminder", "Reminder", now.AddHours(1), now, ReminderStatus.Scheduled));
+    Directory.CreateDirectory(profileRoot);
+    await File.WriteAllTextAsync(Path.Combine(profileRoot, "corrections.json"), "[]");
+
+    var service = new UserDataBackupService(dataRoot, profileRoot);
+    var backup = service.CreateBackup(backupPath);
+    var manifest = service.InspectBackup(backupPath);
+
+    Equal(true, File.Exists(backupPath));
+    Equal(1, manifest.Version);
+    Equal(profile.ProfileId, manifest.ProfileRootName);
+    Equal(true, backup.FileCount >= 8);
+    using (var archive = ZipFile.OpenRead(backupPath))
+    {
+        NotNull(archive.GetEntry("data/runtime-settings.json"), "Runtime settings should be in the backup.");
+        NotNull(archive.GetEntry("data/voice-settings.json"), "Voice settings should be in the backup.");
+        NotNull(archive.GetEntry("profile/Conversations/conversations-index.json"), "Conversation index should be in the backup.");
+        NotNull(archive.GetEntry("profile/Conversations/conversations/conv_one.json"), "Conversation payload should be in the backup.");
+        Equal(null, archive.GetEntry("data/SessionAudio/temporary.wav"));
+    }
+
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "runtime-settings.json"), "stale");
+    await File.WriteAllTextAsync(Path.Combine(profileRoot, "Memory", "memories.json"), "[]");
+    await File.WriteAllTextAsync(Path.Combine(profileRoot, "stale.txt"), "delete me");
+    var freshProfile = AssistantProfile.Create("Fresh");
+    var freshProfileRoot = Path.Combine(localRoot, "Profiles", freshProfile.ProfileId);
+    Directory.CreateDirectory(freshProfileRoot);
+    var restoreService = new UserDataBackupService(dataRoot, freshProfileRoot);
+    var restore = restoreService.RestoreBackup(backupPath);
+
+    Equal(profileRoot, restore.RestoredProfileDataRoot);
+    Contains("ali-test-model", await File.ReadAllTextAsync(Path.Combine(dataRoot, "runtime-settings.json")));
+    Contains("Remember this", await File.ReadAllTextAsync(Path.Combine(profileRoot, "Memory", "memories.json")));
+    Equal(false, File.Exists(Path.Combine(profileRoot, "stale.txt")));
+    Equal(true, File.Exists(Path.Combine(dataRoot, "GeneratedDocuments", "report.pdf")));
+    Equal(true, File.Exists(Path.Combine(dataRoot, "SessionAudio", "temporary.wav")));
 }
 
 static async Task TestDesktopInstallerDeploysAppWithoutCarryingPersonalData()
