@@ -3743,6 +3743,8 @@ static async Task TestRuntimePinsAliPersona()
     Contains("If asked who you are or what your name is", handler.LastChatBody);
     Contains("Do not prepend your name or identity to ordinary answers", handler.LastChatBody);
     Contains("Do not argue that your name is Qwen", handler.LastChatBody);
+    Contains("Answer in the user", handler.LastChatBody);
+    Contains("for English prompts, answer only in English", handler.LastChatBody);
     Contains("do not claim live web browsing", handler.LastChatBody);
     Contains("Keep normal replies concise", handler.LastChatBody);
 }
