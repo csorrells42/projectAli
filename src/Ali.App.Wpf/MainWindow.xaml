@@ -370,6 +370,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
@@ -402,10 +403,6 @@
                         Padding="8"
                         HorizontalAlignment="Stretch">
                     <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -413,15 +410,13 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <Button Grid.Row="0"
-                                Grid.Column="0"
+                        <Button Grid.Column="0"
                                 Content="+"
                                 Command="{Binding PasteImageCommand}"
                                 ToolTip="Attach an image from the clipboard"
                                 Style="{StaticResource ComposerButton}" />
 
                         <TextBox x:Name="ComposerTextBox"
-                                 Grid.Row="0"
                                  Grid.Column="1"
                                  MinHeight="44"
                                  MaxHeight="150"
@@ -437,15 +432,13 @@
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
-                        <Button Grid.Row="0"
-                                Grid.Column="2"
+                        <Button Grid.Column="2"
                                 Content="{Binding PushToTalkKeyButtonText}"
                                 Command="{Binding OpenSettingsCommand}"
                                 ToolTip="Open Settings to change the Push to Talk key."
                                 Style="{StaticResource ComposerButton}"
                                 MinWidth="116" />
-                        <Button Grid.Row="0"
-                                Grid.Column="3"
+                        <Button Grid.Column="3"
                                 Content="{Binding SendButtonText}"
                                 Command="{Binding SendCommand}"
                                 ToolTip="{Binding SendButtonToolTip}"
@@ -453,47 +446,45 @@
                                 Background="{Binding SendButtonBackground}"
                                 BorderBrush="{Binding SendButtonBorderBrush}"
                                 MinWidth="72" />
-
-                        <StackPanel Grid.Row="1"
-                                    Grid.Column="1"
-                                    Grid.ColumnSpan="3"
-                                    Orientation="Horizontal"
-                                    VerticalAlignment="Center"
-                                    Margin="8,8,4,0">
-                            <CheckBox Content="Read replies aloud"
-                                      IsChecked="{Binding AssistantReadsRepliesOutLoud, Mode=TwoWay}"
-                                      ToolTip="{Binding VoiceReadAloudToolTip}"
-                                      VerticalAlignment="Center"
-                                      Margin="0,0,18,0" />
-                            <CheckBox Content="Enable PTT"
-                                      IsChecked="{Binding AutoSendVoiceTranscripts, Mode=TwoWay}"
-                                      ToolTip="{Binding PushToTalkEnabledToolTip}"
-                                      VerticalAlignment="Center"
-                                      Margin="0,0,18,0" />
-                            <TextBlock Text="Speech speed"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,8,0" />
-                            <Slider Minimum="0.75"
-                                    Maximum="1.6"
-                                    Width="160"
-                                    TickFrequency="0.05"
-                                    IsSnapToTickEnabled="True"
-                                    SmallChange="0.05"
-                                    LargeChange="0.1"
-                                    Value="{Binding SpeechRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                    VerticalAlignment="Center"
-                                    Margin="0,0,8,0" />
-                            <TextBlock Text="{Binding SpeechRateLabel}"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontWeight="SemiBold"
-                                       MinWidth="40"
-                                       VerticalAlignment="Center" />
-                        </StackPanel>
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="2" Margin="6,8,6,0">
+                <StackPanel Grid.Row="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="66,6,6,0">
+                    <CheckBox Content="Read replies aloud"
+                              IsChecked="{Binding AssistantReadsRepliesOutLoud, Mode=TwoWay}"
+                              ToolTip="{Binding VoiceReadAloudToolTip}"
+                              VerticalAlignment="Center"
+                              Margin="0,0,18,0" />
+                    <CheckBox Content="Enable PTT"
+                              IsChecked="{Binding AutoSendVoiceTranscripts, Mode=TwoWay}"
+                              ToolTip="{Binding PushToTalkEnabledToolTip}"
+                              VerticalAlignment="Center"
+                              Margin="0,0,18,0" />
+                    <TextBlock Text="Speech speed"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0" />
+                    <Slider Minimum="0.75"
+                            Maximum="1.6"
+                            Width="160"
+                            TickFrequency="0.05"
+                            IsSnapToTickEnabled="True"
+                            SmallChange="0.05"
+                            LargeChange="0.1"
+                            Value="{Binding SpeechRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            VerticalAlignment="Center"
+                            Margin="0,0,8,0" />
+                    <TextBlock Text="{Binding SpeechRateLabel}"
+                               Foreground="{StaticResource TextBrush}"
+                               FontWeight="SemiBold"
+                               MinWidth="40"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Grid Grid.Row="3" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
