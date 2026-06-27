@@ -150,6 +150,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer skips Ollama installer when executable exists", TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists),
     ("desktop installer repair preserves profile data", TestDesktopInstallerRepairPreservesProfileData),
     ("desktop installer installs sidecar voice resources", TestDesktopInstallerInstallsSidecarVoiceResources),
+    ("desktop uninstaller removes app and preserves user data", TestDesktopUninstallerRemovesAppAndPreservesUserData),
+    ("desktop uninstaller can remove user data explicitly", TestDesktopUninstallerCanRemoveUserDataExplicitly),
     ("desktop installer readiness reports payload and first launch profile", TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile),
     ("desktop installer readiness reports voice resources", TestDesktopInstallerReadinessReportsVoiceResources),
     ("desktop installer readiness reports missing VSIX installer", TestDesktopInstallerReadinessReportsMissingVsixInstaller),
@@ -3608,6 +3610,51 @@ static async Task TestDesktopInstallerInstallsSidecarVoiceResources()
     Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "lib", "voice", "piper", "en_US-test-medium.onnx")));
     Equal(true, File.Exists(Path.Combine(localRoot, "DevRun", "lib", "voice", "python-venv", "Scripts", "python.exe")));
     Contains("Local voice resources installed: 1 Piper voice", string.Join(Environment.NewLine, result.DependencyMessages));
+}
+
+static async Task TestDesktopUninstallerRemovesAppAndPreservesUserData()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var localRoot = Path.Combine(root, "LocalAli");
+    var devRun = Path.Combine(localRoot, "DevRun");
+    var dataRoot = Path.Combine(localRoot, "BootstrapData");
+    var profileRoot = Path.Combine(localRoot, "Profiles", "profile_one");
+    Directory.CreateDirectory(devRun);
+    Directory.CreateDirectory(dataRoot);
+    Directory.CreateDirectory(profileRoot);
+    await File.WriteAllTextAsync(Path.Combine(devRun, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "assistant-profile.json"), "{}");
+    await File.WriteAllTextAsync(Path.Combine(profileRoot, "memories.json"), "keep me");
+
+    var uninstaller = new AliDesktopUninstaller();
+    var result = await uninstaller.UninstallAsync(new AliDesktopUninstallOptions(localRoot));
+
+    Equal(true, result.Succeeded);
+    Equal(false, Directory.Exists(devRun));
+    Equal(true, File.Exists(Path.Combine(dataRoot, "assistant-profile.json")));
+    Equal(true, File.Exists(Path.Combine(profileRoot, "memories.json")));
+    Equal(true, File.Exists(result.ReceiptPath));
+    Contains("preserved", result.Message);
+}
+
+static async Task TestDesktopUninstallerCanRemoveUserDataExplicitly()
+{
+    var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var localRoot = Path.Combine(root, "LocalAli");
+    var devRun = Path.Combine(localRoot, "DevRun");
+    var dataRoot = Path.Combine(localRoot, "BootstrapData");
+    Directory.CreateDirectory(devRun);
+    Directory.CreateDirectory(dataRoot);
+    await File.WriteAllTextAsync(Path.Combine(devRun, "Ali.App.Wpf.exe"), "fake app");
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "assistant-profile.json"), "{}");
+
+    var uninstaller = new AliDesktopUninstaller();
+    var result = await uninstaller.UninstallAsync(new AliDesktopUninstallOptions(localRoot, RemoveUserData: true));
+
+    Equal(true, result.Succeeded);
+    Equal(false, Directory.Exists(localRoot));
+    Equal(true, File.Exists(result.ReceiptPath));
+    Contains("user data were removed", result.Message);
 }
 
 static async Task TestDesktopInstallerReadinessReportsPayloadAndFirstLaunchProfile()

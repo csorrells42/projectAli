@@ -55,28 +55,49 @@ public partial class InstallerWindow : Window
         SetBusy(true);
         LogTextBox.Clear();
         FinishLogTextBox.Clear();
-        AppendLog("Starting Ali setup.");
+        AppendLog(UninstallModeRadio.IsChecked == true ? "Starting Ali uninstall." : "Starting Ali setup.");
 
         try
         {
-            var installer = new AliDesktopInstaller();
-            var result = await installer.InstallAsync(BuildOptions()).ConfigureAwait(true);
-
-            ExitCode = result.Succeeded ? 0 : 1;
-            StatusTextBlock.Text = result.Message;
-            AppendLog(result.Message);
-            AppendLog($"Target: {result.TargetDirectory}");
-            AppendLog($"Receipt: {result.ReceiptPath}");
-            AppendLog($"Installed files: {result.InstalledFiles.Count}");
-
-            foreach (var dependency in result.DependencyMessages)
+            if (UninstallModeRadio.IsChecked == true)
             {
-                AppendLog($"Dependency: {dependency}");
+                var uninstaller = new AliDesktopUninstaller();
+                var uninstallResult = await uninstaller.UninstallAsync(BuildUninstallOptions()).ConfigureAwait(true);
+
+                ExitCode = uninstallResult.Succeeded ? 0 : 1;
+                StatusTextBlock.Text = uninstallResult.Message;
+                AppendLog(uninstallResult.Message);
+                AppendLog($"Local root: {uninstallResult.LocalAliRoot}");
+                AppendLog($"Receipt: {uninstallResult.ReceiptPath}");
+                AppendLog($"Removed paths: {uninstallResult.RemovedPaths.Count}");
+                AppendLog($"Preserved paths: {uninstallResult.PreservedPaths.Count}");
+
+                foreach (var warning in uninstallResult.Warnings)
+                {
+                    AppendLog($"Warning: {warning}");
+                }
             }
-
-            foreach (var warning in result.Warnings)
+            else
             {
-                AppendLog($"Warning: {warning}");
+                var installer = new AliDesktopInstaller();
+                var result = await installer.InstallAsync(BuildOptions()).ConfigureAwait(true);
+
+                ExitCode = result.Succeeded ? 0 : 1;
+                StatusTextBlock.Text = result.Message;
+                AppendLog(result.Message);
+                AppendLog($"Target: {result.TargetDirectory}");
+                AppendLog($"Receipt: {result.ReceiptPath}");
+                AppendLog($"Installed files: {result.InstalledFiles.Count}");
+
+                foreach (var dependency in result.DependencyMessages)
+                {
+                    AppendLog($"Dependency: {dependency}");
+                }
+
+                foreach (var warning in result.Warnings)
+                {
+                    AppendLog($"Warning: {warning}");
+                }
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or IOException or UnauthorizedAccessException)
@@ -96,7 +117,7 @@ public partial class InstallerWindow : Window
 
     private AliDesktopInstallOptions BuildOptions()
     {
-        var installApplication = VsixOnlyModeRadio.IsChecked != true;
+        var installApplication = VsixOnlyModeRadio.IsChecked != true && UninstallModeRadio.IsChecked != true;
         var repair = installApplication && RepairModeRadio.IsChecked == true;
         var installVsix = VisualStudioExtensionCheckBox.IsChecked == true || VsixOnlyModeRadio.IsChecked == true;
 
@@ -120,6 +141,9 @@ public partial class InstallerWindow : Window
         };
     }
 
+    private AliDesktopUninstallOptions BuildUninstallOptions() =>
+        new(InstallRootTextBox.Text, RemoveUserDataCheckBox.IsChecked == true);
+
     private void CloseButtonClick(object sender, RoutedEventArgs e)
     {
         Close();
@@ -127,6 +151,12 @@ public partial class InstallerWindow : Window
 
     private void BackButtonClick(object sender, RoutedEventArgs e)
     {
+        if (UninstallModeRadio.IsChecked == true && _currentStep == InstallerStep.Review)
+        {
+            ShowStep(InstallerStep.Assistant);
+            return;
+        }
+
         if (_currentStep > InstallerStep.Mode)
         {
             ShowStep(_currentStep - 1);
@@ -135,6 +165,20 @@ public partial class InstallerWindow : Window
 
     private async void NextButtonClick(object sender, RoutedEventArgs e)
     {
+        if (UninstallModeRadio.IsChecked == true)
+        {
+            var nextStep = _currentStep == InstallerStep.Mode
+                ? InstallerStep.Assistant
+                : InstallerStep.Review;
+            ShowStep(nextStep);
+            if (_currentStep == InstallerStep.Review)
+            {
+                await RefreshReadinessAsync().ConfigureAwait(true);
+            }
+
+            return;
+        }
+
         if (_currentStep < InstallerStep.Review)
         {
             ShowStep(_currentStep + 1);
@@ -199,6 +243,13 @@ public partial class InstallerWindow : Window
         RefreshReadinessButton.IsEnabled = false;
         try
         {
+            if (UninstallModeRadio.IsChecked == true)
+            {
+                ReadinessListBox.ItemsSource = BuildUninstallReadinessItems();
+                StatusTextBlock.Text = "Ready to uninstall selected Ali components.";
+                return;
+            }
+
             var readiness = await _readinessService.EvaluateAsync(BuildOptions()).ConfigureAwait(true);
             ReadinessListBox.ItemsSource = readiness.Items.Select(ReadinessDisplayItem.FromReadinessItem).ToList();
             StatusTextBlock.Text = readiness.IsReadyForSelectedActions
@@ -235,11 +286,15 @@ public partial class InstallerWindow : Window
         StepDescriptionTextBlock.Text = step switch
         {
             InstallerStep.Mode => "Choose a normal install, repair pass, or Visual Studio-only install.",
-            InstallerStep.Assistant => "Choose where Ali installs and optionally seed the assistant name.",
+            InstallerStep.Assistant => UninstallModeRadio.IsChecked == true
+                ? "Confirm which Ali root should be uninstalled."
+                : "Choose where Ali installs and optionally seed the assistant name.",
             InstallerStep.Dependencies => "Select Ollama, model, and local voice resource actions.",
             InstallerStep.VisualStudio => "Choose whether to install the optional Visual Studio Companion extension.",
             InstallerStep.Shortcuts => "Choose launch and shortcut options.",
-            InstallerStep.Review => "Review readiness before setup changes anything.",
+            InstallerStep.Review => UninstallModeRadio.IsChecked == true
+                ? "Review uninstall choices before setup changes anything."
+                : "Review readiness before setup changes anything.",
             _ => "Setup finished."
         };
 
@@ -247,12 +302,14 @@ public partial class InstallerWindow : Window
         NextButton.Visibility = step < InstallerStep.Review ? Visibility.Visible : Visibility.Collapsed;
         InstallButton.Visibility = step == InstallerStep.Review ? Visibility.Visible : Visibility.Collapsed;
         InstallButton.IsEnabled = !_isBusy;
+        InstallButton.Content = UninstallModeRadio.IsChecked == true ? "Uninstall" : "Install";
         CloseButton.Content = step == InstallerStep.Finish ? "Close" : "Cancel";
     }
 
     private void UpdateComponentState()
     {
-        var installApplication = VsixOnlyModeRadio.IsChecked != true;
+        var uninstall = UninstallModeRadio.IsChecked == true;
+        var installApplication = VsixOnlyModeRadio.IsChecked != true && !uninstall;
         var vsixOnly = VsixOnlyModeRadio.IsChecked == true;
 
         AssistantNameTextBox.IsEnabled = installApplication;
@@ -267,7 +324,12 @@ public partial class InstallerWindow : Window
         DesktopShortcutCheckBox.IsEnabled = installApplication;
         StartMenuShortcutCheckBox.IsEnabled = installApplication;
         VisualStudioExtensionCheckBox.IsChecked = vsixOnly ? true : VisualStudioExtensionCheckBox.IsChecked;
-        VisualStudioExtensionCheckBox.IsEnabled = !vsixOnly;
+        VisualStudioExtensionCheckBox.IsEnabled = !vsixOnly && !uninstall;
+        RemoveUserDataCheckBox.IsEnabled = uninstall;
+        if (!uninstall)
+        {
+            RemoveUserDataCheckBox.IsChecked = false;
+        }
     }
 
     private void SetBusy(bool busy)
@@ -289,6 +351,30 @@ public partial class InstallerWindow : Window
 
     private static string? NullIfWhiteSpace(string value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private IReadOnlyList<ReadinessDisplayItem> BuildUninstallReadinessItems()
+    {
+        var options = BuildUninstallOptions();
+        var localRoot = string.IsNullOrWhiteSpace(options.LocalAliRoot)
+            ? AliDesktopUninstallOptions.CreateDefault().LocalAliRoot
+            : Path.GetFullPath(options.LocalAliRoot);
+        var devRun = Path.Combine(localRoot, "DevRun");
+        var items = new List<ReadinessDisplayItem>
+        {
+            new(
+                Directory.Exists(devRun) ? "Ready - Ali app" : "Warning - Ali app",
+                Directory.Exists(devRun)
+                    ? $"DevRun app folder will be removed: {devRun}"
+                    : $"No DevRun app folder was found at {devRun}."),
+            new(
+                options.RemoveUserData ? "Warning - User data" : "Ready - User data",
+                options.RemoveUserData
+                    ? $"User data under {localRoot} will be removed."
+                    : $"User data under {localRoot} will be preserved.")
+        };
+
+        return items;
+    }
 
     private enum InstallerStep
     {

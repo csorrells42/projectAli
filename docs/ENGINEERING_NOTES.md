@@ -180,7 +180,7 @@ The final product spec calls for SQLite. Add SQLite deliberately once package in
 The installer lane is now a GUI-first setup executable backed by deterministic install services:
 
 - `src\Ali.App.Installer\Ali.App.Installer.csproj` builds `Ali.Setup.exe`.
-- The GUI opens as a wizard with mode, assistant, dependencies/models, Visual Studio, shortcuts, review, and finish steps.
+- The GUI opens as a wizard with mode, assistant/root, dependencies/models, Visual Studio, shortcuts, review, and finish steps.
 - Default install copies the packaged WPF payload into `%LOCALAPPDATA%\Ali\DevRun`.
 - Payload copy skips personal data directories and files, including `BootstrapData`, `Profiles`, conversations, memories, reminders, correction queues, session audio/images/speech, and `assistant-profile.json`.
 - User data lives under `%LOCALAPPDATA%\Ali\Profiles\<profileId>`.
@@ -188,6 +188,7 @@ The installer lane is now a GUI-first setup executable backed by deterministic i
 - First launch asks for the assistant name unless setup explicitly seeds the profile file.
 - Repair mode refreshes binaries and selected optional components while preserving profile data.
 - Visual Studio Companion-only mode can install the VSIX later without reinstalling the Ali app payload.
+- Uninstall mode removes DevRun app binaries and verified Ali shortcuts. It preserves user data by default, with an explicit `Also remove user data` option for owner-approved full removal.
 - The packaged payload includes the Ali Companion VSIX under `extras\visualstudio\Ali.App.VisualStudioExtension.vsix`.
 - Local voice resources install from an optional sidecar `Ali.VoicePack.zip` or `lib\voice` folder instead of being embedded in `Ali.Setup.exe`, because full local Piper/Whisper assets are multi-GB.
 - Ollama install is explicit through `Install Ollama if missing` or CLI flags. Model pulls are explicit and check `ollama list` first so already-installed model IDs are not pulled again.
@@ -205,9 +206,11 @@ CLI automation remains available:
 .\Ali.Setup.exe --install-vsix-only
 .\Ali.Setup.exe --install-voice-resources --voice-resources "C:\path\to\Ali.VoicePack.zip"
 .\Ali.Setup.exe --desktop-shortcut --start-menu-shortcut
+.\Ali.Setup.exe --uninstall
+.\Ali.Setup.exe --uninstall --remove-user-data
 ```
 
-Backup/restore is planned after the installer is finished. Backup should gather Ali state into one staging folder, write `ali-backup-manifest.json` at the staging root, copy captured data under stable relative folders such as `BootstrapData`, `Profiles`, and `Receipts`, then zip that staging folder into one timestamped backup file. Restore should unzip to staging first, validate the manifest, block active Ali writes with a single restore lock/mutex, preserve a pre-restore backup, restore JSON/settings with temp-file-and-rename semantics where possible, and restore selected model IDs atomically so runtime settings, UI selections, and receipts do not disagree. Restore must not pull models; after restore it should run a read-only readiness check and report missing Ollama/models/VSIX.
+Backup/restore is implemented in `Settings -> Maintenance`. Backup uses `UserDataBackupService` to write one zip with `ali-backup-manifest.json`, shared bootstrap data under `data/`, and the active profile data under `profile/`. It skips temporary session audio/images and backup/staging folders. Restore validates the manifest, extracts through a temp staging folder, blocks active UI voice/runtime work before writing, restores shared data and the backed-up profile folder, reloads runtime/coding/voice/history/memory state, and never pulls Ollama models during restore. If the restored profile differs from the currently loaded profile, the UI reports that Ali should be restarted so the restored assistant profile/name becomes the active session.
 
 Current developer install path: build from source, refresh `%LOCALAPPDATA%\Ali\DevRun`, optionally install the local VSIX into Visual Studio Community, start `Ali.App.WebHelper` on loopback, and keep voice/model assets under Ali-owned local folders. `show install doctor` is the read-only dependency checker for DevRun, VSIX, Visual Studio discovery, WebHelper bridge URL, runtime settings, selected model, PDF workspace, .NET runtime, and OS. The current saved coding/chat model is `ali-deepseek-coder-v2:16b-low`; Qwen VL models are optional vision assets.
 

@@ -102,6 +102,22 @@
                                      Checked="ModeChanged" />
                         <TextBlock Text="Install the Visual Studio extension without reinstalling Ali or touching assistant data."
                                    Style="{StaticResource OptionText}" />
+                        <RadioButton x:Name="UninstallModeRadio"
+                                     Content="Uninstall Ali"
+                                     FontWeight="SemiBold"
+                                     Margin="0,0,0,4"
+                                     Checked="ModeChanged" />
+                        <TextBlock Text="Remove Ali app binaries and Ali shortcuts. Conversations, memories, settings, backups, and assistant data are preserved by default."
+                                   Style="{StaticResource OptionText}" />
+                        <CheckBox x:Name="RemoveUserDataCheckBox"
+                                  Content="Also remove user data"
+                                  Margin="24,0,0,4"
+                                  Checked="InstallerOptionChanged"
+                                  Unchecked="InstallerOptionChanged" />
+                        <TextBlock Text="This deletes conversations, memories, reminders, settings, sources, backups, and assistant profile data under the selected Ali root."
+                                   Foreground="#991B1B"
+                                   TextWrapping="Wrap"
+                                   Margin="48,0,0,0" />
                     </StackPanel>
 
                     <StackPanel x:Name="AssistantStepPanel" Visibility="Collapsed">

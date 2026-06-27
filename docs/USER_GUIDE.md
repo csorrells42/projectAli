@@ -81,7 +81,7 @@ Ali.Setup.exe
 
 Running it with no arguments opens the GUI setup wizard. The wizard walks through:
 
-- setup mode: install Ali, repair Ali, or install only the Visual Studio Companion extension
+- setup mode: install Ali, repair Ali, install only the Visual Studio Companion extension, or uninstall Ali
 - install location, normally `%LOCALAPPDATA%\Ali`
 - optional assistant name seed
 - optional Ollama install if missing
@@ -107,11 +107,13 @@ The user-facing assistant name has one persisted source of truth:
 
 By default, setup does not create that file. First launch asks the user to name the assistant. If setup is run with an explicit assistant name, it seeds only that profile file and does not duplicate the name into chats, memories, runtime settings, or installer settings.
 
-Repair mode refreshes app binaries and selected optional components while preserving user data. Visual Studio Companion-only mode can install the VSIX later without reinstalling Ali or touching profile data.
+Repair mode refreshes app binaries and selected optional components while preserving user data. Visual Studio Companion-only mode can install the VSIX later without reinstalling Ali or touching profile data. Uninstall mode removes Ali app binaries and Ali shortcuts while preserving user data by default. The separate `Also remove user data` checkbox removes conversations, memories, reminders, settings, sources, backups, and assistant profile data under the selected Ali root.
 
 Local Piper/Whisper voice assets are not embedded inside `Ali.Setup.exe` because the full local voice cache is multi-GB. To install voices during setup, place `Ali.VoicePack.zip` or a `lib\voice` folder beside `Ali.Setup.exe`, or choose a voice resource path in the Dependencies step. The GUI option is safe to leave on: if no sidecar voice pack is present, setup reports that and continues without installing voice resources.
 
-Ollama installation and model pulls are explicit. If requested, setup can install Ollama from the official Windows installer path and then pull selected models. If a selected model is already installed, setup reports that instead of pulling it again. Restore and backup are not yet implemented in the app UI; the planned backup shape is a single zip file containing a manifest plus Ali's important local state.
+Ollama installation and model pulls are explicit. If requested, setup can install Ollama from the official Windows installer path and then pull selected models. If a selected model is already installed, setup reports that instead of pulling it again.
+
+Backup and restore are available in `Settings -> Maintenance`. `Create Backup` writes a single zip containing Ali conversations, memories, reminders, assistant profile/name, app settings, sources/topics, local library settings and index metadata, voice settings, runtime/model selection settings, receipts, and generated documents. Temporary session audio and temporary screenshots are skipped. `Restore Backup` validates the zip manifest, pauses active UI operations, restores data through staging, and does not pull Ollama models.
 
 ## HTML Helper
 

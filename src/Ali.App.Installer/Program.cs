@@ -30,6 +30,24 @@ internal static class Program
             return 0;
         }
 
+        if (parse.Uninstall)
+        {
+            var uninstaller = new AliDesktopUninstaller();
+            var uninstallResult = uninstaller.UninstallAsync(parse.UninstallOptions!, CancellationToken.None).GetAwaiter().GetResult();
+
+            Console.WriteLine(uninstallResult.Message);
+            Console.WriteLine($"Local root: {uninstallResult.LocalAliRoot}");
+            Console.WriteLine($"Receipt: {uninstallResult.ReceiptPath}");
+            Console.WriteLine($"Removed paths: {uninstallResult.RemovedPaths.Count}");
+            Console.WriteLine($"Preserved paths: {uninstallResult.PreservedPaths.Count}");
+            foreach (var warning in uninstallResult.Warnings)
+            {
+                Console.WriteLine($"Warning: {warning}");
+            }
+
+            return uninstallResult.Succeeded ? 0 : 1;
+        }
+
         var installer = new AliDesktopInstaller();
         var result = installer.InstallAsync(parse.Options, CancellationToken.None).GetAwaiter().GetResult();
 
@@ -55,12 +73,15 @@ internal sealed record InstallerArguments(
     bool Succeeded,
     bool ShowHelp,
     string Message,
-    AliDesktopInstallOptions Options)
+    AliDesktopInstallOptions Options,
+    bool Uninstall = false,
+    AliDesktopUninstallOptions? UninstallOptions = null)
 {
     public const string Usage =
         """
         Ali.Setup usage:
           Ali.Setup.exe [--gui]
+          Ali.Setup.exe --uninstall [--local-root <path>] [--remove-user-data]
           Ali.Setup.exe [--payload <folder-or-zip>] [--local-root <path>] [--assistant-name <name>]
                         [--pull-runtime-model] [--runtime-model <model>]
                         [--pull-vision-model] [--vision-model <model>]
@@ -86,14 +107,20 @@ internal sealed record InstallerArguments(
           If --payload is omitted, the installer looks for ali-payload.zip or payload\ beside itself,
           then for an embedded Payload\ali-payload.zip resource in packaged single-file builds.
 
-        Voice resources:
+          Voice resources:
           Place Ali.VoicePack.zip or lib\voice beside setup, or pass --voice-resources.
           Voice assets are sidecar files because local Piper/Whisper assets can be multi-GB.
+
+        Uninstall:
+          --uninstall removes Ali app binaries and Ali shortcuts.
+          User data is preserved unless --remove-user-data is also supplied.
         """;
 
     public static InstallerArguments TryParse(IReadOnlyList<string> args)
     {
         var options = AliDesktopInstallOptions.CreateDefault();
+        var uninstall = false;
+        var removeUserData = false;
         for (var index = 0; index < args.Count; index++)
         {
             var arg = args[index];
@@ -105,6 +132,28 @@ internal sealed record InstallerArguments(
                     return new InstallerArguments(true, true, string.Empty, options);
 
                 case "--gui":
+                    break;
+
+                case "--uninstall":
+                    uninstall = true;
+                    options = options with
+                    {
+                        InstallApplication = false,
+                        InstallVisualStudioExtension = false,
+                        PullRuntimeModel = false,
+                        PullVisionModel = false,
+                        InstallOllamaIfMissing = false,
+                        LaunchAfterInstall = false,
+                        AssistantName = null,
+                        InstallVoiceResources = false,
+                        VoiceResourcesPath = null,
+                        CreateDesktopShortcut = false,
+                        CreateStartMenuShortcut = false
+                    };
+                    break;
+
+                case "--remove-user-data":
+                    removeUserData = true;
                     break;
 
                 case "--payload":
@@ -269,7 +318,18 @@ internal sealed record InstallerArguments(
             }
         }
 
-        return new InstallerArguments(true, false, string.Empty, options);
+        if (removeUserData && !uninstall)
+        {
+            return Fail("--remove-user-data can only be used with --uninstall.", options);
+        }
+
+        return new InstallerArguments(
+            true,
+            false,
+            string.Empty,
+            options,
+            uninstall,
+            uninstall ? new AliDesktopUninstallOptions(options.LocalAliRoot, removeUserData) : null);
     }
 
     private static bool TryReadValue(IReadOnlyList<string> args, ref int index, out string value)
