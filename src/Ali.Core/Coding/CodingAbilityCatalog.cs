@@ -12,6 +12,17 @@ public sealed record CodingAbilityGroup(
     string Summary,
     IReadOnlyList<CodingAbilityCommand> Commands);
 
+public sealed record UserCommandHelpEntry(
+    string Title,
+    string Summary,
+    string Usage,
+    string? Command = null);
+
+public sealed record UserCommandHelpTopic(
+    string Name,
+    string Summary,
+    IReadOnlyList<UserCommandHelpEntry> Entries);
+
 public static class CodingAbilityCatalog
 {
     public static IReadOnlyList<string> FastBuilderPath { get; } =
@@ -207,6 +218,92 @@ public static class CodingAbilityCatalog
             ])
     ];
 
+    public static IReadOnlyList<UserCommandHelpTopic> UserCommandHelpTopics { get; } =
+    [
+        new(
+            "Chat",
+            "Conversation controls for starting fresh or clearing saved local chats.",
+            [
+                new("New chat", "Start a fresh local conversation.", "Use the New chat button in the left sidebar."),
+                new("Erase history", "Erase saved local conversations after confirmation.", "Use the Erase History button in the left sidebar.")
+            ]),
+        new(
+            "Sources",
+            "Approved web sources, topic labels, and the local document library.",
+            [
+                new("Sources and topics", "Manage source URLs and the topics they are useful for.", "Use the Sources button in the top bar."),
+                new("Local library", "Choose the approved local RAG folder and scan it.", "Use the Local Library button in the top bar.")
+            ]),
+        new(
+            "Voice",
+            "Speech, push-to-talk, microphone, and local voice controls.",
+            [
+                new("Voice settings", "Set microphone, voice engine, selected voice, PTT, and speech speed.", "Use Settings -> Voice / Mic."),
+                new("Hear sample", "Play a sample of the selected local voice.", "Use Settings -> Voice / Mic -> Hear Sample.")
+            ]),
+        new(
+            "Runtime",
+            "Local model health, model selection, and install readiness.",
+            [
+                new("Check runtime", "Run local model health checks.", "Use Settings -> Runtime -> Check."),
+                new("Install doctor", "Report install, runtime, model, VSIX, and dependency readiness.", "show install doctor", "show install doctor")
+            ]),
+        new(
+            "Programming",
+            "Coding workspace inspection, planning, packages, guarded builds, tests, and reports.",
+            [
+                new("Command index", "Show deterministic coding commands Ali supports.", "show coding skill command index", "show coding skill command index"),
+                new("Inspect workspace", "Inspect the approved coding workspace.", "inspect coding workspace", "inspect coding workspace"),
+                new("Analyze solution", "Analyze solution architecture.", "analyze solution architecture", "analyze solution architecture"),
+                new("List packages", "List package references.", "list packages", "list packages"),
+                new("Plan coding task", "Draft a guarded implementation plan.", "plan coding task add a settings button", "plan coding task <goal>"),
+                new("Build", "Run a confirmed dotnet build.", "confirm dotnet build \"C:\\path\\to\\solution.sln\"", "confirm dotnet build \"C:\\path\\to\\solution.sln\""),
+                new("Test", "Run a confirmed dotnet test.", "confirm dotnet test \"C:\\path\\to\\solution-or-project\"", "confirm dotnet test \"C:\\path\\to\\solution-or-project\""),
+                new("Coding report", "Generate a coding session report.", "generate coding report", "generate coding report")
+            ]),
+        new(
+            "Computer",
+            "Read-only diagnostics and plan-first local computer troubleshooting.",
+            [
+                new("Status", "Show local computer help boundaries.", "show computer assistant status", "show computer assistant status"),
+                new("Command index", "List deterministic computer-management commands.", "show computer assistant commands", "show computer assistant commands"),
+                new("Running processes", "Read-only snapshot of top local processes by memory.", "collect process evidence", "collect process evidence"),
+                new("Build lock check", "Find common build helper processes holding files.", "diagnose build lock", "diagnose build lock"),
+                new("Port owner", "Check which process owns a local port.", "diagnose port 8765", "diagnose port 8765"),
+                new("Services and startup", "Inspect service and startup evidence.", "inspect services and startup", "inspect services and startup"),
+                new("Event logs", "Triage recent Windows event log clues.", "triage event logs", "triage event logs"),
+                new("Slow computer plan", "Plan safe first checks for performance issues.", "plan slow computer troubleshooting", "plan slow computer troubleshooting"),
+                new("Wi-Fi plan", "Plan safe checks for connection drops.", "troubleshoot wifi dropping connection", "troubleshoot wifi dropping connection"),
+                new("Suspicious activity plan", "Plan evidence gathering for unknown startup/process activity.", "plan suspicious activity check unknown startup item", "plan suspicious activity check unknown startup item"),
+                new("Disk cleanup plan", "Plan cleanup without deleting files automatically.", "plan disk cleanup", "plan disk cleanup")
+            ]),
+        new(
+            "PDF",
+            "Local PDF create, inspect, extract, summarize, combine, and split commands.",
+            [
+                new("PDF status", "Show PDF tool readiness.", "show pdf tool status", "show pdf tool status"),
+                new("PDF commands", "Show PDF command index.", "show pdf commands", "show pdf commands"),
+                new("Generate PDF", "Create a PDF in the approved PDF workspace.", "generate pdf \"demo.pdf\" with text \"One page summary.\"", "generate pdf \"name.pdf\" with text \"content\""),
+                new("Inspect PDF", "Inspect a PDF document.", "inspect pdf \"demo.pdf\"", "inspect pdf \"file.pdf\""),
+                new("Extract text", "Extract text from a PDF.", "extract text from pdf \"demo.pdf\"", "extract text from pdf \"file.pdf\""),
+                new("Combine PDFs", "Combine PDFs after confirmation.", "confirm combine pdfs \"a.pdf\" \"b.pdf\" \"combined.pdf\"", "confirm combine pdfs \"a.pdf\" \"b.pdf\" \"combined.pdf\"")
+            ]),
+        new(
+            "Memory / Reminders",
+            "Review saved local memories and reminder items.",
+            [
+                new("Review memories", "Open Settings to review saved local memories.", "Use Settings -> Memory / Reminders."),
+                new("Review reminders", "Open Settings to review reminders.", "Use Settings -> Memory / Reminders.")
+            ]),
+        new(
+            "Visual Studio",
+            "Ali Companion VSIX status and loopback bridge helpers.",
+            [
+                new("Integration status", "Show Visual Studio integration and bridge status.", "show visual studio integration", "show visual studio integration"),
+                new("VS handoff", "Generate a Visual Studio integration plan.", "generate visual studio integration plan", "generate visual studio integration plan")
+            ])
+    ];
+
     public static string BuildBuilderCommandIndex()
     {
         var builder = new StringBuilder();
@@ -219,6 +316,32 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Each new feature should be surfaced in this shared catalog, in the helper/VS command buttons when useful, and in the user/engineering docs.");
         builder.AppendLine("Prototype/future lane:");
         builder.AppendLine("- Screenshot bug diagnosis can use existing temporary image attachments and local vision proof, but reliable screenshot-to-source debugging still needs a dedicated evidence/triage workflow.");
+        return builder.ToString().TrimEnd();
+    }
+
+    public static string BuildUserCommandHelpGuide()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Ali feature guide:");
+        builder.AppendLine("Here are the main things I can help with. The Commands button shows this same guide as a clickable tree.");
+        builder.AppendLine("Nothing was changed on your computer.");
+        foreach (var topic in UserCommandHelpTopics)
+        {
+            builder.AppendLine();
+            builder.AppendLine($"{topic.Name}: {topic.Summary}");
+            foreach (var entry in topic.Entries.Take(5))
+            {
+                builder.AppendLine($"- {entry.Title}: {entry.Summary}");
+                if (!string.IsNullOrWhiteSpace(entry.Command))
+                {
+                    builder.AppendLine($"  Try: {entry.Command}");
+                }
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Safety rule:");
+        builder.AppendLine("- Commands that build, test, edit files, install packages, combine PDFs, stop processes, or change the computer still require the normal owner confirmation.");
         return builder.ToString().TrimEnd();
     }
 

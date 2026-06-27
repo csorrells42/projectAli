@@ -229,6 +229,25 @@ public static class CodingToolRequestParser
         "what sources can you use"
     ];
 
+    private static readonly string[] UserCommandHelpRequests =
+    [
+        "show commands",
+        "show ali commands",
+        "show command explorer",
+        "show feature guide",
+        "show ali feature guide",
+        "explain your commands",
+        "explain ali commands",
+        "help me understand your commands",
+        "what commands do you know",
+        "what features do you have",
+        "what can you do",
+        "what can ali do",
+        "what are your abilities",
+        "can you tell me about your abilities",
+        "tell me about your abilities"
+    ];
+
     private static readonly string[] ComputerAssistantCommandIndexRequests =
     [
         "show computer assistant commands",
@@ -1696,6 +1715,9 @@ public static class CodingToolRequestParser
     private static bool IsComputerAssistantCommandIndexRequest(string text) =>
         ComputerAssistantCommandIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsUserCommandHelpRequest(string text) =>
+        UserCommandHelpRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsDiskCleanupPlanRequest(string text) =>
         DiskCleanupPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -1882,6 +1904,12 @@ public static class CodingToolRequestParser
     private static bool TryParseComputerAssistantCommand(string text, bool userConfirmed, out CodingToolRequest request)
     {
         request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+
+        if (IsUserCommandHelpRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowUserCommandHelp, null, UserConfirmed: userConfirmed);
+            return true;
+        }
 
         if (IsComputerAssistantStatusRequest(text))
         {

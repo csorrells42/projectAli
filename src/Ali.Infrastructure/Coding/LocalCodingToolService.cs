@@ -230,6 +230,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.RecoverRoadmapState => RecoverRoadmapState(),
             CodingToolAction.DiagnoseRecoveryState => await DiagnoseRecoveryStateAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowReceipts => ShowReceipts(),
+            CodingToolAction.ShowUserCommandHelp => ShowUserCommandHelp(),
             CodingToolAction.ShowComputerAssistantStatus => ShowComputerAssistantStatus(),
             CodingToolAction.ShowComputerAssistantCommandIndex => ShowComputerAssistantCommandIndex(),
             CodingToolAction.PlanFileOrganization => PlanFileOrganization(request),
@@ -1734,6 +1735,9 @@ public sealed class LocalCodingToolService(
             CodingAbilityCatalog.BuildComputerAssistantStatus(Policy.WorkspaceRoot, _pdfWorkspaceRoot),
             "Computer assistant status",
             Policy.WorkspaceRoot);
+
+    private CodingToolResult ShowUserCommandHelp()
+        => new(true, true, CodingAbilityCatalog.BuildUserCommandHelpGuide(), "Ali feature guide", Policy.WorkspaceRoot);
 
     private CodingToolResult ShowComputerAssistantCommandIndex()
         => new(true, true, CodingAbilityCatalog.BuildComputerAssistantCommandIndex(), "Computer assistant command index", Policy.WorkspaceRoot);

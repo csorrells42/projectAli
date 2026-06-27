@@ -166,6 +166,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.FinishRoadmap
             or CodingToolAction.RecoverRoadmapState
             or CodingToolAction.DiagnoseRecoveryState
+            or CodingToolAction.ShowUserCommandHelp
             or CodingToolAction.ShowComputerAssistantStatus
             or CodingToolAction.ShowComputerAssistantCommandIndex
             or CodingToolAction.PlanFileOrganization

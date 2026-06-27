@@ -540,6 +540,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     var builderIndex = CodingAbilityCatalog.BuildBuilderCommandIndex();
     var computerIndex = CodingAbilityCatalog.BuildComputerAssistantCommandIndex();
     var pdfIndex = CodingAbilityCatalog.BuildPdfCommandIndex(@"C:\Ali\Pdfs");
+    var userGuide = CodingAbilityCatalog.BuildUserCommandHelpGuide();
 
     Contains("Ali coding skill command index", builderIndex);
     Contains("show visual studio integration", builderIndex);
@@ -549,10 +550,16 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
     Contains("Ali PDF command index", pdfIndex);
     Contains(@"C:\Ali\Pdfs", pdfIndex);
+    Contains("Ali feature guide", userGuide);
+    Contains("The Commands button shows this same guide", userGuide);
+    Contains("Programming", userGuide);
+    Contains("PDF", userGuide);
+    Contains("Computer", userGuide);
     Contains("plan slow computer troubleshooting", ComputerTroubleshootingCatalog.BuildCommandIndex());
     Contains("Check Task Manager", string.Join(" ", ComputerTroubleshootingCatalog.BuildScenarioChecklist("slow computer")));
     Equal(true, CodingAbilityCatalog.BuilderGroups.Any(group => group.Commands.Any(command => command.RequiresConfirmation)));
     Equal(true, CodingAbilityCatalog.ComputerGroups.Count >= 6);
+    Equal(true, CodingAbilityCatalog.UserCommandHelpTopics.Any(topic => topic.Name == "Programming"));
     return Task.CompletedTask;
 }
 
@@ -863,7 +870,10 @@ static Task TestCodingParserRoutesComputerAssistant()
     Equal(CodingToolAction.ShowComputerAssistantCommandIndex, indexRequest.Action);
 
     Equal(true, CodingToolRequestParser.TryParse("can you tell me about your abilities", out var naturalAbilitiesRequest));
-    Equal(CodingToolAction.ShowComputerAssistantCommandIndex, naturalAbilitiesRequest.Action);
+    Equal(CodingToolAction.ShowUserCommandHelp, naturalAbilitiesRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("explain your commands", out var commandHelpRequest));
+    Equal(CodingToolAction.ShowUserCommandHelp, commandHelpRequest.Action);
 
     Equal(true, CodingToolRequestParser.TryParse("what are your programming and data access limitations", out var dataAccessRequest));
     Equal(CodingToolAction.ShowComputerAssistantStatus, dataAccessRequest.Action);
@@ -1971,6 +1981,7 @@ static async Task TestLocalCodingToolShowsComputerAssistant()
     var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
 
     var status = await service.TryHandleAsync("show computer assistant status", CancellationToken.None);
+    var guide = await service.TryHandleAsync("what can you do", CancellationToken.None);
     var index = await service.TryHandleAsync("show computer assistant commands", CancellationToken.None);
     var filePlan = await service.TryHandleAsync($"plan file organization \"{downloads}\"", CancellationToken.None);
     var cleanup = await service.TryHandleAsync("plan disk cleanup", CancellationToken.None);
@@ -1984,6 +1995,9 @@ static async Task TestLocalCodingToolShowsComputerAssistant()
     Equal(true, status.Succeeded);
     Contains("Ali computer assistant status", status.Message);
     Contains("Guardrails", status.Message);
+    Equal(true, guide.Succeeded);
+    Contains("Ali feature guide", guide.Message);
+    Contains("The Commands button shows this same guide", guide.Message);
     Equal(true, index.Succeeded);
     Contains("Ali computer assistant command index", index.Message);
     Contains("plan file organization", index.Message);

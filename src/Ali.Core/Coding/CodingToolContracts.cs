@@ -61,6 +61,7 @@ public enum CodingToolAction
     RecoverRoadmapState,
     DiagnoseRecoveryState,
     ShowReceipts,
+    ShowUserCommandHelp,
     ShowComputerAssistantStatus,
     ShowComputerAssistantCommandIndex,
     PlanFileOrganization,
