@@ -8,6 +8,7 @@ must already have KittenTTS and numpy available.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import wave
 from pathlib import Path
@@ -50,10 +51,27 @@ def main() -> int:
         return 2
 
     try:
+        try:
+            import espeakng_loader
+
+            espeakng_loader.make_library_available()
+            os.environ.setdefault("PHONEMIZER_ESPEAK_LIBRARY", espeakng_loader.get_library_path())
+            os.environ.setdefault("ESPEAK_DATA_PATH", espeakng_loader.get_data_path())
+        except Exception:
+            # If the bundled loader is unavailable, phonemizer will fall back to
+            # a system eSpeak installation and report a clear failure if needed.
+            pass
+
         from kittentts import KittenTTS
 
         model_path = Path(args.model)
-        model = KittenTTS(cache_dir=str(model_path)) if model_path.is_dir() else KittenTTS(args.model)
+        if model_path.is_dir():
+            onnx_path = model_path / "kitten_tts_nano_v0_1.onnx"
+            voices_path = model_path / "voices.npz"
+            model = KittenTTS(model_path=str(onnx_path), voices_path=str(voices_path))
+        else:
+            model = KittenTTS(model_path=str(model_path))
+
         speed = max(0.75, min(args.rate, 1.6))
         audio = model.generate(text, voice=args.voice, speed=speed)
         write_wav(Path(args.output), audio, args.sample_rate)

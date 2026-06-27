@@ -24,7 +24,7 @@ public static class VoiceRuntimeSettingsStore
         var settings = JsonSerializer.Deserialize<VoiceRuntimeSettings>(json, JsonOptions);
         return settings is null
             ? new VoiceRuntimeSettings()
-            : settings with { SelectedInputPreset = VoiceInputPreset.Normalize(settings.SelectedInputPreset) };
+            : Normalize(settings);
     }
 
     public static void Save(string dataDirectory, VoiceRuntimeSettings settings)
@@ -32,8 +32,14 @@ public static class VoiceRuntimeSettingsStore
         Directory.CreateDirectory(dataDirectory);
         File.WriteAllText(
             GetSettingsPath(dataDirectory),
-            JsonSerializer.Serialize(
-                settings with { SelectedInputPreset = VoiceInputPreset.Normalize(settings.SelectedInputPreset) },
-                JsonOptions));
+            JsonSerializer.Serialize(Normalize(settings), JsonOptions));
     }
+
+    private static VoiceRuntimeSettings Normalize(VoiceRuntimeSettings settings) =>
+        settings with
+        {
+            SelectedInputPreset = VoiceInputPreset.Normalize(settings.SelectedInputPreset),
+            TextToSpeechEngine = TextToSpeechEngines.Normalize(settings.TextToSpeechEngine),
+            KittenVoiceId = KittenVoiceCatalog.Normalize(settings.KittenVoiceId)
+        };
 }

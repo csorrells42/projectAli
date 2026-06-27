@@ -6001,7 +6001,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(@"C:\Ali\lib\voice\en_US.onnx", loaded.PiperModelPath);
     Equal("en_US-test", loaded.PiperVoiceId);
     Equal(@"C:\Ali\lib\voice\kitten", loaded.KittenModelPath);
-    Equal("Luna", loaded.KittenVoiceId);
+    Equal("expr-voice-2-f", loaded.KittenVoiceId);
     Contains("{script}", loaded.KittenArgumentsTemplate ?? string.Empty);
     Contains("{rate}", loaded.KittenArgumentsTemplate ?? string.Empty);
     Equal(3, loaded.LastSuccessfulSttDeviceNumber);
