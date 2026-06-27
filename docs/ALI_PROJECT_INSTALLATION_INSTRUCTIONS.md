@@ -76,6 +76,12 @@ Current target:
 
 Do not create new `DevRun-*` folders for this pass. Refresh the existing DevRun folder only after a clean build/test pass.
 
+Use a self-contained Windows publish for DevRun so `Ali.App.Wpf.exe` does not require a separate .NET Desktop Runtime install:
+
+```powershell
+dotnet publish .\src\Ali.App.Wpf\Ali.App.Wpf.csproj -c Debug -r win-x64 --self-contained true -o "$env:LOCALAPPDATA\Ali\DevRun"
+```
+
 ## Start WebHelper
 
 From the repo root:

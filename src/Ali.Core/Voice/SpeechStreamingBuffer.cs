@@ -5,14 +5,24 @@ namespace Ali.Core.Voice;
 public sealed class SpeechStreamingBuffer
 {
     private readonly StringBuilder _buffer = new();
+    private readonly int _firstMinimumSegmentCharacters;
     private readonly int _minimumSegmentCharacters;
     private readonly int _maximumSegmentCharacters;
+    private bool _hasEmittedSegment;
 
-    public SpeechStreamingBuffer(int minimumSegmentCharacters = 180, int maximumSegmentCharacters = 700)
+    public SpeechStreamingBuffer(
+        int minimumSegmentCharacters = 180,
+        int maximumSegmentCharacters = 700,
+        int firstMinimumSegmentCharacters = 80)
     {
         if (minimumSegmentCharacters < 20)
         {
             throw new ArgumentOutOfRangeException(nameof(minimumSegmentCharacters));
+        }
+
+        if (firstMinimumSegmentCharacters < 20)
+        {
+            throw new ArgumentOutOfRangeException(nameof(firstMinimumSegmentCharacters));
         }
 
         if (maximumSegmentCharacters <= minimumSegmentCharacters)
@@ -20,6 +30,7 @@ public sealed class SpeechStreamingBuffer
             throw new ArgumentOutOfRangeException(nameof(maximumSegmentCharacters));
         }
 
+        _firstMinimumSegmentCharacters = Math.Min(firstMinimumSegmentCharacters, minimumSegmentCharacters);
         _minimumSegmentCharacters = minimumSegmentCharacters;
         _maximumSegmentCharacters = maximumSegmentCharacters;
     }
@@ -50,6 +61,7 @@ public sealed class SpeechStreamingBuffer
 
             var raw = _buffer.ToString(0, length);
             _buffer.Remove(0, length);
+            _hasEmittedSegment = true;
             var cleaned = SpeechOutputCleaner.Clean(raw);
             if (!string.IsNullOrWhiteSpace(cleaned))
             {
@@ -62,12 +74,16 @@ public sealed class SpeechStreamingBuffer
 
     private int FindReadySegmentLength()
     {
-        if (_buffer.Length < _minimumSegmentCharacters)
+        var minimumSegmentCharacters = _hasEmittedSegment
+            ? _minimumSegmentCharacters
+            : _firstMinimumSegmentCharacters;
+
+        if (_buffer.Length < minimumSegmentCharacters)
         {
             return 0;
         }
 
-        for (var index = _minimumSegmentCharacters - 1; index < _buffer.Length; index++)
+        for (var index = minimumSegmentCharacters - 1; index < _buffer.Length; index++)
         {
             if (IsSentenceBoundary(index))
             {
@@ -80,7 +96,7 @@ public sealed class SpeechStreamingBuffer
             return 0;
         }
 
-        for (var index = Math.Min(_maximumSegmentCharacters, _buffer.Length - 1); index >= _minimumSegmentCharacters; index--)
+        for (var index = Math.Min(_maximumSegmentCharacters, _buffer.Length - 1); index >= minimumSegmentCharacters; index--)
         {
             if (char.IsWhiteSpace(_buffer[index]))
             {

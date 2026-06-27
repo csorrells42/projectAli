@@ -5799,6 +5799,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
         RetainDebugAudio: true,
         AssistantReadsRepliesOutLoud: true,
         AutoSendVoiceTranscripts: true,
+        SpeechRate: 1.35,
         WhisperExecutablePath: @"C:\Ali\lib\voice\whisper.exe",
         WhisperModelPath: @"C:\Ali\lib\voice\faster-whisper",
         TextToSpeechEngine: TextToSpeechEngines.Kitten,
@@ -5808,7 +5809,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
         KittenExecutablePath: @"C:\Ali\lib\voice\python-venv\Scripts\python.exe",
         KittenModelPath: @"C:\Ali\lib\voice\kitten",
         KittenVoiceId: "Luna",
-        KittenArgumentsTemplate: "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\"");
+        KittenArgumentsTemplate: "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\" --rate \"{rate}\"");
 
     VoiceRuntimeSettingsStore.Save(directory, settings);
     var loaded = VoiceRuntimeSettingsStore.LoadOrDefault(directory);
@@ -5822,6 +5823,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(true, loaded.RetainDebugAudio);
     Equal(true, loaded.AssistantReadsRepliesOutLoud);
     Equal(true, loaded.AutoSendVoiceTranscripts);
+    Equal(1.35, loaded.SpeechRate);
     Equal(@"C:\Ali\lib\voice\whisper.exe", loaded.WhisperExecutablePath);
     Equal(TextToSpeechEngines.Kitten, loaded.TextToSpeechEngine);
     Equal(@"C:\Ali\lib\voice\en_US.onnx", loaded.PiperModelPath);
@@ -5829,6 +5831,7 @@ static Task TestVoiceSettingsPersistMicrophoneAndPreset()
     Equal(@"C:\Ali\lib\voice\kitten", loaded.KittenModelPath);
     Equal("Luna", loaded.KittenVoiceId);
     Contains("{script}", loaded.KittenArgumentsTemplate ?? string.Empty);
+    Contains("{rate}", loaded.KittenArgumentsTemplate ?? string.Empty);
     Equal(3, loaded.LastSuccessfulSttDeviceNumber);
     return Task.CompletedTask;
 }

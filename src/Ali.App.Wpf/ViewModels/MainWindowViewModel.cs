@@ -155,6 +155,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _retainDebugAudio;
     private bool _assistantReadsRepliesOutLoud;
     private bool _autoSendVoiceTranscripts;
+    private double _speechRate = 1.25d;
     private string _pushToTalkKeyText = "NumPad0";
     private bool _isAssigningPushToTalkKey;
     private bool _pushToTalkKeyDown;
@@ -243,6 +244,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _retainDebugAudio = _voiceSettings.RetainDebugAudio;
         _assistantReadsRepliesOutLoud = _voiceSettings.AssistantReadsRepliesOutLoud;
         _autoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
+        _speechRate = NormalizeSpeechRate(_voiceSettings.SpeechRate);
         _pushToTalkKeyText = NormalizePushToTalkKey(_voiceSettings.PushToTalkKey);
         ReplaceChoices(TextToSpeechEngineChoices, TextToSpeechEngines.All);
         LoadSpeechToolSettings();
@@ -801,6 +803,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string PushToTalkHintText => $"Hold {PushToTalkKeyLabel} to record. Release to transcribe and send.";
 
+    public string SpeechRateLabel => $"{SpeechRate:0.00}x";
+
     public string RuntimeDisplay
     {
         get => _runtimeDisplay;
@@ -1121,6 +1125,20 @@ public sealed class MainWindowViewModel : ObservableObject
                     ? $"Push to Talk enabled. Hold {PushToTalkKeyLabel} to speak."
                     : "Push to Talk disabled.";
                 RaiseCommandStates();
+            }
+        }
+    }
+
+    public double SpeechRate
+    {
+        get => _speechRate;
+        set
+        {
+            var clamped = NormalizeSpeechRate(value);
+            if (SetProperty(ref _speechRate, clamped))
+            {
+                OnPropertyChanged(nameof(SpeechRateLabel));
+                SaveVoiceSettings(speechRate: clamped);
             }
         }
     }
@@ -3626,7 +3644,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var settings = new VoiceSettings(
             _services.TextToSpeech.VoiceId,
-            Rate: 1.0,
+            Rate: SpeechRate,
             RetainAudio: false);
 
         return _services.TextToSpeech.SynthesizeAsync(segment, settings, cancellationToken);
@@ -3694,7 +3712,7 @@ public sealed class MainWindowViewModel : ObservableObject
             TtsStatus = $"Testing {voiceId}...";
             speech = await _services.TextToSpeech.SynthesizeAsync(
                 $"Hello, I am {AssistantName}. This is what my selected voice sounds like.",
-                new VoiceSettings(voiceId, Rate: 1.0, RetainAudio: false),
+                new VoiceSettings(voiceId, Rate: SpeechRate, RetainAudio: false),
                 _activeSpeech.Token).ConfigureAwait(true);
 
             await _services.SpeechPlayer.PlayAsync(speech.AudioPath, _activeSpeech.Token).ConfigureAwait(true);
@@ -3977,9 +3995,10 @@ public sealed class MainWindowViewModel : ObservableObject
             _voiceSettings.KittenModelPath,
             PreferConfigured(FindLocalKittenModelRoot(), kittenDefaults.ModelPath))) ?? string.Empty;
         KittenVoiceText = KittenVoiceCatalog.Normalize(PreferConfigured(_voiceSettings.KittenVoiceId, kittenDefaults.VoiceId));
-        KittenArgumentsText = PreferConfigured(
+        KittenArgumentsText = PreferKittenArgumentsTemplate(
             _voiceSettings.KittenArgumentsTemplate,
-            BuildLocalKittenArgumentsTemplate() ?? kittenDefaults.ArgumentsTemplate);
+            BuildLocalKittenArgumentsTemplate(),
+            kittenDefaults.ArgumentsTemplate);
         TextToSpeechEngineText = savedTextToSpeechEngine;
         RefreshTextToSpeechVoiceChoices();
         _loadingSpeechToolSettings = false;
@@ -4066,7 +4085,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var portableScript = File.Exists(script) ? ToPortablePath(script) : null;
         return string.IsNullOrWhiteSpace(portableScript)
             ? null
-            : $"\"{{script}}\" --model \"{{model}}\" --voice \"{{voice}}\" --output \"{{output}}\"";
+            : $"\"{{script}}\" --model \"{{model}}\" --voice \"{{voice}}\" --output \"{{output}}\" --rate \"{{rate}}\"";
     }
 
     private static string? FindLocalWhisperScript()
@@ -5053,6 +5072,7 @@ public sealed class MainWindowViewModel : ObservableObject
         bool? retainDebugAudio = null,
         bool? assistantReadsRepliesOutLoud = null,
         bool? autoSendVoiceTranscripts = null,
+        double? speechRate = null,
         string? pushToTalkKey = null)
     {
         if (_loadingVoiceSettings)
@@ -5077,6 +5097,7 @@ public sealed class MainWindowViewModel : ObservableObject
             RetainDebugAudio = retainDebugAudio ?? _voiceSettings.RetainDebugAudio,
             AssistantReadsRepliesOutLoud = assistantReadsRepliesOutLoud ?? _voiceSettings.AssistantReadsRepliesOutLoud,
             AutoSendVoiceTranscripts = autoSendVoiceTranscripts ?? _voiceSettings.AutoSendVoiceTranscripts,
+            SpeechRate = NormalizeSpeechRate(speechRate ?? _voiceSettings.SpeechRate),
             PushToTalkKey = NormalizePushToTalkKey(pushToTalkKey ?? _voiceSettings.PushToTalkKey)
         };
 
@@ -5088,6 +5109,9 @@ public sealed class MainWindowViewModel : ObservableObject
         var normalized = NormalizePushToTalkKey(value);
         return Enum.TryParse(normalized, ignoreCase: true, out key);
     }
+
+    private static double NormalizeSpeechRate(double value) =>
+        double.IsFinite(value) ? Math.Clamp(value, 0.75d, 1.6d) : 1.25d;
 
     private static string NormalizePushToTalkKey(string? value)
     {
@@ -5334,6 +5358,27 @@ public sealed class MainWindowViewModel : ObservableObject
         return IsGeneratedPiperShimArguments(configuredTrim)
             ? localPiperArguments
             : configuredTrim;
+    }
+
+    private static string PreferKittenArgumentsTemplate(
+        string? configured,
+        string? localKittenArguments,
+        string fallback)
+    {
+        var configuredTrim = NullIfWhiteSpace(configured);
+        if (configuredTrim is null)
+        {
+            return PreferConfigured(localKittenArguments, fallback);
+        }
+
+        if (!configuredTrim.Contains("{rate}", StringComparison.OrdinalIgnoreCase)
+            && (configuredTrim.Contains("{script}", StringComparison.OrdinalIgnoreCase)
+                || configuredTrim.Contains("local_kitten_tts.py", StringComparison.OrdinalIgnoreCase)))
+        {
+            return PreferConfigured(localKittenArguments, fallback);
+        }
+
+        return configuredTrim;
     }
 
     private static bool IsGeneratedPiperShimPath(string? value)

@@ -16,6 +16,7 @@ public sealed record VoiceRuntimeSettings(
     bool RetainDebugAudio = false,
     bool AssistantReadsRepliesOutLoud = false,
     bool AutoSendVoiceTranscripts = false,
+    double SpeechRate = 1.25,
     string PushToTalkKey = "NumPad0",
     string? WhisperExecutablePath = null,
     string? WhisperModelPath = null,

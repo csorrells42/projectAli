@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True, help="Local KittenTTS model path.")
     parser.add_argument("--voice", required=True, help="KittenTTS voice id.")
     parser.add_argument("--output", required=True, help="Output WAV path.")
-    parser.add_argument("--rate", default="1.0", help="Reserved for future rate control.")
+    parser.add_argument("--rate", type=float, default=1.0, help="Speech speed multiplier.")
     parser.add_argument("--sample-rate", type=int, default=24000, help="Output sample rate.")
     return parser.parse_args()
 
@@ -54,7 +54,8 @@ def main() -> int:
 
         model_path = Path(args.model)
         model = KittenTTS(cache_dir=str(model_path)) if model_path.is_dir() else KittenTTS(args.model)
-        audio = model.generate(text, voice=args.voice)
+        speed = max(0.75, min(args.rate, 1.6))
+        audio = model.generate(text, voice=args.voice, speed=speed)
         write_wav(Path(args.output), audio, args.sample_rate)
         return 0
     except Exception as exc:

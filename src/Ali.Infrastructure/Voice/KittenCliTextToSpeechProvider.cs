@@ -15,7 +15,7 @@ public sealed record KittenCliTextToSpeechOptions(
             Environment.GetEnvironmentVariable("ALI_KITTEN_EXE"),
             Environment.GetEnvironmentVariable("ALI_KITTEN_MODEL"),
             Environment.GetEnvironmentVariable("ALI_KITTEN_VOICE") ?? KittenVoiceCatalog.DefaultVoiceId,
-            Environment.GetEnvironmentVariable("ALI_KITTEN_ARGS") ?? "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\"",
+            Environment.GetEnvironmentVariable("ALI_KITTEN_ARGS") ?? "\"{script}\" --model \"{model}\" --voice \"{voice}\" --output \"{output}\" --rate \"{rate}\"",
             Path.Combine(dataRoot, "SessionSpeech", DateTimeOffset.Now.ToString("yyyyMMdd")));
 }
 
