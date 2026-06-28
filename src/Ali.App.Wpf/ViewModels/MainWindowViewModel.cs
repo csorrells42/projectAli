@@ -90,6 +90,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeSpeech;
     private SettingsWindow? _settingsWindow;
     private MaintenanceDashboardWindow? _maintenanceDashboardWindow;
+    private ProgrammingDashboardWindow? _programmingDashboardWindow;
     private LocalLibraryWindow? _localLibraryWindow;
     private SourcesTopicsWindow? _sourcesTopicsWindow;
     private bool _voiceMonitorRequested;
@@ -226,6 +227,7 @@ public sealed class MainWindowViewModel : ObservableObject
         StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         OpenMaintenanceDashboardCommand = CreateCommand(_ => OpenMaintenanceDashboard());
+        OpenProgrammingDashboardCommand = CreateCommand(_ => OpenProgrammingDashboard());
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
@@ -591,6 +593,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenSettingsCommand { get; }
 
     public ICommand OpenMaintenanceDashboardCommand { get; }
+
+    public ICommand OpenProgrammingDashboardCommand { get; }
 
     public ICommand OpenLocalLibraryCommand { get; }
 
@@ -5295,6 +5299,30 @@ public sealed class MainWindowViewModel : ObservableObject
         _maintenanceDashboardWindow.Closed += (_, _) => _maintenanceDashboardWindow = null;
         _maintenanceDashboardWindow.Show();
         _maintenanceDashboardWindow.Activate();
+    }
+
+    private void OpenProgrammingDashboard()
+    {
+        if (_programmingDashboardWindow is not null)
+        {
+            if (!_programmingDashboardWindow.IsVisible)
+            {
+                _programmingDashboardWindow.Show();
+            }
+
+            _programmingDashboardWindow.Activate();
+            return;
+        }
+
+        var owner = System.Windows.Application.Current?.MainWindow;
+        _programmingDashboardWindow = new ProgrammingDashboardWindow
+        {
+            DataContext = this,
+            Owner = owner
+        };
+        _programmingDashboardWindow.Closed += (_, _) => _programmingDashboardWindow = null;
+        _programmingDashboardWindow.Show();
+        _programmingDashboardWindow.Activate();
     }
 
     private void OpenMaintenanceReceiptFolder()

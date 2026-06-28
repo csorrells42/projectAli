@@ -260,7 +260,6 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0"
                                Text="{Binding StatusText}"
@@ -323,24 +322,6 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     <Button Grid.Column="3"
-                            Content="Sources"
-                            Command="{Binding OpenSourcesTopicsCommand}"
-                            Height="34"
-                            MinHeight="34"
-                            Margin="0,0,8,0"
-                            Padding="12,0"
-                            VerticalAlignment="Center"
-                            ToolTip="{Binding AssistantSourcesTopicsToolTip}" />
-                    <Button Grid.Column="4"
-                            Content="Local Library"
-                            Command="{Binding OpenLocalLibraryCommand}"
-                            Height="34"
-                            MinHeight="34"
-                            Margin="0,0,8,0"
-                            Padding="12,0"
-                            VerticalAlignment="Center"
-                            ToolTip="{Binding AssistantLocalLibraryToolTip}" />
-                    <Button Grid.Column="5"
                             Content="Maintenance"
                             Command="{Binding OpenMaintenanceDashboardCommand}"
                             Height="34"
@@ -349,7 +330,16 @@
                             Padding="12,0"
                             VerticalAlignment="Center"
                             ToolTip="Open Ali's computer maintenance dashboard." />
-                    <Button Grid.Column="6"
+                    <Button Grid.Column="4"
+                            Content="Programming"
+                            Command="{Binding OpenProgrammingDashboardCommand}"
+                            Height="34"
+                            MinHeight="34"
+                            Margin="0,0,8,0"
+                            Padding="12,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Open Ali's programming dashboard." />
+                    <Button Grid.Column="5"
                             Content="{Binding CommandExplorerToggleText}"
                             Command="{Binding ToggleCommandExplorerCommand}"
                             Height="34"
@@ -358,7 +348,7 @@
                             Padding="12,0"
                             VerticalAlignment="Center"
                             ToolTip="Open Ali's feature and command explorer." />
-                    <Button Grid.Column="7"
+                    <Button Grid.Column="6"
                             Content="Settings"
                             Command="{Binding OpenSettingsCommand}"
                             Height="34"

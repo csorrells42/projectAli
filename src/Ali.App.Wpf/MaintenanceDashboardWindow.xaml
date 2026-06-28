@@ -130,37 +130,19 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Coding Diagnostics"
+                            <TextBlock Text="Sources &amp; Local Library"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="One-click workspace, git, review, build, test, failure, and receipt checks."
+                            <TextBlock Text="Maintain approved research sources and local documents Ali can use for grounded answers."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Workspace"
-                                        Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
-                                <Button Content="Git"
-                                        Command="{Binding RunCodingGitStatusCommand}" />
-                                <Button Content="Review"
-                                        Command="{Binding RunCodingReviewChangesCommand}" />
-                                <Button Content="Validate"
-                                        Command="{Binding RunCodingValidationPlanCommand}" />
-                                <Button Content="Build"
-                                        Command="{Binding RunCodingBuildCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Tests"
-                                        Command="{Binding RunCodingTestCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Last Failure"
-                                        Command="{Binding RunCodingLastFailureCommand}" />
-                                <Button Content="Suggest Fix"
-                                        Command="{Binding RunCodingSuggestFixCommand}" />
-                                <Button Content="Receipts"
-                                        Command="{Binding RunCodingReceiptsCommand}" />
+                                <Button Content="Sources"
+                                        Command="{Binding OpenSourcesTopicsCommand}" />
+                                <Button Content="Local Library"
+                                        Command="{Binding OpenLocalLibraryCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
