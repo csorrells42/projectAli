@@ -60,6 +60,7 @@ public sealed record RuntimeOptimizationReport(
         builder.AppendLine($"- Top-p: {CurrentOptions.TopP?.ToString("0.###", CultureInfo.InvariantCulture) ?? "model default"}");
         builder.AppendLine($"- Streaming: {(CurrentOptions.StreamingEnabled ? "on" : "off")}");
         builder.AppendLine($"- Vision: {(CurrentOptions.SupportsVision ? "on" : "off")}");
+        builder.AppendLine($"- Suggested role: {RuntimeOptimizationAdvisor.DescribeModelRole(CurrentOptions, Machine)}");
         builder.AppendLine();
         builder.AppendLine("Current machine snapshot");
         builder.AppendLine($"- CPU: {FormatCpu(Machine.CpuName, Machine.LogicalProcessorCount)}");
@@ -160,6 +161,49 @@ public static class RuntimeOptimizationAdvisor
         };
 
         return new RuntimeOptimizationReport(options, machine, current, strategies);
+    }
+
+    public static string DescribeModelRole(
+        OpenAiCompatibleRuntimeOptions options,
+        RuntimeMachineResourceSnapshot machine)
+    {
+        var model = options.Model.ToLowerInvariant();
+        var vramGb = machine.VramLimitBytes is > 0
+            ? machine.VramLimitBytes.Value / Gib
+            : machine.Gpus?
+                .Where(gpu => gpu.DedicatedMemoryBytes is > 0)
+                .Select(gpu => gpu.DedicatedMemoryBytes!.Value / Gib)
+                .DefaultIfEmpty()
+                .Max();
+
+        if (model.Contains("deepseek-coder", StringComparison.Ordinal))
+        {
+            return "Recommended coding-first model for this PC. Best for repo work, patch suggestions, build failures, diagnostics, and software architecture questions.";
+        }
+
+        if (model.Contains("gemma4", StringComparison.Ordinal) && model.Contains("12b", StringComparison.Ordinal))
+        {
+            return "Optional general assistant model. Smooth for chat, source-backed answers, planning, and maintenance, but DeepSeek remains the better coding-first default here.";
+        }
+
+        if (model.Contains("gemma4", StringComparison.Ordinal) && model.Contains("26b", StringComparison.Ordinal))
+        {
+            return vramGb is not null && vramGb.Value <= 18
+                ? "Heavy experiment. On this VRAM class, expect possible spillover and desktop choppiness; keep it manual, not default."
+                : "Heavy experiment. Use when quality matters more than responsiveness, and keep other GPU apps light.";
+        }
+
+        if (model.Contains("qwen3-vl", StringComparison.Ordinal) || model.Contains("vision", StringComparison.Ordinal))
+        {
+            return "Vision-capable local model. Use when image understanding matters; keep context modest for responsiveness.";
+        }
+
+        if (model.Contains("qwen", StringComparison.Ordinal))
+        {
+            return "General local model. Usually a reasonable fallback when Gemma or DeepSeek are not installed.";
+        }
+
+        return "General local model. Run a health check and compare responsiveness before making it the default.";
     }
 
     private static RuntimeOptimizationStrategy BuildLowStrategy(

@@ -160,6 +160,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer readiness reports voice resources", TestDesktopInstallerReadinessReportsVoiceResources),
     ("desktop installer readiness reports missing VSIX installer", TestDesktopInstallerReadinessReportsMissingVsixInstaller),
     ("runtime optimizer uses selected model and hardware", TestRuntimeOptimizerUsesSelectedModelAndHardware),
+    ("runtime optimizer recommends DeepSeek for coding-first setup", TestRuntimeOptimizerRecommendsDeepSeekForCodingFirstSetup),
     ("failed health check does not activate real runtime", TestFailedHealthCheckDoesNotActivateRuntime),
     ("successful health check can activate real runtime", TestSuccessfulHealthCheckCanActivateRuntime),
     ("health check retries empty non-streaming probe", TestHealthCheckRetriesEmptyNonStreamingProbe),
@@ -3908,6 +3909,46 @@ static Task TestRuntimeOptimizerUsesSelectedModelAndHardware()
     Contains("Intel(R) Core(TM) i7-14700F", text);
     Contains("NVIDIA GeForce RTX 5070 Ti", text);
     Equal(false, text.Contains("qwen", StringComparison.OrdinalIgnoreCase));
+    return Task.CompletedTask;
+}
+
+static Task TestRuntimeOptimizerRecommendsDeepSeekForCodingFirstSetup()
+{
+    const double gib = 1024d * 1024d * 1024d;
+    var machine = new RuntimeMachineResourceSnapshot(
+        CpuPercent: 12,
+        RamPercent: 30,
+        GpuPercent: 10,
+        VramPercent: 20,
+        TotalRamBytes: (ulong)(32 * gib),
+        AvailableRamBytes: (ulong)(20 * gib),
+        VramUsageBytes: 2 * gib,
+        VramLimitBytes: 16 * gib,
+        CpuName: "Intel(R) Core(TM) i7-14700F",
+        LogicalProcessorCount: 28,
+        Gpus: [new RuntimeGpuHardwareInfo("NVIDIA GeForce RTX 5070 Ti", (ulong)(16 * gib))]);
+    var deepSeek = CreateRuntimeOptions("ali-deepseek-coder-v2:16b-low") with
+    {
+        DisplayName = "Ali DeepSeek Coder V2 16B - coding-first",
+        Family = "DeepSeek Coder",
+        Size = "16B",
+        Quantization = "Q4 low-load"
+    };
+    var gemma = CreateRuntimeOptions("gemma4:12b") with
+    {
+        DisplayName = "Gemma 4 12B - general assistant",
+        Family = "Gemma",
+        Size = "12B",
+        Quantization = "Ollama package default"
+    };
+
+    var deepSeekRole = RuntimeOptimizationAdvisor.DescribeModelRole(deepSeek, machine);
+    var gemmaRole = RuntimeOptimizationAdvisor.DescribeModelRole(gemma, machine);
+    var reportText = RuntimeOptimizationAdvisor.BuildReport(deepSeek, machine).ToDisplayText();
+
+    Contains("Recommended coding-first model", deepSeekRole);
+    Contains("DeepSeek remains the better coding-first default", gemmaRole);
+    Contains("Suggested role: Recommended coding-first model", reportText);
     return Task.CompletedTask;
 }
 

@@ -7,6 +7,33 @@ internal static class RuntimeModelChoiceCatalog
 {
     public static IReadOnlyList<RuntimeModelChoice> KnownChoices() =>
     [
+        RuntimeModelChoice.FromModelId(
+            "ali-deepseek-coder-v2:16b-low",
+            "Recommended coding-first Ali model",
+            displayName: "Ali DeepSeek Coder V2 16B - coding-first",
+            family: "DeepSeek Coder",
+            size: "16B",
+            quantization: "Q4 low-load",
+            contextTokens: 4096,
+            outputTokenLimit: 256),
+        RuntimeModelChoice.FromModelId(
+            "deepseek-coder-v2:16b",
+            "Known coding specialist",
+            displayName: "DeepSeek Coder V2 16B",
+            family: "DeepSeek Coder",
+            size: "16B",
+            quantization: "Ollama package default",
+            contextTokens: 4096,
+            outputTokenLimit: 256),
+        RuntimeModelChoice.FromModelId(
+            "gemma4:12b",
+            "Optional general-purpose model",
+            displayName: "Gemma 4 12B - general assistant",
+            family: "Gemma",
+            size: "12B",
+            quantization: "Ollama package default",
+            contextTokens: 4096,
+            outputTokenLimit: 256),
         RuntimeModelChoice.FromModelId("qwen3:1.7b", "Known Qwen option"),
         RuntimeModelChoice.FromModelId("qwen3:4b", "Known Qwen option"),
         RuntimeModelChoice.FromModelId("qwen3:8b", "Known Qwen option"),
@@ -153,7 +180,11 @@ internal sealed record RuntimeModelChoice(
     private static IReadOnlyList<int> BuildContextChoices(string model, int? preferred)
     {
         var lower = model.ToLowerInvariant();
-        var values = lower.Contains("32b", StringComparison.Ordinal)
+        var values = lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("26b", StringComparison.Ordinal)
+            ? new[] { 2048, 4096 }
+            : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("12b", StringComparison.Ordinal)
+                ? new[] { 2048, 4096, 8192, 16384 }
+                : lower.Contains("32b", StringComparison.Ordinal)
             ? new[] { 2048, 4096 }
             : lower.Contains("1.7b", StringComparison.Ordinal) || lower.Contains("4b", StringComparison.Ordinal)
                 ? new[] { 1024, 2048, 4096, 8192 }
@@ -189,6 +220,16 @@ internal sealed record RuntimeModelChoice(
             return $"Qwen3 {size}";
         }
 
+        if (lower.Contains("gemma4", StringComparison.Ordinal))
+        {
+            return $"Gemma 4 {size}";
+        }
+
+        if (lower.Contains("deepseek-coder", StringComparison.Ordinal))
+        {
+            return $"DeepSeek Coder V2 {size}";
+        }
+
         return model;
     }
 
@@ -200,12 +241,22 @@ internal sealed record RuntimeModelChoice(
             return "Qwen";
         }
 
+        if (lower.Contains("gemma", StringComparison.Ordinal))
+        {
+            return "Gemma";
+        }
+
+        if (lower.Contains("deepseek", StringComparison.Ordinal))
+        {
+            return "DeepSeek Coder";
+        }
+
         return "local";
     }
 
     private static string InferSize(string model)
     {
-        foreach (var size in new[] { "1.7B", "4B", "8B", "14B", "16B", "32B" })
+        foreach (var size in new[] { "1.7B", "4B", "8B", "12B", "14B", "16B", "26B", "27B", "32B" })
         {
             if (model.Contains(size, StringComparison.OrdinalIgnoreCase))
             {
