@@ -359,6 +359,10 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         if (tokens.Contains("president") && isUnitedStatesQuestion)
         {
             queryTerms.AddRange(["white", "house", "administration", "president", "united", "states"]);
+            if (tokens.Contains("vice"))
+            {
+                queryTerms.Add("vice");
+            }
         }
 
         var distinctTerms = queryTerms

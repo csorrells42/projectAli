@@ -57,6 +57,15 @@ public sealed class ConversationOrchestrator(
     private static readonly Regex SourcesCheckedRegex = new(
         @"(?:\r?\n){0,2}\s*Sources checked:\s*.*\z",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+    private static readonly Regex MultiDayForecastRegex = new(
+        @"\b(?:5|five|3|three|4|four|7|seven|10|ten)\s*-?\s*day\b|\bweek(?:ly|end)?\s+forecast\b|\bforecast\s+(?:for\s+)?(?:the\s+)?(?:week|next\s+week)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex PresidentRegex = new(
+        @"President\s+Donald\s+J\.?\s+Trump",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex VicePresidentRegex = new(
+        @"Vice\s+President\s+JD\s+Vance",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     public ILocalModelRuntime Runtime { get; } = runtime;
 
     public PermissionService Permissions { get; } = permissionService;
@@ -111,7 +120,7 @@ public sealed class ConversationOrchestrator(
         var sourceResult = sourcePlan.UseSources
             ? await Sources.RetrieveAsync(sourcePlan, cancellationToken).ConfigureAwait(false)
             : SourceRetrievalResult.Empty;
-        var deterministicSourceAnswer = TryBuildDeterministicSourceAnswer(sourcePlan, sourceResult);
+        var deterministicSourceAnswer = TryBuildDeterministicSourceAnswer(userText, sourcePlan, sourceResult);
         if (!string.IsNullOrWhiteSpace(deterministicSourceAnswer))
         {
             yield return new AssistantStreamChunk(
@@ -230,10 +239,25 @@ public sealed class ConversationOrchestrator(
     private static string StripModelGeneratedSourceAppendix(string answer) =>
         SourcesCheckedRegex.Replace(answer, string.Empty).TrimEnd();
 
-    private static string? TryBuildDeterministicSourceAnswer(SourceQueryPlan sourcePlan, SourceRetrievalResult sourceResult)
+    private static bool IsDisabledMultiDayForecastRequest(string userText) =>
+        MultiDayForecastRegex.IsMatch(userText);
+
+    private static string? TryBuildDeterministicSourceAnswer(
+        string userText,
+        SourceQueryPlan sourcePlan,
+        SourceRetrievalResult sourceResult)
     {
-        if (!sourceResult.HasSources
-            || !string.Equals(sourcePlan.Intent, "weather", StringComparison.OrdinalIgnoreCase))
+        if (!sourceResult.HasSources)
+        {
+            return null;
+        }
+
+        if (string.Equals(sourcePlan.Intent, "official_info", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryBuildDeterministicOfficeholderAnswer(sourcePlan, sourceResult);
+        }
+
+        if (!string.Equals(sourcePlan.Intent, "weather", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -245,7 +269,66 @@ public sealed class ConversationOrchestrator(
             return null;
         }
 
-        return forecast.Excerpt.Trim();
+        return IsDisabledMultiDayForecastRequest(userText)
+            ? BuildCurrentDayOnlyForecast(forecast.Excerpt)
+            : forecast.Excerpt.Trim();
+    }
+
+    private static string BuildCurrentDayOnlyForecast(string forecastExcerpt)
+    {
+        var lines = forecastExcerpt
+            .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .ToList();
+        var currentLine = lines.FirstOrDefault(line =>
+            line.StartsWith("Today:", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("This Afternoon:", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Tonight:", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(currentLine))
+        {
+            currentLine = lines.FirstOrDefault(line =>
+                !line.StartsWith("National Weather Service local forecast", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var answer = string.IsNullOrWhiteSpace(currentLine)
+            ? "Current-day forecast details were not available in the approved weather source."
+            : $"Current-day forecast: {currentLine}";
+        return $"{answer}{Environment.NewLine}Multi-day forecasts are being reworked for this release, so I am only showing the current-day forecast right now.";
+    }
+
+    private static string? TryBuildDeterministicOfficeholderAnswer(SourceQueryPlan sourcePlan, SourceRetrievalResult sourceResult)
+    {
+        var terms = sourcePlan.SearchText;
+        var asksPresident = terms.Contains("president", StringComparison.OrdinalIgnoreCase)
+                            && !terms.Contains("vice president", StringComparison.OrdinalIgnoreCase);
+        var asksVicePresident = terms.Contains("vice", StringComparison.OrdinalIgnoreCase)
+                                && terms.Contains("president", StringComparison.OrdinalIgnoreCase);
+        if (!asksPresident && !asksVicePresident)
+        {
+            return null;
+        }
+
+        var administration = sourceResult.Excerpts.FirstOrDefault(excerpt =>
+            excerpt.Name.Contains("White House", StringComparison.OrdinalIgnoreCase)
+            || excerpt.Url.Contains("whitehouse.gov/administration", StringComparison.OrdinalIgnoreCase)
+            || excerpt.Excerpt.Contains("The Administration", StringComparison.OrdinalIgnoreCase));
+        if (administration is null)
+        {
+            return null;
+        }
+
+        var lines = new List<string>();
+        if (asksPresident && PresidentRegex.IsMatch(administration.Excerpt))
+        {
+            lines.Add("The current President of the United States is Donald J. Trump, the 45th and 47th President of the United States.");
+        }
+
+        if (asksVicePresident && VicePresidentRegex.IsMatch(administration.Excerpt))
+        {
+            lines.Add("The current Vice President of the United States is JD Vance.");
+        }
+
+        return lines.Count == 0 ? null : string.Join(Environment.NewLine, lines);
     }
 
     private static IReadOnlyList<ChatMessage> AddCodingContext(

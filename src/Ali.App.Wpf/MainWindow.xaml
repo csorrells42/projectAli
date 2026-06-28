@@ -132,7 +132,7 @@
 
                 <StackPanel Grid.Row="0">
                     <TextBlock Text="{Binding AssistantName}" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-                    <TextBlock Text="Local assistant" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,14" />
+                    <TextBlock Text="This assistant can make mistakes. Check important info." Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,14" />
 
                     <Button Content="New chat"
                             Command="{Binding NewChatCommand}"

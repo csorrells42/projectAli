@@ -562,8 +562,10 @@ public sealed class FileSourceRetriever
             .Select(NormalizeToken)
             .Where(topic => !string.IsNullOrWhiteSpace(topic))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var strictWhiteHouseAdministration = IsUsExecutiveOfficeholderPlan(plan, queryTerms);
         var sources = LoadCatalog()
             .Where(source => source.Enabled && Uri.TryCreate(source.Url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https")
+            .Where(source => !strictWhiteHouseAdministration || IsWhiteHouseAdministrationSource(source))
             .Where(source => preferredTopics.Count == 0 || SourceMatchesPreferredTopics(source, preferredTopics))
             .Where(source => SourceIdentityMatchesPlannedQuery(source, plan, queryTerms))
             .Select(source => new
@@ -613,6 +615,19 @@ public sealed class FileSourceRetriever
             : string.Join(' ', source.Topics);
         var sourceTerms = Tokenize($"{source.Topic} {topics} {source.Name} {source.Notes ?? string.Empty} {keywords}", removeGenericTerms: false);
         return sourceTerms.Overlaps(requiredTerms);
+    }
+
+    private static bool IsUsExecutiveOfficeholderPlan(SourceQueryPlan plan, IReadOnlySet<string> queryTerms) =>
+        string.Equals(plan.Intent, "official_info", StringComparison.OrdinalIgnoreCase)
+        && (queryTerms.Contains("president") || queryTerms.Contains("vice"))
+        && (queryTerms.Contains("united") || queryTerms.Contains("states") || queryTerms.Contains("us") || queryTerms.Contains("usa"))
+        && (queryTerms.Contains("white") || queryTerms.Contains("house") || queryTerms.Contains("administration"));
+
+    private static bool IsWhiteHouseAdministrationSource(SourceCatalogEntry source)
+    {
+        var terms = SourceTerms(source);
+        return (terms.Contains("white") && terms.Contains("house") && terms.Contains("administration"))
+               || source.Url.Contains("whitehouse.gov/administration", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool SourceIdentityMatchesPlannedQuery(
@@ -873,7 +888,7 @@ public sealed class FileSourceRetriever
             }
 
             var lines = new StringBuilder("National Weather Service local forecast:");
-            foreach (var period in periods.EnumerateArray().Take(10))
+            foreach (var period in periods.EnumerateArray().Take(4))
             {
                 var name = ReadJsonString(period, "name");
                 var shortForecast = ReadJsonString(period, "shortForecast");

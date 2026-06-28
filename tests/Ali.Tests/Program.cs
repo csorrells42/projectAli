@@ -221,6 +221,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("curated source retriever rejects unrelated team-specific sports sources", TestCuratedSourceRetrieverRejectsUnrelatedTeamSpecificSportsSources),
     ("curated source retriever keeps Alabama football TV channel", TestCuratedSourceRetrieverKeepsAlabamaFootballTvChannel),
     ("curated source retriever keeps official White House administration answer", TestCuratedSourceRetrieverKeepsOfficialWhiteHouseAdministrationAnswer),
+    ("curated source retriever keeps US executive officeholders on White House", TestCuratedSourceRetrieverKeepsUsExecutiveOfficeholdersOnWhiteHouse),
     ("curated source retriever permits stable knowledge fallback", TestCuratedSourceRetrieverPermitsStableKnowledgeFallback),
     ("curated source retriever avoids weak Alabama entity matches", TestCuratedSourceRetrieverAvoidsWeakAlabamaEntityMatches),
     ("curated source retriever keeps short AI term", TestCuratedSourceRetrieverKeepsShortAiTerm),
@@ -230,6 +231,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model source planner guards weather forecasts for sources", TestModelSourcePlannerGuardsWeatherForecastsForSources),
     ("model source planner guards sports records for sources", TestModelSourcePlannerGuardsSportsRecordsForSources),
     ("model source planner guards current president for sources", TestModelSourcePlannerGuardsCurrentPresidentForSources),
+    ("model source planner guards current vice president for sources", TestModelSourcePlannerGuardsCurrentVicePresidentForSources),
     ("model source planner guards local documents for sources", TestModelSourcePlannerGuardsLocalDocumentsForSources),
     ("curated source retriever uses planned weather topic", TestCuratedSourceRetrieverUsesPlannedWeatherTopic),
     ("curated source retriever fetches NWS point forecast", TestCuratedSourceRetrieverFetchesNwsPointForecast),
@@ -240,6 +242,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator owns source appendix", TestOrchestratorOwnsSourceAppendix),
     ("orchestrator reports attempted source lookup without excerpts", TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts),
     ("orchestrator answers verified weather forecast without bootstrap runtime", TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrapRuntime),
+    ("orchestrator limits multiday forecast to current day", TestOrchestratorLimitsMultidayForecastToCurrentDay),
+    ("orchestrator answers current president deterministically", TestOrchestratorAnswersCurrentPresidentDeterministically),
+    ("orchestrator answers current vice president deterministically", TestOrchestratorAnswersCurrentVicePresidentDeterministically),
     ("orchestrator injects saved local memories", TestOrchestratorInjectsSavedLocalMemories),
     ("orchestrator withholds irrelevant memories from source-backed answers", TestOrchestratorWithholdsIrrelevantMemoriesFromSourceBackedAnswers),
     ("source prompt formatter marks excerpts untrusted", TestSourcePromptFormatterMarksExcerptsUntrusted),
@@ -5221,6 +5226,63 @@ static async Task TestCuratedSourceRetrieverKeepsOfficialWhiteHouseAdministratio
     Equal(false, result.Excerpts[0].Excerpt.Contains("navigation menu filler", StringComparison.OrdinalIgnoreCase));
 }
 
+static async Task TestCuratedSourceRetrieverKeepsUsExecutiveOfficeholdersOnWhiteHouse()
+{
+    var directory = NewTestDirectory();
+    var sourceStore = new FileSourceRetriever(
+        directory,
+        new HttpClient(new RouteHandler(request =>
+            request.RequestUri?.AbsolutePath switch
+            {
+                "/administration/" => """
+                    <html><body><main>
+                    <h1>The Administration</h1>
+                    <h2>President Donald J. Trump</h2>
+                    <p>45th &amp; 47th President of the United States</p>
+                    <h2>Vice President JD Vance</h2>
+                    </main></body></html>
+                    """,
+                _ => throw new InvalidOperationException($"Unexpected route: {request.RequestUri}")
+            })));
+    Directory.CreateDirectory(sourceStore.RootDirectory);
+    var catalog = new[]
+    {
+        new SourceCatalogEntry(
+            Id: "white-house-administration",
+            Topic: "government",
+            Name: "The White House Administration",
+            Url: "https://www.whitehouse.gov/administration/",
+            TrustLevel: "primary",
+            Keywords: ["white house", "president", "vice president", "united states", "administration", "official"],
+            Notes: "Official White House administration page.",
+            Enabled: true),
+        new SourceCatalogEntry(
+            Id: "south-carolina-state-admin",
+            Topic: "state_government",
+            Name: "State of South Carolina-The South Carolina Department of Administration, Chief Information Officer",
+            Url: "https://sc.gov/",
+            TrustLevel: "official",
+            Keywords: ["state government", "administration", "official"],
+            Notes: "Official state government source.",
+            Enabled: true)
+    };
+    await File.WriteAllTextAsync(sourceStore.CatalogPath, JsonSerializer.Serialize(catalog));
+    var plan = new SourceQueryPlan(
+        true,
+        true,
+        "official_info",
+        "who is the president of the united states",
+        ["who", "is", "the", "president", "of", "the", "united", "states", "white", "house", "administration", "official"],
+        ["government"]);
+
+    var result = await sourceStore.CreateRetriever().RetrieveAsync(plan, CancellationToken.None);
+
+    Equal(1, result.Excerpts.Count);
+    Equal("The White House Administration", result.Excerpts[0].Name);
+    Equal(false, result.Excerpts.Any(excerpt => excerpt.Name.Contains("South Carolina", StringComparison.OrdinalIgnoreCase)));
+    Contains("President Donald J. Trump", result.Excerpts[0].Excerpt);
+}
+
 static async Task TestCuratedSourceRetrieverPermitsStableKnowledgeFallback()
 {
     var directory = NewTestDirectory();
@@ -5438,6 +5500,29 @@ static async Task TestModelSourcePlannerGuardsCurrentPresidentForSources()
     Equal(null, runtime.LastRequest);
 }
 
+static async Task TestModelSourcePlannerGuardsCurrentVicePresidentForSources()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_sources":false,"requires_source_grounding":false,"intent":"stable_knowledge","topic":"","query_terms":[],"preferred_source_topics":[]}
+        """);
+    var planner = new ModelSourceQueryPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "who is the vice president of the united states",
+        Array.Empty<ChatMessage>(),
+        CancellationToken.None);
+
+    Equal(true, plan.UseSources);
+    Equal(true, plan.RequiresSourceGrounding);
+    Equal("official_info", plan.Intent);
+    Contains("government", string.Join(' ', plan.PreferredSourceTopics));
+    Contains("vice", string.Join(' ', plan.QueryTerms));
+    Contains("president", string.Join(' ', plan.QueryTerms));
+    Contains("white", string.Join(' ', plan.QueryTerms));
+    Equal(null, runtime.LastRequest);
+}
+
 static async Task TestModelSourcePlannerGuardsLocalDocumentsForSources()
 {
     var runtime = new FixedTextRuntime(
@@ -5555,7 +5640,9 @@ static async Task TestCuratedSourceRetrieverFetchesNwsPointForecast()
     Contains("National Weather Service local forecast", result.Excerpts[0].Excerpt);
     Contains("Today: 91F", result.Excerpts[0].Excerpt);
     Contains("Mostly Sunny", result.Excerpts[0].Excerpt);
-    Contains("Night 5: 66F", result.Excerpts[0].Excerpt);
+    Contains("Night 2: 70F", result.Excerpts[0].Excerpt);
+    Equal(false, result.Excerpts[0].Excerpt.Contains("Day 3", StringComparison.Ordinal));
+    Equal(false, result.Excerpts[0].Excerpt.Contains("Night 5", StringComparison.Ordinal));
     Equal(false, result.Excerpts[0].Excerpt.Contains("Day 6", StringComparison.Ordinal));
 }
 
@@ -5852,6 +5939,158 @@ static async Task TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrap
     Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
     Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
 }
+
+static async Task TestOrchestratorLimitsMultidayForecastToCurrentDay()
+{
+    var directory = NewTestDirectory();
+    var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
+    var sourceResult = new SourceRetrievalResult(
+        [
+            new SourceExcerpt(
+                1,
+                "weather",
+                "National Weather Service Forecast - Andalusia, AL",
+                "https://api.weather.gov/points/31.3085,-86.482",
+                DateTimeOffset.UtcNow,
+                """
+                National Weather Service local forecast:
+                Today: 91F. Mostly Sunny. A slight chance of showers and thunderstorms after 4pm.
+                Tonight: 69F. Chance Showers And Thunderstorms. A chance of showers and thunderstorms before 4am.
+                Day 2: 92F. Sunny. Sunny conditions continue.
+                Night 5: 66F. Clear. Clear overnight.
+                """)
+        ],
+        Array.Empty<string>());
+    var orchestrator = new ConversationOrchestrator(
+        new DevelopmentLocalModelRuntime(),
+        new PermissionService(),
+        correctionQueue,
+        new StaticSourceRetriever(sourceResult),
+        new StaticSourceQueryPlanner(new SourceQueryPlan(
+            true,
+            true,
+            "weather",
+            "andalusia alabama 5 day forecast",
+            ["weather", "forecast", "5", "day", "andalusia", "alabama"],
+            ["weather"])));
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamAnswerAsync(
+                       "conv_weather_multiday",
+                       "msg_user_weather_multiday",
+                       "msg_assistant_weather_multiday",
+                       "give me a 5 day forecast",
+                       Array.Empty<ChatMessage>(),
+                       Array.Empty<ChatAttachment>(),
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Contains("Current-day forecast: Today: 91F", answer);
+    Contains("Multi-day forecasts are being reworked", answer);
+    Contains("Sources checked:", answer);
+    Equal(false, answer.Contains("Night 5", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
+    Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
+}
+
+static async Task TestOrchestratorAnswersCurrentPresidentDeterministically()
+{
+    var directory = NewTestDirectory();
+    var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
+    var orchestrator = new ConversationOrchestrator(
+        new DevelopmentLocalModelRuntime(),
+        new PermissionService(),
+        correctionQueue,
+        new StaticSourceRetriever(BuildWhiteHouseAdministrationSourceResult()),
+        new StaticSourceQueryPlanner(new SourceQueryPlan(
+            true,
+            true,
+            "official_info",
+            "current president united states white house administration",
+            ["current", "president", "united", "states", "white", "house", "administration"],
+            ["government"])));
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamAnswerAsync(
+                       "conv_president",
+                       "msg_user_president",
+                       "msg_assistant_president",
+                       "who is the president of the united states",
+                       Array.Empty<ChatMessage>(),
+                       Array.Empty<ChatAttachment>(),
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Contains("Donald J. Trump", answer);
+    Contains("45th and 47th", answer);
+    Contains("Sources checked:", answer);
+    Equal(false, answer.Contains("Joe Biden", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("46th President", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
+    Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
+}
+
+static async Task TestOrchestratorAnswersCurrentVicePresidentDeterministically()
+{
+    var directory = NewTestDirectory();
+    var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
+    var orchestrator = new ConversationOrchestrator(
+        new DevelopmentLocalModelRuntime(),
+        new PermissionService(),
+        correctionQueue,
+        new StaticSourceRetriever(BuildWhiteHouseAdministrationSourceResult()),
+        new StaticSourceQueryPlanner(new SourceQueryPlan(
+            true,
+            true,
+            "official_info",
+            "current vice president united states white house administration",
+            ["current", "vice", "president", "united", "states", "white", "house", "administration"],
+            ["government"])));
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamAnswerAsync(
+                       "conv_vice_president",
+                       "msg_user_vice_president",
+                       "msg_assistant_vice_president",
+                       "who is the vice president of the united states",
+                       Array.Empty<ChatMessage>(),
+                       Array.Empty<ChatAttachment>(),
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Contains("JD Vance", answer);
+    Contains("Sources checked:", answer);
+    Equal(false, answer.Contains("Kamala Harris", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
+    Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
+}
+
+static SourceRetrievalResult BuildWhiteHouseAdministrationSourceResult() =>
+    new(
+        [
+            new SourceExcerpt(
+                1,
+                "government",
+                "The White House Administration",
+                "https://www.whitehouse.gov/administration/",
+                DateTimeOffset.UtcNow,
+                """
+                The Administration
+                President Donald J. Trump
+                45th & 47th President of the United States
+                Vice President JD Vance
+                """)
+        ],
+        Array.Empty<string>());
 
 static async Task TestOrchestratorInjectsSavedLocalMemories()
 {
