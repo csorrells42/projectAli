@@ -145,6 +145,8 @@
                                         Command="{Binding RunCodingGitStatusCommand}" />
                                 <Button Content="Review"
                                         Command="{Binding RunCodingReviewChangesCommand}" />
+                                <Button Content="Validate"
+                                        Command="{Binding RunCodingValidationPlanCommand}" />
                                 <Button Content="Build"
                                         Command="{Binding RunCodingBuildCommand}"
                                         BorderBrush="#1E6B49"

@@ -36,7 +36,7 @@ public static class CodingAbilityCatalog
         "start approved roadmap",
         "show next coding action",
         "show execution packet",
-        "plan post edit validation"
+        "validation plan"
     ];
 
     public static IReadOnlyList<CodingAbilityGroup> BuilderGroups { get; } =
@@ -71,7 +71,7 @@ public static class CodingAbilityCatalog
                 new("Packet console", "show packet commands"),
                 new("Run packet item", "confirm run packet item N", RequiresConfirmation: true),
                 new("Review changes", "review current changes"),
-                new("Post-edit validation", "plan post edit validation")
+                new("Validation plan", "validation plan")
             ]),
         new(
             "VS and reports",
@@ -261,6 +261,7 @@ public static class CodingAbilityCatalog
                 new("Build", "Run a confirmed dotnet build.", "confirm dotnet build \"C:\\path\\to\\solution.sln\"", "confirm dotnet build \"C:\\path\\to\\solution.sln\""),
                 new("Test", "Run a confirmed dotnet test.", "confirm dotnet test \"C:\\path\\to\\solution-or-project\"", "confirm dotnet test \"C:\\path\\to\\solution-or-project\""),
                 new("Review changes", "Summarize uncommitted files, diff check status, risk hints, and next validation.", "review current changes", "review current changes"),
+                new("Validation plan", "Show the next build, test, review, and commit checks after edits.", "validation plan", "validation plan"),
                 new("Coding report", "Generate a coding session report.", "generate coding report", "generate coding report")
             ]),
         new(

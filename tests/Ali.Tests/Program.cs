@@ -806,6 +806,9 @@ static Task TestCodingParserRoutesPacketConsoleAndBuildPlanning()
     Equal(true, CodingToolRequestParser.TryParse("plan post edit validation", out var validationRequest));
     Equal(CodingToolAction.PlanPostEditValidation, validationRequest.Action);
 
+    Equal(true, CodingToolRequestParser.TryParse("validation plan", out var simpleValidationRequest));
+    Equal(CodingToolAction.PlanPostEditValidation, simpleValidationRequest.Action);
+
     Equal(true, CodingToolRequestParser.TryParse("show coding skill command index", out var indexRequest));
     Equal(CodingToolAction.ShowBuilderCommandIndex, indexRequest.Action);
 
@@ -1911,6 +1914,11 @@ static async Task TestLocalCodingToolRunsPacketConsoleAndBuildPlanning()
     Contains("Build resume plan", resume.Message);
     Equal(true, validation.Succeeded);
     Contains("Post-edit build loop", validation.Message);
+    Contains("Validation plan", validation.Message);
+    Contains("Latest validation", validation.Message);
+    Contains("Patch preview", validation.Message);
+    Contains("Build:", validation.Message);
+    Contains("Tests:", validation.Message);
     Equal(true, commandIndex.Succeeded);
     Contains("Ali coding skill command index", commandIndex.Message);
     Equal(true, sessionSummary.Succeeded);

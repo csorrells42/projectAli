@@ -263,6 +263,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingValidationPlanCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation plan", "validation plan", "Coding.ValidationPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -663,6 +664,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingGitStatusCommand { get; }
 
     public ICommand RunCodingReviewChangesCommand { get; }
+
+    public ICommand RunCodingValidationPlanCommand { get; }
 
     public ICommand RunCodingBuildCommand { get; }
 
@@ -3201,6 +3204,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return CompactReviewChangesLines(lines);
         }
 
+        if (command.StartsWith("validation plan", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactValidationPlanLines(lines);
+        }
+
         if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("confirm dotnet test", StringComparison.OrdinalIgnoreCase))
         {
@@ -3235,6 +3243,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (command.StartsWith("review current changes", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Run build/tests before committing reviewed changes.";
+        }
+
+        if (command.StartsWith("validation plan", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Run Build, then Tests, then Review.";
         }
 
         if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase))
@@ -3273,6 +3286,22 @@ public sealed class MainWindowViewModel : ObservableObject
             .Take(10)
             .ToList();
         return compact.Count > 0 ? compact : ["No review details found."];
+    }
+
+    private static IReadOnlyList<string> CompactValidationPlanLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Git:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Latest validation:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Patch preview:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Build:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Tests:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Review:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Commit:", StringComparison.OrdinalIgnoreCase))
+            .Select(ShortMaintenanceDetail)
+            .Take(8)
+            .ToList();
+        return compact.Count > 0 ? compact : ["No validation plan found."];
     }
 
     private static IReadOnlyList<string> CompactCodingWorkspaceLines(IReadOnlyList<string> lines)
@@ -6295,6 +6324,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingReviewChangesCommand is AsyncRelayCommand runCodingReviewChanges)
         {
             runCodingReviewChanges.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingValidationPlanCommand is AsyncRelayCommand runCodingValidationPlan)
+        {
+            runCodingValidationPlan.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildCommand is AsyncRelayCommand runCodingBuild)

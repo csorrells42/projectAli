@@ -704,9 +704,14 @@ public static class CodingToolRequestParser
 
     private static readonly string[] PostEditValidationRequests =
     [
+        "validation plan",
+        "show validation plan",
+        "plan validation",
         "plan post edit validation",
         "post edit validation",
         "after edit validation",
+        "what should i validate",
+        "what should i test",
         "show validation after edits",
         "show post edit build loop"
     ];
