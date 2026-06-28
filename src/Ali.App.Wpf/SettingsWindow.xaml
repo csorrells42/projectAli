@@ -1135,6 +1135,28 @@
                             Padding="16"
                             Margin="0,12,10,0">
                         <StackPanel>
+                            <TextBlock Text="Computer Maintenance"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Text="Run a read-only health check for Ali's install, local computer assistant lanes, PDF tools, Visual Studio bridge, source catalog, and recent receipts."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,3,0,12" />
+
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,0,0,14">
+                                <Button Content="Run Health Check"
+                                        Command="{Binding RunComputerHealthCheckCommand}"
+                                        MinWidth="148"
+                                        Margin="0,0,10,0" />
+                            </StackPanel>
+
+                            <Border Height="1"
+                                    Background="{StaticResource BorderBrushDark}"
+                                    Margin="0,0,0,14" />
+
                             <TextBlock Text="Backup &amp; Restore"
                                        FontSize="18"
                                        FontWeight="SemiBold"

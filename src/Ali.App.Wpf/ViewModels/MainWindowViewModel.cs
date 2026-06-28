@@ -243,6 +243,7 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseCodingPdfWorkspaceRootCommand = CreateCommand(_ => BrowseCodingPdfWorkspaceRoot());
         BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
+        RunComputerHealthCheckCommand = CreateAsyncCommand(RunComputerHealthCheckAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
 
@@ -606,6 +607,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand BrowseNotepadPlusPlusPathCommand { get; }
 
     public ICommand BrowseVisualStudioPathCommand { get; }
+
+    public ICommand RunComputerHealthCheckCommand { get; }
 
     public ICommand BackupUserDataCommand { get; }
 
@@ -2439,6 +2442,52 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task RunComputerHealthCheckAsync()
+    {
+        try
+        {
+            IsBusy = true;
+            StatusText = "Running Ali computer health check...";
+            MaintenanceStatusText = "Running health check...";
+
+            var sections = new List<string>
+            {
+                $"Ali computer health check: {DateTimeOffset.Now.LocalDateTime:g}",
+                DescribeSourceCatalogHealth()
+            };
+
+            foreach (var command in new[]
+                     {
+                         "show install doctor",
+                         "show computer assistant status",
+                         "show pdf tool status",
+                         "show visual studio integration",
+                         "show coding receipts"
+                     })
+            {
+                var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
+                sections.Add(FormatMaintenanceCommandResult(command, result));
+            }
+
+            MaintenanceStatusText = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            StatusText = "Ali computer health check finished.";
+        }
+        catch (OperationCanceledException)
+        {
+            MaintenanceStatusText = "Health check cancelled.";
+            StatusText = "Ali health check cancelled.";
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = $"Health check failed safely: {ex.Message}";
+            StatusText = "Ali health check failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task RestoreUserDataAsync()
     {
         try
@@ -2532,6 +2581,42 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
         RefreshSpeechToolStatuses();
         VoiceSettingsStatusText = "Voice settings reloaded from restored backup.";
+    }
+
+    private string DescribeSourceCatalogHealth()
+    {
+        try
+        {
+            var sources = _services.LoadCuratedSources();
+            var catalogPath = _services.CuratedSourcesCatalogPath;
+            var status = sources.Count > 0 ? "Healthy" : "Needs attention";
+            return $"Source catalog: {status}{Environment.NewLine}Path: {catalogPath}{Environment.NewLine}Sources: {sources.Count}";
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return $"Source catalog: Needs attention{Environment.NewLine}Path: {_services.CuratedSourcesCatalogPath}{Environment.NewLine}Reason: {ex.Message}";
+        }
+    }
+
+    private static string FormatMaintenanceCommandResult(string command, CodingToolResult result)
+    {
+        var status = result is { Handled: true, Succeeded: true }
+            ? "Healthy"
+            : result.Handled ? "Needs attention" : "Unavailable";
+        var message = string.IsNullOrWhiteSpace(result.Message)
+            ? "No details returned."
+            : TrimMaintenanceText(result.Message.Trim(), 2_400);
+        return $"{command}: {status}{Environment.NewLine}{message}";
+    }
+
+    private static string TrimMaintenanceText(string text, int maxCharacters)
+    {
+        if (text.Length <= maxCharacters)
+        {
+            return text;
+        }
+
+        return text[..Math.Max(0, maxCharacters - 32)] + Environment.NewLine + "... trimmed for display.";
     }
 
     private static string DefaultBackupDirectory()
@@ -5036,6 +5121,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (BackupUserDataCommand is AsyncRelayCommand backupUserData)
         {
             backupUserData.RaiseCanExecuteChanged();
+        }
+
+        if (RunComputerHealthCheckCommand is AsyncRelayCommand runComputerHealthCheck)
+        {
+            runComputerHealthCheck.RaiseCanExecuteChanged();
         }
 
         if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
