@@ -1155,7 +1155,11 @@
                                         Command="{Binding RepairAliInstallCommand}"
                                         MinWidth="148"
                                         BorderBrush="#8A6A18"
-                                        Background="#2A2415" />
+                                        Background="#2A2415"
+                                        Margin="0,0,10,0" />
+                                <Button Content="Assistant Setup"
+                                        Command="{Binding RunComputerAssistantSetupCommand}"
+                                        MinWidth="148" />
                             </StackPanel>
 
                             <Border Height="1"

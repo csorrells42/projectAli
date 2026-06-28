@@ -246,6 +246,7 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
         RunComputerHealthCheckCommand = CreateAsyncCommand(RunComputerHealthCheckAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RepairAliInstallCommand = CreateAsyncCommand(RepairAliInstallAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunComputerAssistantSetupCommand = CreateAsyncCommand(RunComputerAssistantSetupAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
 
@@ -613,6 +614,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunComputerHealthCheckCommand { get; }
 
     public ICommand RepairAliInstallCommand { get; }
+
+    public ICommand RunComputerAssistantSetupCommand { get; }
 
     public ICommand BackupUserDataCommand { get; }
 
@@ -2541,6 +2544,56 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             MaintenanceStatusText = $"Ali install repair failed safely: {ex.Message}";
             StatusText = "Ali install repair failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RunComputerAssistantSetupAsync()
+    {
+        try
+        {
+            IsBusy = true;
+            StatusText = "Checking computer assistant setup...";
+            MaintenanceStatusText = "Checking computer assistant setup...";
+
+            var sections = new List<string>
+            {
+                $"Computer assistant setup: {DateTimeOffset.Now.LocalDateTime:g}",
+                "Supported lanes: Ali can provide deterministic local coding commands, Visual Studio companion/bridge guidance, PDF workspace tools, Windows troubleshooting plans, file organization plans, disk cleanup plans, app install troubleshooting plans, peripheral setup plans, source-backed answers, and audio setup guidance. High-risk changes remain gated by owner permissions."
+            };
+
+            foreach (var command in new[]
+                     {
+                         "show computer assistant status",
+                         "show computer assistant commands",
+                         "show windows troubleshooting toolkit",
+                         "show tool integration status",
+                         "show visual studio integration",
+                         "show pdf tool status"
+                     })
+            {
+                var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
+                sections.Add(FormatMaintenanceCommandResult(command, result));
+            }
+
+            sections.Add("Current permission summary:");
+            sections.Add(TrimMaintenanceText(CodingPermissionSummaryText, 2_400));
+
+            MaintenanceStatusText = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            StatusText = "Computer assistant setup check finished.";
+        }
+        catch (OperationCanceledException)
+        {
+            MaintenanceStatusText = "Computer assistant setup check cancelled.";
+            StatusText = "Computer assistant setup check cancelled.";
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = $"Computer assistant setup check failed safely: {ex.Message}";
+            StatusText = "Computer assistant setup check failed.";
         }
         finally
         {
@@ -5284,6 +5337,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RepairAliInstallCommand is AsyncRelayCommand repairAliInstall)
         {
             repairAliInstall.RaiseCanExecuteChanged();
+        }
+
+        if (RunComputerAssistantSetupCommand is AsyncRelayCommand runComputerAssistantSetup)
+        {
+            runComputerAssistantSetup.RaiseCanExecuteChanged();
         }
 
         if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
