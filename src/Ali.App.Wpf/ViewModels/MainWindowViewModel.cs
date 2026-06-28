@@ -637,7 +637,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string CodingToolSettingsPath => _services.CodingToolSettingsPath;
 
-    public string MaintenanceReceiptPath => Path.Combine(_services.DataRoot, "maintenance-actions.jsonl");
+    public string MaintenanceReceiptPath => Path.Combine(_services.DataRoot, "Receipts", "maintenance-actions.jsonl");
 
     public string MaintenanceReceiptFolder => Path.GetDirectoryName(MaintenanceReceiptPath) ?? _services.DataRoot;
 
