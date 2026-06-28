@@ -1217,9 +1217,16 @@
                             <Border BorderBrush="{StaticResource BorderBrushDark}"
                                     BorderThickness="1"
                                     Padding="10">
-                                <TextBlock Text="{Binding MaintenanceStatusText}"
-                                           Foreground="{StaticResource TextBrush}"
-                                           TextWrapping="Wrap" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding MaintenanceStatusText}"
+                                               Foreground="{StaticResource TextBrush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding MaintenanceReceiptPath, StringFormat=Maintenance receipts: {0}}"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Margin="0,8,0,0" />
+                                </StackPanel>
                             </Border>
                         </StackPanel>
                     </Border>

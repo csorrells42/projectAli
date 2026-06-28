@@ -41,6 +41,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan StreamingTextFlushInterval = TimeSpan.FromMilliseconds(45);
     private static readonly TimeSpan StreamingTextPaceDelay = TimeSpan.FromMilliseconds(12);
+    private static readonly JsonSerializerOptions MaintenanceReceiptJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
     private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
     private static readonly string[] CodingWorkspaceAccessModeChoiceValues = [CodingPermissionModes.Allowed];
@@ -627,6 +628,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
     public string CodingToolSettingsPath => _services.CodingToolSettingsPath;
+
+    public string MaintenanceReceiptPath => Path.Combine(_services.DataRoot, "maintenance-actions.jsonl");
 
     public string CodingWorkspaceRootText
     {
@@ -2411,6 +2414,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task BackupUserDataAsync()
     {
+        var startedAt = DateTimeOffset.Now;
         try
         {
             SaveActiveConversation();
@@ -2429,7 +2433,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
             if (dialog.ShowDialog() != true)
             {
-                MaintenanceStatusText = "Backup cancelled.";
+                var cancelReceipt = WriteMaintenanceReceipt("Maintenance.BackupUserData", false, "Ali backup cancelled before changes.", startedAt, DateTimeOffset.Now);
+                MaintenanceStatusText = $"Backup cancelled.{Environment.NewLine}{Environment.NewLine}{cancelReceipt}";
                 return;
             }
 
@@ -2438,12 +2443,15 @@ public sealed class MainWindowViewModel : ObservableObject
             MaintenanceStatusText = "Creating backup...";
             var backupService = _services.CreateUserDataBackupService();
             var result = await Task.Run(() => backupService.CreateBackup(dialog.FileName)).ConfigureAwait(true);
-            MaintenanceStatusText = $"Backup saved: {result.BackupPath} ({result.FileCount} file(s), {FormatBytes(result.TotalBytes)} before compression).";
+            var message = $"Backup saved: {result.BackupPath} ({result.FileCount} file(s), {FormatBytes(result.TotalBytes)} before compression).";
+            var receipt = WriteMaintenanceReceipt("Maintenance.BackupUserData", true, "Ali backup saved.", startedAt, DateTimeOffset.Now, message);
+            MaintenanceStatusText = $"{message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali backup saved.";
         }
         catch (Exception ex)
         {
-            MaintenanceStatusText = $"Backup failed: {ex.Message}";
+            var receipt = WriteMaintenanceReceipt("Maintenance.BackupUserData", false, "Ali backup failed.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"Backup failed: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali backup failed.";
         }
         finally
@@ -2454,6 +2462,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RunComputerHealthCheckAsync()
     {
+        var startedAt = DateTimeOffset.Now;
         try
         {
             IsBusy = true;
@@ -2479,17 +2488,21 @@ public sealed class MainWindowViewModel : ObservableObject
                 sections.Add(FormatMaintenanceCommandResult(command, result));
             }
 
-            MaintenanceStatusText = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var output = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var receipt = WriteMaintenanceReceipt("Maintenance.HealthCheck", true, "Ali computer health check completed.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali computer health check finished.";
         }
         catch (OperationCanceledException)
         {
-            MaintenanceStatusText = "Health check cancelled.";
+            var receipt = WriteMaintenanceReceipt("Maintenance.HealthCheck", false, "Ali computer health check cancelled.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"Health check cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali health check cancelled.";
         }
         catch (Exception ex)
         {
-            MaintenanceStatusText = $"Health check failed safely: {ex.Message}";
+            var receipt = WriteMaintenanceReceipt("Maintenance.HealthCheck", false, "Ali computer health check failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"Health check failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali health check failed.";
         }
         finally
@@ -2500,6 +2513,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RepairAliInstallAsync()
     {
+        var startedAt = DateTimeOffset.Now;
         var confirmation = System.Windows.MessageBox.Show(
             "Repair Ali's local install data now?\n\nThis repairs starter Sources & Topics, missing example/config helper files, and local voice tool paths. It preserves chats, memories, reminders, app settings, installed models, and the selected runtime model.",
             "Repair Ali Install",
@@ -2507,7 +2521,8 @@ public sealed class MainWindowViewModel : ObservableObject
             MessageBoxImage.Warning);
         if (confirmation != MessageBoxResult.Yes)
         {
-            MaintenanceStatusText = "Ali install repair cancelled.";
+            var receipt = WriteMaintenanceReceipt("Maintenance.RepairInstall", false, "Ali install repair cancelled before changes.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"Ali install repair cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
             return;
         }
 
@@ -2535,17 +2550,21 @@ public sealed class MainWindowViewModel : ObservableObject
                 messages.AddRange(warnings.Select(warning => "- " + warning));
             }
 
-            MaintenanceStatusText = TrimMaintenanceText(string.Join(Environment.NewLine, messages), 16_000);
+            var output = TrimMaintenanceText(string.Join(Environment.NewLine, messages), 16_000);
+            var receipt = WriteMaintenanceReceipt("Maintenance.RepairInstall", warnings.Count == 0, warnings.Count == 0 ? "Ali install repair completed." : "Ali install repair completed with warnings.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali install repair finished.";
         }
         catch (OperationCanceledException)
         {
-            MaintenanceStatusText = "Ali install repair cancelled.";
+            var receipt = WriteMaintenanceReceipt("Maintenance.RepairInstall", false, "Ali install repair cancelled.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"Ali install repair cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali install repair cancelled.";
         }
         catch (Exception ex)
         {
-            MaintenanceStatusText = $"Ali install repair failed safely: {ex.Message}";
+            var receipt = WriteMaintenanceReceipt("Maintenance.RepairInstall", false, "Ali install repair failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"Ali install repair failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali install repair failed.";
         }
         finally
@@ -2556,6 +2575,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RunComputerAssistantSetupAsync()
     {
+        var startedAt = DateTimeOffset.Now;
         try
         {
             IsBusy = true;
@@ -2585,17 +2605,21 @@ public sealed class MainWindowViewModel : ObservableObject
             sections.Add("Current permission summary:");
             sections.Add(TrimMaintenanceText(CodingPermissionSummaryText, 2_400));
 
-            MaintenanceStatusText = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var output = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var receipt = WriteMaintenanceReceipt("Maintenance.AssistantSetup", true, "Computer assistant setup check completed.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Computer assistant setup check finished.";
         }
         catch (OperationCanceledException)
         {
-            MaintenanceStatusText = "Computer assistant setup check cancelled.";
+            var receipt = WriteMaintenanceReceipt("Maintenance.AssistantSetup", false, "Computer assistant setup check cancelled.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"Computer assistant setup check cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Computer assistant setup check cancelled.";
         }
         catch (Exception ex)
         {
-            MaintenanceStatusText = $"Computer assistant setup check failed safely: {ex.Message}";
+            var receipt = WriteMaintenanceReceipt("Maintenance.AssistantSetup", false, "Computer assistant setup check failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"Computer assistant setup check failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Computer assistant setup check failed.";
         }
         finally
@@ -2606,6 +2630,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RunMaintenancePlanAsync()
     {
+        var startedAt = DateTimeOffset.Now;
         try
         {
             IsBusy = true;
@@ -2644,17 +2669,21 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             sections.Add(BuildMaintenanceRecommendations(needsAttention));
-            MaintenanceStatusText = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var output = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var receipt = WriteMaintenanceReceipt("Maintenance.Plan", needsAttention.Count == 0, needsAttention.Count == 0 ? "Maintenance plan completed with no immediate repair indicated." : "Maintenance plan completed with recommended next actions.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Maintenance plan finished.";
         }
         catch (OperationCanceledException)
         {
-            MaintenanceStatusText = "Maintenance plan cancelled.";
+            var receipt = WriteMaintenanceReceipt("Maintenance.Plan", false, "Maintenance plan cancelled.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"Maintenance plan cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Maintenance plan cancelled.";
         }
         catch (Exception ex)
         {
-            MaintenanceStatusText = $"Maintenance plan failed safely: {ex.Message}";
+            var receipt = WriteMaintenanceReceipt("Maintenance.Plan", false, "Maintenance plan failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"Maintenance plan failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Maintenance plan failed.";
         }
         finally
@@ -2665,6 +2694,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RestoreUserDataAsync()
     {
+        var startedAt = DateTimeOffset.Now;
         try
         {
             var backupDirectory = DefaultBackupDirectory();
@@ -2680,7 +2710,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
             if (dialog.ShowDialog() != true)
             {
-                MaintenanceStatusText = "Restore cancelled.";
+                var cancelReceipt = WriteMaintenanceReceipt("Maintenance.RestoreUserData", false, "Ali restore cancelled before selecting a backup.", startedAt, DateTimeOffset.Now);
+                MaintenanceStatusText = $"Restore cancelled.{Environment.NewLine}{Environment.NewLine}{cancelReceipt}";
                 return;
             }
 
@@ -2693,7 +2724,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 MessageBoxImage.Warning);
             if (confirmation != MessageBoxResult.Yes)
             {
-                MaintenanceStatusText = "Restore cancelled.";
+                var cancelReceipt = WriteMaintenanceReceipt("Maintenance.RestoreUserData", false, "Ali restore cancelled before changes.", startedAt, DateTimeOffset.Now);
+                MaintenanceStatusText = $"Restore cancelled.{Environment.NewLine}{Environment.NewLine}{cancelReceipt}";
                 return;
             }
 
@@ -2706,12 +2738,15 @@ public sealed class MainWindowViewModel : ObservableObject
 
             var result = await Task.Run(() => backupService.RestoreBackup(dialog.FileName)).ConfigureAwait(true);
             ReloadAfterUserDataRestore(result);
-            MaintenanceStatusText = $"Backup restored from {result.BackupCreatedAt.LocalDateTime:g}. Restart Ali if the restored assistant name/profile differs from this session.";
+            var message = $"Backup restored from {result.BackupCreatedAt.LocalDateTime:g}. Restart Ali if the restored assistant name/profile differs from this session.";
+            var receipt = WriteMaintenanceReceipt("Maintenance.RestoreUserData", true, "Ali backup restored.", startedAt, DateTimeOffset.Now, message);
+            MaintenanceStatusText = $"{message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali backup restored.";
         }
         catch (Exception ex)
         {
-            MaintenanceStatusText = $"Restore failed: {ex.Message}";
+            var receipt = WriteMaintenanceReceipt("Maintenance.RestoreUserData", false, "Ali restore failed.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"Restore failed: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali restore failed.";
         }
         finally
@@ -2863,6 +2898,30 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
             return $"Source catalog: Needs attention{Environment.NewLine}Path: {_services.CuratedSourcesCatalogPath}{Environment.NewLine}Reason: {ex.Message}";
+        }
+    }
+
+    private string WriteMaintenanceReceipt(
+        string actionType,
+        bool succeeded,
+        string summary,
+        DateTimeOffset startedAt,
+        DateTimeOffset completedAt,
+        string? details = null)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(MaintenanceReceiptPath)!);
+            var receipt = succeeded
+                ? ActionReceipt.Success(actionType, summary, startedAt, completedAt, details)
+                : ActionReceipt.Failure(actionType, summary, startedAt, completedAt, standardError: details);
+            var line = JsonSerializer.Serialize(receipt, MaintenanceReceiptJsonOptions);
+            File.AppendAllText(MaintenanceReceiptPath, line + Environment.NewLine);
+            return $"Receipt: {MaintenanceReceiptPath}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or JsonException)
+        {
+            return $"Receipt warning: {ex.Message}";
         }
     }
 
