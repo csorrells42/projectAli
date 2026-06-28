@@ -3055,6 +3055,11 @@ public sealed class MainWindowViewModel : ObservableObject
                    || line.Contains("Manual dependency", StringComparison.OrdinalIgnoreCase);
         }
 
+        if (component.Equals("Visual Studio", StringComparison.OrdinalIgnoreCase))
+        {
+            return line.Contains("Primary solution/project", StringComparison.OrdinalIgnoreCase);
+        }
+
         return false;
     }
 

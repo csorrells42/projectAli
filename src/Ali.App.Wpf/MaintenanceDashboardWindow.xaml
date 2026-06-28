@@ -68,7 +68,7 @@
                 <UniformGrid Columns="2">
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Full Health"
+                            <TextBlock Text="Check Status"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
@@ -76,7 +76,7 @@
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
-                            <Button Content="Run Health Check"
+                            <Button Content="Check Status"
                                     Command="{Binding RunComputerHealthCheckCommand}" />
                         </StackPanel>
                     </Border>
@@ -100,7 +100,7 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Assistant Setup"
+                            <TextBlock Text="Check Tools"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
@@ -108,14 +108,14 @@
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
-                            <Button Content="Check Setup"
+                            <Button Content="Check Tools"
                                     Command="{Binding RunComputerAssistantSetupCommand}" />
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Maintenance Plan"
+                            <TextBlock Text="Recommend Next Step"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
@@ -123,7 +123,7 @@
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
-                            <Button Content="Run Plan"
+                            <Button Content="Recommend"
                                     Command="{Binding RunMaintenancePlanCommand}" />
                         </StackPanel>
                     </Border>
