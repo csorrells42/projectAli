@@ -112,6 +112,12 @@
                                         Command="{Binding RunCodingLastFailureCommand}" />
                                 <Button Content="Suggest Fix"
                                         Command="{Binding RunCodingSuggestFixCommand}" />
+                                <Button Content="Patch Preview"
+                                        Command="{Binding RunCodingShowPatchPreviewCommand}" />
+                                <Button Content="Apply Preview"
+                                        Command="{Binding RunCodingApplyPreviewCommand}"
+                                        BorderBrush="#8A6A18"
+                                        Background="#2A2415" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>

@@ -264,6 +264,8 @@ public static class CodingAbilityCatalog
                 new("Validation plan", "Show the next build, test, review, and commit checks after edits.", "validation plan", "validation plan"),
                 new("Diagnose failure", "Summarize the last failed confirmed build or test.", "diagnose last build failure", "diagnose last build failure"),
                 new("Suggest fix", "Preview a deterministic patch for simple compiler failures without changing files.", "suggest patch from last failure", "suggest patch from last failure"),
+                new("Patch preview", "Show the pending patch preview before applying it.", "show pending patch preview", "show pending patch preview"),
+                new("Apply preview", "Apply the reviewed pending patch preview through the confirmed edit gate.", "confirm apply last patch preview", "confirm apply last patch preview"),
                 new("Coding report", "Generate a coding session report.", "generate coding report", "generate coding report")
             ]),
         new(
