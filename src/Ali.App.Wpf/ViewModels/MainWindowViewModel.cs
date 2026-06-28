@@ -260,6 +260,12 @@ public sealed class MainWindowViewModel : ObservableObject
         RunSuspiciousActivityPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Suspicious activity plan", "plan suspicious activity check unknown startup item", "Maintenance.SuspiciousActivityPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunAppInstallTroubleshootingCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("App install troubleshooting", "plan app install troubleshooting recent installer issue", "Maintenance.AppInstallTroubleshooting"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunPeripheralSetupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Peripheral setup plan", "plan peripheral setup audio microphone or USB device", "Maintenance.PeripheralSetupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingReceiptsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding receipts", "show coding receipts", "Coding.Receipts"), () => !IsBusy && !IsRecording && !IsTranscribing);
         OpenMaintenanceReceiptFolderCommand = CreateCommand(_ => OpenMaintenanceReceiptFolder());
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -650,6 +656,18 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunAppInstallTroubleshootingCommand { get; }
 
     public ICommand RunPeripheralSetupPlanCommand { get; }
+
+    public ICommand RunCodingWorkspaceDiagnosticCommand { get; }
+
+    public ICommand RunCodingGitStatusCommand { get; }
+
+    public ICommand RunCodingBuildCommand { get; }
+
+    public ICommand RunCodingTestCommand { get; }
+
+    public ICommand RunCodingLastFailureCommand { get; }
+
+    public ICommand RunCodingReceiptsCommand { get; }
 
     public ICommand OpenMaintenanceReceiptFolderCommand { get; }
 
@@ -2777,6 +2795,96 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task RunCodingDiagnosticAsync(string title, string command, string actionType)
+    {
+        var startedAt = DateTimeOffset.Now;
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Running {title.ToLowerInvariant()}...";
+            MaintenanceStatusText = $"Running {title.ToLowerInvariant()}...";
+
+            var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
+            var output = BuildCodingDiagnosticText(title, command, result);
+
+            var succeeded = result is { Handled: true, Succeeded: true };
+            var receipt = WriteMaintenanceReceipt(actionType, succeeded, $"{title} completed.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
+            StatusText = $"{title} finished.";
+        }
+        catch (OperationCanceledException)
+        {
+            var receipt = WriteMaintenanceReceipt(actionType, false, $"{title} cancelled.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"{title} cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
+            StatusText = $"{title} cancelled.";
+        }
+        catch (Exception ex)
+        {
+            var receipt = WriteMaintenanceReceipt(actionType, false, $"{title} failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"{title} failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
+            StatusText = $"{title} failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private string BuildConfirmedDotNetCommand(string verb)
+        => $"confirm dotnet {verb} \"{EscapeCodingCommandPath(FindCodingDiagnosticTarget())}\"";
+
+    private string FindCodingDiagnosticTarget()
+    {
+        var target = CodingWorkspaceRootText;
+        if (!CodingWorkspacePolicy.TryNormalizePath(target, out var normalizedTarget))
+        {
+            normalizedTarget = _services.LocalCodingTool.Policy.WorkspaceRoot;
+        }
+
+        if (File.Exists(normalizedTarget))
+        {
+            return normalizedTarget;
+        }
+
+        if (!Directory.Exists(normalizedTarget))
+        {
+            return _services.LocalCodingTool.Policy.WorkspaceRoot;
+        }
+
+        try
+        {
+            var topLevelTarget = Directory.EnumerateFiles(normalizedTarget, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(IsDotNetTargetFile)
+                .OrderBy(path => path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(topLevelTarget))
+            {
+                return topLevelTarget;
+            }
+
+            return Directory.EnumerateFiles(normalizedTarget, "*.*", SearchOption.AllDirectories)
+                .Where(IsDotNetTargetFile)
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                               && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault() ?? normalizedTarget;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return normalizedTarget;
+        }
+    }
+
+    private static bool IsDotNetTargetFile(string path)
+        => path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+           || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+           || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase);
+
+    private static string EscapeCodingCommandPath(string path)
+        => path.Replace("\"", string.Empty, StringComparison.Ordinal);
+
     private async Task RestoreUserDataAsync()
     {
         var startedAt = DateTimeOffset.Now;
@@ -3059,6 +3167,198 @@ public sealed class MainWindowViewModel : ObservableObject
             ? "Next - Review the items above. No changes were made."
             : "Next - Run Check Tools, then try this diagnostic again.");
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildCodingDiagnosticText(string title, string command, CodingToolResult result)
+    {
+        var status = result is { Handled: true, Succeeded: true };
+        var lines = new List<string>
+        {
+            $"{title}: {DateTimeOffset.Now.LocalDateTime:g}",
+            ComponentStatus(title, status, status ? "complete" : ShortMaintenanceDetail(result.Message))
+        };
+
+        lines.AddRange(BuildCodingDiagnosticBody(command, result.Message));
+        lines.Add(status
+            ? BuildCodingDiagnosticNextAction(command)
+            : "Next - Review the bad row above, then run Last Failure or Check Tools.");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static IEnumerable<string> BuildCodingDiagnosticBody(string command, string message)
+    {
+        var lines = SplitMaintenanceLines(message);
+        if (command.StartsWith("inspect coding workspace", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactCodingWorkspaceLines(lines);
+        }
+
+        if (command.StartsWith("git status", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactGitStatusLines(lines);
+        }
+
+        if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("confirm dotnet test", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactDotNetLines(lines);
+        }
+
+        if (command.StartsWith("diagnose last", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactLastFailureLines(lines);
+        }
+
+        if (command.StartsWith("show coding receipts", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactReceiptLines(lines);
+        }
+
+        return lines
+            .Where(line => !LooksLikeMaintenanceBoilerplate(line))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(ShortMaintenanceDetail)
+            .Take(8)
+            .ToList();
+    }
+
+    private static string BuildCodingDiagnosticNextAction(string command)
+    {
+        if (command.StartsWith("git status", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Review changed files before build, test, or commit.";
+        }
+
+        if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Run Tests if build is good.";
+        }
+
+        if (command.StartsWith("confirm dotnet test", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Review receipts and commit only after expected changes are verified.";
+        }
+
+        if (command.StartsWith("diagnose last", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Apply a focused fix only after reviewing the failure.";
+        }
+
+        return "Next - Pick the next coding diagnostic button as needed.";
+    }
+
+    private static IReadOnlyList<string> CompactCodingWorkspaceLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Workspace", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Primary", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Projects", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Solutions", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Test projects", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Existing", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(line => ShortMaintenanceDetail(line.TrimStart('-', ' ')))
+            .Take(8)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Workspace - No workspace summary returned"];
+    }
+
+    private static IReadOnlyList<string> CompactGitStatusLines(IReadOnlyList<string> lines)
+    {
+        var entries = lines
+            .Where(line => !line.StartsWith("Git", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Where(line => Regex.IsMatch(line, @"^(##|[ MADRCU?!]{1,2}\s+)"))
+            .Select(ShortMaintenanceDetail)
+            .Take(12)
+            .ToList();
+        if (entries.Count > 0)
+        {
+            entries.Insert(0, $"Changes - {entries.Count} shown");
+            return entries;
+        }
+
+        var clean = lines.FirstOrDefault(line => line.Contains("clean", StringComparison.OrdinalIgnoreCase));
+        return [ShortMaintenanceDetail(clean ?? "Git - Clean or no changes returned")];
+    }
+
+    private static IReadOnlyList<string> CompactDotNetLines(IReadOnlyList<string> lines)
+    {
+        var compact = new List<string>();
+        AddFirstMatching(compact, lines, "Action", line => line.StartsWith("Action:", StringComparison.OrdinalIgnoreCase));
+        AddFirstMatching(compact, lines, "Target", line => line.StartsWith("Target:", StringComparison.OrdinalIgnoreCase));
+        AddFirstMatching(compact, lines, "Exit code", line => line.StartsWith("Exit code:", StringComparison.OrdinalIgnoreCase));
+        AddFirstMatching(compact, lines, "Summary", line => line.Contains("Build succeeded", StringComparison.OrdinalIgnoreCase)
+                                                           || line.Contains("Build failed", StringComparison.OrdinalIgnoreCase)
+                                                           || line.Contains("Test Run Successful", StringComparison.OrdinalIgnoreCase)
+                                                           || line.Contains("Failed!", StringComparison.OrdinalIgnoreCase)
+                                                           || line.Contains("Passed!", StringComparison.OrdinalIgnoreCase));
+        compact.AddRange(lines
+            .Where(IsLikelyCompilerOrTestError)
+            .Select(ShortMaintenanceDetail)
+            .Take(6));
+
+        if (compact.Count == 0)
+        {
+            compact.Add("Output - No concise build/test summary returned");
+        }
+
+        return compact;
+    }
+
+    private static IReadOnlyList<string> CompactLastFailureLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Category:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Action:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Target:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Exit code:", StringComparison.OrdinalIgnoreCase)
+                           || IsLikelyCompilerOrTestError(line)
+                           || line.Contains("No failed dotnet command", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(ShortMaintenanceDetail)
+            .Take(10)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Failure - No stored failure found"];
+    }
+
+    private static IReadOnlyList<string> CompactReceiptLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.Contains("succeeded", StringComparison.OrdinalIgnoreCase)
+                           || line.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                           || line.Contains("receipt", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(ShortMaintenanceDetail)
+            .Take(10)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Receipts - None found"];
+    }
+
+    private static void AddFirstMatching(ICollection<string> target, IReadOnlyList<string> lines, string label, Func<string, bool> predicate)
+    {
+        var match = lines.FirstOrDefault(predicate);
+        if (!string.IsNullOrWhiteSpace(match))
+        {
+            target.Add($"{label} - {ShortMaintenanceDetail(match)}");
+        }
+    }
+
+    private static bool IsLikelyCompilerOrTestError(string line)
+        => Regex.IsMatch(line, @"\b(error|failed|failure|exception|CS\d{4}|CA\d{4}|NETSDK\d{4}|NU\d{4})\b", RegexOptions.IgnoreCase);
+
+    private static bool LooksLikeCommandSuggestion(string line)
+    {
+        var trimmed = line.TrimStart('-', ' ');
+        return trimmed.StartsWith("run:", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("confirm ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("dotnet ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("git ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("show ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("diagnose ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("preview ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("apply ", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith("mark ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> BuildMaintenanceDiagnosticBody(string command, string message)
@@ -5952,6 +6252,36 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunPeripheralSetupPlanCommand is AsyncRelayCommand runPeripheralSetupPlan)
         {
             runPeripheralSetupPlan.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingWorkspaceDiagnosticCommand is AsyncRelayCommand runCodingWorkspaceDiagnostic)
+        {
+            runCodingWorkspaceDiagnostic.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingGitStatusCommand is AsyncRelayCommand runCodingGitStatus)
+        {
+            runCodingGitStatus.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingBuildCommand is AsyncRelayCommand runCodingBuild)
+        {
+            runCodingBuild.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingTestCommand is AsyncRelayCommand runCodingTest)
+        {
+            runCodingTest.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingLastFailureCommand is AsyncRelayCommand runCodingLastFailure)
+        {
+            runCodingLastFailure.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingReceiptsCommand is AsyncRelayCommand runCodingReceipts)
+        {
+            runCodingReceipts.RaiseCanExecuteChanged();
         }
 
         if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
