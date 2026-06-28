@@ -1151,6 +1151,11 @@
                                         Command="{Binding RunComputerHealthCheckCommand}"
                                         MinWidth="148"
                                         Margin="0,0,10,0" />
+                                <Button Content="Repair Ali Install"
+                                        Command="{Binding RepairAliInstallCommand}"
+                                        MinWidth="148"
+                                        BorderBrush="#8A6A18"
+                                        Background="#2A2415" />
                             </StackPanel>
 
                             <Border Height="1"

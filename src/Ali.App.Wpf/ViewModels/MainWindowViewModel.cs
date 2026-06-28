@@ -22,6 +22,7 @@ using Ali.Core.Voice;
 using Ali.Infrastructure.Bootstrap;
 using Ali.Infrastructure.Coding;
 using Ali.Infrastructure.Runtime;
+using Ali.Infrastructure.Sources;
 using Ali.Infrastructure.Storage;
 using Ali.Infrastructure.Voice;
 using MediaBrushes = System.Windows.Media.Brushes;
@@ -244,6 +245,7 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
         RunComputerHealthCheckCommand = CreateAsyncCommand(RunComputerHealthCheckAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        RepairAliInstallCommand = CreateAsyncCommand(RepairAliInstallAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
 
@@ -609,6 +611,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand BrowseVisualStudioPathCommand { get; }
 
     public ICommand RunComputerHealthCheckCommand { get; }
+
+    public ICommand RepairAliInstallCommand { get; }
 
     public ICommand BackupUserDataCommand { get; }
 
@@ -2488,6 +2492,62 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task RepairAliInstallAsync()
+    {
+        var confirmation = System.Windows.MessageBox.Show(
+            "Repair Ali's local install data now?\n\nThis repairs starter Sources & Topics, missing example/config helper files, and local voice tool paths. It preserves chats, memories, reminders, app settings, installed models, and the selected runtime model.",
+            "Repair Ali Install",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            MaintenanceStatusText = "Ali install repair cancelled.";
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusText = "Repairing Ali install data...";
+            MaintenanceStatusText = "Repairing Ali install data...";
+
+            var messages = new List<string>
+            {
+                $"Ali install repair: {DateTimeOffset.Now.LocalDateTime:g}"
+            };
+            var warnings = new List<string>();
+
+            await Task.Run(() => RepairAliInstallData(messages, warnings), _lifetimeCancellation.Token).ConfigureAwait(true);
+
+            ReloadVoiceSettingsFromDisk();
+            LoadRuntimeSettings();
+            LoadCodingPermissions();
+
+            if (warnings.Count > 0)
+            {
+                messages.Add("Warnings:");
+                messages.AddRange(warnings.Select(warning => "- " + warning));
+            }
+
+            MaintenanceStatusText = TrimMaintenanceText(string.Join(Environment.NewLine, messages), 16_000);
+            StatusText = "Ali install repair finished.";
+        }
+        catch (OperationCanceledException)
+        {
+            MaintenanceStatusText = "Ali install repair cancelled.";
+            StatusText = "Ali install repair cancelled.";
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = $"Ali install repair failed safely: {ex.Message}";
+            StatusText = "Ali install repair failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task RestoreUserDataAsync()
     {
         try
@@ -2581,6 +2641,99 @@ public sealed class MainWindowViewModel : ObservableObject
         ApplyVoiceToolSettings(saveSettings: false, reportStatus: false);
         RefreshSpeechToolStatuses();
         VoiceSettingsStatusText = "Voice settings reloaded from restored backup.";
+    }
+
+    private void RepairAliInstallData(List<string> messages, List<string> warnings)
+    {
+        RepairStarterSources(messages, warnings);
+        RuntimeSettingsStore.WriteExample(_services.DataRoot);
+        messages.Add("Runtime settings example verified; selected runtime model was not changed.");
+        LocalVectorLibrarySettingsStore.WriteExample(_services.DataRoot);
+        _services.CreateLocalVectorLibraryRetriever().WriteExample();
+        messages.Add("Local library settings and index folders verified.");
+        CodingToolSettingsStore.WriteExample(_services.DataRoot);
+        messages.Add("Coding permission settings example verified.");
+        RepairVoiceToolSettings(messages, warnings);
+    }
+
+    private void RepairStarterSources(List<string> messages, List<string> warnings)
+    {
+        try
+        {
+            var sourceStore = _services.CreateFileSourceRetriever();
+            var result = sourceStore.RepairStarterCatalog();
+            sourceStore.WriteExample();
+
+            if (result.CatalogCreated)
+            {
+                messages.Add($"Sources & Topics catalog created with {result.AddedStarterSourceCount} approved source(s).");
+            }
+            else if (result.AddedStarterSourceCount > 0)
+            {
+                messages.Add($"Sources & Topics repaired: added {result.AddedStarterSourceCount} missing approved source(s), preserved {result.ExistingSourceCount} existing source(s).");
+            }
+            else
+            {
+                messages.Add($"Sources & Topics verified: {result.ExistingSourceCount} approved source(s) already present.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.BackupPath))
+            {
+                warnings.Add($"Invalid Sources & Topics catalog was backed up before repair: {result.BackupPath}");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        {
+            warnings.Add($"Sources & Topics could not be repaired: {ex.Message}");
+        }
+    }
+
+    private void RepairVoiceToolSettings(List<string> messages, List<string> warnings)
+    {
+        var voiceRoot = FindLocalVoiceResourceDirectory();
+        if (string.IsNullOrWhiteSpace(voiceRoot))
+        {
+            warnings.Add("Local voice resources were not found; voice settings repair was skipped.");
+            return;
+        }
+
+        try
+        {
+            _voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(_services.DataRoot);
+            LoadTextToSpeechVoiceChoices();
+
+            var piperModel = PreferredPiperModelPath();
+            var piperVoiceId = string.IsNullOrWhiteSpace(piperModel)
+                ? _voiceSettings.PiperVoiceId
+                : Path.GetFileNameWithoutExtension(ResolvePortablePath(piperModel));
+            var kittenModel = FindLocalKittenModelRoot();
+            var hasKitten = !string.IsNullOrWhiteSpace(kittenModel);
+            var settings = _voiceSettings with
+            {
+                WhisperExecutablePath = PreferConfigured(FindLocalWhisperPythonExecutable(), _voiceSettings.WhisperExecutablePath),
+                WhisperModelPath = PreferConfigured(FindLocalWhisperModelRoot(), _voiceSettings.WhisperModelPath),
+                WhisperArgumentsTemplate = PreferConfigured(BuildLocalWhisperArgumentsTemplate(), _voiceSettings.WhisperArgumentsTemplate),
+                TextToSpeechEngine = hasKitten
+                    ? TextToSpeechEngines.Kitten
+                    : TextToSpeechEngines.Normalize(_voiceSettings.TextToSpeechEngine),
+                PiperExecutablePath = PreferConfigured(FindLocalPiperExecutable(), _voiceSettings.PiperExecutablePath),
+                PiperModelPath = PreferConfigured(piperModel, _voiceSettings.PiperModelPath),
+                PiperVoiceId = piperVoiceId,
+                PiperArgumentsTemplate = BuildLocalPiperArgumentsTemplate(),
+                KittenExecutablePath = PreferConfigured(FindLocalKittenPythonExecutable(), _voiceSettings.KittenExecutablePath),
+                KittenModelPath = PreferConfigured(kittenModel, _voiceSettings.KittenModelPath),
+                KittenVoiceId = _voiceSettings.KittenVoiceId ?? KittenVoiceCatalog.DefaultVoiceId,
+                KittenArgumentsTemplate = PreferConfigured(BuildLocalKittenArgumentsTemplate(), _voiceSettings.KittenArgumentsTemplate)
+            };
+
+            VoiceRuntimeSettingsStore.Save(_services.DataRoot, settings);
+            _voiceSettings = settings;
+            messages.Add($"Voice settings repaired to prefer installed local resources: {voiceRoot}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException or NotSupportedException)
+        {
+            warnings.Add($"Voice settings could not be repaired: {ex.Message}");
+        }
     }
 
     private string DescribeSourceCatalogHealth()
@@ -5126,6 +5279,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunComputerHealthCheckCommand is AsyncRelayCommand runComputerHealthCheck)
         {
             runComputerHealthCheck.RaiseCanExecuteChanged();
+        }
+
+        if (RepairAliInstallCommand is AsyncRelayCommand repairAliInstall)
+        {
+            repairAliInstall.RaiseCanExecuteChanged();
         }
 
         if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
