@@ -130,40 +130,42 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Sources &amp; Library"
+                            <TextBlock Text="Processes"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Review approved internet sources and local document library settings."
+                            <TextBlock Text="Read-only checks for running processes, build locks, and local port owners."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Sources"
-                                        Command="{Binding OpenSourcesTopicsCommand}" />
-                                <Button Content="Local Library"
-                                        Command="{Binding OpenLocalLibraryCommand}" />
+                                <Button Content="Running"
+                                        Command="{Binding RunProcessEvidenceCommand}" />
+                                <Button Content="Build Locks"
+                                        Command="{Binding RunBuildLockDiagnosticCommand}" />
+                                <Button Content="Port 8765"
+                                        Command="{Binding RunPortDiagnosticCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Backups"
+                            <TextBlock Text="Windows Checks"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Create or restore Ali user data backups. Models are not changed."
+                            <TextBlock Text="Inspect startup/services and plan cleanup or suspicious-activity review without changing Windows."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Create Backup"
-                                        Command="{Binding BackupUserDataCommand}" />
-                                <Button Content="Restore Backup"
-                                        Command="{Binding RestoreUserDataCommand}"
-                                        BorderBrush="#7F1D1D"
-                                        Background="#2A1517" />
+                                <Button Content="Startup"
+                                        Command="{Binding RunServicesStartupInspectionCommand}" />
+                                <Button Content="Cleanup"
+                                        Command="{Binding RunDiskCleanupPlanCommand}" />
+                                <Button Content="Suspicious"
+                                        Command="{Binding RunSuspiciousActivityPlanCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
@@ -185,16 +187,20 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Settings"
+                            <TextBlock Text="Troubleshooting Plans"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Advanced runtime, voice, permissions, memory, reminders, and backup settings."
+                            <TextBlock Text="Plan app install and peripheral setup fixes before anything changes."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
-                            <Button Content="Open Settings"
-                                    Command="{Binding OpenSettingsCommand}" />
+                            <WrapPanel>
+                                <Button Content="App Install"
+                                        Command="{Binding RunAppInstallTroubleshootingCommand}" />
+                                <Button Content="Peripheral"
+                                        Command="{Binding RunPeripheralSetupPlanCommand}" />
+                            </WrapPanel>
                         </StackPanel>
                     </Border>
                 </UniformGrid>

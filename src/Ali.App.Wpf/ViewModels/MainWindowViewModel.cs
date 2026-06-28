@@ -252,6 +252,14 @@ public sealed class MainWindowViewModel : ObservableObject
         RepairAliInstallCommand = CreateAsyncCommand(RepairAliInstallAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunComputerAssistantSetupCommand = CreateAsyncCommand(RunComputerAssistantSetupAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunMaintenancePlanCommand = CreateAsyncCommand(RunMaintenancePlanAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunProcessEvidenceCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Running processes", "collect process evidence", "Maintenance.ProcessEvidence"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunBuildLockDiagnosticCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Build lock check", "diagnose build lock", "Maintenance.BuildLock"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunPortDiagnosticCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Port owner check", "diagnose port 8765", "Maintenance.PortDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunServicesStartupInspectionCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Services and startup", "inspect services and startup", "Maintenance.ServicesStartup"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunDiskCleanupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Disk cleanup plan", "plan disk cleanup", "Maintenance.DiskCleanupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunSuspiciousActivityPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Suspicious activity plan", "plan suspicious activity check unknown startup item", "Maintenance.SuspiciousActivityPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunAppInstallTroubleshootingCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("App install troubleshooting", "plan app install troubleshooting recent installer issue", "Maintenance.AppInstallTroubleshooting"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunPeripheralSetupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Peripheral setup plan", "plan peripheral setup audio microphone or USB device", "Maintenance.PeripheralSetupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         OpenMaintenanceReceiptFolderCommand = CreateCommand(_ => OpenMaintenanceReceiptFolder());
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -626,6 +634,22 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunComputerAssistantSetupCommand { get; }
 
     public ICommand RunMaintenancePlanCommand { get; }
+
+    public ICommand RunProcessEvidenceCommand { get; }
+
+    public ICommand RunBuildLockDiagnosticCommand { get; }
+
+    public ICommand RunPortDiagnosticCommand { get; }
+
+    public ICommand RunServicesStartupInspectionCommand { get; }
+
+    public ICommand RunDiskCleanupPlanCommand { get; }
+
+    public ICommand RunSuspiciousActivityPlanCommand { get; }
+
+    public ICommand RunAppInstallTroubleshootingCommand { get; }
+
+    public ICommand RunPeripheralSetupPlanCommand { get; }
 
     public ICommand OpenMaintenanceReceiptFolderCommand { get; }
 
@@ -2711,6 +2735,53 @@ public sealed class MainWindowViewModel : ObservableObject
             var receipt = WriteMaintenanceReceipt("Maintenance.Plan", false, "Maintenance plan failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
             MaintenanceStatusText = $"Maintenance plan failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Maintenance plan failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RunMaintenanceDiagnosticAsync(string title, string command, string actionType)
+    {
+        var startedAt = DateTimeOffset.Now;
+        try
+        {
+            IsBusy = true;
+            StatusText = $"Running {title.ToLowerInvariant()}...";
+            MaintenanceStatusText = $"Running {title.ToLowerInvariant()}...";
+
+            var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
+            var component = FormatMaintenanceCommandResult(title, result);
+            var output = BuildMaintenanceStatusText(
+                title,
+                [
+                    component,
+                    ComponentStatus("Command", result.Handled, command)
+                ],
+                result is { Handled: true, Succeeded: true }
+                    ? "Review the short result below. No changes were made."
+                    : "Open Check Tools, then try this diagnostic again.")
+                + Environment.NewLine
+                + Environment.NewLine
+                + TrimMaintenanceText(result.Message, 4_000);
+
+            var succeeded = result is { Handled: true, Succeeded: true };
+            var receipt = WriteMaintenanceReceipt(actionType, succeeded, $"{title} completed.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
+            StatusText = $"{title} finished.";
+        }
+        catch (OperationCanceledException)
+        {
+            var receipt = WriteMaintenanceReceipt(actionType, false, $"{title} cancelled.", startedAt, DateTimeOffset.Now);
+            MaintenanceStatusText = $"{title} cancelled.{Environment.NewLine}{Environment.NewLine}{receipt}";
+            StatusText = $"{title} cancelled.";
+        }
+        catch (Exception ex)
+        {
+            var receipt = WriteMaintenanceReceipt(actionType, false, $"{title} failed safely.", startedAt, DateTimeOffset.Now, ex.Message);
+            MaintenanceStatusText = $"{title} failed safely: {ex.Message}{Environment.NewLine}{Environment.NewLine}{receipt}";
+            StatusText = $"{title} failed.";
         }
         finally
         {
@@ -5647,6 +5718,46 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunMaintenancePlanCommand is AsyncRelayCommand runMaintenancePlan)
         {
             runMaintenancePlan.RaiseCanExecuteChanged();
+        }
+
+        if (RunProcessEvidenceCommand is AsyncRelayCommand runProcessEvidence)
+        {
+            runProcessEvidence.RaiseCanExecuteChanged();
+        }
+
+        if (RunBuildLockDiagnosticCommand is AsyncRelayCommand runBuildLockDiagnostic)
+        {
+            runBuildLockDiagnostic.RaiseCanExecuteChanged();
+        }
+
+        if (RunPortDiagnosticCommand is AsyncRelayCommand runPortDiagnostic)
+        {
+            runPortDiagnostic.RaiseCanExecuteChanged();
+        }
+
+        if (RunServicesStartupInspectionCommand is AsyncRelayCommand runServicesStartupInspection)
+        {
+            runServicesStartupInspection.RaiseCanExecuteChanged();
+        }
+
+        if (RunDiskCleanupPlanCommand is AsyncRelayCommand runDiskCleanupPlan)
+        {
+            runDiskCleanupPlan.RaiseCanExecuteChanged();
+        }
+
+        if (RunSuspiciousActivityPlanCommand is AsyncRelayCommand runSuspiciousActivityPlan)
+        {
+            runSuspiciousActivityPlan.RaiseCanExecuteChanged();
+        }
+
+        if (RunAppInstallTroubleshootingCommand is AsyncRelayCommand runAppInstallTroubleshooting)
+        {
+            runAppInstallTroubleshooting.RaiseCanExecuteChanged();
+        }
+
+        if (RunPeripheralSetupPlanCommand is AsyncRelayCommand runPeripheralSetupPlan)
+        {
+            runPeripheralSetupPlan.RaiseCanExecuteChanged();
         }
 
         if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
