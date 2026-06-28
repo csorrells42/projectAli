@@ -13,10 +13,6 @@ Current status: Phase 0 / Phase 1C bootstrap.
   - `Ali.Tests`
 - WPF shell with left navigation and Chat home base.
 - ChatGPT-style composer with Enter to send and Shift+Enter for newline.
-- Paste image from clipboard with `Ctrl+V`.
-- Capture full screen into the composer.
-- Preview image attachments before sending.
-- Mark image attachments as retained or temporary.
 - Push-to-talk voice controls in the WPF chat surface.
 - Temporary local WAV recording through NAudio with selectable input device support.
 - Live input level meter with silence, too-quiet, usable, and clipping states.
@@ -103,7 +99,7 @@ Current first proof vision model:
 qwen3-vl:8b
 ```
 
-This proves Ali's local screenshot/image path. It is not the final Ali vision model decision.
+This proves Ali's local vision-model configuration path. It is not the final Ali vision model decision.
 
 ## Optional Local Voice Setup
 

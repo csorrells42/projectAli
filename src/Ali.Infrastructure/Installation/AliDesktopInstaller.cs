@@ -566,15 +566,15 @@ public sealed class AliDesktopInstaller
 
             if (result.CatalogCreated)
             {
-                dependencyMessages.Add($"Starter Sources & Topics catalog created with {result.AddedStarterSourceCount} approved source(s).");
+                dependencyMessages.Add($"Bundled Sources & Topics catalog created with {result.AddedStarterSourceCount} approved source(s).");
             }
             else if (result.AddedStarterSourceCount > 0)
             {
-                dependencyMessages.Add($"Starter Sources & Topics repaired: added {result.AddedStarterSourceCount} missing approved source(s), preserved {result.ExistingSourceCount} existing source(s).");
+                dependencyMessages.Add($"Bundled Sources & Topics repaired: added {result.AddedStarterSourceCount} missing approved source(s), preserved {result.ExistingSourceCount} existing source(s).");
             }
             else
             {
-                dependencyMessages.Add($"Starter Sources & Topics verified: {result.ExistingSourceCount} approved source(s) already present.");
+                dependencyMessages.Add($"Bundled Sources & Topics verified: {result.ExistingSourceCount} approved source(s) already present.");
             }
 
             if (!string.IsNullOrWhiteSpace(result.BackupPath))
@@ -584,7 +584,7 @@ public sealed class AliDesktopInstaller
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {
-            warnings.Add($"Starter Sources & Topics could not be repaired: {ex.Message}");
+            warnings.Add($"Bundled Sources & Topics could not be repaired: {ex.Message}");
         }
     }
 

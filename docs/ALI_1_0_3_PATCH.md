@@ -9,7 +9,7 @@ Ali 1.0.3 finishes the computer-management dashboard work and fixes the installe
 - Existing valid user-added sources are preserved during repair.
 - The seed includes the prior 311 public sources plus expanded weather, news, science, health, reliable reference, and official state/territory government sources.
 - Chris's local Ali source catalog was synced to the same 1000-entry seed, with the previous local catalog backed up.
-- Weather questions now route through approved source lookup so Ali can answer 5-day forecast requests instead of falling back to the bootstrap unknown response.
+- Weather questions now route through approved source lookup so Ali can answer local weather requests instead of falling back to the bootstrap unknown response.
 - Adds the Computer Maintenance dashboard with one-click buttons for status, repair, assistant setup, maintenance planning, diagnostics, and receipts.
 - Adds guarded maintenance receipts under `%LOCALAPPDATA%\Ali\Receipts` instead of writing them into the main Ali data folder.
 - Replaces duplicate dashboard shortcuts with process, port, Windows startup/service, disk cleanup, suspicious activity, install, and peripheral troubleshooting checks.

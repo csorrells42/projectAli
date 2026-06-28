@@ -50,7 +50,7 @@ setlocal
 cd /d "%~dp0"
 echo Ali $version repair patch
 echo.
-echo This repairs the installed Ali app, voice Python runtime, voice bridge scripts, voice settings, and starter Sources ^& Topics.
+echo This repairs the installed Ali app, voice Python runtime, voice bridge scripts, voice settings, and bundled Sources ^& Topics catalog.
 echo It preserves user chats, memories, settings, and installed voice models.
 echo.
 start "" /wait "%~dp0Ali.Setup.exe" --install-voice-resources --voice-resources "%~dp0Ali.VoicePatch.zip" --repair
@@ -58,7 +58,7 @@ echo.
 if errorlevel 1 (
   echo Patch failed. Please send the output above back to Chris.
 ) else (
-  echo Patch complete. Restart Ali and test voice plus Sources ^& Topics.
+  echo Patch complete. Restart Ali and test voice, current weather, Sources ^& Topics, and the maintenance dashboard.
 )
 echo.
 pause
@@ -79,6 +79,7 @@ This patch is intentionally small. It includes:
 
 It does not include the full multi-GB Ali.VoicePack.zip.
 It preserves user data, chats, memories, app settings, and already-installed voice models.
+It also repairs the bundled Sources & Topics catalog used for current weather and other approved-source answers.
 "@
 Set-Content -LiteralPath (Join-Path $patchDestination "README.txt") -Value $readme -Encoding ASCII
 

@@ -2593,7 +2593,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var startedAt = DateTimeOffset.Now;
         var confirmation = System.Windows.MessageBox.Show(
-            "Repair Ali's local install data now?\n\nThis repairs starter Sources & Topics, missing example/config helper files, and local voice tool paths. It preserves chats, memories, reminders, app settings, installed models, and the selected runtime model.",
+            "Repair Ali's local install data now?\n\nThis repairs the bundled Sources & Topics catalog, missing example/config helper files, and local voice tool paths. It preserves chats, memories, reminders, app settings, installed models, and the selected runtime model.",
             "Repair Ali Install",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
