@@ -122,6 +122,34 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         "what",
         "where"
     };
+    private static readonly HashSet<string> WeatherSubjectTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "forecast",
+        "weather",
+        "rain",
+        "storm",
+        "storms",
+        "temperature",
+        "temps"
+    };
+    private static readonly HashSet<string> WeatherTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "forecast",
+        "weather",
+        "rain",
+        "storm",
+        "storms",
+        "temperature",
+        "temps",
+        "tomorrow",
+        "tomorrows",
+        "today",
+        "tonight",
+        "week",
+        "five",
+        "day",
+        "days"
+    };
 
     public async Task<SourceQueryPlan> PlanAsync(
         string userText,
@@ -133,7 +161,7 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             return SourceQueryPlan.NoSources;
         }
 
-        var guardedPlan = TryBuildGuardedSourcePlan(userText);
+        var guardedPlan = TryBuildGuardedSourcePlan(userText, history);
         if (guardedPlan is not null)
         {
             return guardedPlan;
@@ -213,9 +241,15 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static SourceQueryPlan? TryBuildGuardedSourcePlan(string userText)
+    private static SourceQueryPlan? TryBuildGuardedSourcePlan(string userText, IReadOnlyList<ChatMessage> history)
     {
         var tokens = TokenizeForRouting(userText);
+        var weatherPlan = TryBuildWeatherPlan(userText, tokens, history);
+        if (weatherPlan is not null)
+        {
+            return weatherPlan;
+        }
+
         var localDocumentPlan = TryBuildLocalDocumentPlan(userText, tokens);
         if (localDocumentPlan is not null)
         {
@@ -229,6 +263,54 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         }
 
         return TryBuildSportsPlan(tokens);
+    }
+
+    private static SourceQueryPlan? TryBuildWeatherPlan(
+        string userText,
+        IReadOnlySet<string> tokens,
+        IReadOnlyList<ChatMessage> history)
+    {
+        if (!tokens.Overlaps(WeatherSubjectTerms))
+        {
+            return null;
+        }
+
+        var queryTerms = tokens.ToList();
+        queryTerms.AddRange(["weather", "forecast"]);
+        var memoryText = string.Join(
+            Environment.NewLine,
+            history
+                .Where(message => message.Role is ChatRole.System
+                                  && message.Text.Contains("Saved local user memories", StringComparison.OrdinalIgnoreCase))
+                .Select(message => message.Text));
+        if (memoryText.Contains("Andalusia", StringComparison.OrdinalIgnoreCase))
+        {
+            queryTerms.AddRange(["andalusia", "alabama", "al", "local"]);
+        }
+
+        if (tokens.Contains("tomorrow") || tokens.Contains("tomorrows"))
+        {
+            queryTerms.Add("tomorrow");
+        }
+
+        if ((tokens.Contains("five") || tokens.Contains("5")) && (tokens.Contains("day") || tokens.Contains("days")))
+        {
+            queryTerms.AddRange(["5", "day", "five", "days"]);
+        }
+
+        var distinctTerms = queryTerms
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList();
+
+        return new SourceQueryPlan(
+            true,
+            true,
+            "weather",
+            string.Join(' ', distinctTerms),
+            distinctTerms,
+            ["weather"]);
     }
 
     private static SourceQueryPlan? TryBuildLocalDocumentPlan(string userText, IReadOnlySet<string> tokens)

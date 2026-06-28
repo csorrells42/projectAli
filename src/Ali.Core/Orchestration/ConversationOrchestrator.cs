@@ -111,6 +111,30 @@ public sealed class ConversationOrchestrator(
         var sourceResult = sourcePlan.UseSources
             ? await Sources.RetrieveAsync(sourcePlan, cancellationToken).ConfigureAwait(false)
             : SourceRetrievalResult.Empty;
+        var deterministicSourceAnswer = TryBuildDeterministicSourceAnswer(sourcePlan, sourceResult);
+        if (!string.IsNullOrWhiteSpace(deterministicSourceAnswer))
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                deterministicSourceAnswer,
+                EvidenceStatus.Verified);
+
+            var deterministicSourceAppendix = SourcePromptFormatter.BuildAnswerAppendix(sourceResult);
+            if (!string.IsNullOrWhiteSpace(deterministicSourceAppendix))
+            {
+                yield return new AssistantStreamChunk(
+                    conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    $"{Environment.NewLine}{Environment.NewLine}{deterministicSourceAppendix}",
+                    EvidenceStatus.Verified);
+            }
+
+            yield break;
+        }
+
         var answerHistory = ShouldIncludeSavedMemoriesInAnswer(userText, sourcePlan)
             ? plannerHistory
             : history;
@@ -205,6 +229,24 @@ public sealed class ConversationOrchestrator(
 
     private static string StripModelGeneratedSourceAppendix(string answer) =>
         SourcesCheckedRegex.Replace(answer, string.Empty).TrimEnd();
+
+    private static string? TryBuildDeterministicSourceAnswer(SourceQueryPlan sourcePlan, SourceRetrievalResult sourceResult)
+    {
+        if (!sourceResult.HasSources
+            || !string.Equals(sourcePlan.Intent, "weather", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var forecast = sourceResult.Excerpts.FirstOrDefault(excerpt =>
+            excerpt.Excerpt.Contains("National Weather Service local forecast:", StringComparison.OrdinalIgnoreCase));
+        if (forecast is null)
+        {
+            return null;
+        }
+
+        return forecast.Excerpt.Trim();
+    }
 
     private static IReadOnlyList<ChatMessage> AddCodingContext(
         IReadOnlyList<ChatMessage> history,

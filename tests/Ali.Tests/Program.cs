@@ -225,6 +225,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model source planner parses structured plan", TestModelSourcePlannerParsesStructuredPlan),
     ("model source planner rejects non-json output", TestModelSourcePlannerRejectsNonJsonOutput),
     ("model source planner includes saved memory context", TestModelSourcePlannerIncludesSavedMemoryContext),
+    ("model source planner guards weather forecasts for sources", TestModelSourcePlannerGuardsWeatherForecastsForSources),
     ("model source planner guards sports records for sources", TestModelSourcePlannerGuardsSportsRecordsForSources),
     ("model source planner guards current president for sources", TestModelSourcePlannerGuardsCurrentPresidentForSources),
     ("model source planner guards local documents for sources", TestModelSourcePlannerGuardsLocalDocumentsForSources),
@@ -236,6 +237,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator injects approved source excerpts", TestOrchestratorInjectsApprovedSourceExcerpts),
     ("orchestrator owns source appendix", TestOrchestratorOwnsSourceAppendix),
     ("orchestrator reports attempted source lookup without excerpts", TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts),
+    ("orchestrator answers verified weather forecast without bootstrap runtime", TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrapRuntime),
     ("orchestrator injects saved local memories", TestOrchestratorInjectsSavedLocalMemories),
     ("orchestrator withholds irrelevant memories from source-backed answers", TestOrchestratorWithholdsIrrelevantMemoriesFromSourceBackedAnswers),
     ("source prompt formatter marks excerpts untrusted", TestSourcePromptFormatterMarksExcerptsUntrusted),
@@ -5214,7 +5216,7 @@ static async Task TestModelSourcePlannerParsesStructuredPlan()
         """);
     var planner = new ModelSourceQueryPlanner(runtime);
 
-    var plan = await planner.PlanAsync("what is the weather like in Andalusia, AL?", Array.Empty<ChatMessage>(), CancellationToken.None);
+    var plan = await planner.PlanAsync("please plan approved sources for this question", Array.Empty<ChatMessage>(), CancellationToken.None);
 
     Equal(true, plan.UseSources);
     Equal(true, plan.RequiresSourceGrounding);
@@ -5251,11 +5253,43 @@ static async Task TestModelSourcePlannerIncludesSavedMemoryContext()
             EvidenceStatus.Verified)
     };
 
-    await planner.PlanAsync("What is the weather like today?", history, CancellationToken.None);
+    await planner.PlanAsync("What source-backed context is relevant today?", history, CancellationToken.None);
 
     NotNull(runtime.LastRequest, "Planner runtime request should be captured.");
     Contains("SavedMemory:", runtime.LastRequest!.History[0].Text);
     Contains("We are in Andalusia, AL.", runtime.LastRequest.History[0].Text);
+}
+
+static async Task TestModelSourcePlannerGuardsWeatherForecastsForSources()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_sources":false,"requires_source_grounding":false,"intent":"stable_knowledge","topic":"","query_terms":[],"preferred_source_topics":[]}
+        """);
+    var planner = new ModelSourceQueryPlanner(runtime);
+    var history = new[]
+    {
+        new ChatMessage(
+            "msg_memories",
+            ChatRole.System,
+            "Saved local user memories. Use these only when relevant to the current conversation.\n- We are in Andalusia, AL.",
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Verified)
+    };
+
+    var plan = await planner.PlanAsync(
+        "whats tomorrows forecast going to be like",
+        history,
+        CancellationToken.None);
+
+    Equal(true, plan.UseSources);
+    Equal(true, plan.RequiresSourceGrounding);
+    Equal("weather", plan.Intent);
+    Contains("forecast", string.Join(' ', plan.QueryTerms));
+    Contains("tomorrow", string.Join(' ', plan.QueryTerms));
+    Contains("andalusia", string.Join(' ', plan.QueryTerms));
+    Contains("weather", string.Join(' ', plan.PreferredSourceTopics));
+    Equal(null, runtime.LastRequest);
 }
 
 static async Task TestModelSourcePlannerGuardsSportsRecordsForSources()
@@ -5375,7 +5409,16 @@ static async Task TestCuratedSourceRetrieverFetchesNwsPointForecast()
                 "/gridpoints/MOB/73,66/forecast" => """
                     {"properties":{"periods":[
                       {"name":"Today","temperature":91,"temperatureUnit":"F","windSpeed":"0 mph","windDirection":"","shortForecast":"Mostly Sunny then Slight Chance Showers And Thunderstorms","detailedForecast":"A slight chance of showers and thunderstorms after 4pm."},
-                      {"name":"Tonight","temperature":69,"temperatureUnit":"F","windSpeed":"0 mph","windDirection":"","shortForecast":"Chance Showers And Thunderstorms","detailedForecast":"A chance of showers and thunderstorms before 4am."}
+                      {"name":"Tonight","temperature":69,"temperatureUnit":"F","windSpeed":"0 mph","windDirection":"","shortForecast":"Chance Showers And Thunderstorms","detailedForecast":"A chance of showers and thunderstorms before 4am."},
+                      {"name":"Day 2","temperature":92,"temperatureUnit":"F","windSpeed":"5 mph","windDirection":"S","shortForecast":"Sunny","detailedForecast":"Sunny conditions continue."},
+                      {"name":"Night 2","temperature":70,"temperatureUnit":"F","windSpeed":"5 mph","windDirection":"S","shortForecast":"Partly Cloudy","detailedForecast":"Partly cloudy overnight."},
+                      {"name":"Day 3","temperature":93,"temperatureUnit":"F","windSpeed":"6 mph","windDirection":"SW","shortForecast":"Slight Chance Showers","detailedForecast":"A slight chance of showers in the afternoon."},
+                      {"name":"Night 3","temperature":71,"temperatureUnit":"F","windSpeed":"4 mph","windDirection":"SW","shortForecast":"Mostly Cloudy","detailedForecast":"Mostly cloudy overnight."},
+                      {"name":"Day 4","temperature":90,"temperatureUnit":"F","windSpeed":"7 mph","windDirection":"W","shortForecast":"Chance Thunderstorms","detailedForecast":"A chance of thunderstorms after noon."},
+                      {"name":"Night 4","temperature":68,"temperatureUnit":"F","windSpeed":"3 mph","windDirection":"NW","shortForecast":"Chance Showers","detailedForecast":"A chance of showers before midnight."},
+                      {"name":"Day 5","temperature":88,"temperatureUnit":"F","windSpeed":"6 mph","windDirection":"N","shortForecast":"Mostly Sunny","detailedForecast":"Mostly sunny and a little cooler."},
+                      {"name":"Night 5","temperature":66,"temperatureUnit":"F","windSpeed":"2 mph","windDirection":"N","shortForecast":"Clear","detailedForecast":"Clear overnight."},
+                      {"name":"Day 6","temperature":89,"temperatureUnit":"F","windSpeed":"4 mph","windDirection":"NE","shortForecast":"Sunny","detailedForecast":"This sixth day should not be included."}
                     ]}}
                     """,
                 _ => throw new InvalidOperationException($"Unexpected route: {request.RequestUri}")
@@ -5409,6 +5452,8 @@ static async Task TestCuratedSourceRetrieverFetchesNwsPointForecast()
     Contains("National Weather Service local forecast", result.Excerpts[0].Excerpt);
     Contains("Today: 91F", result.Excerpts[0].Excerpt);
     Contains("Mostly Sunny", result.Excerpts[0].Excerpt);
+    Contains("Night 5: 66F", result.Excerpts[0].Excerpt);
+    Equal(false, result.Excerpts[0].Excerpt.Contains("Day 6", StringComparison.Ordinal));
 }
 
 static async Task TestCuratedSourceRetrieverReportsPlannedLookupWithoutMatches()
@@ -5642,6 +5687,67 @@ static async Task TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts()
     Contains("No matching approved sources", handler.LastChatBody);
     Contains("Planner intent: weather", handler.LastChatBody);
     Equal("OK", string.Concat(chunks));
+}
+
+static async Task TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrapRuntime()
+{
+    var directory = NewTestDirectory();
+    var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
+    var sourceResult = new SourceRetrievalResult(
+        [
+            new SourceExcerpt(
+                1,
+                "weather",
+                "National Weather Service Forecast - Andalusia, AL",
+                "https://api.weather.gov/points/31.3085,-86.482",
+                DateTimeOffset.UtcNow,
+                """
+                National Weather Service local forecast:
+                Today: 91F. Mostly Sunny. A slight chance of showers and thunderstorms after 4pm.
+                Tonight: 69F. Chance Showers And Thunderstorms. A chance of showers and thunderstorms before 4am.
+                Day 2: 92F. Sunny. Sunny conditions continue.
+                Night 2: 70F. Partly Cloudy. Partly cloudy overnight.
+                Day 3: 93F. Slight Chance Showers. A slight chance of showers in the afternoon.
+                Night 3: 71F. Mostly Cloudy. Mostly cloudy overnight.
+                Day 4: 90F. Chance Thunderstorms. A chance of thunderstorms after noon.
+                Night 4: 68F. Chance Showers. A chance of showers before midnight.
+                Day 5: 88F. Mostly Sunny. Mostly sunny and a little cooler.
+                Night 5: 66F. Clear. Clear overnight.
+                """)
+        ],
+        Array.Empty<string>());
+    var orchestrator = new ConversationOrchestrator(
+        new DevelopmentLocalModelRuntime(),
+        new PermissionService(),
+        correctionQueue,
+        new StaticSourceRetriever(sourceResult),
+        new StaticSourceQueryPlanner(new SourceQueryPlan(
+            true,
+            true,
+            "weather",
+            "andalusia alabama weather tomorrow forecast",
+            ["weather", "forecast", "tomorrow", "andalusia", "alabama"],
+            ["weather"])));
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamAnswerAsync(
+                       "conv_weather",
+                       "msg_user_weather",
+                       "msg_assistant_weather",
+                       "whats tomorrows forecast going to be like",
+                       Array.Empty<ChatMessage>(),
+                       Array.Empty<ChatAttachment>(),
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Contains("National Weather Service local forecast", answer);
+    Contains("Night 5: 66F", answer);
+    Contains("Sources checked:", answer);
+    Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
+    Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
 }
 
 static async Task TestOrchestratorInjectsSavedLocalMemories()

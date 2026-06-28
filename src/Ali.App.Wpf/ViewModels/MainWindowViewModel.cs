@@ -88,6 +88,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _activeVoiceInput;
     private CancellationTokenSource? _activeSpeech;
     private SettingsWindow? _settingsWindow;
+    private MaintenanceDashboardWindow? _maintenanceDashboardWindow;
     private LocalLibraryWindow? _localLibraryWindow;
     private SourcesTopicsWindow? _sourcesTopicsWindow;
     private bool _voiceMonitorRequested;
@@ -223,6 +224,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
+        OpenMaintenanceDashboardCommand = CreateCommand(_ => OpenMaintenanceDashboard());
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
@@ -249,6 +251,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RepairAliInstallCommand = CreateAsyncCommand(RepairAliInstallAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunComputerAssistantSetupCommand = CreateAsyncCommand(RunComputerAssistantSetupAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunMaintenancePlanCommand = CreateAsyncCommand(RunMaintenancePlanAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        OpenMaintenanceReceiptFolderCommand = CreateCommand(_ => OpenMaintenanceReceiptFolder());
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
 
@@ -569,6 +572,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand OpenSettingsCommand { get; }
 
+    public ICommand OpenMaintenanceDashboardCommand { get; }
+
     public ICommand OpenLocalLibraryCommand { get; }
 
     public ICommand OpenSourcesTopicsCommand { get; }
@@ -621,6 +626,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunMaintenancePlanCommand { get; }
 
+    public ICommand OpenMaintenanceReceiptFolderCommand { get; }
+
     public ICommand BackupUserDataCommand { get; }
 
     public ICommand RestoreUserDataCommand { get; }
@@ -630,6 +637,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public string CodingToolSettingsPath => _services.CodingToolSettingsPath;
 
     public string MaintenanceReceiptPath => Path.Combine(_services.DataRoot, "maintenance-actions.jsonl");
+
+    public string MaintenanceReceiptFolder => Path.GetDirectoryName(MaintenanceReceiptPath) ?? _services.DataRoot;
 
     public string CodingWorkspaceRootText
     {
@@ -4506,6 +4515,47 @@ public sealed class MainWindowViewModel : ObservableObject
         _settingsWindow.Show();
         _settingsWindow.Activate();
         return true;
+    }
+
+    private void OpenMaintenanceDashboard()
+    {
+        if (_maintenanceDashboardWindow is not null)
+        {
+            if (!_maintenanceDashboardWindow.IsVisible)
+            {
+                _maintenanceDashboardWindow.Show();
+            }
+
+            _maintenanceDashboardWindow.Activate();
+            return;
+        }
+
+        var owner = System.Windows.Application.Current?.MainWindow;
+        _maintenanceDashboardWindow = new MaintenanceDashboardWindow
+        {
+            DataContext = this,
+            Owner = owner
+        };
+        _maintenanceDashboardWindow.Closed += (_, _) => _maintenanceDashboardWindow = null;
+        _maintenanceDashboardWindow.Show();
+        _maintenanceDashboardWindow.Activate();
+    }
+
+    private void OpenMaintenanceReceiptFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(MaintenanceReceiptFolder);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = MaintenanceReceiptFolder,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            MaintenanceStatusText = $"Could not open receipt folder: {ex.Message}";
+        }
     }
 
     private void OpenLocalLibrary()

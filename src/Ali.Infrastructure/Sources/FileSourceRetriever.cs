@@ -873,7 +873,7 @@ public sealed class FileSourceRetriever
             }
 
             var lines = new StringBuilder("National Weather Service local forecast:");
-            foreach (var period in periods.EnumerateArray().Take(5))
+            foreach (var period in periods.EnumerateArray().Take(10))
             {
                 var name = ReadJsonString(period, "name");
                 var shortForecast = ReadJsonString(period, "shortForecast");
