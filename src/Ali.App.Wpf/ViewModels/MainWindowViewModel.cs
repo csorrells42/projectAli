@@ -247,6 +247,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunComputerHealthCheckCommand = CreateAsyncCommand(RunComputerHealthCheckAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RepairAliInstallCommand = CreateAsyncCommand(RepairAliInstallAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunComputerAssistantSetupCommand = CreateAsyncCommand(RunComputerAssistantSetupAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunMaintenancePlanCommand = CreateAsyncCommand(RunMaintenancePlanAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RestoreUserDataCommand = CreateAsyncCommand(RestoreUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
 
@@ -616,6 +617,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RepairAliInstallCommand { get; }
 
     public ICommand RunComputerAssistantSetupCommand { get; }
+
+    public ICommand RunMaintenancePlanCommand { get; }
 
     public ICommand BackupUserDataCommand { get; }
 
@@ -2601,6 +2604,65 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async Task RunMaintenancePlanAsync()
+    {
+        try
+        {
+            IsBusy = true;
+            StatusText = "Running maintenance plan...";
+            MaintenanceStatusText = "Running maintenance plan...";
+
+            var sections = new List<string>
+            {
+                $"Ali maintenance plan: {DateTimeOffset.Now.LocalDateTime:g}",
+                "Boundary: this button is read-only. It inspects health, identifies likely next actions, and keeps repairs behind the separate confirmed Repair Ali Install button."
+            };
+            var needsAttention = new List<string>();
+
+            var sourceHealth = DescribeSourceCatalogHealth();
+            sections.Add(sourceHealth);
+            if (sourceHealth.Contains("Needs attention", StringComparison.OrdinalIgnoreCase))
+            {
+                needsAttention.Add("Sources & Topics need repair.");
+            }
+
+            foreach (var command in new[]
+                     {
+                         "show install doctor",
+                         "show computer assistant status",
+                         "show pdf tool status",
+                         "show visual studio integration",
+                         "show coding receipts"
+                     })
+            {
+                var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
+                sections.Add(FormatMaintenanceCommandResult(command, result));
+                if (result is not { Handled: true, Succeeded: true })
+                {
+                    needsAttention.Add($"{command} did not report healthy.");
+                }
+            }
+
+            sections.Add(BuildMaintenanceRecommendations(needsAttention));
+            MaintenanceStatusText = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            StatusText = "Maintenance plan finished.";
+        }
+        catch (OperationCanceledException)
+        {
+            MaintenanceStatusText = "Maintenance plan cancelled.";
+            StatusText = "Maintenance plan cancelled.";
+        }
+        catch (Exception ex)
+        {
+            MaintenanceStatusText = $"Maintenance plan failed safely: {ex.Message}";
+            StatusText = "Maintenance plan failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private async Task RestoreUserDataAsync()
     {
         try
@@ -2802,6 +2864,32 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             return $"Source catalog: Needs attention{Environment.NewLine}Path: {_services.CuratedSourcesCatalogPath}{Environment.NewLine}Reason: {ex.Message}";
         }
+    }
+
+    private static string BuildMaintenanceRecommendations(IReadOnlyCollection<string> needsAttention)
+    {
+        var lines = new List<string>
+        {
+            "Recommended next actions:"
+        };
+
+        if (needsAttention.Count == 0)
+        {
+            lines.Add("- No immediate repair is indicated by the read-only checks.");
+            lines.Add("- Use Assistant Setup to review supported computer-assistant lanes and permission boundaries.");
+            lines.Add("- Create a backup before any major install or machine-maintenance work.");
+            return string.Join(Environment.NewLine, lines);
+        }
+
+        foreach (var item in needsAttention.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            lines.Add("- " + item);
+        }
+
+        lines.Add("- Review the details above, then use Repair Ali Install only if the issue is install data, Sources & Topics, or local voice path drift.");
+        lines.Add("- Use Backup & Restore before risky maintenance or before moving Ali to another machine.");
+        lines.Add("- Use the chat command index for any fix that needs extra owner confirmation.");
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string FormatMaintenanceCommandResult(string command, CodingToolResult result)
@@ -5342,6 +5430,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunComputerAssistantSetupCommand is AsyncRelayCommand runComputerAssistantSetup)
         {
             runComputerAssistantSetup.RaiseCanExecuteChanged();
+        }
+
+        if (RunMaintenancePlanCommand is AsyncRelayCommand runMaintenancePlan)
+        {
+            runMaintenancePlan.RaiseCanExecuteChanged();
         }
 
         if (RestoreUserDataCommand is AsyncRelayCommand restoreUserData)
