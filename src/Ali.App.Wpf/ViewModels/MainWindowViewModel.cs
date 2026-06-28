@@ -75,8 +75,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _loadingConversationHistorySelection;
     private bool _checkingModelConnectionStatus;
     private bool _ollamaWasRunningAtStartup;
-    private bool _ollamaStartInProgress;
     private DateTimeOffset _nextOllamaStartAttemptAt = DateTimeOffset.MinValue;
+    private readonly SemaphoreSlim _ollamaStartGate = new(1, 1);
     private readonly HashSet<int> _ollamaProcessIdsStartedByAli = new();
     private readonly Dictionary<string, TextToSpeechVoiceChoice> _textToSpeechVoiceChoices = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, RuntimeModelChoice> _runtimeModelChoices = new(StringComparer.OrdinalIgnoreCase);
@@ -1624,41 +1624,47 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (_ollamaStartInProgress || _ollamaProcessIdsStartedByAli.Count > 0)
+        if (_ollamaProcessIdsStartedByAli.Count > 0)
         {
             return;
         }
 
-        var before = GetOllamaProcesses();
-        if (before.Count > 0)
-        {
-            _ollamaWasRunningAtStartup = true;
-            _nextOllamaStartAttemptAt = DateTimeOffset.MaxValue;
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if (now < _nextOllamaStartAttemptAt)
+        if (!await _ollamaStartGate.WaitAsync(0).ConfigureAwait(true))
         {
             return;
         }
 
-        _ollamaStartInProgress = true;
-        _nextOllamaStartAttemptAt = now + OllamaStartRetryInterval;
-
-        var appPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs",
-            "Ollama",
-            "ollama app.exe");
-        var serverPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs",
-            "Ollama",
-            "ollama.exe");
+        IReadOnlyList<Process> before = Array.Empty<Process>();
 
         try
         {
+            before = GetOllamaProcesses();
+            if (before.Count > 0)
+            {
+                _ollamaWasRunningAtStartup = true;
+                _nextOllamaStartAttemptAt = DateTimeOffset.MaxValue;
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (now < _nextOllamaStartAttemptAt)
+            {
+                return;
+            }
+
+            _nextOllamaStartAttemptAt = now + OllamaStartRetryInterval;
+
+            var appPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs",
+                "Ollama",
+                "ollama app.exe");
+            var serverPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs",
+                "Ollama",
+                "ollama.exe");
+
             var launchedProcess = StartOwnedOllamaProcess(serverPath, appPath);
             if (launchedProcess is null)
             {
@@ -1678,7 +1684,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         finally
         {
-            _ollamaStartInProgress = false;
+            _ollamaStartGate.Release();
         }
     }
 

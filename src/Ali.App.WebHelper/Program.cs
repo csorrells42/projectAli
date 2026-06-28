@@ -415,8 +415,8 @@ internal sealed class OllamaProcessOwner
 {
     private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
     private readonly HashSet<int> _processIdsStartedByAli = new();
+    private readonly SemaphoreSlim _startGate = new(1, 1);
     private bool _ollamaWasRunningAtStartup;
-    private bool _startInProgress;
     private DateTimeOffset _nextStartAttemptAt = DateTimeOffset.MinValue;
 
     public async Task EnsureStartedForAsync(
@@ -428,41 +428,47 @@ internal sealed class OllamaProcessOwner
             return;
         }
 
-        if (_startInProgress || _processIdsStartedByAli.Count > 0)
+        if (_processIdsStartedByAli.Count > 0)
         {
             return;
         }
 
-        var before = GetOllamaProcesses();
-        if (before.Count > 0)
-        {
-            _ollamaWasRunningAtStartup = true;
-            _nextStartAttemptAt = DateTimeOffset.MaxValue;
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        if (now < _nextStartAttemptAt)
+        if (!await _startGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
         {
             return;
         }
 
-        _startInProgress = true;
-        _nextStartAttemptAt = now + OllamaStartRetryInterval;
-
-        var appPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs",
-            "Ollama",
-            "ollama app.exe");
-        var serverPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs",
-            "Ollama",
-            "ollama.exe");
+        IReadOnlyList<Process> before = Array.Empty<Process>();
 
         try
         {
+            before = GetOllamaProcesses();
+            if (before.Count > 0)
+            {
+                _ollamaWasRunningAtStartup = true;
+                _nextStartAttemptAt = DateTimeOffset.MaxValue;
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (now < _nextStartAttemptAt)
+            {
+                return;
+            }
+
+            _nextStartAttemptAt = now + OllamaStartRetryInterval;
+
+            var appPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs",
+                "Ollama",
+                "ollama app.exe");
+            var serverPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs",
+                "Ollama",
+                "ollama.exe");
+
             var launchedProcess = StartOwnedOllamaProcess(serverPath, appPath);
             if (launchedProcess is null)
             {
@@ -482,7 +488,7 @@ internal sealed class OllamaProcessOwner
         }
         finally
         {
-            _startInProgress = false;
+            _startGate.Release();
         }
     }
 
