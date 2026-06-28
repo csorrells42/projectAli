@@ -437,20 +437,13 @@
                         HorizontalAlignment="Stretch">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <Button Grid.Column="0"
-                                Content="+"
-                                Command="{Binding PasteImageCommand}"
-                                ToolTip="Attach an image from the clipboard"
-                                Style="{StaticResource ComposerButton}" />
-
                         <TextBox x:Name="ComposerTextBox"
-                                 Grid.Column="1"
+                                 Grid.Column="0"
                                  MinHeight="44"
                                  MaxHeight="150"
                                  VerticalScrollBarVisibility="Auto"
@@ -465,13 +458,13 @@
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
-                        <Button Grid.Column="2"
+                        <Button Grid.Column="1"
                                 Content="{Binding PushToTalkKeyButtonText}"
                                 Command="{Binding OpenSettingsCommand}"
                                 ToolTip="Open Settings to change the Push to Talk key."
                                 Style="{StaticResource ComposerButton}"
                                 MinWidth="116" />
-                        <Button Grid.Column="3"
+                        <Button Grid.Column="2"
                                 Content="{Binding SendButtonText}"
                                 Command="{Binding SendCommand}"
                                 ToolTip="{Binding SendButtonToolTip}"
