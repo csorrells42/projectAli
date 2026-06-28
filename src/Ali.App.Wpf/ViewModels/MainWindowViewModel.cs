@@ -2752,19 +2752,7 @@ public sealed class MainWindowViewModel : ObservableObject
             MaintenanceStatusText = $"Running {title.ToLowerInvariant()}...";
 
             var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
-            var component = FormatMaintenanceCommandResult(title, result);
-            var output = BuildMaintenanceStatusText(
-                title,
-                [
-                    component,
-                    ComponentStatus("Command", result.Handled, command)
-                ],
-                result is { Handled: true, Succeeded: true }
-                    ? "Review the short result below. No changes were made."
-                    : "Open Check Tools, then try this diagnostic again.")
-                + Environment.NewLine
-                + Environment.NewLine
-                + TrimMaintenanceText(result.Message, 4_000);
+            var output = BuildMaintenanceDiagnosticText(title, command, result);
 
             var succeeded = result is { Handled: true, Succeeded: true };
             var receipt = WriteMaintenanceReceipt(actionType, succeeded, $"{title} completed.", startedAt, DateTimeOffset.Now, output);
@@ -3056,6 +3044,212 @@ public sealed class MainWindowViewModel : ObservableObject
 
         return string.Join(Environment.NewLine, lines);
     }
+
+    private static string BuildMaintenanceDiagnosticText(string title, string command, CodingToolResult result)
+    {
+        var status = result is { Handled: true, Succeeded: true };
+        var lines = new List<string>
+        {
+            $"{title}: {DateTimeOffset.Now.LocalDateTime:g}",
+            ComponentStatus(title, status, status ? "read-only check complete" : ShortMaintenanceDetail(result.Message))
+        };
+
+        lines.AddRange(BuildMaintenanceDiagnosticBody(command, result.Message));
+        lines.Add(status
+            ? "Next - Review the items above. No changes were made."
+            : "Next - Run Check Tools, then try this diagnostic again.");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static IEnumerable<string> BuildMaintenanceDiagnosticBody(string command, string message)
+    {
+        var lines = SplitMaintenanceLines(message);
+        if (command.StartsWith("collect process evidence", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("diagnose build lock", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactProcessLines(lines);
+        }
+
+        if (command.StartsWith("diagnose port", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactPortLines(lines);
+        }
+
+        if (command.StartsWith("inspect services", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                "Services - Ready for read-only review",
+                "Startup - Ready for read-only review",
+                "Changes - None"
+            ];
+        }
+
+        if (command.StartsWith("plan disk cleanup", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactDiskCleanupLines(lines);
+        }
+
+        if (command.StartsWith("plan ", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactPlanLines(lines);
+        }
+
+        return lines
+            .Where(line => !LooksLikeMaintenanceBoilerplate(line))
+            .Take(8)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> SplitMaintenanceLines(string? message) =>
+        string.IsNullOrWhiteSpace(message)
+            ? Array.Empty<string>()
+            : message
+                .ReplaceLineEndings("\n")
+                .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static IReadOnlyList<string> CompactProcessLines(IReadOnlyList<string> lines)
+    {
+        var rows = lines
+            .Where(line => line.StartsWith("- PID ", StringComparison.OrdinalIgnoreCase))
+            .Select(FormatProcessRow)
+            .Take(12)
+            .ToList();
+        if (rows.Count > 0)
+        {
+            return rows;
+        }
+
+        var noMatch = lines.FirstOrDefault(line => line.Contains("No matching", StringComparison.OrdinalIgnoreCase)
+                                                   || line.Contains("No common build-lock", StringComparison.OrdinalIgnoreCase));
+        return [ShortMaintenanceDetail(noMatch ?? "Processes - No matching processes found")];
+    }
+
+    private static IReadOnlyList<string> CompactPortLines(IReadOnlyList<string> lines)
+    {
+        var rows = lines
+            .Where(line => Regex.IsMatch(line, @"^-\s+(TCP|UDP)\s+", RegexOptions.IgnoreCase))
+            .Select(FormatPortRow)
+            .Take(8)
+            .ToList();
+        if (rows.Count > 0)
+        {
+            return rows;
+        }
+
+        var port = lines.FirstOrDefault(line => line.StartsWith("Port:", StringComparison.OrdinalIgnoreCase));
+        var noMatch = lines.FirstOrDefault(line => line.Contains("No listener", StringComparison.OrdinalIgnoreCase)
+                                                   || line.Contains("No connection", StringComparison.OrdinalIgnoreCase));
+        return
+        [
+            ShortMaintenanceDetail(port ?? "Port - unknown"),
+            ShortMaintenanceDetail(noMatch ?? "Owner - none found")
+        ];
+    }
+
+    private static IReadOnlyList<string> CompactDiskCleanupLines(IReadOnlyList<string> lines)
+    {
+        var driveRows = lines
+            .Where(line => Regex.IsMatch(line, @"^-\s+[A-Z]:\\", RegexOptions.IgnoreCase))
+            .Select(line => ShortMaintenanceDetail(line[2..]))
+            .Take(8)
+            .ToList();
+        if (driveRows.Count > 0)
+        {
+            driveRows.Insert(0, "Drive space:");
+            return driveRows;
+        }
+
+        return ["Drive space - No ready drives found"];
+    }
+
+    private static IReadOnlyList<string> CompactPlanLines(IReadOnlyList<string> lines)
+    {
+        var compact = new List<string>();
+        var target = lines.FirstOrDefault(line => line.StartsWith("Target:", StringComparison.OrdinalIgnoreCase)
+                                                  || line.StartsWith("Scenario:", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(target))
+        {
+            compact.Add(ShortMaintenanceDetail(target));
+        }
+
+        compact.AddRange(lines
+            .Where(line => Regex.IsMatch(line, @"^\d+\.\s+")
+                           || line.StartsWith("- Exact ", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Check ", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Identify ", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Verify ", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeMaintenanceBoilerplate(line))
+            .Select(line => ShortMaintenanceDetail(line.TrimStart('-', ' ')))
+            .Take(5));
+
+        if (compact.Count == 0)
+        {
+            compact.Add("Plan - Gather evidence first, then choose one approved next action.");
+        }
+
+        return compact;
+    }
+
+    private static string FormatProcessRow(string line)
+    {
+        var text = line.TrimStart('-', ' ');
+        var match = Regex.Match(text, @"^PID\s+(?<pid>\d+):\s*(?<name>[^;]+)(?:;\s*memory\s*(?<memory>[^;]+))?(?:;\s*started\s*(?<started>[^;]+))?(?:;\s*path\s*(?<path>.+))?$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return ShortMaintenanceDetail(text.Replace("; ", " - "));
+        }
+
+        var parts = new List<string>
+        {
+            $"PID {match.Groups["pid"].Value}",
+            $"Name {match.Groups["name"].Value.Trim()}"
+        };
+        AddMatchedPart(parts, "Memory", match.Groups["memory"]);
+        AddMatchedPart(parts, "Started", match.Groups["started"]);
+        AddMatchedPart(parts, "Path", match.Groups["path"]);
+        return ShortMaintenanceDetail(string.Join(" - ", parts));
+    }
+
+    private static string FormatPortRow(string line)
+    {
+        var text = line.TrimStart('-', ' ');
+        var match = Regex.Match(text, @"^(?<proto>TCP|UDP)\s+(?<address>\S+)\s+(?<state>\S+)\s+PID\s+(?<pid>\d+):\s*(?<name>[^;]+)(?:;\s*memory\s*(?<memory>[^;]+))?(?:;\s*path\s*(?<path>.+))?$", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return ShortMaintenanceDetail(text.Replace("; ", " - "));
+        }
+
+        var parts = new List<string>
+        {
+            $"PID {match.Groups["pid"].Value}",
+            $"Name {match.Groups["name"].Value.Trim()}",
+            $"Port {match.Groups["address"].Value}",
+            $"State {match.Groups["state"].Value}"
+        };
+        AddMatchedPart(parts, "Memory", match.Groups["memory"]);
+        AddMatchedPart(parts, "Path", match.Groups["path"]);
+        return ShortMaintenanceDetail(string.Join(" - ", parts));
+    }
+
+    private static void AddMatchedPart(ICollection<string> parts, string label, Group group)
+    {
+        if (group.Success && !string.IsNullOrWhiteSpace(group.Value))
+        {
+            parts.Add($"{label} {group.Value.Trim()}");
+        }
+    }
+
+    private static bool LooksLikeMaintenanceBoilerplate(string line) =>
+        line.Contains("Useful Ali commands", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("Next safe commands", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("Approval boundaries", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("Approval gate", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("Stop rules", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("No files were", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("No processes were", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("No installer was", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("No drivers", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatMaintenanceCommandResult(string component, CodingToolResult result)
     {
