@@ -229,12 +229,14 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model source planner rejects non-json output", TestModelSourcePlannerRejectsNonJsonOutput),
     ("model source planner includes saved memory context", TestModelSourcePlannerIncludesSavedMemoryContext),
     ("model source planner guards weather forecasts for sources", TestModelSourcePlannerGuardsWeatherForecastsForSources),
+    ("model source planner keeps explicit weather location", TestModelSourcePlannerKeepsExplicitWeatherLocation),
     ("model source planner guards sports records for sources", TestModelSourcePlannerGuardsSportsRecordsForSources),
     ("model source planner guards current president for sources", TestModelSourcePlannerGuardsCurrentPresidentForSources),
     ("model source planner guards current vice president for sources", TestModelSourcePlannerGuardsCurrentVicePresidentForSources),
     ("model source planner guards local documents for sources", TestModelSourcePlannerGuardsLocalDocumentsForSources),
     ("curated source retriever uses planned weather topic", TestCuratedSourceRetrieverUsesPlannedWeatherTopic),
     ("curated source retriever fetches NWS point forecast", TestCuratedSourceRetrieverFetchesNwsPointForecast),
+    ("curated source retriever selects Tullahoma NWS point forecast", TestCuratedSourceRetrieverSelectsTullahomaNwsPointForecast),
     ("curated source retriever reports planned lookup without matches", TestCuratedSourceRetrieverReportsPlannedLookupWithoutMatches),
     ("source prompt formatter distinguishes stable fallback", TestSourcePromptFormatterDistinguishesStableFallback),
     ("source prompt formatter forbids no-internet fallback after lookup", TestSourcePromptFormatterForbidsNoInternetFallbackAfterLookup),
@@ -245,6 +247,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator limits multiday forecast to current day", TestOrchestratorLimitsMultidayForecastToCurrentDay),
     ("orchestrator answers current president deterministically", TestOrchestratorAnswersCurrentPresidentDeterministically),
     ("orchestrator answers current vice president deterministically", TestOrchestratorAnswersCurrentVicePresidentDeterministically),
+    ("orchestrator does not let officeholder guard hijack unrelated followup", TestOrchestratorDoesNotLetOfficeholderGuardHijackUnrelatedFollowup),
     ("orchestrator injects saved local memories", TestOrchestratorInjectsSavedLocalMemories),
     ("orchestrator withholds irrelevant memories from source-backed answers", TestOrchestratorWithholdsIrrelevantMemoriesFromSourceBackedAnswers),
     ("source prompt formatter marks excerpts untrusted", TestSourcePromptFormatterMarksExcerptsUntrusted),
@@ -568,8 +571,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
     Contains("Ali PDF command index", pdfIndex);
     Contains(@"C:\Ali\Pdfs", pdfIndex);
-    Contains("Ali feature guide", userGuide);
-    Contains("The Commands button shows this same guide", userGuide);
+    Contains("Here is how I can help", userGuide);
+    Contains("For location-based weather", userGuide);
     Contains("Programming", userGuide);
     Contains("PDF", userGuide);
     Contains("Computer", userGuide);
@@ -2029,8 +2032,8 @@ static async Task TestLocalCodingToolShowsComputerAssistant()
     Contains("Ali computer assistant status", status.Message);
     Contains("Guardrails", status.Message);
     Equal(true, guide.Succeeded);
-    Contains("Ali feature guide", guide.Message);
-    Contains("The Commands button shows this same guide", guide.Message);
+    Contains("Here is how I can help", guide.Message);
+    Contains("For location-based weather", guide.Message);
     Equal(true, index.Succeeded);
     Contains("Ali computer assistant command index", index.Message);
     Contains("plan file organization", index.Message);
@@ -3707,7 +3710,7 @@ static async Task TestDesktopInstallerRepairMergesStarterSources()
     Equal(true, repaired.Any(source => source.Id == "medlineplus"));
     Equal(true, repaired.Any(source => source.Id == "alabama-gov"));
     Equal(true, repaired.Count >= 1_000);
-    Contains("Starter Sources & Topics repaired", string.Join(Environment.NewLine, result.DependencyMessages));
+    Contains("Bundled Sources & Topics repaired", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
 static async Task TestDesktopInstallerInstallsSidecarVoiceResources()
@@ -4902,6 +4905,7 @@ static async Task TestCuratedSourceCatalogMergesMissingStarterSources()
     Equal(true, catalog.Any(source => source.Id == "weather-gov"));
     Equal(true, catalog.Any(source => source.Id == "python-docs"));
     Equal(true, catalog.Any(source => source.Id == "nws-mobile"));
+    Equal(true, catalog.Any(source => source.Id == "nws-tullahoma-tn-forecast"));
     Equal(true, catalog.Any(source => source.Id == "nhc-noaa"));
     Equal(true, catalog.Any(source => source.Id == "ap-news"));
     Equal(true, catalog.Any(source => source.Id == "nasa-main"));
@@ -5457,6 +5461,28 @@ static async Task TestModelSourcePlannerGuardsWeatherForecastsForSources()
     Equal(null, runtime.LastRequest);
 }
 
+static async Task TestModelSourcePlannerKeepsExplicitWeatherLocation()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_sources":false,"requires_source_grounding":false,"intent":"stable_knowledge","topic":"","query_terms":[],"preferred_source_topics":[]}
+        """);
+    var planner = new ModelSourceQueryPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "what is the weather in Tullahoma TN",
+        Array.Empty<ChatMessage>(),
+        CancellationToken.None);
+
+    Equal(true, plan.UseSources);
+    Equal(true, plan.RequiresSourceGrounding);
+    Equal("weather", plan.Intent);
+    Contains("tullahoma", string.Join(' ', plan.QueryTerms));
+    Contains("tn", string.Join(' ', plan.QueryTerms));
+    Contains("weather", string.Join(' ', plan.PreferredSourceTopics));
+    Equal(null, runtime.LastRequest);
+}
+
 static async Task TestModelSourcePlannerGuardsSportsRecordsForSources()
 {
     var runtime = new FixedTextRuntime(
@@ -5644,6 +5670,64 @@ static async Task TestCuratedSourceRetrieverFetchesNwsPointForecast()
     Equal(false, result.Excerpts[0].Excerpt.Contains("Day 3", StringComparison.Ordinal));
     Equal(false, result.Excerpts[0].Excerpt.Contains("Night 5", StringComparison.Ordinal));
     Equal(false, result.Excerpts[0].Excerpt.Contains("Day 6", StringComparison.Ordinal));
+}
+
+static async Task TestCuratedSourceRetrieverSelectsTullahomaNwsPointForecast()
+{
+    var directory = NewTestDirectory();
+    var sourceStore = new FileSourceRetriever(
+        directory,
+        new HttpClient(new RouteHandler(request =>
+            request.RequestUri?.AbsolutePath switch
+            {
+                "/points/35.3620,-86.2094" => """
+                    {"properties":{"forecast":"https://api.weather.gov/gridpoints/OHX/73,22/forecast"}}
+                    """,
+                "/gridpoints/OHX/73,22/forecast" => """
+                    {"properties":{"periods":[
+                      {"name":"Today","temperature":86,"temperatureUnit":"F","windSpeed":"5 mph","windDirection":"SW","shortForecast":"Mostly Sunny","detailedForecast":"Mostly sunny with a light southwest wind."},
+                      {"name":"Tonight","temperature":67,"temperatureUnit":"F","windSpeed":"3 mph","windDirection":"S","shortForecast":"Partly Cloudy","detailedForecast":"Partly cloudy overnight."}
+                    ]}}
+                    """,
+                _ => throw new InvalidOperationException($"Unexpected route: {request.RequestUri}")
+            })));
+    Directory.CreateDirectory(sourceStore.RootDirectory);
+    var catalog = new[]
+    {
+        new SourceCatalogEntry(
+            Id: "nws-tullahoma-tn-forecast",
+            Topic: "weather",
+            Name: "National Weather Service Forecast - Tullahoma, TN",
+            Url: "https://api.weather.gov/points/35.3620,-86.2094",
+            Type: "nws-point-forecast",
+            TrustLevel: "primary",
+            Keywords: ["weather", "forecast", "nws", "tullahoma", "tennessee", "tn"],
+            Topics: ["weather", "tennessee weather", "tullahoma weather"],
+            Enabled: true),
+        new SourceCatalogEntry(
+            Id: "nws-andalusia-al-forecast",
+            Topic: "weather",
+            Name: "National Weather Service Forecast - Andalusia, AL",
+            Url: "https://api.weather.gov/points/31.3085,-86.482",
+            Type: "nws-point-forecast",
+            TrustLevel: "primary",
+            Keywords: ["weather", "forecast", "nws", "andalusia", "alabama", "al"],
+            Enabled: true)
+    };
+    await File.WriteAllTextAsync(sourceStore.CatalogPath, JsonSerializer.Serialize(catalog));
+    var plan = new SourceQueryPlan(
+        true,
+        true,
+        "weather",
+        "tullahoma tn weather",
+        ["weather", "forecast", "tullahoma", "tn"],
+        ["weather"]);
+
+    var result = await sourceStore.CreateRetriever().RetrieveAsync(plan, CancellationToken.None);
+
+    Equal(1, result.Excerpts.Count);
+    Equal("National Weather Service Forecast - Tullahoma, TN", result.Excerpts[0].Name);
+    Contains("Today: 86F", result.Excerpts[0].Excerpt);
 }
 
 static async Task TestCuratedSourceRetrieverReportsPlannedLookupWithoutMatches()
@@ -6073,6 +6157,44 @@ static async Task TestOrchestratorAnswersCurrentVicePresidentDeterministically()
     Equal(false, answer.Contains("Kamala Harris", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
     Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
+}
+
+static async Task TestOrchestratorDoesNotLetOfficeholderGuardHijackUnrelatedFollowup()
+{
+    var directory = NewTestDirectory();
+    var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
+    var runtime = new FixedTextRuntime("I would solve the dilemma by stopping use of the unsafe supplier, notifying regulators, and protecting patients first.");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        correctionQueue,
+        new StaticSourceRetriever(BuildWhiteHouseAdministrationSourceResult()),
+        new StaticSourceQueryPlanner(new SourceQueryPlan(
+            true,
+            true,
+            "official_info",
+            "current president united states white house administration",
+            ["current", "president", "united", "states", "white", "house", "administration"],
+            ["government"])));
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamAnswerAsync(
+                       "conv_dilemma",
+                       "msg_user_dilemma",
+                       "msg_assistant_dilemma",
+                       "How would you solve this moral dilemma?",
+                       Array.Empty<ChatMessage>(),
+                       Array.Empty<ChatAttachment>(),
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Contains("solve the dilemma", answer);
+    Equal(false, answer.Contains("Donald J. Trump", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("President of the United States", StringComparison.OrdinalIgnoreCase));
+    NotNull(runtime.LastRequest, "Unrelated follow-up should flow through the normal runtime.");
 }
 
 static SourceRetrievalResult BuildWhiteHouseAdministrationSourceResult() =>

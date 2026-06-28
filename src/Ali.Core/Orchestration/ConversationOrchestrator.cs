@@ -66,6 +66,12 @@ public sealed class ConversationOrchestrator(
     private static readonly Regex VicePresidentRegex = new(
         @"Vice\s+President\s+JD\s+Vance",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex CurrentPresidentQuestionRegex = new(
+        @"\b(?:who(?:'s|\s+is)|whos|current|today|now)\b.*\bpresident\b|\bpresident\b.*\b(?:united\s+states|u\.?\s*s\.?|america|current|today|now)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex CurrentVicePresidentQuestionRegex = new(
+        @"\b(?:who(?:'s|\s+is)|whos|current|today|now)\b.*\b(?:vice\s+president|vp)\b|\b(?:vice\s+president|vp)\b.*\b(?:united\s+states|u\.?\s*s\.?|america|current|today|now)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     public ILocalModelRuntime Runtime { get; } = runtime;
 
     public PermissionService Permissions { get; } = permissionService;
@@ -254,7 +260,7 @@ public sealed class ConversationOrchestrator(
 
         if (string.Equals(sourcePlan.Intent, "official_info", StringComparison.OrdinalIgnoreCase))
         {
-            return TryBuildDeterministicOfficeholderAnswer(sourcePlan, sourceResult);
+            return TryBuildDeterministicOfficeholderAnswer(userText, sourceResult);
         }
 
         if (!string.Equals(sourcePlan.Intent, "weather", StringComparison.OrdinalIgnoreCase))
@@ -298,13 +304,10 @@ public sealed class ConversationOrchestrator(
             : answer;
     }
 
-    private static string? TryBuildDeterministicOfficeholderAnswer(SourceQueryPlan sourcePlan, SourceRetrievalResult sourceResult)
+    private static string? TryBuildDeterministicOfficeholderAnswer(string userText, SourceRetrievalResult sourceResult)
     {
-        var terms = sourcePlan.SearchText;
-        var asksPresident = terms.Contains("president", StringComparison.OrdinalIgnoreCase)
-                            && !terms.Contains("vice president", StringComparison.OrdinalIgnoreCase);
-        var asksVicePresident = terms.Contains("vice", StringComparison.OrdinalIgnoreCase)
-                                && terms.Contains("president", StringComparison.OrdinalIgnoreCase);
+        var asksVicePresident = CurrentVicePresidentQuestionRegex.IsMatch(userText);
+        var asksPresident = !asksVicePresident && CurrentPresidentQuestionRegex.IsMatch(userText);
         if (!asksPresident && !asksVicePresident)
         {
             return null;

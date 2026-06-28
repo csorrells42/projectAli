@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
 
@@ -150,6 +151,30 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         "day",
         "days"
     };
+    private static readonly HashSet<string> StateLocationTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ak", "al", "ar", "az", "ca", "co", "ct", "dc", "de", "fl", "ga", "hi", "ia", "id", "il", "in", "ks", "ky", "la", "ma", "md", "me", "mi", "mn", "mo", "ms", "mt", "nc", "nd", "ne", "nh", "nj", "nm", "nv", "ny", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "va", "vt", "wa", "wi", "wv", "wy",
+        "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada", "hampshire", "jersey", "mexico", "york", "carolina", "dakota", "ohio", "oklahoma", "oregon", "pennsylvania", "rhode", "tennessee", "texas", "utah", "vermont", "virginia", "washington", "wisconsin", "wyoming"
+    };
+    private static readonly HashSet<string> LocationStopTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "around",
+        "for",
+        "forecast",
+        "in",
+        "near",
+        "rain",
+        "temperature",
+        "temps",
+        "the",
+        "weather"
+    };
+    private static readonly Regex ExplicitWeatherLocationRegex = new(
+        @"\b(?:weather|forecast|temperature|temps|rain)\b.*?(?:\b(?:in|for|near|around)\s+)?([a-z][a-z .'-]{1,50}?)\s*,?\s+(ak|al|ar|az|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new\s+hampshire|new\s+jersey|new\s+mexico|new\s+york|north\s+carolina|north\s+dakota|ohio|oklahoma|oregon|pennsylvania|rhode\s+island|south\s+carolina|south\s+dakota|tennessee|texas|utah|vermont|virginia|washington|west\s+virginia|wisconsin|wyoming)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex SavedLocationMemoryRegex = new(
+        @"\b(?:we\s+are|we're|i\s+am|i'm|my\s+location\s+is|current\s+location\s+is|located)\s+(?:in|near|around)?\s*([a-z][a-z .'-]{1,50}?)\s*,?\s+(ak|al|ar|az|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new\s+hampshire|new\s+jersey|new\s+mexico|new\s+york|north\s+carolina|north\s+dakota|ohio|oklahoma|oregon|pennsylvania|rhode\s+island|south\s+carolina|south\s+dakota|tennessee|texas|utah|vermont|virginia|washington|west\s+virginia|wisconsin|wyoming)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public async Task<SourceQueryPlan> PlanAsync(
         string userText,
@@ -283,10 +308,13 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
                 .Where(message => message.Role is ChatRole.System
                                   && message.Text.Contains("Saved local user memories", StringComparison.OrdinalIgnoreCase))
                 .Select(message => message.Text));
-        if (memoryText.Contains("Andalusia", StringComparison.OrdinalIgnoreCase))
+        var locationTerms = ExtractWeatherLocationTerms(userText);
+        if (locationTerms.Count == 0)
         {
-            queryTerms.AddRange(["andalusia", "alabama", "al", "local"]);
+            locationTerms = ExtractWeatherLocationTerms(memoryText, fromSavedMemory: true);
         }
+
+        queryTerms.AddRange(locationTerms);
 
         if (tokens.Contains("tomorrow") || tokens.Contains("tomorrows"))
         {
@@ -428,13 +456,29 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         text.Split(RoutingTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(NormalizeRoutingToken)
             .Where(token => token.Length >= 3
-                            || token.Equals("al", StringComparison.OrdinalIgnoreCase)
                             || token.Equals("is", StringComparison.OrdinalIgnoreCase)
-                            || token.Equals("us", StringComparison.OrdinalIgnoreCase))
+                            || token.Equals("us", StringComparison.OrdinalIgnoreCase)
+                            || StateLocationTerms.Contains(token))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private static string NormalizeRoutingToken(string token) =>
         new string(token.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+
+    private static IReadOnlyList<string> ExtractWeatherLocationTerms(string text, bool fromSavedMemory = false)
+    {
+        var match = (fromSavedMemory ? SavedLocationMemoryRegex : ExplicitWeatherLocationRegex).Match(text);
+        if (!match.Success)
+        {
+            return Array.Empty<string>();
+        }
+
+        var location = match.Groups[1].Value;
+        var state = match.Groups[2].Value;
+        return TokenizeForRouting($"{location} {state}")
+            .Where(term => !LocationStopTerms.Contains(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
 
     private static bool LooksLikeWindowsPath(string text)
     {

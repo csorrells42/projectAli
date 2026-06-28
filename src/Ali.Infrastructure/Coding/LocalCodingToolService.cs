@@ -1735,7 +1735,7 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
 
     private CodingToolResult ShowUserCommandHelp()
-        => new(true, true, CodingAbilityCatalog.BuildUserCommandHelpGuide(), "Ali feature guide", Policy.WorkspaceRoot);
+        => new(true, true, CodingAbilityCatalog.BuildUserCommandHelpGuide(), "Ali plain-language guide", Policy.WorkspaceRoot);
 
     private CodingToolResult ShowComputerAssistantCommandIndex()
         => new(true, true, CodingAbilityCatalog.BuildComputerAssistantCommandIndex(), "Computer assistant command index", Policy.WorkspaceRoot);

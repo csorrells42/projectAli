@@ -3163,6 +3163,34 @@
     "enabled": true
   },
   {
+    "id": "nws-tullahoma-tn-forecast",
+    "topic": "weather",
+    "name": "National Weather Service Forecast - Tullahoma, TN",
+    "url": "https://api.weather.gov/points/35.3620,-86.2094",
+    "type": "nws-point-forecast",
+    "trustLevel": "primary",
+    "keywords": [
+      "weather",
+      "forecast",
+      "nws",
+      "tullahoma",
+      "tennessee",
+      "tn",
+      "coffee",
+      "county",
+      "today",
+      "tonight"
+    ],
+    "topics": [
+      "weather",
+      "tennessee weather",
+      "tullahoma weather",
+      "local forecast"
+    ],
+    "notes": "NWS point forecast for Tullahoma, Tennessee.",
+    "enabled": true
+  },
+  {
     "id": "nba",
     "topic": "sports",
     "name": "NBA",
