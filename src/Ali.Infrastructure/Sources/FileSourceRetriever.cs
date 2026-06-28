@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -15,6 +16,7 @@ public sealed record SourceCatalogRepairResult(
 
 public sealed class FileSourceRetriever
 {
+    private const string BundledDefaultCatalogResourceName = "Ali.Infrastructure.Sources.curated_sources.seed.json";
     private const int MaxSourcesPerRequest = 3;
     private const int MaxExcerptCharacters = 2400;
     private const int MinimumSourceScore = 4;
@@ -214,6 +216,36 @@ public sealed class FileSourceRetriever
     }
 
     private static SourceCatalogEntry[] BuildDefaultCatalog()
+    {
+        return LoadBundledDefaultCatalog() ?? BuildFallbackDefaultCatalog();
+    }
+
+    private static SourceCatalogEntry[]? LoadBundledDefaultCatalog()
+    {
+        try
+        {
+            var assembly = typeof(FileSourceRetriever).Assembly;
+            using var stream = assembly.GetManifestResourceStream(BundledDefaultCatalogResourceName);
+            if (stream is null)
+            {
+                return null;
+            }
+
+            var catalog = JsonSerializer.Deserialize<SourceCatalogEntry[]>(stream, JsonOptions);
+            var enabledCatalog = catalog?
+                .Where(source => source.Enabled)
+                .GroupBy(source => source.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            return enabledCatalog is { Length: > 0 } ? enabledCatalog : null;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static SourceCatalogEntry[] BuildFallbackDefaultCatalog()
     {
         return
         [

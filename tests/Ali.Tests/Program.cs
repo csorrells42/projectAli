@@ -3628,9 +3628,15 @@ static async Task TestDesktopInstallerRepairMergesStarterSources()
 
     Equal(true, result.Succeeded);
     Equal(true, repaired.Any(source => source.Id == "owner-source"));
-    Equal(true, repaired.Any(source => source.Id == "national-weather-service"));
+    Equal(true, repaired.Any(source => source.Id == "weather-gov"));
     Equal(true, repaired.Any(source => source.Id == "python-docs"));
-    Equal(true, repaired.Count > existing.Length + 10);
+    Equal(true, repaired.Any(source => source.Id == "nws-mobile"));
+    Equal(true, repaired.Any(source => source.Id == "nhc-noaa"));
+    Equal(true, repaired.Any(source => source.Id == "ap-news"));
+    Equal(true, repaired.Any(source => source.Id == "nasa-main"));
+    Equal(true, repaired.Any(source => source.Id == "medlineplus"));
+    Equal(true, repaired.Any(source => source.Id == "alabama-gov"));
+    Equal(true, repaired.Count >= 1_000);
     Contains("Starter Sources & Topics repaired", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
@@ -4783,9 +4789,15 @@ static async Task TestCuratedSourceCatalogMergesMissingStarterSources()
     var catalog = sourceStore.LoadCatalog();
 
     Equal(true, catalog.Any(source => source.Id == "custom-owner-source"));
-    Equal(true, catalog.Any(source => source.Id == "national-weather-service"));
+    Equal(true, catalog.Any(source => source.Id == "weather-gov"));
     Equal(true, catalog.Any(source => source.Id == "python-docs"));
-    Equal(true, catalog.Count > existing.Length + 10);
+    Equal(true, catalog.Any(source => source.Id == "nws-mobile"));
+    Equal(true, catalog.Any(source => source.Id == "nhc-noaa"));
+    Equal(true, catalog.Any(source => source.Id == "ap-news"));
+    Equal(true, catalog.Any(source => source.Id == "nasa-main"));
+    Equal(true, catalog.Any(source => source.Id == "medlineplus"));
+    Equal(true, catalog.Any(source => source.Id == "alabama-gov"));
+    Equal(true, catalog.Count >= 1_000);
 }
 
 static async Task TestCuratedSourceRetrieverMatchesUserFacingTopics()
