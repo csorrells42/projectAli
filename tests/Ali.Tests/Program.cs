@@ -241,7 +241,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator injects approved source excerpts", TestOrchestratorInjectsApprovedSourceExcerpts),
     ("orchestrator owns source appendix", TestOrchestratorOwnsSourceAppendix),
     ("orchestrator reports attempted source lookup without excerpts", TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts),
-    ("orchestrator answers verified weather forecast without bootstrap runtime", TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrapRuntime),
+    ("orchestrator treats forecast as current weather without bootstrap runtime", TestOrchestratorTreatsForecastAsCurrentWeatherWithoutBootstrapRuntime),
     ("orchestrator limits multiday forecast to current day", TestOrchestratorLimitsMultidayForecastToCurrentDay),
     ("orchestrator answers current president deterministically", TestOrchestratorAnswersCurrentPresidentDeterministically),
     ("orchestrator answers current vice president deterministically", TestOrchestratorAnswersCurrentVicePresidentDeterministically),
@@ -5879,7 +5879,7 @@ static async Task TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts()
     Equal("OK", string.Concat(chunks));
 }
 
-static async Task TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrapRuntime()
+static async Task TestOrchestratorTreatsForecastAsCurrentWeatherWithoutBootstrapRuntime()
 {
     var directory = NewTestDirectory();
     var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
@@ -5933,9 +5933,10 @@ static async Task TestOrchestratorAnswersVerifiedWeatherForecastWithoutBootstrap
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Contains("National Weather Service local forecast", answer);
-    Contains("Night 5: 66F", answer);
+    Contains("Current-day forecast: Today: 91F", answer);
     Contains("Sources checked:", answer);
+    Equal(false, answer.Contains("Night 5", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Multi-day forecasts are being reworked", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Unknown: no validated local model runtime", StringComparison.OrdinalIgnoreCase));
     Equal(true, chunks.All(chunk => chunk.EvidenceStatus is EvidenceStatus.Verified));
 }

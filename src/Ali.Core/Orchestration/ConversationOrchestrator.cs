@@ -269,12 +269,12 @@ public sealed class ConversationOrchestrator(
             return null;
         }
 
-        return IsDisabledMultiDayForecastRequest(userText)
-            ? BuildCurrentDayOnlyForecast(forecast.Excerpt)
-            : forecast.Excerpt.Trim();
+        return BuildCurrentDayOnlyForecast(
+            forecast.Excerpt,
+            includeMultiDayReworkNote: IsDisabledMultiDayForecastRequest(userText));
     }
 
-    private static string BuildCurrentDayOnlyForecast(string forecastExcerpt)
+    private static string BuildCurrentDayOnlyForecast(string forecastExcerpt, bool includeMultiDayReworkNote)
     {
         var lines = forecastExcerpt
             .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -293,7 +293,9 @@ public sealed class ConversationOrchestrator(
         var answer = string.IsNullOrWhiteSpace(currentLine)
             ? "Current-day forecast details were not available in the approved weather source."
             : $"Current-day forecast: {currentLine}";
-        return $"{answer}{Environment.NewLine}Multi-day forecasts are being reworked for this release, so I am only showing the current-day forecast right now.";
+        return includeMultiDayReworkNote
+            ? $"{answer}{Environment.NewLine}Multi-day forecasts are being reworked for this release, so I am only showing the current-day forecast right now."
+            : answer;
     }
 
     private static string? TryBuildDeterministicOfficeholderAnswer(SourceQueryPlan sourcePlan, SourceRetrievalResult sourceResult)
