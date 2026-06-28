@@ -408,6 +408,7 @@ public static class CodingToolRequestParser
     [
         "show visual studio integration",
         "show visual studio status",
+        "show tool integration status",
         "visual studio integration status",
         "visual studio status",
         "show coding tool status",

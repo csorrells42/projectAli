@@ -939,6 +939,9 @@ static Task TestCodingParserRoutesToolIntegrationStatus()
 
     Equal(true, CodingToolRequestParser.TryParse("show coding tool status", out var statusRequest));
     Equal(CodingToolAction.ShowToolIntegrationStatus, statusRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show tool integration status", out var dashboardRequest));
+    Equal(CodingToolAction.ShowToolIntegrationStatus, dashboardRequest.Action);
     return Task.CompletedTask;
 }
 
