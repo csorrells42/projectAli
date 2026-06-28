@@ -262,6 +262,8 @@ public static class CodingAbilityCatalog
                 new("Test", "Run a confirmed dotnet test.", "confirm dotnet test \"C:\\path\\to\\solution-or-project\"", "confirm dotnet test \"C:\\path\\to\\solution-or-project\""),
                 new("Review changes", "Summarize uncommitted files, diff check status, risk hints, and next validation.", "review current changes", "review current changes"),
                 new("Validation plan", "Show the next build, test, review, and commit checks after edits.", "validation plan", "validation plan"),
+                new("Diagnose failure", "Summarize the last failed confirmed build or test.", "diagnose last build failure", "diagnose last build failure"),
+                new("Suggest fix", "Preview a deterministic patch for simple compiler failures without changing files.", "suggest patch from last failure", "suggest patch from last failure"),
                 new("Coding report", "Generate a coding session report.", "generate coding report", "generate coding report")
             ]),
         new(

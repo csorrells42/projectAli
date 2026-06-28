@@ -157,6 +157,8 @@
                                         Background="#152A22" />
                                 <Button Content="Last Failure"
                                         Command="{Binding RunCodingLastFailureCommand}" />
+                                <Button Content="Suggest Fix"
+                                        Command="{Binding RunCodingSuggestFixCommand}" />
                                 <Button Content="Receipts"
                                         Command="{Binding RunCodingReceiptsCommand}" />
                             </WrapPanel>

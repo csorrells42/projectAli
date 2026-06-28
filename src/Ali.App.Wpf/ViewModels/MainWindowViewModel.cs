@@ -267,6 +267,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSuggestFixCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Suggest fix", "suggest patch from last failure", "Coding.SuggestFix"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReceiptsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding receipts", "show coding receipts", "Coding.Receipts"), () => !IsBusy && !IsRecording && !IsTranscribing);
         OpenMaintenanceReceiptFolderCommand = CreateCommand(_ => OpenMaintenanceReceiptFolder());
         BackupUserDataCommand = CreateAsyncCommand(BackupUserDataAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -672,6 +673,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingTestCommand { get; }
 
     public ICommand RunCodingLastFailureCommand { get; }
+
+    public ICommand RunCodingSuggestFixCommand { get; }
 
     public ICommand RunCodingReceiptsCommand { get; }
 
@@ -3220,6 +3223,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return CompactLastFailureLines(lines);
         }
 
+        if (command.StartsWith("suggest patch from last failure", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactSuggestFixLines(lines);
+        }
+
         if (command.StartsWith("show coding receipts", StringComparison.OrdinalIgnoreCase))
         {
             return CompactReceiptLines(lines);
@@ -3262,7 +3270,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (command.StartsWith("diagnose last", StringComparison.OrdinalIgnoreCase))
         {
-            return "Next - Apply a focused fix only after reviewing the failure.";
+            return "Next - Run Suggest Fix if the failure points to a simple code patch.";
+        }
+
+        if (command.StartsWith("suggest patch from last failure", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Review the preview, then apply it only if it is clearly right.";
         }
 
         return "Next - Pick the next coding diagnostic button as needed.";
@@ -3377,6 +3390,24 @@ public sealed class MainWindowViewModel : ObservableObject
             .Take(10)
             .ToList();
         return compact.Count > 0 ? compact : ["Failure - No stored failure found"];
+    }
+
+    private static IReadOnlyList<string> CompactSuggestFixLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Suggested patch", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("No deterministic patch", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("No failed dotnet command", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Diagnostic:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Target:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Line:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- File:", StringComparison.OrdinalIgnoreCase)
+                           || line.Contains("No files were changed", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(ShortMaintenanceDetail)
+            .Take(8)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Fix preview - No deterministic patch suggestion found"];
     }
 
     private static IReadOnlyList<string> CompactReceiptLines(IReadOnlyList<string> lines)
@@ -6344,6 +6375,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingLastFailureCommand is AsyncRelayCommand runCodingLastFailure)
         {
             runCodingLastFailure.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSuggestFixCommand is AsyncRelayCommand runCodingSuggestFix)
+        {
+            runCodingSuggestFix.RaiseCanExecuteChanged();
         }
 
         if (RunCodingReceiptsCommand is AsyncRelayCommand runCodingReceipts)
