@@ -52,6 +52,7 @@ public enum CodingToolAction
     ExecuteProcessStop,
     DiagnoseBuildLock,
     ClassifyLastFailure,
+    ReviewCurrentChanges,
     ShowRoadmapStepChecklist,
     ShowInstallDoctor,
     AdvanceRoadmapStep,

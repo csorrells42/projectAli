@@ -262,6 +262,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunPeripheralSetupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Peripheral setup plan", "plan peripheral setup audio microphone or USB device", "Maintenance.PeripheralSetupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -660,6 +661,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingWorkspaceDiagnosticCommand { get; }
 
     public ICommand RunCodingGitStatusCommand { get; }
+
+    public ICommand RunCodingReviewChangesCommand { get; }
 
     public ICommand RunCodingBuildCommand { get; }
 
@@ -3193,6 +3196,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return CompactGitStatusLines(lines);
         }
 
+        if (command.StartsWith("review current changes", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactReviewChangesLines(lines);
+        }
+
         if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("confirm dotnet test", StringComparison.OrdinalIgnoreCase))
         {
@@ -3224,6 +3232,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return "Next - Review changed files before build, test, or commit.";
         }
 
+        if (command.StartsWith("review current changes", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Run build/tests before committing reviewed changes.";
+        }
+
         if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Run Tests if build is good.";
@@ -3240,6 +3253,26 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         return "Next - Pick the next coding diagnostic button as needed.";
+    }
+
+    private static IReadOnlyList<string> CompactReviewChangesLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Changed files:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Staged:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Unstaged:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Untracked:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Diff check:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Project/dependency", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Source files", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Deleted files", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Renamed files", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("- Large change", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Status:", StringComparison.OrdinalIgnoreCase))
+            .Select(ShortMaintenanceDetail)
+            .Take(10)
+            .ToList();
+        return compact.Count > 0 ? compact : ["No review details found."];
     }
 
     private static IReadOnlyList<string> CompactCodingWorkspaceLines(IReadOnlyList<string> lines)
@@ -6257,6 +6290,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingGitStatusCommand is AsyncRelayCommand runCodingGitStatus)
         {
             runCodingGitStatus.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingReviewChangesCommand is AsyncRelayCommand runCodingReviewChanges)
+        {
+            runCodingReviewChanges.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildCommand is AsyncRelayCommand runCodingBuild)

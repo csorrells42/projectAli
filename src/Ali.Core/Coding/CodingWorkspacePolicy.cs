@@ -510,11 +510,11 @@ public sealed class CodingWorkspacePolicy
 
         return request.Action switch
         {
-            CodingToolAction.GitStatus or CodingToolAction.GitDiff or CodingToolAction.GitLog
+            CodingToolAction.GitStatus or CodingToolAction.GitDiff or CodingToolAction.GitLog or CodingToolAction.ReviewCurrentChanges
                 when AllowGitReadInsideWorkspace =>
                 CodingToolPermissionKind.Allow.AsPermission("Read-only Git inspection inside the approved coding workspace is allowed."),
 
-            CodingToolAction.GitStatus or CodingToolAction.GitDiff or CodingToolAction.GitLog =>
+            CodingToolAction.GitStatus or CodingToolAction.GitDiff or CodingToolAction.GitLog or CodingToolAction.ReviewCurrentChanges =>
                 CodingToolPermissionKind.Deny.AsPermission("Read-only Git inspection is disabled in coding permissions."),
 
             CodingToolAction.GitAdd or CodingToolAction.GitCommit
@@ -554,6 +554,7 @@ public sealed class CodingWorkspacePolicy
         action is CodingToolAction.GitStatus
             or CodingToolAction.GitDiff
             or CodingToolAction.GitLog
+            or CodingToolAction.ReviewCurrentChanges
             or CodingToolAction.GitAdd
             or CodingToolAction.GitCommit
             or CodingToolAction.GitMerge

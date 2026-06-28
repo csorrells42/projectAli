@@ -1172,6 +1172,21 @@ public static class CodingToolRequestParser
         "git push"
     ];
 
+    private static readonly string[] ReviewCurrentChangesRequests =
+    [
+        "review changes",
+        "review current changes",
+        "review git changes",
+        "review workspace changes",
+        "review uncommitted changes",
+        "review diff",
+        "summarize changes",
+        "summarize current changes",
+        "summarize git diff",
+        "check current changes",
+        "check uncommitted changes"
+    ];
+
     public static bool TryParse(string userText, out CodingToolRequest request)
     {
         request = new CodingToolRequest(CodingToolAction.OpenFile, null);
@@ -1531,6 +1546,12 @@ public static class CodingToolRequestParser
         if (IsClassifyLastFailureRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ClassifyLastFailure, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsReviewCurrentChangesRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ReviewCurrentChanges, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -2583,6 +2604,9 @@ public static class CodingToolRequestParser
 
         return false;
     }
+
+    private static bool IsReviewCurrentChangesRequest(string text) =>
+        ReviewCurrentChangesRequests.Any(candidate => text.Equals(candidate, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParseGit(string text, bool userConfirmed, out CodingToolRequest request)
     {

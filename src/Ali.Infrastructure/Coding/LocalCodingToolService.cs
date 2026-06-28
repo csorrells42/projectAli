@@ -221,6 +221,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ExecuteProcessStop => await ExecuteProcessStopAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.DiagnoseBuildLock => DiagnoseBuildLock(),
             CodingToolAction.ClassifyLastFailure => ClassifyLastFailure(),
+            CodingToolAction.ReviewCurrentChanges => await ReviewCurrentChangesAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowRoadmapStepChecklist => await ShowRoadmapStepChecklistAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowInstallDoctor => ShowInstallDoctor(),
             CodingToolAction.AdvanceRoadmapStep => AdvanceRoadmapStep(),
@@ -6397,6 +6398,249 @@ public sealed class LocalCodingToolService(
             ExitCode: run.ExitCode);
     }
 
+    private async Task<CodingToolResult> ReviewCurrentChangesAsync(CancellationToken cancellationToken)
+    {
+        var workingDirectory = Policy.WorkspaceRoot;
+        if (!Directory.Exists(workingDirectory))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding workspace does not exist yet: {workingDirectory}",
+                "git",
+                workingDirectory);
+        }
+
+        var status = await _commandRunner.RunAsync(
+            "git",
+            ["status", "--short", "--branch"],
+            workingDirectory,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        var nameStatus = await _commandRunner.RunAsync(
+            "git",
+            ["diff", "--name-status", "HEAD"],
+            workingDirectory,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        var stat = await _commandRunner.RunAsync(
+            "git",
+            ["diff", "--stat", "HEAD"],
+            workingDirectory,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        var check = await _commandRunner.RunAsync(
+            "git",
+            ["diff", "--check", "HEAD"],
+            workingDirectory,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+
+        var statusText = MergeCommandOutput(status);
+        if (status.ExitCode != 0 || status.TimedOut)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Change review could not read git status.{Environment.NewLine}{TrimForChat(statusText, MaxCommandOutputCharacters)}",
+                "git",
+                workingDirectory,
+                ExitCode: status.ExitCode);
+        }
+
+        var statusLines = SplitNonEmptyLines(status.StandardOutput);
+        var branch = statusLines.FirstOrDefault(line => line.StartsWith("##", StringComparison.Ordinal)) ?? "## unknown";
+        var changeLines = statusLines
+            .Where(line => !line.StartsWith("##", StringComparison.Ordinal))
+            .ToList();
+        var changedFiles = ExtractChangedFilePaths(changeLines, nameStatus.StandardOutput);
+        var stagedCount = changeLines.Count(line => line.Length >= 2 && line[0] != ' ' && line[0] != '?');
+        var unstagedCount = changeLines.Count(line => line.Length >= 2
+            && line[1] != ' '
+            && !line.StartsWith("??", StringComparison.Ordinal));
+        var untrackedCount = changeLines.Count(line => line.StartsWith("??", StringComparison.Ordinal));
+        var deletedCount = changeLines.Count(line => line.StartsWith(" D", StringComparison.Ordinal) || line.StartsWith("D", StringComparison.Ordinal));
+        var renamedCount = SplitNonEmptyLines(nameStatus.StandardOutput)
+            .Count(line => line.StartsWith("R", StringComparison.OrdinalIgnoreCase));
+        var projectFiles = changedFiles
+            .Where(IsProjectOrDependencyFile)
+            .ToList();
+        var sourceFiles = changedFiles
+            .Where(IsSourceFile)
+            .ToList();
+        var testFiles = changedFiles
+            .Where(IsTestFile)
+            .ToList();
+
+        var lines = new List<string>
+        {
+            "Current Changes Review",
+            $"Workspace: {workingDirectory}",
+            $"Branch: {branch.TrimStart('#', ' ')}",
+            $"Changed files: {changedFiles.Count}",
+            $"Staged: {stagedCount}",
+            $"Unstaged: {unstagedCount}",
+            $"Untracked: {untrackedCount}"
+        };
+
+        if (changedFiles.Count == 0)
+        {
+            lines.Add("Status: clean");
+            lines.Add("Next: no commit is needed unless generated receipts or settings changed outside Git.");
+            return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "git", workingDirectory, ExitCode: 0);
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Files");
+        foreach (var path in changedFiles.Take(20))
+        {
+            lines.Add($"- {path}");
+        }
+
+        if (changedFiles.Count > 20)
+        {
+            lines.Add($"- ...and {changedFiles.Count - 20} more");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Risk Checks");
+        lines.Add(check.ExitCode == 0 && !check.TimedOut
+            ? "- Diff check: Good"
+            : $"- Diff check: Needs attention - {TrimForChat(MergeCommandOutput(check), 800)}");
+
+        if (projectFiles.Count > 0)
+        {
+            lines.Add($"- Project/dependency files changed: {string.Join(", ", projectFiles.Take(6))}");
+        }
+
+        if (sourceFiles.Count > 0 && testFiles.Count == 0)
+        {
+            lines.Add("- Source files changed without obvious test file changes.");
+        }
+
+        if (deletedCount > 0)
+        {
+            lines.Add($"- Deleted files detected: {deletedCount}");
+        }
+
+        if (renamedCount > 0)
+        {
+            lines.Add($"- Renamed files detected: {renamedCount}");
+        }
+
+        if (changedFiles.Count > 12)
+        {
+            lines.Add("- Large change set: review by feature area before commit.");
+        }
+
+        if (sourceFiles.Count == 0 && projectFiles.Count == 0)
+        {
+            lines.Add("- No source or project files detected; this looks like docs, config, receipts, or assets.");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Diff Stat");
+        lines.Add(string.IsNullOrWhiteSpace(stat.StandardOutput)
+            ? "No diff stat output."
+            : TrimForChat(stat.StandardOutput.Trim(), 1_500));
+
+        lines.Add(string.Empty);
+        lines.Add("Next");
+        lines.Add(projectFiles.Count > 0
+            ? "- Run restore/build/tests before commit because project/dependency files changed."
+            : "- Run build/tests that match the changed source area before commit.");
+        lines.Add("- Use git diff for line-level review, then commit only after validation passes.");
+
+        var succeeded = nameStatus.ExitCode == 0
+            && stat.ExitCode == 0
+            && check.ExitCode == 0
+            && !nameStatus.TimedOut
+            && !stat.TimedOut
+            && !check.TimedOut;
+        return new CodingToolResult(
+            true,
+            succeeded,
+            string.Join(Environment.NewLine, lines),
+            "git",
+            workingDirectory,
+            ExitCode: succeeded ? 0 : check.ExitCode);
+    }
+
+    private static IReadOnlyList<string> SplitNonEmptyLines(string text) =>
+        text.Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r'))
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+
+    private static IReadOnlyList<string> ExtractChangedFilePaths(
+        IReadOnlyList<string> statusLines,
+        string nameStatusOutput)
+    {
+        var paths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in SplitNonEmptyLines(nameStatusOutput))
+        {
+            var parts = line.Split('\t', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length >= 2)
+            {
+                paths.Add(parts[^1]);
+            }
+        }
+
+        foreach (var line in statusLines)
+        {
+            if (line.Length < 4)
+            {
+                continue;
+            }
+
+            var path = line[3..].Trim();
+            var renameArrow = path.LastIndexOf(" -> ", StringComparison.Ordinal);
+            if (renameArrow >= 0)
+            {
+                path = path[(renameArrow + 4)..].Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                paths.Add(path.Trim('"'));
+            }
+        }
+
+        return paths.ToList();
+    }
+
+    private static bool IsProjectOrDependencyFile(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".vbproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("Directory.Packages.props", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("NuGet.Config", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("packages.config", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("package.json", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("package-lock.json", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("pnpm-lock.yaml", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("yarn.lock", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSourceFile(string path) =>
+        path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".js", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".py", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTestFile(string path) =>
+        path.Contains($"{Path.DirectorySeparatorChar}test", StringComparison.OrdinalIgnoreCase)
+        || path.Contains($"{Path.AltDirectorySeparatorChar}test", StringComparison.OrdinalIgnoreCase)
+        || Path.GetFileName(path).Contains("test", StringComparison.OrdinalIgnoreCase);
+
     private async Task AppendLogAsync(
         CodingToolRequest request,
         CodingToolResult result,
@@ -7331,6 +7575,7 @@ public sealed class LocalCodingToolService(
             or nameof(CodingToolAction.GitStatus)
             or nameof(CodingToolAction.GitDiff)
             or nameof(CodingToolAction.GitLog)
+            or nameof(CodingToolAction.ReviewCurrentChanges)
             or nameof(CodingToolAction.GitAdd)
             or nameof(CodingToolAction.GitCommit);
 

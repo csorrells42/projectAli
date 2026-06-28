@@ -125,6 +125,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool requires confirmation before package install", TestLocalCodingToolRequiresConfirmationBeforePackageInstall),
     ("local coding tool requires confirmation before outdated package check", TestLocalCodingToolRequiresConfirmationBeforeOutdatedPackageCheck),
     ("local coding tool handles guarded git commands", TestLocalCodingToolHandlesGuardedGitCommands),
+    ("local coding tool reviews current changes", TestLocalCodingToolReviewsCurrentChanges),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
@@ -1123,6 +1124,10 @@ static Task TestCodingParserRoutesGuardedGitCommands()
     Equal(true, CodingToolRequestParser.TryParse("git status", out var statusRequest));
     Equal(CodingToolAction.GitStatus, statusRequest.Action);
     Equal(false, statusRequest.UserConfirmed);
+
+    Equal(true, CodingToolRequestParser.TryParse("review current changes", out var reviewRequest));
+    Equal(CodingToolAction.ReviewCurrentChanges, reviewRequest.Action);
+    Equal(false, reviewRequest.UserConfirmed);
 
     Equal(true, CodingToolRequestParser.TryParse("confirm git add all", out var addRequest));
     Equal(CodingToolAction.GitAdd, addRequest.Action);
@@ -2779,6 +2784,52 @@ static async Task TestLocalCodingToolHandlesGuardedGitCommands()
     Equal("git", runner.Runs[0].FileName);
     Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
     Equal("commit -m Add guarded git tools", string.Join(" ", runner.Runs[1].Arguments));
+}
+
+static async Task TestLocalCodingToolReviewsCurrentChanges()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var runner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(
+            0,
+            $"## main{Environment.NewLine} M src/Ali.cs{Environment.NewLine}?? tests/Ali.Tests/Program.cs",
+            string.Empty,
+            TimedOut: false),
+        new CodingCommandRun(
+            0,
+            $"M\tsrc/Ali.cs{Environment.NewLine}A\ttests/Ali.Tests/Program.cs",
+            string.Empty,
+            TimedOut: false),
+        new CodingCommandRun(
+            0,
+            $" src/Ali.cs                 |  4 ++--{Environment.NewLine} tests/Ali.Tests/Program.cs | 10 ++++++++++",
+            string.Empty,
+            TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("review current changes", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Current Changes Review", result.Message);
+    Contains("Changed files: 2", result.Message);
+    Contains("Unstaged: 1", result.Message);
+    Contains("Untracked: 1", result.Message);
+    Contains("src/Ali.cs", result.Message);
+    Contains("Diff check: Good", result.Message);
+    Contains("Run build/tests", result.Message);
+    Equal(4, runner.Runs.Count);
+    Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
+    Equal("diff --name-status HEAD", string.Join(" ", runner.Runs[1].Arguments));
+    Equal("diff --stat HEAD", string.Join(" ", runner.Runs[2].Arguments));
+    Equal("diff --check HEAD", string.Join(" ", runner.Runs[3].Arguments));
 }
 
 static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
@@ -7914,6 +7965,27 @@ internal sealed class FakeCodingCommandRunner(CodingCommandRun result) : ICoding
         cancellationToken.ThrowIfCancellationRequested();
         Runs.Add(new CodingCommandStart(fileName, arguments.ToArray(), workingDirectory, timeout));
         return Task.FromResult(result);
+    }
+}
+
+internal sealed class SequencedFakeCodingCommandRunner(params CodingCommandRun[] results) : ICodingCommandRunner
+{
+    private readonly Queue<CodingCommandRun> _results = new(results);
+
+    public List<CodingCommandStart> Runs { get; } = new();
+
+    public Task<CodingCommandRun> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Runs.Add(new CodingCommandStart(fileName, arguments.ToArray(), workingDirectory, timeout));
+        return Task.FromResult(_results.Count > 0
+            ? _results.Dequeue()
+            : new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false));
     }
 }
 

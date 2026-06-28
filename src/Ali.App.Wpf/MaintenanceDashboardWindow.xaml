@@ -134,7 +134,7 @@
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="One-click workspace, git, build, test, failure, and receipt checks."
+                            <TextBlock Text="One-click workspace, git, review, build, test, failure, and receipt checks."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
@@ -143,6 +143,8 @@
                                         Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
                                 <Button Content="Git"
                                         Command="{Binding RunCodingGitStatusCommand}" />
+                                <Button Content="Review"
+                                        Command="{Binding RunCodingReviewChangesCommand}" />
                                 <Button Content="Build"
                                         Command="{Binding RunCodingBuildCommand}"
                                         BorderBrush="#1E6B49"

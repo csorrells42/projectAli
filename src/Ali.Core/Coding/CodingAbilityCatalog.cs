@@ -70,6 +70,7 @@ public static class CodingAbilityCatalog
                 new("Apply patch", "confirm apply last patch preview", RequiresConfirmation: true),
                 new("Packet console", "show packet commands"),
                 new("Run packet item", "confirm run packet item N", RequiresConfirmation: true),
+                new("Review changes", "review current changes"),
                 new("Post-edit validation", "plan post edit validation")
             ]),
         new(
@@ -259,6 +260,7 @@ public static class CodingAbilityCatalog
                 new("Plan coding task", "Draft a guarded implementation plan.", "plan coding task add a settings button", "plan coding task <goal>"),
                 new("Build", "Run a confirmed dotnet build.", "confirm dotnet build \"C:\\path\\to\\solution.sln\"", "confirm dotnet build \"C:\\path\\to\\solution.sln\""),
                 new("Test", "Run a confirmed dotnet test.", "confirm dotnet test \"C:\\path\\to\\solution-or-project\"", "confirm dotnet test \"C:\\path\\to\\solution-or-project\""),
+                new("Review changes", "Summarize uncommitted files, diff check status, risk hints, and next validation.", "review current changes", "review current changes"),
                 new("Coding report", "Generate a coding session report.", "generate coding report", "generate coding report")
             ]),
         new(
