@@ -5,6 +5,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -2452,9 +2453,16 @@ public sealed class MainWindowViewModel : ObservableObject
             MaintenanceStatusText = "Creating backup...";
             var backupService = _services.CreateUserDataBackupService();
             var result = await Task.Run(() => backupService.CreateBackup(dialog.FileName)).ConfigureAwait(true);
-            var message = $"Backup saved: {result.BackupPath} ({result.FileCount} file(s), {FormatBytes(result.TotalBytes)} before compression).";
-            var receipt = WriteMaintenanceReceipt("Maintenance.BackupUserData", true, "Ali backup saved.", startedAt, DateTimeOffset.Now, message);
-            MaintenanceStatusText = $"{message}{Environment.NewLine}{Environment.NewLine}{receipt}";
+            var output = BuildMaintenanceStatusText(
+                "Ali backup",
+                [
+                    ComponentStatus("Backup file", true, result.BackupPath),
+                    ComponentStatus("Files included", result.FileCount > 0, $"{result.FileCount} file(s)"),
+                    ComponentStatus("Data size", true, FormatBytes(result.TotalBytes))
+                ],
+                "Keep this zip somewhere safe before repair, reinstall, or machine maintenance.");
+            var receipt = WriteMaintenanceReceipt("Maintenance.BackupUserData", true, "Ali backup saved.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali backup saved.";
         }
         catch (Exception ex)
@@ -2478,26 +2486,31 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusText = "Running Ali computer health check...";
             MaintenanceStatusText = "Running health check...";
 
-            var sections = new List<string>
+            var componentLines = new List<string>
             {
-                $"Ali computer health check: {DateTimeOffset.Now.LocalDateTime:g}",
                 DescribeSourceCatalogHealth()
             };
 
-            foreach (var command in new[]
+            foreach (var check in new[]
                      {
-                         "show install doctor",
-                         "show computer assistant status",
-                         "show pdf tool status",
-                         "show visual studio integration",
-                         "show coding receipts"
+                         ("Ali install", "show install doctor"),
+                         ("Computer assistant", "show computer assistant status"),
+                         ("PDF tools", "show pdf tool status"),
+                         ("Visual Studio", "show visual studio integration"),
+                         ("Receipts", "show coding receipts")
                      })
             {
-                var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
-                sections.Add(FormatMaintenanceCommandResult(command, result));
+                var result = await _services.LocalCodingTool.TryHandleAsync(check.Item2, _lifetimeCancellation.Token).ConfigureAwait(true);
+                componentLines.Add(FormatMaintenanceCommandResult(check.Item1, result));
             }
 
-            var output = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var hasBadComponent = componentLines.Any(line => line.Contains(" - Bad", StringComparison.OrdinalIgnoreCase));
+            var output = BuildMaintenanceStatusText(
+                "Ali computer health check",
+                componentLines,
+                hasBadComponent
+                    ? "Run Repair Ali Install for Ali data issues, or open Settings for disabled/missing integrations."
+                    : "Everything checked is ready.");
             var receipt = WriteMaintenanceReceipt("Maintenance.HealthCheck", true, "Ali computer health check completed.", startedAt, DateTimeOffset.Now, output);
             MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali computer health check finished.";
@@ -2553,13 +2566,18 @@ public sealed class MainWindowViewModel : ObservableObject
             LoadRuntimeSettings();
             LoadCodingPermissions();
 
-            if (warnings.Count > 0)
-            {
-                messages.Add("Warnings:");
-                messages.AddRange(warnings.Select(warning => "- " + warning));
-            }
-
-            var output = TrimMaintenanceText(string.Join(Environment.NewLine, messages), 16_000);
+            var hasVoiceWarning = warnings.Any(warning => warning.Contains("voice", StringComparison.OrdinalIgnoreCase));
+            var output = BuildMaintenanceStatusText(
+                "Ali install repair",
+                [
+                    ComponentStatus("Install data", warnings.Count == 0, warnings.Count == 0 ? "repaired" : $"{warnings.Count} warning(s)"),
+                    DescribeSourceCatalogHealth(),
+                    ComponentStatus("Runtime settings", true, "reloaded"),
+                    ComponentStatus("Voice paths", !hasVoiceWarning, hasVoiceWarning ? "needs review" : "repaired")
+                ],
+                warnings.Count == 0
+                    ? "Run Health Check to confirm the refreshed state."
+                    : "Open receipts for details, then rerun Health Check.");
             var receipt = WriteMaintenanceReceipt("Maintenance.RepairInstall", warnings.Count == 0, warnings.Count == 0 ? "Ali install repair completed." : "Ali install repair completed with warnings.", startedAt, DateTimeOffset.Now, output);
             MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali install repair finished.";
@@ -2591,30 +2609,30 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusText = "Checking computer assistant setup...";
             MaintenanceStatusText = "Checking computer assistant setup...";
 
-            var sections = new List<string>
-            {
-                $"Computer assistant setup: {DateTimeOffset.Now.LocalDateTime:g}",
-                "Supported lanes: Ali can provide deterministic local coding commands, Visual Studio companion/bridge guidance, PDF workspace tools, Windows troubleshooting plans, file organization plans, disk cleanup plans, app install troubleshooting plans, peripheral setup plans, source-backed answers, and audio setup guidance. High-risk changes remain gated by owner permissions."
-            };
+            var componentLines = new List<string>();
 
-            foreach (var command in new[]
+            foreach (var check in new[]
                      {
-                         "show computer assistant status",
-                         "show computer assistant commands",
-                         "show windows troubleshooting toolkit",
-                         "show tool integration status",
-                         "show visual studio integration",
-                         "show pdf tool status"
+                         ("Computer assistant", "show computer assistant status"),
+                         ("Command buttons", "show computer assistant commands"),
+                         ("Windows toolkit", "show windows troubleshooting toolkit"),
+                         ("Tool integrations", "show tool integration status"),
+                         ("Visual Studio", "show visual studio integration"),
+                         ("PDF tools", "show pdf tool status")
                      })
             {
-                var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
-                sections.Add(FormatMaintenanceCommandResult(command, result));
+                var result = await _services.LocalCodingTool.TryHandleAsync(check.Item2, _lifetimeCancellation.Token).ConfigureAwait(true);
+                componentLines.Add(FormatMaintenanceCommandResult(check.Item1, result));
             }
 
-            sections.Add("Current permission summary:");
-            sections.Add(TrimMaintenanceText(CodingPermissionSummaryText, 2_400));
+            componentLines.Add(ComponentStatus("Permission gates", true, "owner confirmation stays on"));
 
-            var output = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var output = BuildMaintenanceStatusText(
+                "Computer assistant setup",
+                componentLines,
+                componentLines.Any(line => line.Contains(" - Bad", StringComparison.OrdinalIgnoreCase))
+                    ? "Open Settings for the bad component or run Repair Ali Install for Ali data issues."
+                    : "The maintenance buttons are ready to use.");
             var receipt = WriteMaintenanceReceipt("Maintenance.AssistantSetup", true, "Computer assistant setup check completed.", startedAt, DateTimeOffset.Now, output);
             MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Computer assistant setup check finished.";
@@ -2646,39 +2664,38 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusText = "Running maintenance plan...";
             MaintenanceStatusText = "Running maintenance plan...";
 
-            var sections = new List<string>
-            {
-                $"Ali maintenance plan: {DateTimeOffset.Now.LocalDateTime:g}",
-                "Boundary: this button is read-only. It inspects health, identifies likely next actions, and keeps repairs behind the separate confirmed Repair Ali Install button."
-            };
+            var componentLines = new List<string>();
             var needsAttention = new List<string>();
 
             var sourceHealth = DescribeSourceCatalogHealth();
-            sections.Add(sourceHealth);
-            if (sourceHealth.Contains("Needs attention", StringComparison.OrdinalIgnoreCase))
+            componentLines.Add(sourceHealth);
+            if (sourceHealth.Contains(" - Bad", StringComparison.OrdinalIgnoreCase))
             {
                 needsAttention.Add("Sources & Topics need repair.");
             }
 
-            foreach (var command in new[]
+            foreach (var check in new[]
                      {
-                         "show install doctor",
-                         "show computer assistant status",
-                         "show pdf tool status",
-                         "show visual studio integration",
-                         "show coding receipts"
+                         ("Ali install", "show install doctor"),
+                         ("Computer assistant", "show computer assistant status"),
+                         ("PDF tools", "show pdf tool status"),
+                         ("Visual Studio", "show visual studio integration"),
+                         ("Receipts", "show coding receipts")
                      })
             {
-                var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
-                sections.Add(FormatMaintenanceCommandResult(command, result));
-                if (result is not { Handled: true, Succeeded: true })
+                var result = await _services.LocalCodingTool.TryHandleAsync(check.Item2, _lifetimeCancellation.Token).ConfigureAwait(true);
+                var line = FormatMaintenanceCommandResult(check.Item1, result);
+                componentLines.Add(line);
+                if (line.Contains(" - Bad", StringComparison.OrdinalIgnoreCase))
                 {
-                    needsAttention.Add($"{command} did not report healthy.");
+                    needsAttention.Add($"{check.Item1} needs attention.");
                 }
             }
 
-            sections.Add(BuildMaintenanceRecommendations(needsAttention));
-            var output = TrimMaintenanceText(string.Join($"{Environment.NewLine}{Environment.NewLine}", sections), 16_000);
+            var output = BuildMaintenanceStatusText(
+                "Ali maintenance plan",
+                componentLines,
+                BuildMaintenanceNextAction(needsAttention));
             var receipt = WriteMaintenanceReceipt("Maintenance.Plan", needsAttention.Count == 0, needsAttention.Count == 0 ? "Maintenance plan completed with no immediate repair indicated." : "Maintenance plan completed with recommended next actions.", startedAt, DateTimeOffset.Now, output);
             MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Maintenance plan finished.";
@@ -2747,9 +2764,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
             var result = await Task.Run(() => backupService.RestoreBackup(dialog.FileName)).ConfigureAwait(true);
             ReloadAfterUserDataRestore(result);
-            var message = $"Backup restored from {result.BackupCreatedAt.LocalDateTime:g}. Restart Ali if the restored assistant name/profile differs from this session.";
-            var receipt = WriteMaintenanceReceipt("Maintenance.RestoreUserData", true, "Ali backup restored.", startedAt, DateTimeOffset.Now, message);
-            MaintenanceStatusText = $"{message}{Environment.NewLine}{Environment.NewLine}{receipt}";
+            var output = BuildMaintenanceStatusText(
+                "Ali restore",
+                [
+                    ComponentStatus("Backup restore", true, $"from {result.BackupCreatedAt.LocalDateTime:g}"),
+                    ComponentStatus("Runtime settings", true, "reloaded"),
+                    ComponentStatus("Voice settings", true, "reloaded"),
+                    ComponentStatus("Conversation data", true, "reloaded")
+                ],
+                "Restart Ali if the restored assistant name or profile differs from this session.");
+            var receipt = WriteMaintenanceReceipt("Maintenance.RestoreUserData", true, "Ali backup restored.", startedAt, DateTimeOffset.Now, output);
+            MaintenanceStatusText = $"{output}{Environment.NewLine}{Environment.NewLine}{receipt}";
             StatusText = "Ali backup restored.";
         }
         catch (Exception ex)
@@ -2900,13 +2925,11 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             var sources = _services.LoadCuratedSources();
-            var catalogPath = _services.CuratedSourcesCatalogPath;
-            var status = sources.Count > 0 ? "Healthy" : "Needs attention";
-            return $"Source catalog: {status}{Environment.NewLine}Path: {catalogPath}{Environment.NewLine}Sources: {sources.Count}";
+            return ComponentStatus("Sources & Topics", sources.Count > 0, $"{sources.Count} sources");
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            return $"Source catalog: Needs attention{Environment.NewLine}Path: {_services.CuratedSourcesCatalogPath}{Environment.NewLine}Reason: {ex.Message}";
+            return ComponentStatus("Sources & Topics", false, ShortMaintenanceDetail(ex.Message));
         }
     }
 
@@ -2934,41 +2957,116 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private static string BuildMaintenanceRecommendations(IReadOnlyCollection<string> needsAttention)
+    private static string BuildMaintenanceNextAction(IReadOnlyCollection<string> needsAttention)
+    {
+        if (needsAttention.Count == 0)
+        {
+            return "No immediate repair is indicated. Create a backup before major machine changes.";
+        }
+
+        var firstIssue = needsAttention.Distinct(StringComparer.OrdinalIgnoreCase).First();
+        return $"{firstIssue} Use Repair Ali Install for Ali data issues, or Settings for optional integrations.";
+    }
+
+    private static string BuildMaintenanceStatusText(
+        string title,
+        IEnumerable<string> componentLines,
+        string nextAction)
     {
         var lines = new List<string>
         {
-            "Recommended next actions:"
+            $"{title}: {DateTimeOffset.Now.LocalDateTime:g}"
         };
-
-        if (needsAttention.Count == 0)
+        lines.AddRange(componentLines.Where(line => !string.IsNullOrWhiteSpace(line)));
+        if (!string.IsNullOrWhiteSpace(nextAction))
         {
-            lines.Add("- No immediate repair is indicated by the read-only checks.");
-            lines.Add("- Use Assistant Setup to review supported computer-assistant lanes and permission boundaries.");
-            lines.Add("- Create a backup before any major install or machine-maintenance work.");
-            return string.Join(Environment.NewLine, lines);
+            lines.Add($"Next - {nextAction}");
         }
 
-        foreach (var item in needsAttention.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            lines.Add("- " + item);
-        }
-
-        lines.Add("- Review the details above, then use Repair Ali Install only if the issue is install data, Sources & Topics, or local voice path drift.");
-        lines.Add("- Use Backup & Restore before risky maintenance or before moving Ali to another machine.");
-        lines.Add("- Use the chat command index for any fix that needs extra owner confirmation.");
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static string FormatMaintenanceCommandResult(string command, CodingToolResult result)
+    private static string FormatMaintenanceCommandResult(string component, CodingToolResult result)
     {
-        var status = result is { Handled: true, Succeeded: true }
-            ? "Healthy"
-            : result.Handled ? "Needs attention" : "Unavailable";
-        var message = string.IsNullOrWhiteSpace(result.Message)
-            ? "No details returned."
-            : TrimMaintenanceText(result.Message.Trim(), 2_400);
-        return $"{command}: {status}{Environment.NewLine}{message}";
+        if (!result.Handled)
+        {
+            return ComponentStatus(component, false, "not available");
+        }
+
+        if (!result.Succeeded)
+        {
+            return ComponentStatus(component, false, ShortMaintenanceDetail(result.Message));
+        }
+
+        var problem = FindMaintenanceProblemHint(component, result.Message);
+        return ComponentStatus(component, problem is null, problem ?? "ready");
+    }
+
+    private static string ComponentStatus(string component, bool good, string? detail = null)
+    {
+        var status = good ? "Good" : "Bad";
+        var suffix = string.IsNullOrWhiteSpace(detail) ? string.Empty : $" ({ShortMaintenanceDetail(detail)})";
+        return $"{component} - {status}{suffix}";
+    }
+
+    private static string? FindMaintenanceProblemHint(string component, string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return null;
+        }
+
+        foreach (var rawLine in message.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim().TrimStart('-', ' ');
+            if (ShouldIgnoreMaintenanceProblemLine(component, line))
+            {
+                continue;
+            }
+
+            if (line.Contains("missing", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("could not", StringComparison.OrdinalIgnoreCase))
+            {
+                return ShortMaintenanceDetail(line);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ShouldIgnoreMaintenanceProblemLine(string component, string line)
+    {
+        if (line.Contains("No files were changed", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("No immediate", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("No recent", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (component.Equals("Ali install", StringComparison.OrdinalIgnoreCase))
+        {
+            return line.Contains("Notepad++", StringComparison.OrdinalIgnoreCase)
+                   || line.Contains("Visual Studio", StringComparison.OrdinalIgnoreCase)
+                   || line.Contains("VSIX", StringComparison.OrdinalIgnoreCase)
+                   || line.Contains("Confirm ", StringComparison.OrdinalIgnoreCase)
+                   || line.Contains("Manual dependency", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static string ShortMaintenanceDetail(string? detail)
+    {
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return string.Empty;
+        }
+
+        var compact = Regex.Replace(detail.Trim(), @"\s+", " ");
+        return compact.Length <= 96 ? compact : compact[..93] + "...";
     }
 
     private static string TrimMaintenanceText(string text, int maxCharacters)
