@@ -1634,12 +1634,9 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        IReadOnlyList<Process> before = Array.Empty<Process>();
-
         try
         {
-            before = GetOllamaProcesses();
-            if (before.Count > 0)
+            if (GetOllamaProcesses().Count > 0)
             {
                 _ollamaWasRunningAtStartup = true;
                 _nextOllamaStartAttemptAt = DateTimeOffset.MaxValue;
@@ -1673,14 +1670,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
             _ollamaProcessIdsStartedByAli.Add(launchedProcess.Id);
             await Task.Delay(TimeSpan.FromMilliseconds(750)).ConfigureAwait(true);
-            var beforeIds = before.Select(process => process.Id).ToHashSet();
-            foreach (var process in GetOllamaProcesses())
-            {
-                if (!beforeIds.Contains(process.Id))
-                {
-                    _ollamaProcessIdsStartedByAli.Add(process.Id);
-                }
-            }
         }
         finally
         {

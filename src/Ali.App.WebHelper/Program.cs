@@ -438,12 +438,9 @@ internal sealed class OllamaProcessOwner
             return;
         }
 
-        IReadOnlyList<Process> before = Array.Empty<Process>();
-
         try
         {
-            before = GetOllamaProcesses();
-            if (before.Count > 0)
+            if (GetOllamaProcesses().Count > 0)
             {
                 _ollamaWasRunningAtStartup = true;
                 _nextStartAttemptAt = DateTimeOffset.MaxValue;
@@ -477,14 +474,6 @@ internal sealed class OllamaProcessOwner
 
             _processIdsStartedByAli.Add(launchedProcess.Id);
             await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken).ConfigureAwait(false);
-            var beforeIds = before.Select(process => process.Id).ToHashSet();
-            foreach (var process in GetOllamaProcesses())
-            {
-                if (!beforeIds.Contains(process.Id))
-                {
-                    _processIdsStartedByAli.Add(process.Id);
-                }
-            }
         }
         finally
         {
