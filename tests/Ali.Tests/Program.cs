@@ -3568,6 +3568,8 @@ static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
     Contains("No files were changed", preview.Message);
     Contains("Validation hint:", preview.Message);
     Contains("Changed files:", preview.Message);
+    Contains("Affected projects:", preview.Message);
+    Contains("Build order slice:", preview.Message);
     Contains("Build command:", preview.Message);
     Contains("Before:", preview.Message);
     Contains("After:", preview.Message);
@@ -3607,6 +3609,8 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Contains("Edits: 2", preview.Message);
     Contains("Validation hint:", preview.Message);
     Contains("Changed files:", preview.Message);
+    Contains("Affected projects:", preview.Message);
+    Contains("Build order slice:", preview.Message);
     Contains("Build command:", preview.Message);
     Contains("Review command:", preview.Message);
     Contains("class Demo", preview.Message);
@@ -3658,6 +3662,8 @@ static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()
     Contains("Edits: 2", preview.Message);
     Contains("Validation hint:", preview.Message);
     Contains("Changed files:", preview.Message);
+    Contains("Affected projects:", preview.Message);
+    Contains("Build order slice:", preview.Message);
     Contains("Build command:", preview.Message);
     Contains("Review command:", preview.Message);
     Contains("class Widget", preview.Message);

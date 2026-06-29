@@ -7705,6 +7705,7 @@ public sealed class LocalCodingToolService(
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase));
         var testTarget = await ResolveTestTargetRecommendationAsync(query, cancellationToken).ConfigureAwait(false);
+        var projectImpact = BuildProjectImpact(paths, GetWorkspaceProjectSummaries());
         var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
             : Policy.WorkspaceRoot;
@@ -7712,6 +7713,8 @@ public sealed class LocalCodingToolService(
         {
             "Validation hint:",
             $"- Changed files: {FormatInlineList(paths.Select(RelativeToWorkspace))}",
+            $"- Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}",
+            $"- Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}",
             $"- Likely tests: {FormatInlineList(testTarget.TestFiles.Select(RelativeToWorkspace))}",
             string.IsNullOrWhiteSpace(testTarget.Command)
                 ? "- Test command: none resolved"
