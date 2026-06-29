@@ -181,6 +181,12 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowProjectIntelligence => ShowProjectIntelligence(),
             CodingToolAction.ShowRepoUnderstanding => await ShowRepoUnderstandingAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowSafeCommitCheck => await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowWorkspaceHealthScore => await ShowWorkspaceHealthScoreAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.DraftCommitMessage => await DraftCommitMessageAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.DraftReleaseNotes => await DraftReleaseNotesAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowCodingSessionTimeline => ShowCodingSessionTimeline(),
+            CodingToolAction.ShowRollbackPlan => await ShowRollbackPlanAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowUiChangeChecklist => ShowUiChangeChecklist(request),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
             CodingToolAction.ShowArchitectureOptions => ShowArchitectureOptions(request),
@@ -5378,6 +5384,175 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Commit readiness", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowWorkspaceHealthScoreAsync(CancellationToken cancellationToken)
+    {
+        var files = Directory.Exists(Policy.WorkspaceRoot)
+            ? EnumerateWorkspaceFiles().Take(10_000).ToList()
+            : [];
+        var summaries = GetWorkspaceProjectSummaries();
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var primaryTarget = GetPrimaryTarget();
+        var buildCommands = DiscoverBuildCommands(files, summaries, primaryTarget).ToList();
+        var testCommands = DiscoverTestCommands(files, summaries, primaryTarget).ToList();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var score = 0;
+        score += Directory.Exists(Policy.WorkspaceRoot) ? 15 : 0;
+        score += primaryTarget is not null ? 15 : 0;
+        score += summaries.Count > 0 ? 15 : 0;
+        score += testCommands.Count > 0 ? 15 : 0;
+        score += gitStatus.Available ? 10 : 0;
+        score += gitStatus.Available && !gitStatus.HasUncommittedChanges ? 10 : 0;
+        score += latestValidation?.Succeeded == true ? 20 : 0;
+
+        var lines = new List<string>
+        {
+            "Workspace health score:",
+            "No files were changed.",
+            $"Score: {score}/100",
+            $"Workspace: {(Directory.Exists(Policy.WorkspaceRoot) ? "Good" : "Bad - missing")}",
+            $"Primary target: {(primaryTarget is null ? "Bad - not found" : "Good - " + primaryTarget)}",
+            $"Projects: {(summaries.Count > 0 ? "Good - " + summaries.Count : "Bad - none found")}",
+            $"Tests: {(testCommands.Count > 0 ? "Good - " + FormatInlineList(testCommands.Take(3)) : "Needs work - none detected")}",
+            $"Git: {gitStatus.Summary}",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            $"Build commands: {FormatInlineList(buildCommands)}",
+            $"Test commands: {FormatInlineList(testCommands)}",
+            "Next - improve the weakest row first."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Workspace health score", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> DraftCommitMessageAsync(CancellationToken cancellationToken)
+    {
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var summary = SummarizeChangedAreas(changedFiles);
+        var message = changedFiles.Count == 0
+            ? "No commit needed"
+            : $"Update {summary}";
+        var lines = new List<string>
+        {
+            "Commit message draft:",
+            "No files were changed.",
+            $"Changed files: {changedFiles.Count}",
+            $"Suggested message: {message}",
+            "Body bullets:"
+        };
+        if (changedFiles.Count == 0)
+        {
+            lines.Add("- Working tree appears clean.");
+        }
+        else
+        {
+            foreach (var area in changedFiles.Select(ClassifyChangedArea).Distinct(StringComparer.OrdinalIgnoreCase).Take(6))
+            {
+                lines.Add($"- Updates {area}.");
+            }
+        }
+
+        lines.Add("Next - run Safe Commit before using this message.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Commit message draft", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> DraftReleaseNotesAsync(CancellationToken cancellationToken)
+    {
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Release notes draft:",
+            "No files were changed.",
+            "Highlights:"
+        };
+        if (changedFiles.Count == 0)
+        {
+            lines.Add("- No uncommitted release-note items detected.");
+        }
+        else
+        {
+            foreach (var area in changedFiles.Select(ClassifyChangedArea).Distinct(StringComparer.OrdinalIgnoreCase).Take(8))
+            {
+                lines.Add($"- {area}");
+            }
+        }
+
+        lines.Add("Validation:");
+        lines.Add("- Build passed: confirm from latest receipt.");
+        lines.Add("- Tests passed: confirm from latest receipt.");
+        lines.Add("- User-facing notes reviewed by owner.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Release notes draft", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowCodingSessionTimeline()
+    {
+        var receipts = ReadRecentReceipts(20);
+        var lines = new List<string>
+        {
+            "Coding session timeline:",
+            "No files were changed.",
+            $"Receipts found: {receipts.Count}"
+        };
+        if (receipts.Count == 0)
+        {
+            lines.Add("- No coding receipts found yet.");
+        }
+        else
+        {
+            lines.AddRange(receipts.Select(receipt =>
+                $"- {receipt.Timestamp.LocalDateTime:g}: {receipt.Action} {(receipt.Succeeded ? "Good" : "Bad")}{(receipt.ExitCode is null ? string.Empty : $" exit {receipt.ExitCode}")}"));
+        }
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session timeline", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowRollbackPlanAsync(CancellationToken cancellationToken)
+    {
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Rollback plan:",
+            "No files were changed.",
+            $"Changed files detected: {changedFiles.Count}",
+            "Safe rollback approach:"
+        };
+        if (changedFiles.Count == 0)
+        {
+            lines.Add("- No working-tree changes detected.");
+        }
+        else
+        {
+            lines.Add("- Review each changed file and decide whether to keep, edit, or revert.");
+            lines.Add("- Prefer an explicit reverse patch for Ali-made changes.");
+            lines.Add("- Use Git restore/reset only after the owner explicitly requests that destructive action.");
+            lines.Add("Files to review:");
+            lines.AddRange(changedFiles.Take(12).Select(file => $"- {file}"));
+        }
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Rollback plan", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowUiChangeChecklist(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query, "current UI change");
+        var lines = new List<string>
+        {
+            "UI change checklist:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            "Before edit:",
+            "- Identify XAML/view, view model, command, and test touch points.",
+            "- Check disabled/busy states and error text.",
+            "- Keep button labels short and output human-readable.",
+            "After edit:",
+            "- Build the app.",
+            "- Smoke check the window at normal and narrow sizes.",
+            "- Confirm text does not overlap and scroll areas still work.",
+            "- Add or update parser/service tests when the button triggers a deterministic command."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "UI change checklist", Policy.WorkspaceRoot);
+    }
+
     private CodingToolResult ListPackages(CodingToolRequest request)
     {
         if (!ResolveProjectReportTargets(request, out var projectFiles, out var targetPath, out var error))
@@ -7392,6 +7567,79 @@ public sealed class LocalCodingToolService(
         }
 
         target.AddRange(selected.Select(line => "- " + line.TrimStart('-', ' ')));
+    }
+
+    private async Task<IReadOnlyList<string>> ReadChangedFilesAsync(CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return [];
+        }
+
+        var status = await _commandRunner.RunAsync(
+            "git",
+            ["diff", "--name-only", "HEAD"],
+            Policy.WorkspaceRoot,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        if (status.ExitCode != 0 || status.TimedOut)
+        {
+            return [];
+        }
+
+        return SplitNonEmptyLines(status.StandardOutput)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string SummarizeChangedAreas(IReadOnlyList<string> changedFiles)
+    {
+        var areas = changedFiles
+            .Select(ClassifyChangedArea)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
+        return areas.Count == 0 ? "working tree" : string.Join(", ", areas).ToLowerInvariant();
+    }
+
+    private static string ClassifyChangedArea(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        if (normalized.StartsWith("tests/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tests";
+        }
+
+        if (normalized.StartsWith("docs/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "documentation";
+        }
+
+        if (normalized.Contains("/Coding/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "coding assistant behavior";
+        }
+
+        if (normalized.Contains("App.Wpf", StringComparison.OrdinalIgnoreCase)
+            || normalized.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return "WPF interface";
+        }
+
+        if (normalized.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("Directory.Build.props", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("package.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "project/dependency setup";
+        }
+
+        if (normalized.StartsWith("src/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "application code";
+        }
+
+        return "project files";
     }
 
     private static void AddCompactList(List<string> lines, string title, IReadOnlyList<string> items)

@@ -265,10 +265,15 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingHealthScoreCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Health score", "workspace health score", "Coding.HealthScore"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingValidationPlanCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation plan", "validation plan", "Coding.ValidationPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSafeCommitCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Safe commit", "can i safely commit", "Coding.SafeCommit"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingCommitMessageCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Commit message", "draft commit message", "Coding.CommitMessage"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingReleaseNotesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Release notes", "draft release notes", "Coding.ReleaseNotes"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingTimelineCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Session timeline", "show coding session timeline", "Coding.Timeline"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingRollbackPlanCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Rollback plan", "show rollback plan", "Coding.RollbackPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -675,6 +680,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingRepoUnderstandingCommand { get; }
 
+    public ICommand RunCodingHealthScoreCommand { get; }
+
     public ICommand RunCodingGitStatusCommand { get; }
 
     public ICommand RunCodingReviewChangesCommand { get; }
@@ -682,6 +689,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingValidationPlanCommand { get; }
 
     public ICommand RunCodingSafeCommitCommand { get; }
+
+    public ICommand RunCodingCommitMessageCommand { get; }
+
+    public ICommand RunCodingReleaseNotesCommand { get; }
+
+    public ICommand RunCodingTimelineCommand { get; }
+
+    public ICommand RunCodingRollbackPlanCommand { get; }
 
     public ICommand RunCodingBuildCommand { get; }
 
@@ -6545,6 +6560,11 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingRepoUnderstanding.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingHealthScoreCommand is AsyncRelayCommand runCodingHealthScore)
+        {
+            runCodingHealthScore.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingGitStatusCommand is AsyncRelayCommand runCodingGitStatus)
         {
             runCodingGitStatus.RaiseCanExecuteChanged();
@@ -6563,6 +6583,26 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingSafeCommitCommand is AsyncRelayCommand runCodingSafeCommit)
         {
             runCodingSafeCommit.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingCommitMessageCommand is AsyncRelayCommand runCodingCommitMessage)
+        {
+            runCodingCommitMessage.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingReleaseNotesCommand is AsyncRelayCommand runCodingReleaseNotes)
+        {
+            runCodingReleaseNotes.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingTimelineCommand is AsyncRelayCommand runCodingTimeline)
+        {
+            runCodingTimeline.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingRollbackPlanCommand is AsyncRelayCommand runCodingRollbackPlan)
+        {
+            runCodingRollbackPlan.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildCommand is AsyncRelayCommand runCodingBuild)

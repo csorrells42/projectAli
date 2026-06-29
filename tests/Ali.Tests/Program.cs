@@ -66,6 +66,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
     ("coding parser routes project intelligence", TestCodingParserRoutesProjectIntelligence),
     ("coding parser routes repo understanding and safe commit", TestCodingParserRoutesRepoUnderstandingAndSafeCommit),
+    ("coding parser routes coding readiness helpers", TestCodingParserRoutesCodingReadinessHelpers),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
@@ -118,6 +119,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows project intelligence", TestLocalCodingToolShowsProjectIntelligence),
     ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
     ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
+    ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
@@ -657,6 +659,29 @@ static Task TestCodingParserRoutesRepoUnderstandingAndSafeCommit()
 
     Equal(true, CodingToolRequestParser.TryParse("can i safely commit", out var commitRequest));
     Equal(CodingToolAction.ShowSafeCommitCheck, commitRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesCodingReadinessHelpers()
+{
+    Equal(true, CodingToolRequestParser.TryParse("workspace health score", out var healthRequest));
+    Equal(CodingToolAction.ShowWorkspaceHealthScore, healthRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("draft commit message", out var commitRequest));
+    Equal(CodingToolAction.DraftCommitMessage, commitRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("draft release notes", out var releaseRequest));
+    Equal(CodingToolAction.DraftReleaseNotes, releaseRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show coding session timeline", out var timelineRequest));
+    Equal(CodingToolAction.ShowCodingSessionTimeline, timelineRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show rollback plan", out var rollbackRequest));
+    Equal(CodingToolAction.ShowRollbackPlan, rollbackRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("ui change checklist settings panel", out var checklistRequest));
+    Equal(CodingToolAction.ShowUiChangeChecklist, checklistRequest.Action);
+    Equal("settings panel", checklistRequest.Query);
     return Task.CompletedTask;
 }
 
@@ -2484,6 +2509,58 @@ static async Task TestLocalCodingToolShowsSafeCommitCheck()
     Contains("Safe to commit: No", result.Message);
     Contains("Git: 1 uncommitted change(s) detected", result.Message);
     Contains("No successful build/test validation receipt", result.Message);
+}
+
+static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var projectDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+          </ItemGroup>
+        </Project>
+        """);
+    var changedFiles = $"src/Ali.Core/Coding/CodingToolContracts.cs{Environment.NewLine}tests/Ali.Tests/Program.cs{Environment.NewLine}";
+    var runner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(0, $"## main{Environment.NewLine} M src/Ali.Core/Coding/CodingToolContracts.cs", string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var health = await service.TryHandleAsync("workspace health score", CancellationToken.None);
+    var commit = await service.TryHandleAsync("draft commit message", CancellationToken.None);
+    var release = await service.TryHandleAsync("draft release notes", CancellationToken.None);
+    var rollback = await service.TryHandleAsync("show rollback plan", CancellationToken.None);
+    var timeline = await service.TryHandleAsync("show coding session timeline", CancellationToken.None);
+    var checklist = await service.TryHandleAsync("ui change checklist settings panel", CancellationToken.None);
+
+    Contains("Workspace health score", health.Message);
+    Contains("Score:", health.Message);
+    Contains("Commit message draft", commit.Message);
+    Contains("coding assistant behavior", commit.Message);
+    Contains("Release notes draft", release.Message);
+    Contains("tests", release.Message);
+    Contains("Rollback plan", rollback.Message);
+    Contains("src/Ali.Core/Coding/CodingToolContracts.cs", rollback.Message);
+    Contains("Coding session timeline", timeline.Message);
+    Contains("UI change checklist", checklist.Message);
+    Contains("settings panel", checklist.Message);
 }
 
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()

@@ -1045,6 +1045,58 @@ public static class CodingToolRequestParser
         "ready to commit"
     ];
 
+    private static readonly string[] WorkspaceHealthScoreRequests =
+    [
+        "workspace health score",
+        "show workspace health score",
+        "coding health score",
+        "show coding health score",
+        "repo health score",
+        "repository health score"
+    ];
+
+    private static readonly string[] DraftCommitMessageRequests =
+    [
+        "draft commit message",
+        "suggest commit message",
+        "write commit message",
+        "generate commit message"
+    ];
+
+    private static readonly string[] DraftReleaseNotesRequests =
+    [
+        "draft release notes",
+        "generate release notes",
+        "write release notes",
+        "summarize release notes"
+    ];
+
+    private static readonly string[] CodingSessionTimelineRequests =
+    [
+        "show coding session timeline",
+        "coding session timeline",
+        "show coding timeline",
+        "what happened this coding session"
+    ];
+
+    private static readonly string[] RollbackPlanRequests =
+    [
+        "show rollback plan",
+        "rollback plan",
+        "how do i roll this back",
+        "undo plan",
+        "show undo plan"
+    ];
+
+    private static readonly string[] UiChangeChecklistPrefixes =
+    [
+        "ui change checklist",
+        "show ui checklist",
+        "wpf checklist",
+        "frontend checklist",
+        "screen change checklist"
+    ];
+
     private static readonly string[] PlanTaskPrefixes =
     [
         "plan coding task",
@@ -1288,6 +1340,41 @@ public static class CodingToolRequestParser
         if (IsSafeCommitRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowSafeCommitCheck, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsWorkspaceHealthScoreRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWorkspaceHealthScore, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDraftCommitMessageRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DraftCommitMessage, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDraftReleaseNotesRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.DraftReleaseNotes, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCodingSessionTimelineRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCodingSessionTimeline, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRollbackPlanRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRollbackPlan, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePrefixedQuery(trimmed, UiChangeChecklistPrefixes, CodingToolAction.ShowUiChangeChecklist, userConfirmed, out request))
+        {
             return true;
         }
 
@@ -1695,6 +1782,21 @@ public static class CodingToolRequestParser
 
     private static bool IsSafeCommitRequest(string text) =>
         SafeCommitRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWorkspaceHealthScoreRequest(string text) =>
+        WorkspaceHealthScoreRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDraftCommitMessageRequest(string text) =>
+        DraftCommitMessageRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDraftReleaseNotesRequest(string text) =>
+        DraftReleaseNotesRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCodingSessionTimelineRequest(string text) =>
+        CodingSessionTimelineRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRollbackPlanRequest(string text) =>
+        RollbackPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsOpenSolutionRequest(string text) =>
         OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

@@ -83,6 +83,8 @@
                                         Command="{Binding RunCodingProjectIntelligenceCommand}" />
                                 <Button Content="Understand Repo"
                                         Command="{Binding RunCodingRepoUnderstandingCommand}" />
+                                <Button Content="Health"
+                                        Command="{Binding RunCodingHealthScoreCommand}" />
                                 <Button Content="Git"
                                         Command="{Binding RunCodingGitStatusCommand}" />
                                 <Button Content="Review"
@@ -141,6 +143,14 @@
                             <WrapPanel>
                                 <Button Content="Coding Receipts"
                                         Command="{Binding RunCodingReceiptsCommand}" />
+                                <Button Content="Timeline"
+                                        Command="{Binding RunCodingTimelineCommand}" />
+                                <Button Content="Commit Msg"
+                                        Command="{Binding RunCodingCommitMessageCommand}" />
+                                <Button Content="Release Notes"
+                                        Command="{Binding RunCodingReleaseNotesCommand}" />
+                                <Button Content="Rollback Plan"
+                                        Command="{Binding RunCodingRollbackPlanCommand}" />
                                 <Button Content="Open Receipt Folder"
                                         Command="{Binding OpenMaintenanceReceiptFolderCommand}" />
                             </WrapPanel>

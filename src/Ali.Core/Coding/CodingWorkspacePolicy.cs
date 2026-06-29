@@ -109,9 +109,16 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Scanning project intelligence in the approved coding workspace is read-only and allowed.");
         }
 
-        if (request.Action is CodingToolAction.ShowRepoUnderstanding or CodingToolAction.ShowSafeCommitCheck)
+        if (request.Action is CodingToolAction.ShowRepoUnderstanding
+            or CodingToolAction.ShowSafeCommitCheck
+            or CodingToolAction.ShowWorkspaceHealthScore
+            or CodingToolAction.DraftCommitMessage
+            or CodingToolAction.DraftReleaseNotes
+            or CodingToolAction.ShowCodingSessionTimeline
+            or CodingToolAction.ShowRollbackPlan
+            or CodingToolAction.ShowUiChangeChecklist)
         {
-            return CodingToolPermissionKind.Allow.AsPermission("Reviewing repo understanding and commit readiness is read-only and allowed.");
+            return CodingToolPermissionKind.Allow.AsPermission("Reviewing coding readiness, summaries, and rollback planning is read-only and allowed.");
         }
 
         if (request.Action == CodingToolAction.PlanTask)
