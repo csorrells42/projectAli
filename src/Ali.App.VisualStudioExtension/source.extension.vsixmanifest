@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="Ali.App.VisualStudioExtension" Version="1.0.6" Language="en-US" Publisher="Project Ali" />
+    <Identity Id="Ali.App.VisualStudioExtension" Version="1.0.7" Language="en-US" Publisher="Project Ali" />
     <DisplayName>Ali Companion</DisplayName>
     <Description>Native Visual Studio tool window for Ali's local programming companion. It submits visible commands to Ali's local helper and keeps edits, packages, builds, tests, and Git writes behind Ali's guarded approval gates.</Description>
     <Icon>Resources\AliCompanionIcon.png</Icon>

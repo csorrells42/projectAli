@@ -3709,7 +3709,18 @@ static async Task TestDesktopInstallerRepairMergesStarterSources()
     Equal(true, repaired.Any(source => source.Id == "nasa-main"));
     Equal(true, repaired.Any(source => source.Id == "medlineplus"));
     Equal(true, repaired.Any(source => source.Id == "alabama-gov"));
-    Equal(true, repaired.Count >= 1_000);
+    Equal(true, repaired.Count >= 2_000);
+    Equal(true, repaired.Count(source => source.Topic == "weather") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "sports") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "local_news") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "regional_news") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "national_news") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "international_news") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "science") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "history") >= 100);
+    Equal(true, repaired.Count(source => source.Topic == "military_history") >= 100);
+    Equal(true, repaired.Any(source => source.Name.Contains("National Geographic", StringComparison.OrdinalIgnoreCase)));
+    Equal(true, repaired.Any(source => source.Name.Contains("Army Center of Military History", StringComparison.OrdinalIgnoreCase)));
     Contains("Bundled Sources & Topics repaired", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
@@ -4911,7 +4922,18 @@ static async Task TestCuratedSourceCatalogMergesMissingStarterSources()
     Equal(true, catalog.Any(source => source.Id == "nasa-main"));
     Equal(true, catalog.Any(source => source.Id == "medlineplus"));
     Equal(true, catalog.Any(source => source.Id == "alabama-gov"));
-    Equal(true, catalog.Count >= 1_000);
+    Equal(true, catalog.Count >= 2_000);
+    Equal(true, catalog.Count(source => source.Topic == "weather") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "sports") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "local_news") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "regional_news") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "national_news") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "international_news") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "science") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "history") >= 100);
+    Equal(true, catalog.Count(source => source.Topic == "military_history") >= 100);
+    Equal(true, catalog.Any(source => source.Name.Contains("National Geographic", StringComparison.OrdinalIgnoreCase)));
+    Equal(true, catalog.Any(source => source.Name.Contains("Army Center of Military History", StringComparison.OrdinalIgnoreCase)));
 }
 
 static async Task TestCuratedSourceRetrieverMatchesUserFacingTopics()
