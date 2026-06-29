@@ -8393,6 +8393,19 @@ public sealed class LocalCodingToolService(
                 diagnostic.LineNumber);
         }
 
+        var parsed = ParseCompilerDiagnostic(lastDotNetResult.Message);
+        var parsedForCandidates = new CompilerDiagnosticInfo(
+            string.IsNullOrWhiteSpace(parsed.Path) ? diagnostic.Path : parsed.Path,
+            parsed.LineNumber ?? diagnostic.LineNumber,
+            parsed.Code);
+        var symbolContext = FindEnclosingSymbolAtLine(diagnostic.Path, diagnostic.LineNumber);
+        var testQuery = BuildDiagnosticTestQuery(parsedForCandidates, diagnostic.Path, symbolContext);
+        var testTarget = await ResolveTestTargetRecommendationAsync(testQuery, cancellationToken).ConfigureAwait(false);
+        var candidates = BuildDiagnosticFixCandidates(parsedForCandidates, lastDotNetResult.Message, diagnostic.Path, symbolContext, testTarget);
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+
         if (!TryBuildDeterministicFailurePatch(
                 lastDotNetResult.Message,
                 lines,
@@ -8402,10 +8415,18 @@ public sealed class LocalCodingToolService(
                 out var newText,
                 out var refusal))
         {
+            var refusalLines = new List<string>
+            {
+                "No deterministic patch suggestion was stored.",
+                "No files were changed.",
+                $"Reason: {refusal}"
+            };
+            AddDiagnosticCandidateGuidance(refusalLines, candidates, testQuery, testTarget, primaryTarget);
+            refusalLines.Add("Next - inspect the top candidate or run: map compiler diagnostic");
             return new CodingToolResult(
                 true,
                 false,
-                refusal,
+                string.Join(Environment.NewLine, refusalLines),
                 "Last failure patch suggestion",
                 diagnostic.Path,
                 diagnostic.LineNumber);
@@ -8426,13 +8447,52 @@ public sealed class LocalCodingToolService(
             SavePendingPatchPreview();
         }
 
+        var messageLines = new List<string>();
+        if (preview.Succeeded)
+        {
+            messageLines.Add("Suggested patch from last failure.");
+            messageLines.Add("No files were changed.");
+            messageLines.Add($"Diagnostic: {diagnosticLabel}");
+            AddDiagnosticCandidateGuidance(messageLines, candidates, testQuery, testTarget, primaryTarget);
+            messageLines.Add("To apply this pending preview after review, use: confirm apply last patch preview");
+        }
+        else
+        {
+            messageLines.Add("No deterministic patch suggestion was stored.");
+            messageLines.Add("No files were changed.");
+            AddDiagnosticCandidateGuidance(messageLines, candidates, testQuery, testTarget, primaryTarget);
+        }
+
+        messageLines.Add(preview.Message);
         return preview with
         {
-            Message = preview.Succeeded
-                ? $"Suggested patch from last failure. No files were changed.{Environment.NewLine}Diagnostic: {diagnosticLabel}{Environment.NewLine}To apply this pending preview after review, use: confirm apply last patch preview{Environment.NewLine}{preview.Message}"
-                : $"No deterministic patch suggestion was stored. No files were changed.{Environment.NewLine}{preview.Message}",
+            Message = string.Join(Environment.NewLine, messageLines),
             ToolName = "Last failure patch suggestion"
         };
+    }
+
+    private static void AddDiagnosticCandidateGuidance(
+        List<string> lines,
+        IReadOnlyList<DiagnosticFixCandidate> candidates,
+        string testQuery,
+        TestTargetRecommendation testTarget,
+        string? primaryTarget)
+    {
+        lines.Add("Ranked fix candidates:");
+        lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates.Select(FormatDiagnosticFixCandidate));
+        lines.Add("Validation after fix:");
+        lines.Add($"- show impacted tests {testQuery}");
+        lines.Add($"- resolve test target {testQuery}");
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            lines.Add($"- confirm dotnet build \"{primaryTarget}\"");
+        }
+
+        if (!string.IsNullOrWhiteSpace(testTarget.Command)
+            && !string.Equals(testTarget.Command, $"confirm dotnet build \"{primaryTarget}\"", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add($"- {testTarget.Command}");
+        }
     }
 
     private static bool TryBuildDeterministicFailurePatch(

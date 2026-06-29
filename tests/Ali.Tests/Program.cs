@@ -3299,6 +3299,9 @@ static async Task TestLocalCodingToolSuggestsLastFailurePatch()
     Equal(true, suggestion.Succeeded);
     Contains("Suggested patch from last failure", suggestion.Message);
     Contains("No files were changed", suggestion.Message);
+    Contains("Ranked fix candidates:", suggestion.Message);
+    Contains("compiler location", suggestion.Message);
+    Contains("Validation after fix:", suggestion.Message);
     Contains("var value = 1;", suggestion.Message);
     Contains("confirm apply last patch preview", suggestion.Message);
     Contains("var value = 1", afterSuggestion);
@@ -3344,6 +3347,9 @@ static async Task TestLocalCodingToolSuggestsClosingBracePatch()
     Equal(true, suggestion.Handled);
     Equal(true, suggestion.Succeeded);
     Contains("Diagnostic: CS1513 } expected", suggestion.Message);
+    Contains("Ranked fix candidates:", suggestion.Message);
+    Contains("missing closing brace", suggestion.Message);
+    Contains("Validation after fix:", suggestion.Message);
     Contains("void Run() { }", suggestion.Message);
     Contains("confirm apply last patch preview", suggestion.Message);
     Equal(false, afterSuggestion.TrimEnd().EndsWith("}", StringComparison.Ordinal) && afterSuggestion.Contains(Environment.NewLine + "    }", StringComparison.Ordinal));
