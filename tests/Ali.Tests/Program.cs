@@ -733,6 +733,10 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowImpactedTests, impactedRequest.Action);
     Equal("Save", impactedRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("resolve test target Save", out var testTargetRequest));
+    Equal(CodingToolAction.ResolveTestTarget, testTargetRequest.Action);
+    Equal("Save", testTargetRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("semantic edit plan Save button", out var editPlanRequest));
     Equal(CodingToolAction.PlanSemanticEdit, editPlanRequest.Action);
     Equal("Save button", editPlanRequest.Query);
@@ -2735,6 +2739,15 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var testsDirectory = Path.Combine(workspace, "Demo.Tests");
     Directory.CreateDirectory(testsDirectory);
     await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
         Path.Combine(testsDirectory, "MainWindowViewModelTests.cs"),
         """
         namespace Demo.Tests;
@@ -2753,6 +2766,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var callGraph = await service.TryHandleAsync("show call graph Save", CancellationToken.None);
     var semantic = await service.TryHandleAsync("resolve symbol Save", CancellationToken.None);
     var impacted = await service.TryHandleAsync("show impacted tests Save", CancellationToken.None);
+    var testTarget = await service.TryHandleAsync("resolve test target Save", CancellationToken.None);
     var editPlan = await service.TryHandleAsync("semantic edit plan Save button", CancellationToken.None);
     var safeEdit = await service.TryHandleAsync("safe edit workflow Save button", CancellationToken.None);
     var diagnosticText = $"{Path.Combine(appDirectory, "MainWindowViewModel.cs")}(7,20): error CS0103: The name 'MissingName' does not exist in the current context";
@@ -2781,6 +2795,10 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("method Demo.App.MainWindowViewModel.Save()", semantic.Message);
     Contains("Impacted tests", impacted.Message);
     Contains("MainWindowViewModelTests.cs", impacted.Message);
+    Contains("Smallest practical test target", impacted.Message);
+    Contains("Test target resolver", testTarget.Message);
+    Contains("Demo.Tests.csproj", testTarget.Message);
+    Contains("confirm dotnet test", testTarget.Message);
     Contains("Semantic edit plan", editPlan.Message);
     Contains("MainWindowViewModel.cs", editPlan.Message);
     Contains("Safe edit workflow", safeEdit.Message);

@@ -130,6 +130,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowCallGraph
             or CodingToolAction.ResolveSemanticSymbol
             or CodingToolAction.ShowImpactedTests
+            or CodingToolAction.ResolveTestTarget
             or CodingToolAction.PlanSemanticEdit
             or CodingToolAction.PlanSafeEditWorkflow
             or CodingToolAction.MapCompilerDiagnostic

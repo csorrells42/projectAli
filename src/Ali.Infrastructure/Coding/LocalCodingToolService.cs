@@ -203,6 +203,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowCallGraph => ShowCallGraph(request),
             CodingToolAction.ResolveSemanticSymbol => ResolveSemanticSymbol(request),
             CodingToolAction.ShowImpactedTests => await ShowImpactedTestsAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ResolveTestTarget => await ResolveTestTargetAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanSemanticEdit => await PlanSemanticEditAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanSafeEditWorkflow => await PlanSafeEditWorkflowAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.MapCompilerDiagnostic => MapCompilerDiagnostic(request),
@@ -5671,9 +5672,57 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> ShowImpactedTestsAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var query = CleanGoal(request.Query, string.Empty);
+        var recommendation = await ResolveTestTargetRecommendationAsync(query, cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Impacted tests:",
+            "No files were changed.",
+            "Engine: Roslyn semantic hits + workspace test naming",
+            string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
+            $"Source files signaled: {recommendation.SourceFiles.Count}",
+            $"Likely test files: {recommendation.TestFiles.Count}",
+            "Source signals:"
+        };
+        lines.AddRange(recommendation.SourceFiles.Count == 0 ? ["- none found"] : recommendation.SourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Likely tests:");
+        lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Smallest practical test target:");
+        lines.Add(string.IsNullOrWhiteSpace(recommendation.TargetPath) ? "- none found" : $"- {recommendation.Scope}: {recommendation.TargetPath}");
+        lines.Add("Validation commands:");
+        lines.Add(string.IsNullOrWhiteSpace(recommendation.Command) ? "- No test command detected. Run project intelligence first." : $"- {recommendation.Command}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Impacted tests", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ResolveTestTargetAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var query = CleanGoal(request.Query, string.Empty);
+        var recommendation = await ResolveTestTargetRecommendationAsync(query, cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Test target resolver:",
+            "No files were changed.",
+            "Engine: semantic hits + changed files + nearest test project",
+            string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
+            recommendation.TargetPath is null ? "Target: none found" : $"Target: {recommendation.TargetPath}",
+            $"Scope: {recommendation.Scope}",
+            string.IsNullOrWhiteSpace(recommendation.Command) ? "Command: none" : $"Command: {recommendation.Command}",
+            $"Source signals: {recommendation.SourceFiles.Count}",
+            $"Likely test files: {recommendation.TestFiles.Count}",
+            "Source files:"
+        };
+        lines.AddRange(recommendation.SourceFiles.Count == 0 ? ["- none found"] : recommendation.SourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Test files:");
+        lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Notes:");
+        lines.AddRange(recommendation.Notes.Count == 0 ? ["- none"] : recommendation.Notes.Select(note => $"- {note}"));
+        return new CodingToolResult(true, !string.IsNullOrWhiteSpace(recommendation.Command), string.Join(Environment.NewLine, lines), "Test target resolver", recommendation.TargetPath ?? Policy.WorkspaceRoot);
+    }
+
+    private async Task<TestTargetRecommendation> ResolveTestTargetRecommendationAsync(string query, CancellationToken cancellationToken)
+    {
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
-        var semanticHits = string.IsNullOrWhiteSpace(query) ? [] : FindSemanticSymbolHits(workspace, query, 60);
+        var semanticHits = string.IsNullOrWhiteSpace(query) ? [] : FindSemanticSymbolHits(workspace, query, 80);
         var sourceFiles = semanticHits
             .Select(hit => hit.Path)
             .Where(path => !IsTestFile(path))
@@ -5700,26 +5749,76 @@ public sealed class LocalCodingToolService(
             testFiles = GetCSharpFiles().Where(IsTestFile).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).Take(12).ToList();
         }
 
-        var summaries = GetWorkspaceProjectSummaries();
-        var validationCommands = DiscoverTestCommands(GetCSharpFiles().Cast<string>().Concat(GetXamlFiles()).ToList(), summaries, GetPrimaryTarget()).Take(5).ToList();
-        var lines = new List<string>
+        var notes = new List<string>();
+        string? target = null;
+        var scope = "none";
+        foreach (var testFile in testFiles)
         {
-            "Impacted tests:",
-            "No files were changed.",
-            "Engine: Roslyn semantic hits + workspace test naming",
-            string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
-            $"Source files signaled: {sourceFiles.Count}",
-            $"Likely test files: {testFiles.Count}",
-            "Source signals:"
-        };
-        lines.AddRange(sourceFiles.Count == 0 ? ["- none found"] : sourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
-        lines.Add("Likely tests:");
-        lines.AddRange(testFiles.Count == 0 ? ["- none found"] : testFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
-        lines.Add("Validation commands:");
-        lines.AddRange(validationCommands.Count == 0 ? ["- No test command detected. Run project intelligence first."] : validationCommands.Select(command => $"- {command}"));
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Impacted tests", Policy.WorkspaceRoot);
+            if (TryFindNearestProjectForFile(testFile, out var project))
+            {
+                target = project;
+                scope = "targeted test project";
+                break;
+            }
+        }
+
+        if (target is null)
+        {
+            var summaries = GetWorkspaceProjectSummaries();
+            var testProject = summaries.FirstOrDefault(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase));
+            if (testProject is not null)
+            {
+                target = Path.Combine(Policy.WorkspaceRoot, testProject.RelativePath);
+                scope = "first test project";
+                notes.Add("No nearest test project was found from files; using the first detected test project.");
+            }
+        }
+
+        if (target is null)
+        {
+            target = GetPrimaryTarget();
+            scope = target is null ? "none" : "primary workspace target";
+            if (target is not null)
+            {
+                notes.Add("No dedicated test project was found; falling back to the primary target.");
+            }
+        }
+
+        var command = string.IsNullOrWhiteSpace(target) ? string.Empty : $"confirm dotnet test \"{target}\"";
+        if (testFiles.Count == 0)
+        {
+            notes.Add("No likely test files were detected; run project intelligence if this seems wrong.");
+        }
+
+        return new TestTargetRecommendation(query, sourceFiles, testFiles, target, scope, command, notes);
     }
 
+    private bool TryFindNearestProjectForFile(string file, out string projectPath)
+    {
+        projectPath = string.Empty;
+        var directory = Path.GetDirectoryName(file);
+        while (!string.IsNullOrWhiteSpace(directory) && Policy.IsInsideWorkspace(directory))
+        {
+            var project = Directory.EnumerateFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (project is not null)
+            {
+                projectPath = project;
+                return true;
+            }
+
+            var parent = Directory.GetParent(directory)?.FullName;
+            if (string.IsNullOrWhiteSpace(parent) || parent.Equals(directory, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            directory = parent;
+        }
+
+        return false;
+    }
     private async Task<CodingToolResult> PlanSemanticEditAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query, "current change");
@@ -10622,6 +10721,15 @@ public sealed class LocalCodingToolService(
     private sealed record PatchBundlePreparation(
         IReadOnlyList<PreparedPatchEdit> Edits,
         CodingToolResult? Error);
+
+    private sealed record TestTargetRecommendation(
+        string Query,
+        IReadOnlyList<string> SourceFiles,
+        IReadOnlyList<string> TestFiles,
+        string? TargetPath,
+        string Scope,
+        string Command,
+        IReadOnlyList<string> Notes);
 
     private sealed record ProjectSummary(
         string RelativePath,

@@ -30,6 +30,7 @@ public enum CodingToolAction
     ShowCallGraph,
     ResolveSemanticSymbol,
     ShowImpactedTests,
+    ResolveTestTarget,
     PlanSemanticEdit,
     PlanSafeEditWorkflow,
     MapCompilerDiagnostic,

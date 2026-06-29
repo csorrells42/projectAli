@@ -1229,6 +1229,16 @@ public static class CodingToolRequestParser
         "tests for change"
     ];
 
+    private static readonly string[] TestTargetPrefixes =
+    [
+        "resolve test target",
+        "test target",
+        "smallest test target",
+        "targeted test command",
+        "which tests for",
+        "smallest tests for"
+    ];
+
     private static readonly string[] SemanticEditPlanPrefixes =
     [
         "semantic edit plan",
@@ -1611,6 +1621,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(trimmed, CallGraphPrefixes, CodingToolAction.ShowCallGraph, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SemanticSymbolPrefixes, CodingToolAction.ResolveSemanticSymbol, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, ImpactedTestsPrefixes, CodingToolAction.ShowImpactedTests, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, TestTargetPrefixes, CodingToolAction.ResolveTestTarget, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SemanticEditPlanPrefixes, CodingToolAction.PlanSemanticEdit, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SafeEditWorkflowPrefixes, CodingToolAction.PlanSafeEditWorkflow, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, DiagnosticMapperPrefixes, CodingToolAction.MapCompilerDiagnostic, userConfirmed, out request)
