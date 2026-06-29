@@ -5370,7 +5370,7 @@ public sealed class LocalCodingToolService(
         var status = GetProjectIndexStatus();
         if (!File.Exists(_projectIndexPath))
         {
-            return new ProjectIndexAwareness(false, status.Summary, null, [], []);
+            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], []);
         }
 
         try
@@ -5385,20 +5385,59 @@ public sealed class LocalCodingToolService(
                 status.Summary,
                 primaryTarget,
                 ReadProjectIndexSummaryArray(root, "fileRoles", "role", "examples"),
-                ReadProjectIndexSummaryArray(root, "featureAreas", "area", "representativeFiles"));
+                ReadProjectIndexSummaryArray(root, "featureAreas", "area", "representativeFiles"),
+                ReadProjectDependencyArray(root, "projectDependencies"),
+                ReadProjectStringArray(root, "projectBuildOrder"));
         }
         catch (JsonException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], []);
+            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], []);
         }
         catch (IOException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], []);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], []);
         }
+    }
+
+    private static IReadOnlyList<string> ReadProjectDependencyArray(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var dependencies = new List<string>();
+        foreach (var item in element.EnumerateArray().Take(12))
+        {
+            var from = item.TryGetProperty("from", out var fromElement) ? fromElement.GetString() : null;
+            var to = item.TryGetProperty("to", out var toElement) ? toElement.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(from) && !string.IsNullOrWhiteSpace(to))
+            {
+                dependencies.Add($"{from} -> {to}");
+            }
+        }
+
+        return dependencies;
+    }
+
+    private static IReadOnlyList<string> ReadProjectStringArray(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return element
+            .EnumerateArray()
+            .Select(value => value.GetString())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Take(12)
+            .ToList();
     }
 
     private static IReadOnlyList<string> ReadProjectIndexSummaryArray(
@@ -5445,6 +5484,8 @@ public sealed class LocalCodingToolService(
 
         lines.Add($"- File roles: {FormatInlineList(awareness.FileRoles.Take(limit))}");
         lines.Add($"- Feature areas: {FormatInlineList(awareness.FeatureAreas.Take(limit))}");
+        lines.Add($"- Project dependencies: {FormatInlineList(awareness.ProjectDependencies.Take(limit))}");
+        lines.Add($"- Project build order: {FormatInlineList(awareness.ProjectBuildOrder.Take(limit))}");
     }
 
     private IReadOnlyList<ProjectIndexFileRole> BuildProjectIndexFileRoles(IReadOnlyList<string> files) =>
@@ -5701,6 +5742,9 @@ public sealed class LocalCodingToolService(
             var featureAreas = root.TryGetProperty("featureAreas", out var areasElement) && areasElement.ValueKind == JsonValueKind.Array
                 ? areasElement.GetArrayLength()
                 : 0;
+            var dependencies = root.TryGetProperty("projectDependencies", out var dependenciesElement) && dependenciesElement.ValueKind == JsonValueKind.Array
+                ? dependenciesElement.GetArrayLength()
+                : 0;
             var created = root.TryGetProperty("createdAtUtc", out var createdElement) && createdElement.TryGetDateTimeOffset(out var parsedCreated)
                 ? parsedCreated.LocalDateTime.ToString("g", CultureInfo.CurrentCulture)
                 : "unknown time";
@@ -5728,7 +5772,7 @@ public sealed class LocalCodingToolService(
                 return new ProjectIndexStatus(false, "Needs refresh - workspace files changed after the index was built.");
             }
 
-            return new ProjectIndexStatus(true, $"Good - {projects} project(s), {symbols} symbol(s), {fileRoles} file role(s), {featureAreas} feature area(s), refreshed {created}.");
+            return new ProjectIndexStatus(true, $"Good - {projects} project(s), {symbols} symbol(s), {fileRoles} file role(s), {featureAreas} feature area(s), {dependencies} dependency edge(s), refreshed {created}.");
         }
         catch (JsonException ex)
         {
@@ -5791,6 +5835,8 @@ public sealed class LocalCodingToolService(
             .ToList();
         var fileRoles = BuildProjectIndexFileRoles(files);
         var featureAreas = BuildProjectIndexFeatureAreas(files);
+        var projectDependencies = BuildProjectDependencyEdges(summaries);
+        var projectBuildOrder = EstimateBuildOrder(summaries, projectDependencies);
         var latestWorkspaceWrite = GetLatestWorkspaceWriteUtc(files);
         var snapshot = new ProjectIndexSnapshot(
             DateTimeOffset.UtcNow,
@@ -5808,7 +5854,9 @@ public sealed class LocalCodingToolService(
             testCommands,
             symbols,
             fileRoles,
-            featureAreas);
+            featureAreas,
+            projectDependencies,
+            projectBuildOrder);
 
         Directory.CreateDirectory(Path.GetDirectoryName(_projectIndexPath)!);
         var json = JsonSerializer.Serialize(snapshot, RoadmapJsonOptions);
@@ -5826,6 +5874,8 @@ public sealed class LocalCodingToolService(
             $"Symbols: {symbols.Count}",
             $"File roles: {FormatProjectIndexRoleSummary(fileRoles)}",
             $"Feature areas: {FormatProjectIndexFeatureSummary(featureAreas)}",
+            $"Project dependencies: {FormatProjectDependencySummary(projectDependencies)}",
+            $"Project build order: {FormatInlineList(projectBuildOrder.Take(6))}",
             primaryTarget is null ? "Primary target: not found" : $"Primary target: {primaryTarget}",
             $"Stacks: {FormatInlineList(stackSignals)}",
             $"Style signals: {FormatInlineList(styleSignals)}",
@@ -9226,16 +9276,7 @@ public sealed class LocalCodingToolService(
             return;
         }
 
-        var knownProjects = summaries
-            .Select(summary => summary.RelativePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var edges = summaries
-            .SelectMany(summary => summary.ProjectReferences
-                .Where(reference => knownProjects.Contains(reference))
-                .Select(reference => new ProjectDependency(summary.RelativePath, reference)))
-            .OrderBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(edge => edge.To, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var edges = BuildProjectDependencyEdges(summaries);
 
         lines.Add("Project dependency graph:");
         if (edges.Count == 0)
@@ -10282,6 +10323,25 @@ public sealed class LocalCodingToolService(
             lines.Add($"- ...{items.Count - 6} more {title.ToLowerInvariant()} omitted.");
         }
     }
+
+    private static IReadOnlyList<ProjectDependency> BuildProjectDependencyEdges(IReadOnlyList<ProjectSummary> summaries)
+    {
+        var knownProjects = summaries
+            .Select(summary => summary.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return summaries
+            .SelectMany(summary => summary.ProjectReferences
+                .Where(reference => knownProjects.Contains(reference))
+                .Select(reference => new ProjectDependency(summary.RelativePath, reference)))
+            .OrderBy(edge => edge.From, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(edge => edge.To, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string FormatProjectDependencySummary(IReadOnlyList<ProjectDependency> dependencies) =>
+        dependencies.Count == 0
+            ? "none detected"
+            : string.Join(", ", dependencies.Take(6).Select(edge => $"{edge.From} -> {edge.To}"));
 
     private static IReadOnlyList<string> EstimateBuildOrder(
         IReadOnlyList<ProjectSummary> summaries,
@@ -11797,7 +11857,9 @@ public sealed class LocalCodingToolService(
         string Status,
         string? PrimaryTarget,
         IReadOnlyList<string> FileRoles,
-        IReadOnlyList<string> FeatureAreas);
+        IReadOnlyList<string> FeatureAreas,
+        IReadOnlyList<string> ProjectDependencies,
+        IReadOnlyList<string> ProjectBuildOrder);
 
     private sealed record ProjectIndexStatus(bool Available, string Summary);
 
@@ -11817,7 +11879,9 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> TestCommands,
         IReadOnlyList<ProjectIndexSymbol> Symbols,
         IReadOnlyList<ProjectIndexFileRole> FileRoles,
-        IReadOnlyList<ProjectIndexFeatureArea> FeatureAreas);
+        IReadOnlyList<ProjectIndexFeatureArea> FeatureAreas,
+        IReadOnlyList<ProjectDependency> ProjectDependencies,
+        IReadOnlyList<string> ProjectBuildOrder);
 
     private sealed record ProjectIndexSymbol(
         string Kind,

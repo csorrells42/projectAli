@@ -2587,6 +2587,7 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
           </PropertyGroup>
           <ItemGroup>
             <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+            <ProjectReference Include="..\Demo.App\Demo.App.csproj" />
           </ItemGroup>
         </Project>
         """);
@@ -2603,6 +2604,8 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Symbols:", result.Message);
     Contains("File roles:", result.Message);
     Contains("Feature areas:", result.Message);
+    Contains("Project dependencies:", result.Message);
+    Contains("Project build order:", result.Message);
     Contains("Latest workspace write:", result.Message);
     Contains("Build commands:", result.Message);
     Contains("Test commands:", result.Message);
@@ -2617,6 +2620,8 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("latestWorkspaceWriteUtc", json);
     Contains("fileRoles", json);
     Contains("featureAreas", json);
+    Contains("projectDependencies", json);
+    Contains("projectBuildOrder", json);
     Contains("application code", json);
     Contains("test coverage", json);
 
@@ -2661,6 +2666,8 @@ static async Task TestLocalCodingToolShowsRepoUnderstanding()
     Contains("Codebase awareness map", result.Message);
     Contains("File roles:", result.Message);
     Contains("Feature areas:", result.Message);
+    Contains("Project dependencies:", result.Message);
+    Contains("Project build order:", result.Message);
     Contains("Shape:", result.Message);
     Contains("Detected stacks:", result.Message);
     Contains("Build commands:", result.Message);
@@ -2706,6 +2713,7 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
           </PropertyGroup>
           <ItemGroup>
             <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+            <ProjectReference Include="..\Demo.App\Demo.App.csproj" />
           </ItemGroup>
         </Project>
         """);
@@ -2743,6 +2751,8 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
     Contains("Codebase awareness map", result.Message);
     Contains("File roles:", result.Message);
     Contains("Feature areas:", result.Message);
+    Contains("Project dependencies:", result.Message);
+    Contains("Project build order:", result.Message);
     Contains("Git: 1 uncommitted change(s) detected", result.Message);
     Contains("Smallest practical test target", result.Message);
     Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);
