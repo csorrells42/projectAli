@@ -2365,6 +2365,7 @@ static async Task TestLocalCodingToolShowsCodingReceipts()
     Equal(true, receipts.Succeeded);
     Contains("Recent coding receipts", receipts.Message);
     Contains("OpenFile succeeded", receipts.Message);
+    Contains("outcome=Good", receipts.Message);
     Contains(filePath, receipts.Message);
 }
 
@@ -3117,6 +3118,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Release readiness score", release.Message);
     Contains("Improved tests", release.Message);
     Contains("Rollback plan", rollback.Message);
+    Contains("Symbol-level rollback hints:", rollback.Message);
     Contains("src/Ali.Core/Coding/CodingToolContracts.cs", rollback.Message);
     Contains("Coding session timeline", timeline.Message);
     Contains("Session journal:", timeline.Message);
@@ -3359,8 +3361,11 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Route repair packets:", commandSurface.Message);
     Equal(true, File.Exists(Path.Combine(directory, "Coding", "route-diff-tracker.json")));
     Contains("Before/after validation ledger", ledger.Message);
+    Contains("Edit receipt timeline v2:", ledger.Message);
+    Contains("Command queue dashboard rows:", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 94%", miniCodex.Message);
+    Contains("Overall score: 96%", miniCodex.Message);
+    Contains("Score explainer:", miniCodex.Message);
     Contains("Project index refresh automation", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
@@ -3531,6 +3536,7 @@ static async Task TestLocalCodingToolSummarizesDotNetDiagnostics()
     Equal(false, result.Succeeded);
     Contains("Build failed with exit code 1", result.Message);
     Contains("Diagnostic summary:", result.Message);
+    Contains("Failure repair packet v3:", result.Message);
     Contains(diagnosticLine, result.Message);
     Equal(1, runner.Runs.Count);
 }
@@ -3911,6 +3917,8 @@ static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
     Contains("Affected projects:", preview.Message);
     Contains("Build order slice:", preview.Message);
     Contains("Build command:", preview.Message);
+    Contains("Risk-aware test depth:", preview.Message);
+    Contains("Queued validation command packet:", preview.Message);
     Contains("Before:", preview.Message);
     Contains("After:", preview.Message);
     Contains("class Demo", preview.Message);
@@ -3952,6 +3960,8 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Contains("Affected projects:", preview.Message);
     Contains("Build order slice:", preview.Message);
     Contains("Build command:", preview.Message);
+    Contains("Risk-aware test depth:", preview.Message);
+    Contains("Queued validation command packet:", preview.Message);
     Contains("Review command:", preview.Message);
     Contains("class Demo", preview.Message);
     Contains("class NewName", preview.Message);
@@ -3972,6 +3982,8 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Equal(true, applied.Handled);
     Equal(true, applied.Succeeded);
     Contains("Applied last patch preview bundle", applied.Message);
+    Contains("Before/after symbol diff:", applied.Message);
+    Contains("Queued validation command packet:", applied.Message);
     Equal("class Widget { }", await File.ReadAllTextAsync(firstPath));
     Equal("class NewName { }", await File.ReadAllTextAsync(secondPath));
 }
@@ -4005,12 +4017,16 @@ static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()
     Contains("Affected projects:", preview.Message);
     Contains("Build order slice:", preview.Message);
     Contains("Build command:", preview.Message);
+    Contains("Risk-aware test depth:", preview.Message);
+    Contains("Queued validation command packet:", preview.Message);
     Contains("Review command:", preview.Message);
     Contains("class Widget", preview.Message);
     Contains("NewName", preview.Message);
     Equal(true, applied.Handled);
     Equal(true, applied.Succeeded);
     Contains("Applied 2 edit(s) across 1 file(s)", applied.Message);
+    Contains("Before/after symbol diff:", applied.Message);
+    Contains("Queued validation command packet:", applied.Message);
     Equal("class Widget { string Name => \"NewName\"; }", await File.ReadAllTextAsync(filePath));
 }
 

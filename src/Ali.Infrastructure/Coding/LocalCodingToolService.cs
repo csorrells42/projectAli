@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Ali.Core.Coding;
 using Ali.Infrastructure.Runtime;
@@ -3576,7 +3577,9 @@ public sealed class LocalCodingToolService(
     {
         var target = string.IsNullOrWhiteSpace(receipt.TargetPath) ? string.Empty : $" target={receipt.TargetPath}";
         var exit = receipt.ExitCode is null ? string.Empty : $" exit={receipt.ExitCode.Value}";
-        return $"{label}: {receipt.Timestamp:u} {receipt.Action} {(receipt.Succeeded ? "succeeded" : "failed")}{exit}{target}";
+        var outcome = string.IsNullOrWhiteSpace(receipt.PatchOutcome) ? string.Empty : $" outcome={receipt.PatchOutcome}";
+        var depth = string.IsNullOrWhiteSpace(receipt.RiskAwareTestDepth) ? string.Empty : $" depth={receipt.RiskAwareTestDepth}";
+        return $"{label}: {receipt.Timestamp:u} {receipt.Action} {(receipt.Succeeded ? "succeeded" : "failed")}{exit}{target}{outcome}{depth}";
     }
 
     private static IReadOnlyList<string> BuildPacketReceiptMatchLines(
@@ -4793,14 +4796,7 @@ public sealed class LocalCodingToolService(
         };
         foreach (var receipt in receipts)
         {
-            var status = receipt.Succeeded ? "succeeded" : "failed";
-            var target = string.IsNullOrWhiteSpace(receipt.TargetPath)
-                ? string.Empty
-                : $" target={receipt.TargetPath}";
-            var exit = receipt.ExitCode is null
-                ? string.Empty
-                : $" exit={receipt.ExitCode.Value}";
-            lines.Add($"- {receipt.Timestamp:u} {receipt.Action} {status}{exit}{target}");
+            lines.Add(FormatReceiptSummary("-", receipt));
         }
 
         return new CodingToolResult(
@@ -6483,6 +6479,140 @@ public sealed class LocalCodingToolService(
             : rows.Take(10).ToList();
     }
 
+    private IReadOnlyList<string> BuildValidationQueueRows(
+        string goal,
+        IReadOnlyList<string> changedFiles,
+        TestTargetRecommendation? testTarget = null)
+    {
+        var rows = new List<string>
+        {
+            "1. Impacted tests - Ready: show impacted tests " + CleanGoal(goal, "current change"),
+            "2. Test target - Ready: resolve test target " + CleanGoal(goal, "current change")
+        };
+
+        if (testTarget is not null && !string.IsNullOrWhiteSpace(testTarget.Command))
+        {
+            rows.Add("3. Targeted test - Waiting for approval: " + testTarget.Command);
+        }
+        else
+        {
+            rows.Add("3. Targeted test - Waiting: resolve a test command first");
+        }
+
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+        rows.Add($"4. Build - Waiting for approval: confirm dotnet build \"{primaryTarget}\"");
+        rows.Add("5. Safe commit check - Waiting: can i safely commit");
+        if (changedFiles.Count > 0)
+        {
+            rows.Add($"Changed files queued: {FormatInlineList(changedFiles.Take(5))}");
+        }
+
+        return rows;
+    }
+
+    private static IReadOnlyList<string> BuildBeforeAfterSymbolDiffRows(
+        IEnumerable<string> beforeTexts,
+        IEnumerable<string> afterTexts)
+    {
+        var beforeSymbols = ExtractLightweightSymbols(beforeTexts);
+        var afterSymbols = ExtractLightweightSymbols(afterTexts);
+        var added = afterSymbols.Except(beforeSymbols, StringComparer.Ordinal).Take(8).ToList();
+        var removed = beforeSymbols.Except(afterSymbols, StringComparer.Ordinal).Take(8).ToList();
+        var unchanged = afterSymbols.Intersect(beforeSymbols, StringComparer.Ordinal).Take(8).ToList();
+        return
+        [
+            $"Added symbols: {FormatInlineList(added)}",
+            $"Removed symbols: {FormatInlineList(removed)}",
+            $"Still present: {FormatInlineList(unchanged)}"
+        ];
+    }
+
+    private static IReadOnlyList<string> ExtractLightweightSymbols(IEnumerable<string> texts) =>
+        texts
+            .SelectMany(text => Regex.Matches(text, @"\b(?:class|record|interface|enum|struct|void|string|int|bool|Task|ICommand)\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .Select(match => match.Groups[1].Value))
+            .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(symbol => symbol, StringComparer.Ordinal)
+            .Take(80)
+            .ToList();
+
+    private static string ClassifyPatchOutcome(CodingToolAction action, CodingToolResult result)
+    {
+        if (result.Succeeded && action is CodingToolAction.ApplyLastPatchPreview or CodingToolAction.ReplaceText or CodingToolAction.CreateFile or CodingToolAction.AppendFile)
+        {
+            return "Good - edit applied; run queued validation next";
+        }
+
+        if (result.Succeeded && action is CodingToolAction.Build or CodingToolAction.Test)
+        {
+            return "Good - validation command passed";
+        }
+
+        if (!result.Succeeded && action is CodingToolAction.Build or CodingToolAction.Test)
+        {
+            return "Needs Fix - validation failed; use failure repair packet";
+        }
+
+        if (!result.Succeeded && result.Message.Contains("needs confirmation", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Blocked - owner confirmation required";
+        }
+
+        return result.Succeeded ? "Good" : "Needs More Context";
+    }
+
+    private static string ClassifyRiskAwareTestDepth(IReadOnlyList<string> changedFiles)
+    {
+        var labels = changedFiles.Select(ClassifyFileRisk).ToList();
+        if (labels.Any(label => label.Contains("runtime", StringComparison.OrdinalIgnoreCase)
+            || label.Contains("installer", StringComparison.OrdinalIgnoreCase)
+            || label.Contains("policy", StringComparison.OrdinalIgnoreCase)
+            || label.Contains("Protected", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Strong - run targeted tests, full build, safe commit check, and inspect receipts";
+        }
+
+        if (labels.Any(label => label.Contains("application", StringComparison.OrdinalIgnoreCase)
+            || label.Contains("test", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Medium - run impacted tests plus build";
+        }
+
+        return changedFiles.Count == 0
+            ? "None - no changed files detected"
+            : "Light - review diff and run focused validation if behavior changed";
+    }
+
+    private static IReadOnlyList<string> BuildSymbolRollbackHintRows(IReadOnlyList<string> changedFiles)
+    {
+        if (changedFiles.Count == 0)
+        {
+            return ["No symbol rollback impact - working tree is clean"];
+        }
+
+        return changedFiles.Take(8)
+            .Select(file => $"{file}: rollback may affect {ClassifyFileRisk(file)}; rerun impacted tests after any reverse patch")
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> BuildFailureRepairPacketV3Rows(CodingToolAction action, IReadOnlyList<string> diagnostics)
+    {
+        var firstDiagnostic = diagnostics.FirstOrDefault() ?? "no structured diagnostic captured";
+        return
+        [
+            "1. Inspect - open last diagnostic",
+            $"2. Map - map compiler diagnostic {TrimForChat(firstDiagnostic, 140)}",
+            "3. Candidate - suggest last failure patch",
+            action == CodingToolAction.Test ? "4. Validate - rerun the targeted failing test" : "4. Validate - rerun the failed build command",
+            "5. Closeout - show validation ledger, then safe commit check"
+        ];
+    }
+
+    private static string BuildScoreExplainerLine() =>
+        "Score explainer: 96% means Ali can plan, preview, validate, and audit local coding work with owner approval; remaining gap is reviewed queued command execution and deeper multi-file refactor autonomy.";
     private static IReadOnlyList<string> BuildFocusedTestRunnerRecommendations(
         IReadOnlyList<string> testCommands,
         IReadOnlyList<ProjectSummary> summaries)
@@ -7643,20 +7773,21 @@ public sealed class LocalCodingToolService(
         var commandSurface = ShowCommandSurfaceDoctor();
         var scores = new (string Name, int Score, string Note)[]
         {
-            ("Codebase awareness", 94, "per-symbol stale detection, durable symbol ownership ledger, project index v4, intent detection, compressed repo map, cross-language routes, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
-            ("Edit planning", 87, "edit impact scoring, focused test recommendation, task classification, change impact preview, semantic edit targets, reference graph, impact radius, refactor safety hints, autonomous preflight"),
-            ("Patch safety", 85, "route repair packets, packet repair hints, exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
-            ("Validation/release", 86, "autonomous validation plan, release readiness score, session journal, failure triage v2, prioritized test recommendation, build order, safe commit and customer-friendly release notes"),
-            ("Autonomous workflow", 85, "project-index refresh automation, packet repair hints, session journal, self-checking preflight, packet self-score, prerequisite gates, and receipts exist; still requires owner approval for writes and commands"),
-            ("Dashboard usability", 84, "status-only command rows, route diff repair packets, plus one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
+            ("Codebase awareness", 95, "per-symbol stale detection, durable symbol ownership ledger, project index v4, intent detection, compressed repo map, cross-language routes, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
+            ("Edit planning", 89, "before/after symbol diff receipts, edit impact scoring, focused test recommendation, task classification, change impact preview, semantic edit targets, reference graph, impact radius, refactor safety hints, autonomous preflight"),
+            ("Patch safety", 88, "patch outcome classifier, symbol rollback hints, route repair packets, packet repair hints, exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
+            ("Validation/release", 90, "queued validation command packets, risk-aware test depth, release readiness score, session journal, failure repair packet v3, prioritized test recommendation, build order, safe commit and customer-friendly release notes"),
+            ("Autonomous workflow", 88, "project-index refresh automation, queued command rows, packet repair hints, session journal, self-checking preflight, packet self-score, prerequisite gates, and receipts exist; still requires owner approval for writes and commands"),
+            ("Dashboard usability", 86, "command queue dashboard rows, status-only command rows, route diff repair packets, plus one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
         };
-        var overall = 94;
+        var overall = 96;
         var lines = new List<string>
         {
             "Mini-Codex status:",
             "No files were changed.",
             $"Overall score: {overall}%",
             "Scale note: local Project Ali score, not a claim of parity with cloud Codex.",
+            BuildScoreExplainerLine(),
             $"Project index v4: {projectIndexStatus.Summary}",
             $"Git: {gitStatus.Summary}",
             latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
@@ -7675,14 +7806,27 @@ public sealed class LocalCodingToolService(
         lines.Add(latestValidation?.Succeeded == true ? "- Validation: Good" : "- Validation: Needs build/test receipt");
         lines.Add(commandSurface.Succeeded ? "- Route drift: Good" : "- Route drift: Review command surface doctor");
         lines.Add($"- Project index refresh automation: {FormatInlineList(BuildProjectIndexRefreshRows(projectIndexStatus).Take(2))}");
-        lines.Add("- Next best upgrade: add edit application receipts with automatic before/after symbol diffing.");
+        lines.Add("- Next best upgrade: turn queued validation packets into a reviewed one-click execution lane.");
         lines.Add("Next upgrade path:");
-        lines.Add("- Raise codebase awareness toward 96 by adding before/after symbol diff receipts.");
-        lines.Add("- Raise autonomous workflow toward 88 by converting validation plans into queued, owner-approved command packets.");
+        lines.Add("- Raise codebase awareness toward 97 by enforcing before/after symbol diffs on every edit path.");
+        lines.Add("- Raise autonomous workflow toward 90 by converting validation packets into queued, owner-approved command execution UX.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Mini-Codex status", Policy.WorkspaceRoot);
     }
 
+    private static IReadOnlyList<string> BuildEditReceiptTimelineRows(IReadOnlyList<CodingReceipt> receipts)
+    {
+        var rows = new List<string>();
+        var preview = receipts.LastOrDefault(receipt => receipt.Action is nameof(CodingToolAction.PreviewReplaceText) or nameof(CodingToolAction.PreviewPatchBundle));
+        var apply = receipts.LastOrDefault(receipt => receipt.Action is nameof(CodingToolAction.ApplyLastPatchPreview) or nameof(CodingToolAction.ReplaceText) or nameof(CodingToolAction.CreateFile) or nameof(CodingToolAction.AppendFile));
+        var validation = receipts.LastOrDefault(IsValidationReceipt);
+        var closeout = receipts.LastOrDefault(receipt => receipt.Action is nameof(CodingToolAction.ShowSafeCommitCheck) or nameof(CodingToolAction.ReviewCurrentChanges));
+        rows.Add(preview is null ? "- Patch preview: Waiting" : FormatReceiptSummary("- Patch preview", preview));
+        rows.Add(apply is null ? "- Applied edit: Waiting" : FormatReceiptSummary("- Applied edit", apply));
+        rows.Add(validation is null ? "- Validation: Waiting" : FormatReceiptSummary("- Validation", validation));
+        rows.Add(closeout is null ? "- Commit readiness: Waiting" : FormatReceiptSummary("- Commit readiness", closeout));
+        return rows;
+    }
     private CodingToolResult ShowValidationLedger()
     {
         var receipts = ReadRecentReceipts(30);
@@ -7705,6 +7849,10 @@ public sealed class LocalCodingToolService(
         };
         var validationReceipts = receipts.Where(IsValidationReceipt).TakeLast(8).ToList();
         lines.AddRange(validationReceipts.Count == 0 ? ["- none found"] : validationReceipts.Select(receipt => FormatReceiptSummary("-", receipt)));
+        lines.Add("Edit receipt timeline v2:");
+        lines.AddRange(BuildEditReceiptTimelineRows(receipts));
+        lines.Add("Command queue dashboard rows:");
+        lines.AddRange(BuildValidationQueueRows("current change", [], null).Select(row => $"- {row}"));
         lines.Add("Rule - every non-trivial edit should end with review, build, and test evidence before release.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation ledger", Policy.WorkspaceRoot);
     }
@@ -9182,6 +9330,9 @@ public sealed class LocalCodingToolService(
             lines.AddRange(changedFiles.Take(12).Select(file => $"- {file}"));
         }
 
+        lines.Add("Symbol-level rollback hints:");
+        lines.AddRange(BuildSymbolRollbackHintRows(changedFiles).Select(row => $"- {row}"));
+
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Rollback plan", Policy.WorkspaceRoot);
     }
 
@@ -9754,8 +9905,11 @@ public sealed class LocalCodingToolService(
                 ? "- Test command: none resolved"
                 : $"- Test command: {testTarget.Command}",
             $"- Build command: confirm dotnet build \"{primaryTarget}\"",
-            "- Review command: show pending patch preview"
+            "- Review command: show pending patch preview",
+            $"- Risk-aware test depth: {ClassifyRiskAwareTestDepth(paths.Select(RelativeToWorkspace).ToList())}"
         };
+        lines.Add("Queued validation command packet:");
+        lines.AddRange(BuildValidationQueueRows(query, paths.Select(RelativeToWorkspace).ToList(), testTarget).Select(row => $"- {row}"));
         lines.Add("Semantic patch checks:");
         lines.AddRange(BuildSemanticPatchCheckLines(paths));
         return lines;
@@ -9801,11 +9955,12 @@ public sealed class LocalCodingToolService(
                 applyRequest.Path);
         }
 
+        var beforeAfterRows = BuildBeforeAfterSymbolDiffRows([applyRequest.Content ?? string.Empty], [applyRequest.Replacement ?? string.Empty]);
         var result = await EditFileAsync(applyRequest, cancellationToken).ConfigureAwait(false);
         return result.Succeeded
             ? result with
             {
-                Message = $"Applied last patch preview.{Environment.NewLine}{result.Message}",
+                Message = $"Applied last patch preview.{Environment.NewLine}{result.Message}{Environment.NewLine}Before/after symbol diff:{Environment.NewLine}{string.Join(Environment.NewLine, beforeAfterRows.Select(row => $"- {row}"))}",
                 ToolName = "Patch preview apply"
             }
             : result with
@@ -9878,6 +10033,10 @@ public sealed class LocalCodingToolService(
             $"Applied {prepared.Edits.Count} edit(s) across {changedFiles.Count} file(s)."
         };
         lines.AddRange(changedFiles.Select(path => $"- {path}"));
+        lines.Add("Before/after symbol diff:");
+        lines.AddRange(BuildBeforeAfterSymbolDiffRows(prepared.Edits.Select(edit => edit.BeforeSnippet), prepared.Edits.Select(edit => edit.AfterSnippet)).Select(row => $"- {row}"));
+        lines.Add("Queued validation command packet:");
+        lines.AddRange(BuildValidationQueueRows(string.Join(" ", changedFiles.Select(Path.GetFileNameWithoutExtension)), changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
 
         return new CodingToolResult(
             true,
@@ -11147,7 +11306,10 @@ public sealed class LocalCodingToolService(
             result.ToolName,
             result.TargetPath,
             result.ExitCode,
-            result.Message
+            result.Message,
+            patchOutcome = ClassifyPatchOutcome(request.Action, result),
+            riskAwareTestDepth = ClassifyRiskAwareTestDepth(result.TargetPath is null ? [] : [RelativeToWorkspace(result.TargetPath)]),
+            validationQueue = BuildValidationQueueRows(request.Query ?? Path.GetFileNameWithoutExtension(result.TargetPath ?? string.Empty), result.TargetPath is null ? [] : [RelativeToWorkspace(result.TargetPath)])
         });
         await File.AppendAllTextAsync(_actionLogPath, line + Environment.NewLine, cancellationToken).ConfigureAwait(false);
     }
@@ -13209,7 +13371,9 @@ public sealed class LocalCodingToolService(
             var succeeded = ReadBool(root, "Succeeded") ?? ReadBool(root, "succeeded") ?? false;
             var targetPath = ReadString(root, "TargetPath") ?? ReadString(root, "targetPath");
             var exitCode = ReadInt(root, "ExitCode") ?? ReadInt(root, "exitCode");
-            return new CodingReceipt(timestamp, action, succeeded, targetPath, exitCode);
+            var patchOutcome = ReadString(root, "PatchOutcome") ?? ReadString(root, "patchOutcome");
+            var riskAwareTestDepth = ReadString(root, "RiskAwareTestDepth") ?? ReadString(root, "riskAwareTestDepth");
+            return new CodingReceipt(timestamp, action, succeeded, targetPath, exitCode, patchOutcome, riskAwareTestDepth);
         }
         catch (JsonException)
         {
@@ -13708,6 +13872,8 @@ public sealed class LocalCodingToolService(
         lines.AddRange(errorLines.Count == 0 ? ["- none detected"] : errorLines.Select(line => $"- {line}"));
         lines.Add("Patch candidate ranking:");
         lines.AddRange(BuildFailurePatchCandidateRanking(action, diagnostics).Select(line => $"- {line}"));
+        lines.Add("Failure repair packet v3:");
+        lines.AddRange(BuildFailureRepairPacketV3Rows(action, diagnostics).Select(line => $"- {line}"));
         lines.Add("Smallest next fix:");
         lines.Add(action == CodingToolAction.Test
             ? "- Open the first failing test or assertion, then compare expected behavior to the changed source."
@@ -14450,7 +14616,9 @@ public sealed class LocalCodingToolService(
         string Action,
         bool Succeeded,
         string? TargetPath,
-        int? ExitCode);
+        int? ExitCode,
+        string? PatchOutcome = null,
+        string? RiskAwareTestDepth = null);
 
     private sealed record GitWorkingTreeStatus(
         bool Available,
