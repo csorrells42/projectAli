@@ -264,9 +264,11 @@ public sealed class MainWindowViewModel : ObservableObject
         RunPeripheralSetupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Peripheral setup plan", "plan peripheral setup audio microphone or USB device", "Maintenance.PeripheralSetupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingValidationPlanCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation plan", "validation plan", "Coding.ValidationPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSafeCommitCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Safe commit", "can i safely commit", "Coding.SafeCommit"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -671,11 +673,15 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingProjectIntelligenceCommand { get; }
 
+    public ICommand RunCodingRepoUnderstandingCommand { get; }
+
     public ICommand RunCodingGitStatusCommand { get; }
 
     public ICommand RunCodingReviewChangesCommand { get; }
 
     public ICommand RunCodingValidationPlanCommand { get; }
+
+    public ICommand RunCodingSafeCommitCommand { get; }
 
     public ICommand RunCodingBuildCommand { get; }
 
@@ -3215,6 +3221,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return CompactProjectIntelligenceLines(lines);
         }
 
+        if (command.StartsWith("understand repo", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactRepoUnderstandingLines(lines);
+        }
+
         if (command.StartsWith("git status", StringComparison.OrdinalIgnoreCase))
         {
             return CompactGitStatusLines(lines);
@@ -3228,6 +3239,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (command.StartsWith("validation plan", StringComparison.OrdinalIgnoreCase))
         {
             return CompactValidationPlanLines(lines);
+        }
+
+        if (command.StartsWith("can i safely commit", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactSafeCommitLines(lines);
         }
 
         if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase)
@@ -3281,6 +3297,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return "Next - Use Plan, Build, Tests, or Review from the Programming dashboard.";
         }
 
+        if (command.StartsWith("understand repo", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Pick the action that matches the weakest row above.";
+        }
+
         if (command.StartsWith("review current changes", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Run build/tests before committing reviewed changes.";
@@ -3289,6 +3310,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (command.StartsWith("validation plan", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Run Build, then Tests, then Review.";
+        }
+
+        if (command.StartsWith("can i safely commit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Commit only if Safe to commit says Yes.";
         }
 
         if (command.StartsWith("confirm dotnet build", StringComparison.OrdinalIgnoreCase))
@@ -3395,6 +3421,43 @@ public sealed class MainWindowViewModel : ObservableObject
             .Take(10)
             .ToList();
         return compact.Count > 0 ? compact : ["Project intelligence - No project summary returned"];
+    }
+
+    private static IReadOnlyList<string> CompactRepoUnderstandingLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Shape:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Detected stacks:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Style signals:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Project roles:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Primary target:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Build commands:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Test commands:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Safe to commit:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Git:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Validation:", StringComparison.OrdinalIgnoreCase))
+            .Select(line => ShortMaintenanceDetail(line.TrimStart('-', ' ')))
+            .Take(12)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Repo understanding - No summary returned"];
+    }
+
+    private static IReadOnlyList<string> CompactSafeCommitLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Safe to commit:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Git:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Validation:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Pending patch preview:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Git", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- No successful", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- A pending", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Run ", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Review ", StringComparison.OrdinalIgnoreCase))
+            .Select(line => ShortMaintenanceDetail(line.TrimStart('-', ' ')))
+            .Take(10)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Safe commit - No readiness summary returned"];
     }
 
     private static IReadOnlyList<string> CompactGitStatusLines(IReadOnlyList<string> lines)
@@ -6477,6 +6540,11 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingProjectIntelligence.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingRepoUnderstandingCommand is AsyncRelayCommand runCodingRepoUnderstanding)
+        {
+            runCodingRepoUnderstanding.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingGitStatusCommand is AsyncRelayCommand runCodingGitStatus)
         {
             runCodingGitStatus.RaiseCanExecuteChanged();
@@ -6490,6 +6558,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingValidationPlanCommand is AsyncRelayCommand runCodingValidationPlan)
         {
             runCodingValidationPlan.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSafeCommitCommand is AsyncRelayCommand runCodingSafeCommit)
+        {
+            runCodingSafeCommit.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildCommand is AsyncRelayCommand runCodingBuild)

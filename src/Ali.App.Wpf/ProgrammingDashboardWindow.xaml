@@ -81,12 +81,16 @@
                                         Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
                                 <Button Content="Intelligence"
                                         Command="{Binding RunCodingProjectIntelligenceCommand}" />
+                                <Button Content="Understand Repo"
+                                        Command="{Binding RunCodingRepoUnderstandingCommand}" />
                                 <Button Content="Git"
                                         Command="{Binding RunCodingGitStatusCommand}" />
                                 <Button Content="Review"
                                         Command="{Binding RunCodingReviewChangesCommand}" />
                                 <Button Content="Validate"
                                         Command="{Binding RunCodingValidationPlanCommand}" />
+                                <Button Content="Safe Commit"
+                                        Command="{Binding RunCodingSafeCommitCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>

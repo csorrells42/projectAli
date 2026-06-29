@@ -65,6 +65,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
     ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
     ("coding parser routes project intelligence", TestCodingParserRoutesProjectIntelligence),
+    ("coding parser routes repo understanding and safe commit", TestCodingParserRoutesRepoUnderstandingAndSafeCommit),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
@@ -115,6 +116,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool shows project intelligence", TestLocalCodingToolShowsProjectIntelligence),
+    ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
+    ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
@@ -644,6 +647,16 @@ static Task TestCodingParserRoutesProjectIntelligence()
 
     Equal(true, CodingToolRequestParser.TryParse("repo intelligence", out var repoRequest));
     Equal(CodingToolAction.ShowProjectIntelligence, repoRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesRepoUnderstandingAndSafeCommit()
+{
+    Equal(true, CodingToolRequestParser.TryParse("understand repo", out var understandRequest));
+    Equal(CodingToolAction.ShowRepoUnderstanding, understandRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("can i safely commit", out var commitRequest));
+    Equal(CodingToolAction.ShowSafeCommitCheck, commitRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -2369,6 +2382,9 @@ static async Task TestLocalCodingToolShowsProjectIntelligence()
         </Project>
         """);
     await File.WriteAllTextAsync(Path.Combine(appDirectory, "MainWindow.xaml"), "<Window />");
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "MainWindowViewModel.cs"), "namespace Demo.App; public sealed class MainWindowViewModel { }");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "package.json"), "{\"scripts\":{\"build\":\"vite build\",\"test\":\"vitest\"}}");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "pyproject.toml"), "[project]\nname=\"demo\"");
 
     var testsDirectory = Path.Combine(workspace, "Demo.Tests");
     Directory.CreateDirectory(testsDirectory);
@@ -2398,10 +2414,76 @@ static async Task TestLocalCodingToolShowsProjectIntelligence()
     Contains($"Primary target: Demo.sln", result.Message);
     Contains($"Likely app/host projects: {Path.Combine("Demo.App", "Demo.App.csproj")}", result.Message);
     Contains($"Likely test projects: {Path.Combine("Demo.Tests", "Demo.Tests.csproj")}", result.Message);
-    Contains("Other project markers: README.md", result.Message);
+    Contains("Other project markers:", result.Message);
+    Contains("README.md", result.Message);
+    Contains("Detected stacks:", result.Message);
+    Contains("Node/JavaScript", result.Message);
+    Contains("Python", result.Message);
+    Contains("Style signals:", result.Message);
+    Contains("MVVM naming", result.Message);
     Contains("Recommended commands:", result.Message);
     Contains("confirm dotnet build", result.Message);
     Contains("confirm dotnet test", result.Message);
+    Contains("npm run build", result.Message);
+    Contains("pytest", result.Message);
+}
+
+static async Task TestLocalCodingToolShowsRepoUnderstanding()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "package.json"), "{\"scripts\":{\"build\":\"vite build\",\"test\":\"vitest\"}}");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(projectDirectory, "Demo.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("understand repo", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Repo understanding", result.Message);
+    Contains("Shape:", result.Message);
+    Contains("Detected stacks:", result.Message);
+    Contains("Build commands:", result.Message);
+    Contains("Safe to commit:", result.Message);
+}
+
+static async Task TestLocalCodingToolShowsSafeCommitCheck()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine} M Program.cs", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("can i safely commit", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Commit readiness check", result.Message);
+    Contains("Safe to commit: No", result.Message);
+    Contains("Git: 1 uncommitted change(s) detected", result.Message);
+    Contains("No successful build/test validation receipt", result.Message);
 }
 
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()

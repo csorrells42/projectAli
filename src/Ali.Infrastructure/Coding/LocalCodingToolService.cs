@@ -179,6 +179,8 @@ public sealed class LocalCodingToolService(
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.ShowProjectIntelligence => ShowProjectIntelligence(),
+            CodingToolAction.ShowRepoUnderstanding => await ShowRepoUnderstandingAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowSafeCommitCheck => await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
             CodingToolAction.ShowArchitectureOptions => ShowArchitectureOptions(request),
@@ -578,11 +580,18 @@ public sealed class LocalCodingToolService(
     private CodingToolResult SuggestFeatureTests(CodingToolRequest request)
     {
         var goal = CleanGoal(request.Query, "current feature");
+        var files = Directory.Exists(Policy.WorkspaceRoot)
+            ? EnumerateWorkspaceFiles().Take(10_000).ToList()
+            : [];
+        var summaries = GetWorkspaceProjectSummaries();
+        var buildCommands = DiscoverBuildCommands(files, summaries, GetPrimaryTarget()).ToList();
+        var testCommands = DiscoverTestCommands(files, summaries, GetPrimaryTarget()).ToList();
         var lines = new List<string>
         {
             "Feature test suggestions:",
             $"Goal: {goal}",
             "No files were changed.",
+            $"Detected stacks: {FormatInlineList(DetectStackSignals(files, summaries))}",
             "Focused tests:",
             "- Parser route test for every new owner phrase.",
             "- Service output test for key sections and truth boundaries.",
@@ -608,8 +617,15 @@ public sealed class LocalCodingToolService(
 
         lines.Add("Validation commands:");
         lines.Add("- plan post edit validation");
-        lines.Add("- confirm dotnet build \"path-to-solution-or-project\"");
-        lines.Add("- confirm dotnet test \"path-to-test-project-or-solution\"");
+        foreach (var command in buildCommands.Take(3))
+        {
+            lines.Add($"- {command}");
+        }
+
+        foreach (var command in testCommands.Take(3))
+        {
+            lines.Add($"- {command}");
+        }
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature test suggestions", Policy.WorkspaceRoot);
     }
@@ -631,6 +647,10 @@ public sealed class LocalCodingToolService(
             $"JSON files detected: {files.Count(file => file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))}"
         };
 
+        lines.Add($"Detected stacks: {FormatInlineList(DetectStackSignals(files, summaries))}");
+        lines.Add($"Style signals: {FormatInlineList(DetectStyleSignals(files, summaries))}");
+        lines.Add($"Build commands: {FormatInlineList(DiscoverBuildCommands(files, summaries, GetPrimaryTarget()))}");
+        lines.Add($"Test commands: {FormatInlineList(DiscoverTestCommands(files, summaries, GetPrimaryTarget()))}");
         var packages = summaries.SelectMany(summary => summary.PackageReferences).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).Take(18).ToList();
         lines.Add("Observed package patterns:");
         lines.Add(packages.Count == 0 ? "- none detected" : $"- {string.Join(", ", packages)}");
@@ -5158,12 +5178,18 @@ public sealed class LocalCodingToolService(
             .Take(8)
             .Select(RelativeToWorkspace)
             .ToList();
+        var stackSignals = DetectStackSignals(files, summaries);
+        var styleSignals = DetectStyleSignals(files, summaries);
+        var buildCommands = DiscoverBuildCommands(files, summaries, primaryTarget).ToList();
+        var testCommands = DiscoverTestCommands(files, summaries, primaryTarget).ToList();
 
         var lines = new List<string>
         {
             $"Project intelligence scan: {Policy.WorkspaceRoot}",
             "No files were changed.",
             $"Shape: {solutions.Count} solution(s), {projects.Count} .NET project(s), {files.Count} file(s) scanned.",
+            $"Detected stacks: {FormatInlineList(stackSignals)}",
+            $"Style signals: {FormatInlineList(styleSignals)}",
             $"Project roles: {roleSummary}",
             primaryTarget is null
                 ? "Primary target: not found"
@@ -5176,17 +5202,28 @@ public sealed class LocalCodingToolService(
         AddCompactList(lines, "Other project markers", markers);
 
         lines.Add("Recommended commands:");
-        if (primaryTarget is not null)
+        if (buildCommands.Count > 0)
         {
-            lines.Add($"- Build: confirm dotnet build \"{primaryTarget}\"");
-            lines.Add(testProjects.Count > 0
-                ? $"- Tests: confirm dotnet test \"{primaryTarget}\""
-                : "- Tests: no test project detected; add or identify tests before risky changes.");
+            foreach (var command in buildCommands.Take(4))
+            {
+                lines.Add($"- Build: {command}");
+            }
         }
         else
         {
-            lines.Add("- Build: choose a solution or project first.");
-            lines.Add("- Tests: choose a test project first.");
+            lines.Add("- Build: choose a solution, project, package, or script target first.");
+        }
+
+        if (testCommands.Count > 0)
+        {
+            foreach (var command in testCommands.Take(4))
+            {
+                lines.Add($"- Tests: {command}");
+            }
+        }
+        else
+        {
+            lines.Add("- Tests: no test command detected; add or identify tests before risky changes.");
         }
 
         lines.Add("- Review: review current changes");
@@ -5220,6 +5257,125 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Project intelligence",
             Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowRepoUnderstandingAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var intelligence = ShowProjectIntelligence();
+        var architecture = AnalyzeArchitecture();
+        var patterns = DetectCodebasePatterns();
+        var validation = await PlanPostEditValidationAsync(cancellationToken).ConfigureAwait(false);
+        var safeCommit = await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false);
+
+        var lines = new List<string>
+        {
+            $"Repo understanding: {Policy.WorkspaceRoot}",
+            "No files were changed.",
+            "Project:",
+        };
+        AddSelectedLines(lines, intelligence.Message, 8,
+            "Shape:",
+            "Detected stacks:",
+            "Style signals:",
+            "Project roles:",
+            "Primary target:",
+            "Likely app",
+            "Likely test",
+            "Other project markers:");
+        lines.Add("Architecture:");
+        AddSelectedLines(lines, architecture.Message, 7,
+            "Solutions found:",
+            "Projects found:",
+            "Project role summary:",
+            "App/UI entry projects:",
+            "Test projects:",
+            "Estimated project build order:");
+        lines.Add("Patterns:");
+        AddSelectedLines(lines, patterns.Message, 6,
+            "Detected stacks:",
+            "Style signals:",
+            "Build commands:",
+            "Test commands:");
+        lines.Add("Validation:");
+        AddSelectedLines(lines, validation.Message, 5,
+            "Git:",
+            "Latest validation:",
+            "- Build:",
+            "- Tests:",
+            "- Review:");
+        lines.Add("Commit readiness:");
+        AddSelectedLines(lines, safeCommit.Message, 6,
+            "Safe to commit:",
+            "Git:",
+            "Validation:",
+            "Pending patch preview:",
+            "Required next step:");
+        lines.Add("Next - Pick Plan, Build, Tests, Review, or Safe Commit from the Programming dashboard.");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Repo understanding", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowSafeCommitCheckAsync(CancellationToken cancellationToken)
+    {
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        var hasPendingPatchPreview = _lastPatchPreviewRequest is not null;
+        var hasSuccessfulValidation = latestDotNetReceipt?.Succeeded == true
+            || _lastDotNetResult?.Succeeded == true;
+        var blockers = new List<string>();
+        if (!gitStatus.Available)
+        {
+            blockers.Add("Git status is unavailable.");
+        }
+        else if (gitStatus.Clean)
+        {
+            blockers.Add("Working tree is clean; there is nothing obvious to commit.");
+        }
+
+        if (!hasSuccessfulValidation)
+        {
+            blockers.Add("No successful build/test validation receipt is available in this session.");
+        }
+
+        if (hasPendingPatchPreview)
+        {
+            blockers.Add("A pending patch preview still exists; apply or discard it before committing.");
+        }
+
+        var safe = blockers.Count == 0;
+        var lines = new List<string>
+        {
+            "Commit readiness check:",
+            "No files were changed.",
+            $"Safe to commit: {(safe ? "Yes" : "No")}",
+            $"Git: {gitStatus.Summary}",
+            latestDotNetReceipt is null
+                ? "Validation: none found"
+                : FormatReceiptSummary("Validation", latestDotNetReceipt),
+            hasPendingPatchPreview
+                ? "Pending patch preview: yes"
+                : "Pending patch preview: none",
+            "Decision factors:"
+        };
+
+        if (blockers.Count == 0)
+        {
+            lines.Add("- Git has changes and the latest validation is successful.");
+            lines.Add("- Review the exact diff one final time before committing.");
+        }
+        else
+        {
+            lines.AddRange(blockers.Select(blocker => $"- {blocker}"));
+        }
+
+        lines.Add("Required next step:");
+        lines.Add(safe
+            ? "- Review current changes, then commit with an owner-approved message."
+            : "- Run Review, Build, and Tests until the rows above are good.");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Commit readiness", Policy.WorkspaceRoot);
     }
 
     private CodingToolResult ListPackages(CodingToolRequest request)
@@ -7057,6 +7213,185 @@ public sealed class LocalCodingToolService(
             .Take(12)
             .Select(RelativeToWorkspace)
             .ToList();
+    }
+
+    private List<string> DetectStackSignals(
+        IReadOnlyList<string> files,
+        IReadOnlyList<ProjectSummary> summaries)
+    {
+        var signals = new List<string>();
+        if (summaries.Count > 0)
+        {
+            signals.Add(".NET/C#");
+        }
+
+        if (summaries.Any(summary => summary.ProjectRole.Contains("desktop", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("WPF/desktop UI");
+        }
+
+        if (summaries.Any(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add(".NET tests");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("package.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("Node/JavaScript");
+        }
+
+        if (files.Any(file => file.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase)
+                              || file.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("React-style UI");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase)
+                              || Path.GetFileName(file).Equals("requirements.txt", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("Python");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("Dockerfile", StringComparison.OrdinalIgnoreCase)
+                              || Path.GetFileName(file).Equals("docker-compose.yml", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("Docker");
+        }
+
+        if (files.Any(file => file.Contains($"{Path.DirectorySeparatorChar}.github{Path.DirectorySeparatorChar}workflows{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("GitHub Actions CI");
+        }
+
+        return signals
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(signal => signal, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private List<string> DetectStyleSignals(
+        IReadOnlyList<string> files,
+        IReadOnlyList<ProjectSummary> summaries)
+    {
+        var signals = new List<string>();
+        if (files.Any(file => Path.GetFileName(file).EndsWith("ViewModel.cs", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("MVVM naming");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("App.xaml", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("WPF app startup");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("Directory.Build.props", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("central MSBuild props");
+        }
+
+        if (summaries.SelectMany(summary => summary.PackageReferences).Any(package => package.StartsWith("CommunityToolkit.Mvvm", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("CommunityToolkit MVVM");
+        }
+
+        if (files.Any(file => file.EndsWith(".editorconfig", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("editorconfig style rules");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("README.md", StringComparison.OrdinalIgnoreCase)))
+        {
+            signals.Add("README-guided project");
+        }
+
+        return signals
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(signal => signal, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private IEnumerable<string> DiscoverBuildCommands(
+        IReadOnlyList<string> files,
+        IReadOnlyList<ProjectSummary> summaries,
+        string? primaryTarget)
+    {
+        var commands = new List<string>();
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            commands.Add($"confirm dotnet build \"{primaryTarget}\"");
+        }
+        else if (summaries.Count > 0)
+        {
+            commands.Add($"confirm dotnet build \"{Path.Combine(Policy.WorkspaceRoot, summaries[0].RelativePath)}\"");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("package.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            commands.Add("npm run build");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase)))
+        {
+            commands.Add("python -m build");
+        }
+
+        return commands.Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private IEnumerable<string> DiscoverTestCommands(
+        IReadOnlyList<string> files,
+        IReadOnlyList<ProjectSummary> summaries,
+        string? primaryTarget)
+    {
+        var commands = new List<string>();
+        if (summaries.Any(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase)))
+        {
+            commands.Add(!string.IsNullOrWhiteSpace(primaryTarget)
+                ? $"confirm dotnet test \"{primaryTarget}\""
+                : $"confirm dotnet test \"{Path.Combine(Policy.WorkspaceRoot, summaries.First(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase)).RelativePath)}\"");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("package.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            commands.Add("npm test");
+        }
+
+        if (files.Any(file => Path.GetFileName(file).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase)
+                              || Path.GetFileName(file).Equals("pytest.ini", StringComparison.OrdinalIgnoreCase)))
+        {
+            commands.Add("pytest");
+        }
+
+        return commands.Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string FormatInlineList(IEnumerable<string> items)
+    {
+        var list = items
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        return list.Count == 0 ? "none detected" : string.Join(", ", list);
+    }
+
+    private static void AddSelectedLines(
+        List<string> target,
+        string text,
+        int limit,
+        params string[] prefixes)
+    {
+        var selected = SplitNonEmptyLines(text)
+            .Where(line => prefixes.Any(prefix => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Take(limit)
+            .ToList();
+        if (selected.Count == 0)
+        {
+            target.Add("- no matching summary lines");
+            return;
+        }
+
+        target.AddRange(selected.Select(line => "- " + line.TrimStart('-', ' ')));
     }
 
     private static void AddCompactList(List<string> lines, string title, IReadOnlyList<string> items)

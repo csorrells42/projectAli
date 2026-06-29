@@ -9,6 +9,8 @@ public enum CodingToolAction
     InspectWorkspace,
     AnalyzeArchitecture,
     ShowProjectIntelligence,
+    ShowRepoUnderstanding,
+    ShowSafeCommitCheck,
     PlanTask,
     InterpretBuildGoal,
     ShowArchitectureOptions,

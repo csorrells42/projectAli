@@ -47,6 +47,7 @@ public static class CodingAbilityCatalog
             [
                 new("Interpret goal", "interpret build goal <goal>"),
                 new("Project intelligence", "show project intelligence"),
+                new("Understand repo", "understand repo"),
                 new("Explore idea", "explore build idea <goal>"),
                 new("Architecture options", "show architecture options <goal>"),
                 new("Package lookup plan", "plan package lookup <goal>"),
@@ -72,6 +73,7 @@ public static class CodingAbilityCatalog
                 new("Packet console", "show packet commands"),
                 new("Run packet item", "confirm run packet item N", RequiresConfirmation: true),
                 new("Review changes", "review current changes"),
+                new("Safe commit", "can i safely commit"),
                 new("Validation plan", "validation plan")
             ]),
         new(
@@ -257,6 +259,7 @@ public static class CodingAbilityCatalog
                 new("Command index", "Show deterministic coding commands Ali supports.", "show coding skill command index", "show coding skill command index"),
                 new("Inspect workspace", "Inspect the approved coding workspace.", "inspect coding workspace", "inspect coding workspace"),
                 new("Project intelligence", "Summarize project shape, likely app/test targets, safe commands, and risk notes.", "show project intelligence", "show project intelligence"),
+                new("Understand repo", "Run Ali's orientation rollup: intelligence, architecture, patterns, validation, and commit readiness.", "understand repo", "understand repo"),
                 new("Analyze solution", "Analyze solution architecture.", "analyze solution architecture", "analyze solution architecture"),
                 new("List packages", "List package references.", "list packages", "list packages"),
                 new("Plan coding task", "Draft a guarded implementation plan.", "plan coding task add a settings button", "plan coding task <goal>"),
@@ -264,6 +267,7 @@ public static class CodingAbilityCatalog
                 new("Test", "Run a confirmed dotnet test.", "confirm dotnet test \"C:\\path\\to\\solution-or-project\"", "confirm dotnet test \"C:\\path\\to\\solution-or-project\""),
                 new("Review changes", "Summarize uncommitted files, diff check status, risk hints, and next validation.", "review current changes", "review current changes"),
                 new("Validation plan", "Show the next build, test, review, and commit checks after edits.", "validation plan", "validation plan"),
+                new("Safe commit", "Give a simple yes/no commit readiness check.", "can i safely commit", "can i safely commit"),
                 new("Diagnose failure", "Summarize the last failed confirmed build or test.", "diagnose last build failure", "diagnose last build failure"),
                 new("Suggest fix", "Preview a deterministic patch for simple compiler failures without changing files.", "suggest patch from last failure", "suggest patch from last failure"),
                 new("Patch preview", "Show the pending patch preview before applying it.", "show pending patch preview", "show pending patch preview"),

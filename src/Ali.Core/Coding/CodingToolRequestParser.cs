@@ -1015,6 +1015,36 @@ public static class CodingToolRequestParser
         "summarize project intelligence"
     ];
 
+    private static readonly string[] RepoUnderstandingRequests =
+    [
+        "understand repo",
+        "understand this repo",
+        "understand repository",
+        "understand this repository",
+        "understand project",
+        "understand this project",
+        "repo understanding",
+        "repository understanding",
+        "project understanding",
+        "scan repo",
+        "scan repository",
+        "scan this repo"
+    ];
+
+    private static readonly string[] SafeCommitRequests =
+    [
+        "can i safely commit",
+        "safe to commit",
+        "am i safe to commit",
+        "is this safe to commit",
+        "commit readiness",
+        "show commit readiness",
+        "check commit readiness",
+        "pre commit check",
+        "pre-commit check",
+        "ready to commit"
+    ];
+
     private static readonly string[] PlanTaskPrefixes =
     [
         "plan coding task",
@@ -1246,6 +1276,18 @@ public static class CodingToolRequestParser
         if (IsProjectIntelligenceRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowProjectIntelligence, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRepoUnderstandingRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRepoUnderstanding, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsSafeCommitRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowSafeCommitCheck, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -1647,6 +1689,12 @@ public static class CodingToolRequestParser
 
     private static bool IsProjectIntelligenceRequest(string text) =>
         ProjectIntelligenceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRepoUnderstandingRequest(string text) =>
+        RepoUnderstandingRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSafeCommitRequest(string text) =>
+        SafeCommitRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsOpenSolutionRequest(string text) =>
         OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
