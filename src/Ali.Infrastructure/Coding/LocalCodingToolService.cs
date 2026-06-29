@@ -204,6 +204,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ResolveSemanticSymbol => ResolveSemanticSymbol(request),
             CodingToolAction.ShowImpactedTests => await ShowImpactedTestsAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanSemanticEdit => await PlanSemanticEditAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PlanSafeEditWorkflow => await PlanSafeEditWorkflowAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.MapCompilerDiagnostic => MapCompilerDiagnostic(request),
             CodingToolAction.VerifyXamlBindings => VerifyXamlBindings(),
             CodingToolAction.VerifyCommandBindings => VerifyCommandBindings(),
@@ -5755,6 +5756,108 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Semantic edit plan", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> PlanSafeEditWorkflowAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query, "current change");
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
+        var hits = goalTerms
+            .SelectMany(term => FindSemanticSymbolHits(workspace, term, 8))
+            .DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
+            .Take(12)
+            .ToList();
+        var candidateFiles = hits.Select(hit => hit.Path)
+            .Concat(changedFiles.Select(ToAbsoluteWorkspacePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        if (candidateFiles.Count == 0)
+        {
+            candidateFiles = SuggestLikelyFilesForGoal(goal)
+                .Select(ToAbsoluteWorkspacePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
+
+        var testFiles = GetCSharpFiles()
+            .Where(IsTestFile)
+            .Where(file => goalTerms.Count == 0
+                || goalTerms.Any(term => Path.GetFileName(file).Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || SafeReadText(file).Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        if (testFiles.Count == 0 && candidateFiles.Count > 0)
+        {
+            var candidateNames = candidateFiles
+                .Select(file => Path.GetFileNameWithoutExtension(file))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToList();
+            testFiles = GetCSharpFiles()
+                .Where(IsTestFile)
+                .Where(file => candidateNames.Any(name => Path.GetFileName(file).Contains(name, StringComparison.OrdinalIgnoreCase)
+                    || SafeReadText(file).Contains(name, StringComparison.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
+
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+        var hasPendingPreview = _lastPatchPreviewRequest is not null;
+        var lines = new List<string>
+        {
+            "Safe edit workflow:",
+            "No files were changed.",
+            "Purpose: inspect, preview, approve, validate.",
+            $"Goal: {goal}",
+            hasPendingPreview ? "Pending patch preview: yes - review it before creating another." : "Pending patch preview: none",
+            $"Changed files: {changedFiles.Count}",
+            $"Candidate files: {candidateFiles.Count}",
+            $"Likely tests: {testFiles.Count}",
+            "Inspect first:"
+        };
+        lines.AddRange(hits.Count == 0 ? ["- no semantic symbol hits from goal terms"] : hits.Take(6).Select(FormatSemanticHit));
+        lines.Add("Files to touch only if needed:");
+        lines.AddRange(candidateFiles.Count == 0 ? ["- none found yet"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
+        lines.Add("Patch gate:");
+        if (hasPendingPreview)
+        {
+            lines.Add("- show pending patch preview");
+            lines.Add("- confirm apply last patch preview");
+            lines.Add("- discard pending patch preview");
+        }
+        else
+        {
+            lines.Add("- resolve symbol <name> or read the exact file section first");
+            lines.Add("- prepare a patch bundle with exact old text and new text");
+            lines.Add("- preview patch bundle");
+            lines.Add("- show pending patch preview");
+            lines.Add("- confirm apply last patch preview");
+        }
+
+        lines.Add("Likely tests to run:");
+        lines.AddRange(testFiles.Count == 0 ? ["- no obvious targeted test file found"] : testFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Validation after apply:");
+        lines.Add($"- show impacted tests {goal}");
+        lines.Add($"- confirm dotnet build \"{primaryTarget}\"");
+        if (testFiles.Count > 0 || MentionsAny(goal, "test", "parser", "command", "runtime", "source", "weather"))
+        {
+            lines.Add($"- confirm dotnet test \"{primaryTarget}\"");
+        }
+
+        lines.Add("Commit gate:");
+        lines.Add("- review current changes");
+        lines.Add("- can i safely commit");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Safe edit workflow", Policy.WorkspaceRoot);
+    }
     private CodingToolResult MapCompilerDiagnostic(CodingToolRequest request)
     {
         var diagnostic = CleanGoal(request.Query, string.Empty);

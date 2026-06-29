@@ -270,6 +270,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBindingCheckCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Binding check", "xaml binding check", "Coding.BindingCheck"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImpactedTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Impacted tests", "show impacted tests", "Coding.ImpactedTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSafeEditWorkflowCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Safe edit", "safe edit workflow current change", "Coding.SafeEditWorkflow"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingHealthScoreCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Health score", "workspace health score", "Coding.HealthScore"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -694,6 +695,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingBindingCheckCommand { get; }
 
     public ICommand RunCodingImpactedTestsCommand { get; }
+
+    public ICommand RunCodingSafeEditWorkflowCommand { get; }
 
     public ICommand RunCodingHealthScoreCommand { get; }
 
@@ -6598,6 +6601,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingImpactedTestsCommand is AsyncRelayCommand runCodingImpactedTests)
         {
             runCodingImpactedTests.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSafeEditWorkflowCommand is AsyncRelayCommand runCodingSafeEditWorkflow)
+        {
+            runCodingSafeEditWorkflow.RaiseCanExecuteChanged();
         }
 
         if (RunCodingHealthScoreCommand is AsyncRelayCommand runCodingHealthScore)

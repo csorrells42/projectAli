@@ -131,6 +131,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ResolveSemanticSymbol
             or CodingToolAction.ShowImpactedTests
             or CodingToolAction.PlanSemanticEdit
+            or CodingToolAction.PlanSafeEditWorkflow
             or CodingToolAction.MapCompilerDiagnostic
             or CodingToolAction.VerifyXamlBindings
             or CodingToolAction.VerifyCommandBindings

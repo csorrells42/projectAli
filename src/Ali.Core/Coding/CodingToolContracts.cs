@@ -31,6 +31,7 @@ public enum CodingToolAction
     ResolveSemanticSymbol,
     ShowImpactedTests,
     PlanSemanticEdit,
+    PlanSafeEditWorkflow,
     MapCompilerDiagnostic,
     VerifyXamlBindings,
     VerifyCommandBindings,

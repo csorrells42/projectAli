@@ -1226,6 +1226,15 @@ public static class CodingToolRequestParser
         "plan edit"
     ];
 
+    private static readonly string[] SafeEditWorkflowPrefixes =
+    [
+        "safe edit workflow",
+        "prepare safe edit",
+        "safe edit next step",
+        "safe edit runway",
+        "mini codex edit plan"
+    ];
+
     private static readonly string[] DiagnosticMapperPrefixes =
     [
         "map compiler diagnostic",
@@ -1586,6 +1595,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(trimmed, SemanticSymbolPrefixes, CodingToolAction.ResolveSemanticSymbol, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, ImpactedTestsPrefixes, CodingToolAction.ShowImpactedTests, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SemanticEditPlanPrefixes, CodingToolAction.PlanSemanticEdit, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, SafeEditWorkflowPrefixes, CodingToolAction.PlanSafeEditWorkflow, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, DiagnosticMapperPrefixes, CodingToolAction.MapCompilerDiagnostic, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, KnownErrorPrefixes, CodingToolAction.ExplainKnownError, userConfirmed, out request))
         {

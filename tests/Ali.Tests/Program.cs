@@ -737,6 +737,10 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.PlanSemanticEdit, editPlanRequest.Action);
     Equal("Save button", editPlanRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("safe edit workflow Save button", out var safeEditRequest));
+    Equal(CodingToolAction.PlanSafeEditWorkflow, safeEditRequest.Action);
+    Equal("Save button", safeEditRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("map compiler diagnostic CS0103", out var diagnosticRequest));
     Equal(CodingToolAction.MapCompilerDiagnostic, diagnosticRequest.Action);
     Equal("CS0103", diagnosticRequest.Query);
@@ -2747,6 +2751,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var semantic = await service.TryHandleAsync("resolve symbol Save", CancellationToken.None);
     var impacted = await service.TryHandleAsync("show impacted tests Save", CancellationToken.None);
     var editPlan = await service.TryHandleAsync("semantic edit plan Save button", CancellationToken.None);
+    var safeEdit = await service.TryHandleAsync("safe edit workflow Save button", CancellationToken.None);
     var diagnosticText = $"{Path.Combine(appDirectory, "MainWindowViewModel.cs")}(7,20): error CS0103: The name 'MissingName' does not exist in the current context";
     var diagnostic = await service.TryHandleAsync($"map compiler diagnostic {diagnosticText}", CancellationToken.None);
     var deadCommands = await service.TryHandleAsync("dead command scan", CancellationToken.None);
@@ -2774,6 +2779,9 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("MainWindowViewModelTests.cs", impacted.Message);
     Contains("Semantic edit plan", editPlan.Message);
     Contains("MainWindowViewModel.cs", editPlan.Message);
+    Contains("Safe edit workflow", safeEdit.Message);
+    Contains("Patch gate:", safeEdit.Message);
+    Contains("MainWindowViewModel.cs", safeEdit.Message);
     Contains("Compiler diagnostic mapper", diagnostic.Message);
     Contains("Code: CS0103", diagnostic.Message);
     Contains("Nearest symbol: method Save", diagnostic.Message);

@@ -120,6 +120,8 @@
                                         Command="{Binding RunCodingBindingCheckCommand}" />
                                 <Button Content="Impacted Tests"
                                         Command="{Binding RunCodingImpactedTestsCommand}" />
+                                <Button Content="Safe Edit"
+                                        Command="{Binding RunCodingSafeEditWorkflowCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>

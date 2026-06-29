@@ -289,6 +289,7 @@ public static class CodingAbilityCatalog
                 new("Resolve symbol", "Use Roslyn semantic resolution to explain matching declarations and references.", "resolve symbol Save", "resolve symbol <name>"),
                 new("Impacted tests", "Suggest likely source and test files affected by a symbol or current changed files.", "show impacted tests Save", "show impacted tests <name>"),
                 new("Semantic edit plan", "Plan a guarded edit from goal terms, semantic symbols, file risk, and validation needs.", "semantic edit plan settings command", "semantic edit plan <goal>"),
+                new("Safe edit workflow", "Bridge a goal into inspect targets, patch preview gates, impacted tests, and validation commands without changing files.", "safe edit workflow settings command", "safe edit workflow <goal>"),
                 new("Diagnostic mapper", "Map compiler diagnostics to file, line, nearest symbol, and fix lane.", "map compiler diagnostic CS0103", "map compiler diagnostic <error>"),
                 new("XAML bindings", "Check WPF binding names against Roslyn-discovered code symbols.", "xaml binding check", "xaml binding check"),
                 new("Command bindings", "Check button command bindings against view-model command properties.", "command binding check", "command binding check"),
