@@ -6113,6 +6113,86 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Semantic edit plan", Policy.WorkspaceRoot);
     }
 
+    private EditImpactSurface BuildEditImpactSurface(
+        IReadOnlyList<string> goalTerms,
+        IReadOnlyList<SemanticSymbolHit> hits,
+        IReadOnlyList<string> candidateFiles,
+        TestTargetRecommendation testTarget)
+    {
+        var directFiles = candidateFiles
+            .Where(File.Exists)
+            .Select(RelativeToWorkspace)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var candidateSet = candidateFiles
+            .Where(File.Exists)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var symbolTerms = hits
+            .Select(hit => hit.Name)
+            .Concat(goalTerms)
+            .Where(term => !string.IsNullOrWhiteSpace(term) && term.Length > 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        var relatedFiles = hits
+            .Where(hit => !hit.Source.Equals("declaration", StringComparison.OrdinalIgnoreCase))
+            .Select(hit => hit.Path)
+            .Concat(BuildRoslynCallGraph(GetCSharpFiles(), 400)
+                .Where(edge => symbolTerms.Any(term => edge.Caller.Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || edge.Callee.Contains(term, StringComparison.OrdinalIgnoreCase)))
+                .Select(edge => edge.Path))
+            .Where(path => File.Exists(path) && !candidateSet.Contains(path) && !IsTestFile(path))
+            .Select(RelativeToWorkspace)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        if (relatedFiles.Count == 0 && symbolTerms.Count > 0)
+        {
+            relatedFiles = GetCSharpFiles()
+                .Where(file => File.Exists(file) && !candidateSet.Contains(file) && !IsTestFile(file))
+                .Where(file => symbolTerms.Any(term => SafeReadText(file).Contains(term, StringComparison.OrdinalIgnoreCase)))
+                .Select(RelativeToWorkspace)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
+
+        var testFiles = testTarget.TestFiles
+            .Where(File.Exists)
+            .Select(RelativeToWorkspace)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var notes = new List<string>();
+        if (directFiles.Count == 0)
+        {
+            notes.Add("No direct file was resolved yet; inspect semantic hits before editing.");
+        }
+        if (relatedFiles.Count > 0)
+        {
+            notes.Add("Related files may need review after the direct edit.");
+        }
+        if (testFiles.Count == 0)
+        {
+            notes.Add("No targeted test file was resolved; use build plus broader tests.");
+        }
+
+        return new EditImpactSurface(directFiles, relatedFiles, testFiles, testTarget.Command, notes);
+    }
+
+    private void AddEditImpactSurfaceLines(List<string> lines, EditImpactSurface surface)
+    {
+        lines.Add("Impact radius:");
+        lines.Add($"- Direct files: {FormatInlineList(surface.DirectFiles)}");
+        lines.Add($"- Related references/callers: {FormatInlineList(surface.RelatedFiles)}");
+        lines.Add($"- Likely tests: {FormatInlineList(surface.TestFiles)}");
+        lines.Add(string.IsNullOrWhiteSpace(surface.TestCommand)
+            ? "- Test command: none resolved"
+            : $"- Test command: {surface.TestCommand}");
+        lines.AddRange(surface.Notes.Count == 0 ? ["- Notes: none"] : surface.Notes.Select(note => $"- Note: {note}"));
+    }
+
     private List<EditTargetCandidate> RankEditTargetCandidates(
         IReadOnlyList<string> goalTerms,
         IReadOnlyList<SemanticSymbolHit> hits,
@@ -6245,6 +6325,8 @@ public sealed class LocalCodingToolService(
         var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
             : Policy.WorkspaceRoot;
+        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
+        var impactSurface = BuildEditImpactSurface(goalTerms, hits, candidateFiles, testTarget);
         LoadPendingPatchPreviewIfNeeded();
         var hasPendingPreview = _lastPatchPreviewRequest is not null;
         var lines = new List<string>
@@ -6262,6 +6344,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(hits.Count == 0 ? ["- no semantic symbol hits from goal terms"] : hits.Take(6).Select(FormatSemanticHit));
         lines.Add("Files to touch only if needed:");
         lines.AddRange(candidateFiles.Count == 0 ? ["- none found yet"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
+        AddEditImpactSurfaceLines(lines, impactSurface);
         lines.Add("Patch gate:");
         if (hasPendingPreview)
         {
@@ -6278,7 +6361,6 @@ public sealed class LocalCodingToolService(
             lines.Add("- confirm apply last patch preview");
         }
 
-        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
         lines.Add("Likely tests to run:");
         lines.AddRange(testFiles.Count == 0 ? ["- no obvious targeted test file found"] : testFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
         lines.Add("Validation after apply:");
@@ -11064,6 +11146,13 @@ public sealed class LocalCodingToolService(
     private sealed record PatchBundlePreparation(
         IReadOnlyList<PreparedPatchEdit> Edits,
         CodingToolResult? Error);
+
+    private sealed record EditImpactSurface(
+        IReadOnlyList<string> DirectFiles,
+        IReadOnlyList<string> RelatedFiles,
+        IReadOnlyList<string> TestFiles,
+        string? TestCommand,
+        IReadOnlyList<string> Notes);
 
     private sealed record EditTargetCandidate(
         string RelativePath,

@@ -2969,6 +2969,9 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("MainWindowViewModel.cs", editPlan.Message);
     Contains("Safe edit workflow", safeEdit.Message);
     Contains("Patch gate:", safeEdit.Message);
+    Contains("Impact radius:", safeEdit.Message);
+    Contains("Direct files:", safeEdit.Message);
+    Contains("Test command:", safeEdit.Message);
     Contains("MainWindowViewModel.cs", safeEdit.Message);
     Contains("Compiler diagnostic mapper", diagnostic.Message);
     Contains("Code: CS0103", diagnostic.Message);
