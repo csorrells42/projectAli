@@ -1027,6 +1027,16 @@ public static class CodingToolRequestParser
         "mini-codex project index"
     ];
 
+    private static readonly string[] ProjectDependencyMapPrefixes =
+    [
+        "project dependency map",
+        "show project dependency map",
+        "dependency map",
+        "show dependency map",
+        "project reference map",
+        "show project reference map"
+    ];
+
     private static readonly string[] RepoUnderstandingRequests =
     [
         "understand repo",
@@ -1563,6 +1573,11 @@ public static class CodingToolRequestParser
         if (IsProjectIndexRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowProjectIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePrefixedQuery(trimmed, ProjectDependencyMapPrefixes, CodingToolAction.ShowProjectDependencyMap, userConfirmed, out request))
+        {
             return true;
         }
 

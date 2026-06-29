@@ -119,6 +119,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool shows project intelligence", TestLocalCodingToolShowsProjectIntelligence),
     ("local coding tool builds project index", TestLocalCodingToolBuildsProjectIndex),
+    ("local coding tool shows project dependency map", TestLocalCodingToolShowsProjectDependencyMap),
     ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
     ("local coding tool shows coding context packet", TestLocalCodingToolShowsCodingContextPacket),
     ("local coding tool shows ownership map", TestLocalCodingToolShowsOwnershipMap),
@@ -662,6 +663,10 @@ static Task TestCodingParserRoutesProjectIntelligence()
 
     Equal(true, CodingToolRequestParser.TryParse("project index", out var indexRequest));
     Equal(CodingToolAction.ShowProjectIndex, indexRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("project dependency map Demo.Core", out var dependencyMapRequest));
+    Equal(CodingToolAction.ShowProjectDependencyMap, dependencyMapRequest.Action);
+    Equal("Demo.Core", dependencyMapRequest.Query);
     return Task.CompletedTask;
 }
 
@@ -2634,6 +2639,77 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     var stale = await service.TryHandleAsync("coding context packet WidgetService", CancellationToken.None);
     Equal(true, stale.Handled);
     Contains("Project index: Needs refresh", stale.Message);
+}
+
+static async Task TestLocalCodingToolShowsProjectDependencyMap()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+
+    var coreDirectory = Path.Combine(workspace, "Demo.Core");
+    Directory.CreateDirectory(coreDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(coreDirectory, "Demo.Core.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <ProjectReference Include="..\Demo.Core\Demo.Core.csproj" />
+          </ItemGroup>
+        </Project>
+        """);
+
+    var testsDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testsDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <ProjectReference Include="..\Demo.App\Demo.App.csproj" />
+          </ItemGroup>
+        </Project>
+        """);
+
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+
+    var result = await service.TryHandleAsync("project dependency map Demo.Core", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Project dependency map", result.Message);
+    Contains("Query: Demo.Core", result.Message);
+    Contains("Selected projects:", result.Message);
+    Contains(Path.Combine("Demo.Core", "Demo.Core.csproj"), result.Message);
+    Contains("Direct dependencies:", result.Message);
+    Contains("Direct dependents:", result.Message);
+    Contains($"{Path.Combine("Demo.App", "Demo.App.csproj")} -> {Path.Combine("Demo.Core", "Demo.Core.csproj")}", result.Message);
+    Contains("Transitive impact:", result.Message);
+    Contains(Path.Combine("Demo.Tests", "Demo.Tests.csproj"), result.Message);
+    Contains("Build order slice:", result.Message);
+    Contains($"1. {Path.Combine("Demo.Core", "Demo.Core.csproj")}", result.Message);
+    Contains($"2. {Path.Combine("Demo.App", "Demo.App.csproj")}", result.Message);
+    Contains($"3. {Path.Combine("Demo.Tests", "Demo.Tests.csproj")}", result.Message);
+    Contains("Validation guidance:", result.Message);
 }
 
 static async Task TestLocalCodingToolShowsRepoUnderstanding()

@@ -10,6 +10,7 @@ public enum CodingToolAction
     AnalyzeArchitecture,
     ShowProjectIntelligence,
     ShowProjectIndex,
+    ShowProjectDependencyMap,
     ShowRepoUnderstanding,
     ShowCodingContextPacket,
     ShowSafeCommitCheck,

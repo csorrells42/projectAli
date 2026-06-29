@@ -287,6 +287,7 @@ public static class CodingAbilityCatalog
                 new("Project intelligence", "Summarize project shape, likely app/test targets, safe commands, and risk notes.", "show project intelligence", "show project intelligence"),
                 new("Project index", "Build a persistent local index of project files, roles, symbols, stacks, and validation commands.", "project index", "project index"),
                 new("Context packet", "Build a compact coding handoff with workspace shape, git state, targeted tests, and guardrails for the current goal.", "coding context packet Save button", "coding context packet <goal>"),
+                new("Dependency map", "Show project references, reverse dependents, transitive impact, and build order for a project.", "project dependency map Ali.Core", "project dependency map <project>"),
                 new("Understand repo", "Run Ali's orientation rollup: intelligence, architecture, patterns, validation, and commit readiness.", "understand repo", "understand repo"),
                 new("Health score", "Score workspace readiness across target, projects, tests, git, and validation.", "workspace health score", "workspace health score"),
                 new("Full readiness", "Run the one-click coding readiness rollup with workspace, bindings, command surface, symbols, commit gate, and validation ledger.", "full coding readiness", "full coding readiness"),

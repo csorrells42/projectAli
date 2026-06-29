@@ -239,6 +239,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.ShowProjectIntelligence => ShowProjectIntelligence(),
             CodingToolAction.ShowProjectIndex => await ShowProjectIndexAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowProjectDependencyMap => ShowProjectDependencyMap(request),
             CodingToolAction.ShowRepoUnderstanding => await ShowRepoUnderstandingAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCodingContextPacket => await ShowCodingContextPacketAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowSafeCommitCheck => await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false),
@@ -5887,6 +5888,97 @@ public sealed class LocalCodingToolService(
         };
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Project index", _projectIndexPath);
+    }
+
+    private CodingToolResult ShowProjectDependencyMap(CodingToolRequest request)
+    {
+        var query = CleanGoal(request.Query, string.Empty);
+        var summaries = GetWorkspaceProjectSummaries();
+        var edges = BuildProjectDependencyEdges(summaries);
+        var selected = SelectProjectsForDependencyMap(query, summaries);
+        var impacted = BuildProjectDependentClosure(selected, edges);
+        var buildOrder = EstimateBuildOrder(summaries, edges)
+            .Where(project => impacted.Contains(project))
+            .ToList();
+        var directDependencies = edges
+            .Where(edge => selected.Contains(edge.From))
+            .Select(edge => $"{edge.From} -> {edge.To}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var directDependents = edges
+            .Where(edge => selected.Contains(edge.To))
+            .Select(edge => $"{edge.From} -> {edge.To}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var lines = new List<string>
+        {
+            "Project dependency map:",
+            "No files were changed.",
+            string.IsNullOrWhiteSpace(query) ? "Query: all projects" : $"Query: {query}",
+            $"Projects found: {summaries.Count}",
+            $"Dependency edges: {edges.Count}",
+            "Selected projects:"
+        };
+        lines.AddRange(selected.Count == 0 ? ["- none matched"] : selected.Select(project => $"- {project}"));
+        lines.Add("Direct dependencies:");
+        lines.AddRange(directDependencies.Count == 0 ? ["- none"] : directDependencies.Select(edge => $"- {edge}"));
+        lines.Add("Direct dependents:");
+        lines.AddRange(directDependents.Count == 0 ? ["- none"] : directDependents.Select(edge => $"- {edge}"));
+        lines.Add("Transitive impact:");
+        lines.AddRange(impacted.Count == 0 ? ["- none"] : impacted.OrderBy(project => project, StringComparer.OrdinalIgnoreCase).Select(project => $"- {project}"));
+        lines.Add("Build order slice:");
+        lines.AddRange(buildOrder.Count == 0 ? ["- none"] : buildOrder.Select((project, index) => $"- {index + 1}. {project}"));
+        lines.Add("Validation guidance:");
+        lines.Add(selected.Count == 0
+            ? "- Run project index, then ask for a project path or project name shown there."
+            : "- Validate selected projects first, then direct/transitive dependents in build order.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Project dependency map", Policy.WorkspaceRoot);
+    }
+
+    private static IReadOnlyList<string> SelectProjectsForDependencyMap(string query, IReadOnlyList<ProjectSummary> summaries)
+    {
+        if (summaries.Count == 0)
+        {
+            return [];
+        }
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return summaries
+                .Select(summary => summary.RelativePath)
+                .Take(12)
+                .ToList();
+        }
+
+        return summaries
+            .Where(summary => summary.RelativePath.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileNameWithoutExtension(summary.RelativePath).Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> BuildProjectDependentClosure(
+        IReadOnlyList<string> selected,
+        IReadOnlyList<ProjectDependency> edges)
+    {
+        var impacted = new HashSet<string>(selected, StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<string>(selected);
+        while (pending.Count > 0)
+        {
+            var current = pending.Dequeue();
+            foreach (var dependent in edges.Where(edge => edge.To.Equals(current, StringComparison.OrdinalIgnoreCase)).Select(edge => edge.From))
+            {
+                if (impacted.Add(dependent))
+                {
+                    pending.Enqueue(dependent);
+                }
+            }
+        }
+
+        return impacted.ToList();
     }
 
     private async Task<CodingToolResult> ShowRepoUnderstandingAsync(CancellationToken cancellationToken)
