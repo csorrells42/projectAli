@@ -2651,11 +2651,16 @@ static async Task TestLocalCodingToolShowsRepoUnderstanding()
         new FakeCodingProcessLauncher(),
         runner);
 
+    var index = await service.TryHandleAsync("project index", CancellationToken.None);
+    Equal(true, index.Succeeded);
     var result = await service.TryHandleAsync("understand repo", CancellationToken.None);
 
     Equal(true, result.Handled);
     Equal(true, result.Succeeded);
     Contains("Repo understanding", result.Message);
+    Contains("Codebase awareness map", result.Message);
+    Contains("File roles:", result.Message);
+    Contains("Feature areas:", result.Message);
     Contains("Shape:", result.Message);
     Contains("Detected stacks:", result.Message);
     Contains("Build commands:", result.Message);
@@ -2735,6 +2740,9 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
     Contains("Goal: WidgetService", result.Message);
     Contains("Shape: 1 solution(s), 2 .NET project(s)", result.Message);
     Contains("Project index: Good", result.Message);
+    Contains("Codebase awareness map", result.Message);
+    Contains("File roles:", result.Message);
+    Contains("Feature areas:", result.Message);
     Contains("Git: 1 uncommitted change(s) detected", result.Message);
     Contains("Smallest practical test target", result.Message);
     Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);

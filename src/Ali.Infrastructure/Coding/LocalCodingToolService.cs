@@ -422,11 +422,13 @@ public sealed class LocalCodingToolService(
         }
 
         var projectIndexStatus = GetProjectIndexStatus();
+        var projectAwareness = LoadProjectIndexAwareness();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var testTarget = await ResolveTestTargetRecommendationAsync(userText.Trim(), cancellationToken).ConfigureAwait(false);
         lines.Add("Current coding state:");
         lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
+        AddProjectIndexAwarenessLines(lines, projectAwareness, 6);
         lines.Add("Targeted validation:");
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command)
             ? "- No targeted test command detected yet."
@@ -5363,6 +5365,88 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private ProjectIndexAwareness LoadProjectIndexAwareness()
+    {
+        var status = GetProjectIndexStatus();
+        if (!File.Exists(_projectIndexPath))
+        {
+            return new ProjectIndexAwareness(false, status.Summary, null, [], []);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(_projectIndexPath));
+            var root = document.RootElement;
+            var primaryTarget = root.TryGetProperty("primaryTarget", out var primaryElement)
+                ? primaryElement.GetString()
+                : null;
+            return new ProjectIndexAwareness(
+                status.Available,
+                status.Summary,
+                primaryTarget,
+                ReadProjectIndexSummaryArray(root, "fileRoles", "role", "examples"),
+                ReadProjectIndexSummaryArray(root, "featureAreas", "area", "representativeFiles"));
+        }
+        catch (JsonException ex)
+        {
+            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], []);
+        }
+        catch (IOException ex)
+        {
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], []);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], []);
+        }
+    }
+
+    private static IReadOnlyList<string> ReadProjectIndexSummaryArray(
+        JsonElement root,
+        string propertyName,
+        string nameProperty,
+        string examplesProperty)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var summaries = new List<string>();
+        foreach (var item in element.EnumerateArray().Take(8))
+        {
+            var name = item.TryGetProperty(nameProperty, out var nameElement)
+                ? nameElement.GetString()
+                : null;
+            var count = item.TryGetProperty("count", out var countElement) && countElement.TryGetInt32(out var parsedCount)
+                ? parsedCount
+                : 0;
+            var examples = item.TryGetProperty(examplesProperty, out var examplesElement) && examplesElement.ValueKind == JsonValueKind.Array
+                ? examplesElement.EnumerateArray().Select(value => value.GetString()).Where(value => !string.IsNullOrWhiteSpace(value)).Take(3).ToList()
+                : [];
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var exampleText = examples.Count == 0 ? string.Empty : $": {string.Join(", ", examples)}";
+                summaries.Add($"{name} ({count}){exampleText}");
+            }
+        }
+
+        return summaries;
+    }
+
+    private static void AddProjectIndexAwarenessLines(List<string> lines, ProjectIndexAwareness awareness, int limit)
+    {
+        lines.Add("Codebase awareness map:");
+        lines.Add($"- Project index: {awareness.Status}");
+        if (!string.IsNullOrWhiteSpace(awareness.PrimaryTarget))
+        {
+            lines.Add($"- Primary target: {awareness.PrimaryTarget}");
+        }
+
+        lines.Add($"- File roles: {FormatInlineList(awareness.FileRoles.Take(limit))}");
+        lines.Add($"- Feature areas: {FormatInlineList(awareness.FeatureAreas.Take(limit))}");
+    }
+
     private IReadOnlyList<ProjectIndexFileRole> BuildProjectIndexFileRoles(IReadOnlyList<string> files) =>
         files
             .Select(RelativeToWorkspace)
@@ -5762,6 +5846,7 @@ public sealed class LocalCodingToolService(
         var patterns = DetectCodebasePatterns();
         var validation = await PlanPostEditValidationAsync(cancellationToken).ConfigureAwait(false);
         var safeCommit = await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false);
+        var projectAwareness = LoadProjectIndexAwareness();
 
         var lines = new List<string>
         {
@@ -5769,6 +5854,7 @@ public sealed class LocalCodingToolService(
             "No files were changed.",
             "Project:",
         };
+        AddProjectIndexAwarenessLines(lines, projectAwareness, 6);
         AddSelectedLines(lines, intelligence.Message, 8,
             "Shape:",
             "Detected stacks:",
@@ -5817,6 +5903,7 @@ public sealed class LocalCodingToolService(
         var goal = CleanGoal(request.Query, "general coding work");
         var intelligence = ShowProjectIntelligence();
         var projectIndexStatus = GetProjectIndexStatus();
+        var projectAwareness = LoadProjectIndexAwareness();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
         var contextPack = await BuildContextPackAsync(goal, force: true, cancellationToken).ConfigureAwait(false);
@@ -5842,6 +5929,7 @@ public sealed class LocalCodingToolService(
         lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
         lines.Add(latestValidation is null ? "- Latest validation: none" : $"- {FormatReceiptSummary("Latest validation", latestValidation)}");
+        AddProjectIndexAwarenessLines(lines, projectAwareness, 6);
         lines.Add("Smallest practical test target:");
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command) ? "- none detected" : $"- {testTarget.Command}");
         lines.Add("Coding guardrails:");
@@ -11461,6 +11549,13 @@ public sealed class LocalCodingToolService(
         string Scope,
         string Command,
         IReadOnlyList<string> Notes);
+
+    private sealed record ProjectIndexAwareness(
+        bool Available,
+        string Status,
+        string? PrimaryTarget,
+        IReadOnlyList<string> FileRoles,
+        IReadOnlyList<string> FeatureAreas);
 
     private sealed record ProjectIndexStatus(bool Available, string Summary);
 
