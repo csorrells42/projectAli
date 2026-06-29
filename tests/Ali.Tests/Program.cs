@@ -2761,6 +2761,12 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
     Contains("Git: 1 uncommitted change(s) detected", result.Message);
     Contains("Smallest practical test target", result.Message);
     Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);
+    Contains("Ownership:", result.Message);
+    Contains("Source projects:", result.Message);
+    Contains("Affected projects:", result.Message);
+    Contains("Source files:", result.Message);
+    Contains("Likely tests:", result.Message);
+    Contains("Build order slice:", result.Message);
     Contains("Preview patches before applying them", result.Message);
     Contains("Claim edits, tests, installs, searches, and receipts only after tool output proves them", result.Message);
 }

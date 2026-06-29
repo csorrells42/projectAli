@@ -5983,6 +5983,12 @@ public sealed class LocalCodingToolService(
         AddProjectIndexAwarenessLines(lines, projectAwareness, 6);
         lines.Add("Smallest practical test target:");
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command) ? "- none detected" : $"- {testTarget.Command}");
+        lines.Add("Ownership:");
+        lines.Add($"- Source projects: {FormatInlineList(testTarget.SourceProjects)}");
+        lines.Add($"- Affected projects: {FormatInlineList(testTarget.AffectedProjects)}");
+        lines.Add($"- Source files: {FormatInlineList(testTarget.SourceFiles.Select(RelativeToWorkspace))}");
+        lines.Add($"- Likely tests: {FormatInlineList(testTarget.TestFiles.Select(RelativeToWorkspace))}");
+        lines.Add($"- Build order slice: {FormatInlineList(testTarget.BuildOrderProjects)}");
         lines.Add("Coding guardrails:");
         lines.Add("- Preview patches before applying them.");
         lines.Add("- Claim edits, tests, installs, searches, and receipts only after tool output proves them.");
