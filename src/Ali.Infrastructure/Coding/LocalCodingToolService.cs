@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -420,9 +421,11 @@ public sealed class LocalCodingToolService(
             AddContextSection(lines, "Package references", packageReport.Message, 4_000);
         }
 
+        var projectIndexStatus = GetProjectIndexStatus();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var testTarget = await ResolveTestTargetRecommendationAsync(userText.Trim(), cancellationToken).ConfigureAwait(false);
         lines.Add("Current coding state:");
+        lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
         lines.Add("Targeted validation:");
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command)
@@ -5360,6 +5363,51 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private ProjectIndexStatus GetProjectIndexStatus()
+    {
+        if (!File.Exists(_projectIndexPath))
+        {
+            return new ProjectIndexStatus(false, "Bad - missing; run project index.");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(_projectIndexPath));
+            var root = document.RootElement;
+            var workspaceRoot = root.TryGetProperty("workspaceRoot", out var workspaceElement)
+                ? workspaceElement.GetString()
+                : null;
+            var projects = root.TryGetProperty("projects", out var projectsElement) && projectsElement.ValueKind == JsonValueKind.Array
+                ? projectsElement.GetArrayLength()
+                : 0;
+            var symbols = root.TryGetProperty("symbols", out var symbolsElement) && symbolsElement.ValueKind == JsonValueKind.Array
+                ? symbolsElement.GetArrayLength()
+                : 0;
+            var created = root.TryGetProperty("createdAtUtc", out var createdElement) && createdElement.TryGetDateTimeOffset(out var parsedCreated)
+                ? parsedCreated.LocalDateTime.ToString("g", CultureInfo.CurrentCulture)
+                : "unknown time";
+            if (string.IsNullOrWhiteSpace(workspaceRoot)
+                || !Path.GetFullPath(workspaceRoot).Equals(Path.GetFullPath(Policy.WorkspaceRoot), StringComparison.OrdinalIgnoreCase))
+            {
+                return new ProjectIndexStatus(false, "Needs refresh - index is for another workspace.");
+            }
+
+            return new ProjectIndexStatus(true, $"Good - {projects} project(s), {symbols} symbol(s), refreshed {created}.");
+        }
+        catch (JsonException ex)
+        {
+            return new ProjectIndexStatus(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}");
+        }
+        catch (IOException ex)
+        {
+            return new ProjectIndexStatus(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return new ProjectIndexStatus(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}");
+        }
+    }
+
     private async Task<CodingToolResult> ShowProjectIndexAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -5507,6 +5555,7 @@ public sealed class LocalCodingToolService(
         cancellationToken.ThrowIfCancellationRequested();
         var goal = CleanGoal(request.Query, "general coding work");
         var intelligence = ShowProjectIntelligence();
+        var projectIndexStatus = GetProjectIndexStatus();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
         var contextPack = await BuildContextPackAsync(goal, force: true, cancellationToken).ConfigureAwait(false);
@@ -5529,6 +5578,7 @@ public sealed class LocalCodingToolService(
             "Likely app",
             "Likely test");
         lines.Add("Current state:");
+        lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
         lines.Add(latestValidation is null ? "- Latest validation: none" : $"- {FormatReceiptSummary("Latest validation", latestValidation)}");
         lines.Add("Smallest practical test target:");
@@ -5740,6 +5790,7 @@ public sealed class LocalCodingToolService(
         var deadCommands = ScanDeadCommands();
         var symbolIndex = ShowCSharpSymbolIndex();
         var validationLedger = ShowValidationLedger();
+        var projectIndexStatus = GetProjectIndexStatus();
 
         var lines = new List<string>
         {
@@ -5748,6 +5799,8 @@ public sealed class LocalCodingToolService(
             "Workspace:"
         };
         AddSelectedLines(lines, health.Message, 8, "Score:", "Workspace:", "Primary target:", "Projects:", "Tests:", "Git:", "Latest validation:");
+        lines.Add("Project index:");
+        lines.Add($"- {projectIndexStatus.Summary}");
         lines.Add("Bindings:");
         AddSelectedLines(lines, xamlBindings.Message, 5, "XAML files:", "Bindings found:", "Unknown bindings:");
         AddSelectedLines(lines, commandBindings.Message, 5, "Command bindings found:", "Missing command targets:");
@@ -10940,6 +10993,8 @@ public sealed class LocalCodingToolService(
         string Scope,
         string Command,
         IReadOnlyList<string> Notes);
+
+    private sealed record ProjectIndexStatus(bool Available, string Summary);
 
     private sealed record ProjectIndexSnapshot(
         DateTimeOffset CreatedAtUtc,

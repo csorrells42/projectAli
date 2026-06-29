@@ -2711,6 +2711,9 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
         new FakeCodingProcessLauncher(),
         runner);
 
+    var index = await service.TryHandleAsync("project index", CancellationToken.None);
+    Equal(true, index.Succeeded);
+
     var result = await service.TryHandleAsync("coding context packet WidgetService", CancellationToken.None);
 
     Equal(true, result.Handled);
@@ -2718,6 +2721,7 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
     Contains("Coding context packet", result.Message);
     Contains("Goal: WidgetService", result.Message);
     Contains("Shape: 1 solution(s), 2 .NET project(s)", result.Message);
+    Contains("Project index: Good", result.Message);
     Contains("Git: 1 uncommitted change(s) detected", result.Message);
     Contains("Smallest practical test target", result.Message);
     Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);
@@ -2936,6 +2940,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Equal(true, readiness.Handled);
     Equal(true, readiness.Succeeded);
     Contains("Full coding readiness", readiness.Message);
+    Contains("Project index:", readiness.Message);
+    Contains("Bad - missing", readiness.Message);
     Contains("Bindings:", readiness.Message);
     Contains("Command surface:", readiness.Message);
     Contains("Symbol index:", readiness.Message);
