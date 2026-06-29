@@ -635,64 +635,95 @@
                             BorderThickness="1"
                             Padding="16,10">
                         <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="220" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="112" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="140" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                            <TextBlock Text="Mic"
-                                       Foreground="{StaticResource TextBrush}"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,8,0" />
-                            <ComboBox Grid.Column="1"
-                                      ItemsSource="{Binding VoiceInputDevices}"
-                                      SelectedItem="{Binding SelectedVoiceInputDevice}"
-                                      Height="30" />
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="420" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Column="2"
-                                       Text="Channel"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       VerticalAlignment="Center"
-                                       Margin="14,0,8,0" />
-                            <ComboBox Grid.Column="3"
-                                      ItemsSource="{Binding VoiceInputChannelModes}"
-                                      SelectedItem="{Binding SelectedVoiceInputChannelMode}"
-                                      Height="30" />
+                                <TextBlock Text="Speaker"
+                                           Foreground="{StaticResource TextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding VoiceOutputDevices}"
+                                          SelectedItem="{Binding SelectedVoiceOutputDevice}"
+                                          Height="30" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding SelectedVoiceOutputDevice}"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Margin="12,0,0,0" />
+                            </Grid>
 
-                            <TextBlock Grid.Column="4"
-                                       Text="Gain"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       VerticalAlignment="Center"
-                                       Margin="14,0,8,0" />
-                            <Slider Grid.Column="5"
-                                    Minimum="1"
-                                    Maximum="24"
-                                    Value="{Binding SpectrumDisplayGain, UpdateSourceTrigger=PropertyChanged}"
-                                    VerticalAlignment="Center" />
+                            <Grid Grid.Row="1" Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="220" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="112" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Column="6"
-                                       Text="{Binding SpectrumPeakText}"
-                                       Foreground="{StaticResource TextBrush}"
-                                       VerticalAlignment="Center"
-                                       Margin="10,0,0,0" />
+                                <TextBlock Text="Mic"
+                                           Foreground="{StaticResource TextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding VoiceInputDevices}"
+                                          SelectedItem="{Binding SelectedVoiceInputDevice}"
+                                          Height="30" />
 
-                            <TextBlock Grid.Column="7"
-                                       Text="{Binding PushToTalkKeyLabel}"
-                                       Foreground="{StaticResource TextBrush}"
-                                       VerticalAlignment="Center"
-                                       Margin="14,0,8,0" />
-                            <Button Grid.Column="8"
-                                    Content="{Binding AssignPushToTalkKeyButtonText}"
-                                    Command="{Binding BeginAssignPushToTalkKeyCommand}"
-                                    MinWidth="104"
-                                    ToolTip="Click, then press the key you want to use for Push to Talk." />
+                                <TextBlock Grid.Column="2"
+                                           Text="Channel"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="14,0,8,0" />
+                                <ComboBox Grid.Column="3"
+                                          ItemsSource="{Binding VoiceInputChannelModes}"
+                                          SelectedItem="{Binding SelectedVoiceInputChannelMode}"
+                                          Height="30" />
+
+                                <TextBlock Grid.Column="4"
+                                           Text="Gain"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="14,0,8,0" />
+                                <Slider Grid.Column="5"
+                                        Minimum="1"
+                                        Maximum="24"
+                                        Value="{Binding SpectrumDisplayGain, UpdateSourceTrigger=PropertyChanged}"
+                                        VerticalAlignment="Center" />
+
+                                <TextBlock Grid.Column="6"
+                                           Text="{Binding SpectrumPeakText}"
+                                           Foreground="{StaticResource TextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="10,0,0,0" />
+
+                                <TextBlock Grid.Column="7"
+                                           Text="{Binding PushToTalkKeyLabel}"
+                                           Foreground="{StaticResource TextBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="14,0,8,0" />
+                                <Button Grid.Column="8"
+                                        Content="{Binding AssignPushToTalkKeyButtonText}"
+                                        Command="{Binding BeginAssignPushToTalkKeyCommand}"
+                                        MinWidth="104"
+                                        ToolTip="Click, then press the key you want to use for Push to Talk." />
+                            </Grid>
                         </Grid>
                     </Border>
 
@@ -774,79 +805,45 @@
                             Padding="14"
                             Margin="0,0,0,12">
                         <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="260" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
 
-                            <Grid Grid.Row="0"
-                                  Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="360" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-
-                                <TextBlock Text="Speaker"
-                                           Foreground="{StaticResource TextBrush}"
-                                           FontSize="18"
-                                           FontWeight="SemiBold"
-                                           VerticalAlignment="Center"
-                                           Margin="0,0,12,0" />
-                                <ComboBox Grid.Column="1"
-                                          ItemsSource="{Binding VoiceOutputDevices}"
-                                          SelectedItem="{Binding SelectedVoiceOutputDevice}"
-                                          Height="30" />
-                                <TextBlock Grid.Column="2"
-                                           Text="{Binding SelectedVoiceOutputDevice}"
+                            <TextBlock Text="{Binding AssistantVoiceLabel}"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,12,0" />
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{Binding TextToSpeechEngineChoices}"
+                                      SelectedItem="{Binding TextToSpeechEngineText}"
+                                      Height="30" />
+                            <ComboBox Grid.Column="2"
+                                      ItemsSource="{Binding TextToSpeechVoiceChoices}"
+                                      SelectedItem="{Binding SelectedTextToSpeechVoiceChoice}"
+                                      Height="30"
+                                      Margin="8,0,0,0" />
+                            <Button Grid.Column="3"
+                                    Content="Hear Sample"
+                                    Command="{Binding PlayVoiceSampleCommand}"
+                                    MinWidth="112"
+                                    Margin="12,0,12,0" />
+                            <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding TtsStatus}"
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextWrapping="Wrap"
+                                           FontSize="12" />
+                                <TextBlock Text="{Binding VoiceSettingsStatusText}"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           TextWrapping="Wrap"
                                            FontSize="12"
-                                           VerticalAlignment="Center"
-                                           Margin="12,0,0,0" />
-                            </Grid>
-
-                            <Grid Grid.Row="1">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="260" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-
-                                <TextBlock Text="{Binding AssistantVoiceLabel}"
-                                           Foreground="{StaticResource TextBrush}"
-                                           FontSize="18"
-                                           FontWeight="SemiBold"
-                                           VerticalAlignment="Center"
-                                           Margin="0,0,12,0" />
-                                <ComboBox Grid.Column="1"
-                                          ItemsSource="{Binding TextToSpeechEngineChoices}"
-                                          SelectedItem="{Binding TextToSpeechEngineText}"
-                                          Height="30" />
-                                <ComboBox Grid.Column="2"
-                                          ItemsSource="{Binding TextToSpeechVoiceChoices}"
-                                          SelectedItem="{Binding SelectedTextToSpeechVoiceChoice}"
-                                          Height="30"
-                                          Margin="8,0,0,0" />
-                                <Button Grid.Column="3"
-                                        Content="Hear Sample"
-                                        Command="{Binding PlayVoiceSampleCommand}"
-                                        MinWidth="112"
-                                        Margin="12,0,12,0" />
-                                <StackPanel Grid.Column="4" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding TtsStatus}"
-                                               Foreground="{StaticResource MutedTextBrush}"
-                                               TextWrapping="Wrap"
-                                               FontSize="12" />
-                                    <TextBlock Text="{Binding VoiceSettingsStatusText}"
-                                               Foreground="{StaticResource SubtleTextBrush}"
-                                               TextWrapping="Wrap"
-                                               FontSize="12"
-                                               Margin="0,3,0,0" />
-                                </StackPanel>
-                            </Grid>
+                                           Margin="0,3,0,0" />
+                            </StackPanel>
                         </Grid>
                     </Border>
                 </Grid>

@@ -12,7 +12,7 @@ Ali 1.0.8 is the cumulative customer repair patch for systems currently at 1.0.4
 - Restores KittenTTS voice sample playback with the installed local KittenTTS API and bundled voice resources.
 - Expands the bundled curated source seed to `2000` entries across weather, sports, local/regional/national/international news, science, history, National Geographic-style knowledge, and military history.
 - Adds project index, project dependency map, ownership map, coding context ownership, project-impact review, patch validation hints, safer edit planning, targeted test recommendations, and richer commit/release readiness.
-- Adds a Voice / Mic speaker selector above the existing Ali voice controls so the customer can choose where Ali talks from without changing voice selection.
+- Adds a visible Voice / Mic speaker selector in the upper voice settings strip so the customer can choose where Ali talks from without changing voice selection.
 
 ## Customer Patch Contents
 
