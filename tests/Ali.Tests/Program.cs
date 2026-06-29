@@ -721,6 +721,10 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("show csharp symbol index", out var indexRequest));
     Equal(CodingToolAction.ShowCSharpSymbolIndex, indexRequest.Action);
 
+    Equal(true, CodingToolRequestParser.TryParse("show call graph Save", out var callGraphRequest));
+    Equal(CodingToolAction.ShowCallGraph, callGraphRequest.Action);
+    Equal("Save", callGraphRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("xaml binding check", out var bindingRequest));
     Equal(CodingToolAction.VerifyXamlBindings, bindingRequest.Action);
 
@@ -2701,7 +2705,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
         {
             public string Title { get; } = "Demo";
             public ICommand SaveCommand { get; }
-            public void Save() { }
+            public void Save() { Helper(); }
+            private void Helper() { }
         }
         """);
     var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
@@ -2711,6 +2716,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var binding = await service.TryHandleAsync("xaml binding check", CancellationToken.None);
     var command = await service.TryHandleAsync("command binding check", CancellationToken.None);
     var symbolIndex = await service.TryHandleAsync("show csharp symbol index", CancellationToken.None);
+    var callGraph = await service.TryHandleAsync("show call graph Save", CancellationToken.None);
     var deadCommands = await service.TryHandleAsync("dead command scan", CancellationToken.None);
     var ledger = await service.TryHandleAsync("show validation ledger", CancellationToken.None);
 
@@ -2728,6 +2734,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("C# symbol index", symbolIndex.Message);
     Contains("Engine: Roslyn syntax tree", symbolIndex.Message);
     Contains("property Title", symbolIndex.Message);
+    Contains("Call graph", callGraph.Message);
+    Contains("Save -> Helper", callGraph.Message);
     Contains("Dead command scan", deadCommands.Message);
     Contains("Before/after validation ledger", ledger.Message);
 }

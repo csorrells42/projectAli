@@ -1192,6 +1192,15 @@ public static class CodingToolRequestParser
         "where is used"
     ];
 
+    private static readonly string[] CallGraphPrefixes =
+    [
+        "show call graph",
+        "call graph",
+        "callgraph",
+        "who calls",
+        "what calls"
+    ];
+
     private static readonly string[] TestGapRequests =
     [
         "show test gap report",
@@ -1539,6 +1548,7 @@ public static class CodingToolRequestParser
         if (TryParsePrefixedQuery(trimmed, TypedPatchComposerPrefixes, CodingToolAction.ComposeTypedPatch, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SymbolFinderPrefixes, CodingToolAction.FindSymbol, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, CrossReferencePrefixes, CodingToolAction.ShowCrossReferenceMap, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, CallGraphPrefixes, CodingToolAction.ShowCallGraph, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, KnownErrorPrefixes, CodingToolAction.ExplainKnownError, userConfirmed, out request))
         {
             return true;

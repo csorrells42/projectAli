@@ -127,6 +127,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFullCodingReadiness
             or CodingToolAction.ShowValidationLedger
             or CodingToolAction.ShowCSharpSymbolIndex
+            or CodingToolAction.ShowCallGraph
             or CodingToolAction.VerifyXamlBindings
             or CodingToolAction.VerifyCommandBindings
             or CodingToolAction.ScanDeadCommands)

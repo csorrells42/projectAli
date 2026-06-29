@@ -27,6 +27,7 @@ public enum CodingToolAction
     ShowFullCodingReadiness,
     ShowValidationLedger,
     ShowCSharpSymbolIndex,
+    ShowCallGraph,
     VerifyXamlBindings,
     VerifyCommandBindings,
     ScanDeadCommands,

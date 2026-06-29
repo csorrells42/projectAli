@@ -200,6 +200,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowFullCodingReadiness => await ShowFullCodingReadinessAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationLedger => ShowValidationLedger(),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
+            CodingToolAction.ShowCallGraph => ShowCallGraph(request),
             CodingToolAction.VerifyXamlBindings => VerifyXamlBindings(),
             CodingToolAction.VerifyCommandBindings => VerifyCommandBindings(),
             CodingToolAction.ScanDeadCommands => ScanDeadCommands(),
@@ -5604,6 +5605,32 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "C# symbol index", Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult ShowCallGraph(CodingToolRequest request)
+    {
+        var query = CleanGoal(request.Query, string.Empty);
+        var edges = BuildRoslynCallGraph(GetCSharpFiles(), 240);
+        var filtered = string.IsNullOrWhiteSpace(query)
+            ? edges.Take(30).ToList()
+            : edges
+                .Where(edge => edge.Caller.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || edge.Callee.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Take(30)
+                .ToList();
+        var lines = new List<string>
+        {
+            "Call graph:",
+            "No files were changed.",
+            "Engine: Roslyn invocation syntax scan",
+            string.IsNullOrWhiteSpace(query) ? "Filter: none" : $"Filter: {query}",
+            $"Edges found: {edges.Count}",
+            $"Edges shown: {filtered.Count}"
+        };
+        lines.AddRange(filtered.Count == 0
+            ? ["- none found"]
+            : filtered.Select(edge => $"- {edge.Caller} -> {edge.Callee} ({RelativeToWorkspace(edge.Path)}:{edge.LineNumber})"));
+        lines.Add("Note - this is syntax-level and does not resolve overloads, virtual dispatch, reflection, or generated code yet.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Call graph", Policy.WorkspaceRoot);
+    }
     private CodingToolResult VerifyXamlBindings()
     {
         var xamlFiles = GetXamlFiles();
@@ -7997,6 +8024,65 @@ public sealed class LocalCodingToolService(
         ? EnumerateWorkspaceFiles().Where(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)).Take(1_000).ToList()
         : [];
 
+    private List<CSharpCallEdge> BuildRoslynCallGraph(IReadOnlyList<string> files, int limit)
+    {
+        var edges = new List<CSharpCallEdge>();
+        foreach (var file in files.Where(File.Exists))
+        {
+            if (edges.Count >= limit)
+            {
+                break;
+            }
+
+            var text = SafeReadText(file);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            SyntaxNode root;
+            try
+            {
+                root = CSharpSyntaxTree.ParseText(text).GetRoot();
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (edges.Count >= limit)
+                {
+                    break;
+                }
+
+                var caller = invocation.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
+                    ?? invocation.Ancestors().OfType<ConstructorDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
+                    ?? "<initializer>";
+                var callee = ExtractInvocationName(invocation.Expression);
+                if (string.IsNullOrWhiteSpace(callee))
+                {
+                    continue;
+                }
+
+                var lineNumber = text[..Math.Min(invocation.SpanStart, text.Length)].Count(character => character == '\n') + 1;
+                edges.Add(new CSharpCallEdge(caller, callee, file, lineNumber));
+            }
+        }
+
+        return edges
+            .DistinctBy(edge => $"{edge.Caller}|{edge.Callee}|{edge.Path}|{edge.LineNumber}", StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static string ExtractInvocationName(ExpressionSyntax expression) => expression switch
+    {
+        IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
+        MemberAccessExpressionSyntax memberAccess => memberAccess.Name.Identifier.ValueText,
+        GenericNameSyntax generic => generic.Identifier.ValueText,
+        _ => expression.ToString()
+    };
     private List<CSharpSymbolInfo> BuildRoslynSymbolIndex(IReadOnlyList<string> files, int limit)
     {
         var symbols = new List<CSharpSymbolInfo>();
@@ -10007,6 +10093,12 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> Steps,
         string LastReceiptSummary,
         DateTimeOffset UpdatedAt);
+
+    private sealed record CSharpCallEdge(
+        string Caller,
+        string Callee,
+        string Path,
+        int LineNumber);
 
     private sealed record CSharpSymbolInfo(
         string Kind,
