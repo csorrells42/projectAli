@@ -3178,6 +3178,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var command = await service.TryHandleAsync("command binding check", CancellationToken.None);
     var symbolIndex = await service.TryHandleAsync("show csharp symbol index", CancellationToken.None);
     var callGraph = await service.TryHandleAsync("show call graph Save", CancellationToken.None);
+    var ownership = await service.TryHandleAsync("ownership map Save", CancellationToken.None);
     var semantic = await service.TryHandleAsync("resolve symbol Save", CancellationToken.None);
     var impacted = await service.TryHandleAsync("show impacted tests Save", CancellationToken.None);
     var testTarget = await service.TryHandleAsync("resolve test target Save", CancellationToken.None);
@@ -3213,6 +3214,10 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Inbound callers:", callGraph.Message);
     Contains("Outbound callees:", callGraph.Message);
     Contains("Save -> Helper", callGraph.Message);
+    Contains("Ownership map", ownership.Message);
+    Contains("Ownership hints:", ownership.Message);
+    Contains("Prioritized test plan:", ownership.Message);
+    Contains("Call-chain impact:", ownership.Message);
     Contains("Semantic symbol resolver", semantic.Message);
     Contains("Reference graph:", semantic.Message);
     Contains("method Demo.App.MainWindowViewModel.Save()", semantic.Message);
@@ -3220,12 +3225,16 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Engine: Roslyn reference graph + symbol-to-test mapping", impacted.Message);
     Contains("MainWindowViewModelTests.cs", impacted.Message);
     Contains("Likely test symbols:", impacted.Message);
+    Contains("Prioritized test plan:", impacted.Message);
+    Contains("Call-chain impact:", impacted.Message);
     Contains("Smallest practical test target", impacted.Message);
     Contains("Project impact:", impacted.Message);
     Contains("Build order slice:", impacted.Message);
     Contains("Test target resolver", testTarget.Message);
     Contains("Reference signals:", testTarget.Message);
     Contains("Test symbols:", testTarget.Message);
+    Contains("Prioritized test plan:", testTarget.Message);
+    Contains("Call-chain impact:", testTarget.Message);
     Contains("Demo.Tests.csproj", testTarget.Message);
     Contains("confirm dotnet test", testTarget.Message);
     Contains("Project impact:", testTarget.Message);
@@ -3235,12 +3244,16 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Edit target validation:", editPlan.Message);
     Contains("Reference graph:", editPlan.Message);
     Contains("Safe refactor detector:", editPlan.Message);
+    Contains("Autonomous preflight:", editPlan.Message);
     Contains("symbol hit", editPlan.Message);
     Contains("MainWindowViewModel.cs", editPlan.Message);
     Contains("Safe edit workflow", safeEdit.Message);
     Contains("Patch gate:", safeEdit.Message);
     Contains("Impact radius:", safeEdit.Message);
     Contains("Safe refactor detector:", safeEdit.Message);
+    Contains("Autonomous preflight:", safeEdit.Message);
+    Contains("Prioritized tests:", safeEdit.Message);
+    Contains("Call-chain impact:", safeEdit.Message);
     Contains("Edit target validation:", safeEdit.Message);
     Contains("Direct files:", safeEdit.Message);
     Contains("Test command:", safeEdit.Message);
@@ -3263,7 +3276,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 75%", miniCodex.Message);
+    Contains("Overall score: 80%", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
 }

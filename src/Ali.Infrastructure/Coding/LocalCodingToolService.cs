@@ -6676,14 +6676,14 @@ public sealed class LocalCodingToolService(
         var commandSurface = ShowCommandSurfaceDoctor();
         var scores = new (string Name, int Score, string Note)[]
         {
-            ("Codebase awareness", 75, "project index v2, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
-            ("Edit planning", 74, "semantic edit targets, reference graph, impact radius, refactor safety hints"),
-            ("Patch safety", 72, "exact patch preview, semantic validation hints, pending patch ledger"),
-            ("Validation/release", 70, "targeted test recommendation, build order, safe commit and release readiness"),
-            ("Autonomous workflow", 68, "execution packets and receipts exist; still requires owner approval for writes and commands"),
+            ("Codebase awareness", 80, "project index v2, Roslyn symbols, ownership hints, dependency/build order, public API, generated-code guardrails"),
+            ("Edit planning", 79, "semantic edit targets, reference graph, impact radius, refactor safety hints, autonomous preflight"),
+            ("Patch safety", 76, "exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
+            ("Validation/release", 75, "prioritized test recommendation, build order, safe commit and release readiness"),
+            ("Autonomous workflow", 72, "self-checking preflight and receipts exist; still requires owner approval for writes and commands"),
             ("Dashboard usability", 73, "one-click programming checks with concise output")
         };
-        var overall = 75;
+        var overall = 80;
         var lines = new List<string>
         {
             "Mini-Codex status:",
@@ -6704,8 +6704,8 @@ public sealed class LocalCodingToolService(
         lines.Add("Command surface:");
         AddSelectedLines(lines, commandSurface.Message, 5, "Overall:", "Actions:", "Service handlers:", "Policy coverage:", "Parser/test coverage:", "Dashboard bindings:");
         lines.Add("Next upgrade path:");
-        lines.Add("- Raise codebase awareness toward 85 by adding deeper symbol ownership, call-chain impact, and generated test selection.");
-        lines.Add("- Raise autonomous workflow toward 80 by making execution packets more self-checking before any apply step.");
+        lines.Add("- Raise codebase awareness toward 85 by adding persistent ownership maps and cross-language route scanning.");
+        lines.Add("- Raise autonomous workflow toward 80 by making execution packets self-score each planned edit before approval.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Mini-Codex status", Policy.WorkspaceRoot);
     }
@@ -6801,6 +6801,7 @@ public sealed class LocalCodingToolService(
         var projectImpact = BuildProjectImpact(candidateFiles, summaries);
         var testTarget = await ResolveTestTargetRecommendationAsync(query, cancellationToken).ConfigureAwait(false);
         var relatedFiles = FindOwnershipRelatedFiles(terms, semanticHits, candidateFiles);
+        var ownershipHints = BuildSymbolOwnershipHints(terms, semanticHits, candidateFiles, summaries);
         var lines = new List<string>
         {
             "Ownership map:",
@@ -6817,16 +6818,59 @@ public sealed class LocalCodingToolService(
         lines.AddRange(candidateFiles.Count == 0 ? ["- none found"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
         lines.Add("Nearby symbols:");
         lines.AddRange(semanticHits.Count == 0 ? ["- none found"] : semanticHits.Take(10).Select(FormatSemanticHit));
+        lines.Add("Ownership hints:");
+        lines.AddRange(ownershipHints.Count == 0 ? ["- none resolved"] : ownershipHints);
         lines.Add("Related files:");
         lines.AddRange(relatedFiles.Count == 0 ? ["- none found"] : relatedFiles.Select(file => $"- {file}"));
         lines.Add("Likely tests:");
         lines.AddRange(testTarget.TestFiles.Count == 0 ? ["- none found"] : testTarget.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Prioritized test plan:");
+        lines.AddRange(testTarget.PrioritizedTests.Count == 0 ? ["- none resolved"] : testTarget.PrioritizedTests.Select(test => $"- {test}"));
+        lines.Add("Call-chain impact:");
+        lines.AddRange(testTarget.CallChainImpact.Count == 0 ? ["- none resolved"] : testTarget.CallChainImpact.Select(item => $"- {item}"));
         lines.Add("Build order slice:");
         lines.AddRange(projectImpact.BuildOrderProjects.Count == 0 ? ["- none resolved"] : projectImpact.BuildOrderProjects.Select((project, index) => $"- {index + 1}. {project}"));
         lines.Add("Validation commands:");
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command) ? "- No targeted test command resolved." : $"- {testTarget.Command}");
         lines.Add("Next - inspect the primary files, then use safe edit workflow before changing anything.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Ownership map", Policy.WorkspaceRoot);
+    }
+
+    private IReadOnlyList<string> BuildSymbolOwnershipHints(
+        IReadOnlyList<string> terms,
+        IReadOnlyList<SemanticSymbolHit> semanticHits,
+        IReadOnlyList<string> candidateFiles,
+        IReadOnlyList<ProjectSummary> summaries)
+    {
+        var hints = new List<string>();
+        var hitOwners = semanticHits
+            .Where(hit => !string.IsNullOrWhiteSpace(hit.Container) || !string.IsNullOrWhiteSpace(hit.ProjectPath))
+            .Select(hit =>
+            {
+                var project = string.IsNullOrWhiteSpace(hit.ProjectPath) ? "unknown project" : RelativeToWorkspace(hit.ProjectPath);
+                var container = string.IsNullOrWhiteSpace(hit.Container) ? hit.Display : hit.Container;
+                return $"{container} owns {hit.Name} in {project}";
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        hints.AddRange(hitOwners.Select(hint => $"- {hint}"));
+
+        foreach (var file in candidateFiles.Take(6))
+        {
+            var ownerProject = FindProjectForWorkspaceFile(file, summaries);
+            var relativePath = RelativeToWorkspace(file);
+            hints.Add(string.IsNullOrWhiteSpace(ownerProject)
+                ? $"- {relativePath}: no owning project resolved; inspect folder boundaries."
+                : $"- {relativePath}: owned by {ownerProject}; {ClassifyFileRisk(relativePath)}.");
+        }
+
+        if (terms.Count > 0 && semanticHits.Count == 0)
+        {
+            hints.Add($"- Terms {FormatInlineList(terms.Take(4))} did not resolve to symbols; start with file search before editing.");
+        }
+
+        return hints.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList();
     }
 
     private IReadOnlyList<string> FindOwnershipRelatedFiles(
@@ -6950,6 +6994,10 @@ public sealed class LocalCodingToolService(
         lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
         lines.Add("Likely test symbols:");
         lines.AddRange(recommendation.TestSymbols.Count == 0 ? ["- none found"] : recommendation.TestSymbols.Select(symbol => $"- {symbol}"));
+        lines.Add("Prioritized test plan:");
+        lines.AddRange(recommendation.PrioritizedTests.Count == 0 ? ["- none found"] : recommendation.PrioritizedTests.Select(test => $"- {test}"));
+        lines.Add("Call-chain impact:");
+        lines.AddRange(recommendation.CallChainImpact.Count == 0 ? ["- none found"] : recommendation.CallChainImpact.Select(item => $"- {item}"));
         lines.Add("Smallest practical test target:");
         lines.Add(string.IsNullOrWhiteSpace(recommendation.TargetPath) ? "- none found" : $"- {recommendation.Scope}: {recommendation.TargetPath}");
         lines.Add("Build order slice:");
@@ -6991,6 +7039,10 @@ public sealed class LocalCodingToolService(
         lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
         lines.Add("Test symbols:");
         lines.AddRange(recommendation.TestSymbols.Count == 0 ? ["- none found"] : recommendation.TestSymbols.Select(symbol => $"- {symbol}"));
+        lines.Add("Prioritized test plan:");
+        lines.AddRange(recommendation.PrioritizedTests.Count == 0 ? ["- none found"] : recommendation.PrioritizedTests.Select(test => $"- {test}"));
+        lines.Add("Call-chain impact:");
+        lines.AddRange(recommendation.CallChainImpact.Count == 0 ? ["- none found"] : recommendation.CallChainImpact.Select(item => $"- {item}"));
         lines.Add("Notes:");
         lines.AddRange(recommendation.Notes.Count == 0 ? ["- none"] : recommendation.Notes.Select(note => $"- {note}"));
         return new CodingToolResult(true, !string.IsNullOrWhiteSpace(recommendation.Command), string.Join(Environment.NewLine, lines), "Test target resolver", recommendation.TargetPath ?? Policy.WorkspaceRoot);
@@ -7086,7 +7138,122 @@ public sealed class LocalCodingToolService(
             notes.Add("No likely test files were detected; run project intelligence if this seems wrong.");
         }
 
-        return new TestTargetRecommendation(query, sourceFiles, testFiles, testSymbols, graph.ReferenceFiles, projectImpact.SourceProjects, projectImpact.AffectedProjects, projectImpact.BuildOrderProjects, target, scope, command, notes);
+        var prioritizedTests = BuildPrioritizedTestPlan(testFiles, testSymbols, sourceTokens, projectImpact, target, command);
+        var callChainImpact = BuildCallChainImpactSummary(graph, sourceFiles);
+        return new TestTargetRecommendation(
+            query,
+            sourceFiles,
+            testFiles,
+            testSymbols,
+            graph.ReferenceFiles,
+            projectImpact.SourceProjects,
+            projectImpact.AffectedProjects,
+            projectImpact.BuildOrderProjects,
+            target,
+            scope,
+            command,
+            notes,
+            prioritizedTests,
+            callChainImpact);
+    }
+
+    private IReadOnlyList<string> BuildPrioritizedTestPlan(
+        IReadOnlyList<string> testFiles,
+        IReadOnlyList<string> testSymbols,
+        IReadOnlyList<string> sourceTokens,
+        ProjectImpact projectImpact,
+        string? target,
+        string command)
+    {
+        var lines = new List<string>();
+        foreach (var testFile in testFiles.Take(6))
+        {
+            var relative = RelativeToWorkspace(testFile);
+            var score = 50;
+            var reasons = new List<string>();
+            var name = Path.GetFileNameWithoutExtension(testFile);
+            var matchedTokens = sourceTokens
+                .Where(token => name.Contains(token, StringComparison.OrdinalIgnoreCase) || SafeReadText(testFile).Contains(token, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+            if (matchedTokens.Count > 0)
+            {
+                score += 25;
+                reasons.Add("matches " + string.Join(", ", matchedTokens));
+            }
+
+            if (TryFindNearestProjectForFile(testFile, out var project)
+                && projectImpact.AffectedProjects.Any(affected => Path.GetFullPath(Path.Combine(Policy.WorkspaceRoot, affected)).Equals(project, StringComparison.OrdinalIgnoreCase)))
+            {
+                score += 15;
+                reasons.Add("inside affected project slice");
+            }
+
+            if (testSymbols.Any(symbol => symbol.Contains(name, StringComparison.OrdinalIgnoreCase)))
+            {
+                score += 10;
+                reasons.Add("symbol-level match");
+            }
+
+            var confidence = score >= 85 ? "High" : score >= 65 ? "Medium" : "Low";
+            lines.Add($"{confidence} {score} - {relative}: {(reasons.Count == 0 ? "nearest available test" : string.Join("; ", reasons))}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(command))
+        {
+            lines.Add($"Command first: {command}");
+        }
+        else if (!string.IsNullOrWhiteSpace(target))
+        {
+            lines.Add($"Target first: {target}");
+        }
+
+        if (projectImpact.BuildOrderProjects.Count > 0)
+        {
+            lines.Add($"Then build affected slice: {FormatInlineList(projectImpact.BuildOrderProjects.Take(6))}");
+        }
+
+        return lines.Distinct(StringComparer.OrdinalIgnoreCase).Take(10).ToList();
+    }
+
+    private IReadOnlyList<string> BuildCallChainImpactSummary(SemanticReferenceGraph graph, IReadOnlyList<string> sourceFiles)
+    {
+        var inboundCallers = graph.InboundCalls
+            .Select(edge => edge.Caller)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var outboundCallees = graph.OutboundCalls
+            .Select(edge => edge.Callee)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var impactFiles = graph.InboundCalls
+            .Concat(graph.OutboundCalls)
+            .Select(edge => edge.Path)
+            .Concat(sourceFiles)
+            .Where(File.Exists)
+            .Select(RelativeToWorkspace)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var lines = new List<string>
+        {
+            $"Inbound callers: {FormatInlineList(inboundCallers)}",
+            $"Outbound callees: {FormatInlineList(outboundCallees)}",
+            $"Impact files: {FormatInlineList(impactFiles)}"
+        };
+        if (graph.InboundCalls.Count == 0 && graph.OutboundCalls.Count == 0)
+        {
+            lines.Add("Call graph confidence: Low - no direct invocation edges resolved.");
+        }
+        else
+        {
+            lines.Add($"Call graph confidence: Medium - {graph.InboundCalls.Count} inbound and {graph.OutboundCalls.Count} outbound edge(s) resolved.");
+        }
+
+        return lines;
     }
 
     private bool TryFindNearestProjectForFile(string file, out string projectPath)
@@ -7154,6 +7321,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(rankedTargets.Count == 0 ? ["- none found"] : rankedTargets.Take(8).Select(FormatEditTargetCandidate));
         AddReferenceGraphLines(lines, graph, includeSymbols: true);
         AddSafeRefactorDetectorLines(lines, goal, candidateFiles.Select(RelativeToWorkspace).ToList(), graph);
+        AddAutonomousPreflightLines(lines, candidateFiles.Select(RelativeToWorkspace).ToList(), graph, null, hasPendingPreview: false);
         lines.Add("Symbols to inspect:");
         lines.AddRange(hits.Count == 0 ? ["- none found from goal terms"] : hits.Take(10).Select(FormatSemanticHit));
         lines.Add("Files to inspect first:");
@@ -7235,7 +7403,15 @@ public sealed class LocalCodingToolService(
             notes.Add("No targeted test file was resolved; use build plus broader tests.");
         }
 
-        return new EditImpactSurface(directFiles, relatedFiles, testFiles, affectedProjects, testTarget.Command, notes);
+        return new EditImpactSurface(
+            directFiles,
+            relatedFiles,
+            testFiles,
+            affectedProjects,
+            testTarget.Command,
+            testTarget.PrioritizedTests,
+            testTarget.CallChainImpact,
+            notes);
     }
 
     private void AddEditImpactSurfaceLines(List<string> lines, EditImpactSurface surface)
@@ -7248,6 +7424,8 @@ public sealed class LocalCodingToolService(
         lines.Add(string.IsNullOrWhiteSpace(surface.TestCommand)
             ? "- Test command: none resolved"
             : $"- Test command: {surface.TestCommand}");
+        lines.Add($"- Prioritized tests: {FormatInlineList(surface.PrioritizedTests.Take(4))}");
+        lines.Add($"- Call-chain impact: {FormatInlineList(surface.CallChainImpact.Take(4))}");
         lines.AddRange(surface.Notes.Count == 0 ? ["- Notes: none"] : surface.Notes.Select(note => $"- Note: {note}"));
     }
 
@@ -7290,6 +7468,35 @@ public sealed class LocalCodingToolService(
             : $"- Protected/generated targets: {FormatInlineList(protectedFiles)}");
     }
 
+    private static void AddAutonomousPreflightLines(
+        List<string> lines,
+        IReadOnlyList<string> candidateFiles,
+        SemanticReferenceGraph graph,
+        TestTargetRecommendation? testTarget,
+        bool hasPendingPreview)
+    {
+        var protectedFiles = candidateFiles
+            .Where(file => ClassifyFileRisk(file).StartsWith("Protected", StringComparison.OrdinalIgnoreCase))
+            .Take(5)
+            .ToList();
+        lines.Add("Autonomous preflight:");
+        lines.Add(candidateFiles.Count == 0
+            ? "- Target resolved: Bad - no candidate files yet."
+            : $"- Target resolved: Good - {candidateFiles.Count} candidate file(s).");
+        lines.Add(protectedFiles.Count == 0
+            ? "- Protected file check: Good - no generated/designer candidate."
+            : $"- Protected file check: Review - {FormatInlineList(protectedFiles)}");
+        lines.Add(graph.Declarations.Count > 0 || graph.References.Count > 0
+            ? "- Semantic evidence: Good - symbol/reference evidence exists."
+            : "- Semantic evidence: Needs review - no symbol/reference evidence resolved.");
+        lines.Add(testTarget is null || string.IsNullOrWhiteSpace(testTarget.Command)
+            ? "- Test target: Needs review - no targeted test command attached yet."
+            : $"- Test target: Good - {testTarget.Command}");
+        lines.Add(hasPendingPreview
+            ? "- Patch preview: Review existing pending preview before creating another."
+            : "- Patch preview: Required before any apply step.");
+    }
+
     private IReadOnlyList<string> BuildSemanticPatchCheckLines(IReadOnlyList<string> paths)
     {
         var relativePaths = paths.Select(RelativeToWorkspace).ToList();
@@ -7318,6 +7525,16 @@ public sealed class LocalCodingToolService(
                 : $"- Public API guard: Review callers and compatibility for {FormatInlineList(publicApiFiles)}",
             "- Ledger: patch preview must be shown again if old text or target files change."
         };
+        var query = string.Join(" ", relativePaths
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var graph = BuildSemanticReferenceGraph(query, BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000), 80);
+            lines.AddRange(BuildCallChainImpactSummary(graph, paths).Take(4).Select(item => $"- Call-chain guard: {item}"));
+        }
+
         return lines;
     }
 
@@ -7480,6 +7697,7 @@ public sealed class LocalCodingToolService(
         AddReferenceGraphLines(lines, graph, includeSymbols: true);
         AddEditImpactSurfaceLines(lines, impactSurface);
         AddSafeRefactorDetectorLines(lines, goal, candidateFiles.Select(RelativeToWorkspace).ToList(), graph);
+        AddAutonomousPreflightLines(lines, candidateFiles.Select(RelativeToWorkspace).ToList(), graph, testTarget, hasPendingPreview);
         lines.Add("Edit target validation:");
         lines.Add(candidateFiles.Count == 0
             ? "- Needs review - no exact candidate files resolved."
@@ -12834,6 +13052,8 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> TestFiles,
         IReadOnlyList<string> AffectedProjects,
         string? TestCommand,
+        IReadOnlyList<string> PrioritizedTests,
+        IReadOnlyList<string> CallChainImpact,
         IReadOnlyList<string> Notes);
 
     private sealed record EditTargetCandidate(
@@ -12854,7 +13074,9 @@ public sealed class LocalCodingToolService(
         string? TargetPath,
         string Scope,
         string Command,
-        IReadOnlyList<string> Notes);
+        IReadOnlyList<string> Notes,
+        IReadOnlyList<string> PrioritizedTests,
+        IReadOnlyList<string> CallChainImpact);
 
     private sealed record ProjectIndexAwareness(
         bool Available,
