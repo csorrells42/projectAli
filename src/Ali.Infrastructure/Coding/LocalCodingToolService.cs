@@ -6517,6 +6517,8 @@ public sealed class LocalCodingToolService(
     {
         var query = CleanGoal(request.Query, string.Empty);
         var edges = BuildRoslynCallGraph(GetCSharpFiles(), 240);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var graph = BuildSemanticReferenceGraph(query, workspace, 80);
         var filtered = string.IsNullOrWhiteSpace(query)
             ? edges.Take(30).ToList()
             : edges
@@ -6536,6 +6538,13 @@ public sealed class LocalCodingToolService(
         lines.AddRange(filtered.Count == 0
             ? ["- none found"]
             : filtered.Select(edge => $"- {edge.Caller} -> {edge.Callee} ({RelativeToWorkspace(edge.Path)}:{edge.LineNumber})"));
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            lines.Add("Inbound callers:");
+            lines.AddRange(graph.InboundCalls.Count == 0 ? ["- none found"] : graph.InboundCalls.Take(8).Select(FormatCallEdge));
+            lines.Add("Outbound callees:");
+            lines.AddRange(graph.OutboundCalls.Count == 0 ? ["- none found"] : graph.OutboundCalls.Take(8).Select(FormatCallEdge));
+        }
         lines.Add("Note - this resolves normal C# invocations; virtual dispatch, reflection, and generated code may still need manual review.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Call graph", Policy.WorkspaceRoot);
     }
@@ -6548,14 +6557,14 @@ public sealed class LocalCodingToolService(
         }
 
         var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
-        var hits = FindSemanticSymbolHits(workspace, query, 40);
-        var declarations = hits.Where(hit => hit.Source == "declaration").Take(12).ToList();
-        var references = hits.Where(hit => hit.Source != "declaration").Take(12).ToList();
+        var graph = BuildSemanticReferenceGraph(query, workspace, 80);
+        var declarations = graph.Declarations.Take(12).ToList();
+        var references = graph.References.Take(12).ToList();
         var lines = new List<string>
         {
             "Semantic symbol resolver:",
             "No files were changed.",
-            "Engine: Roslyn semantic model",
+            "Engine: Roslyn semantic model + reference graph",
             $"Query: {query}",
             $"C# files: {workspace.Trees.Count}",
             $"Declarations found: {declarations.Count}",
@@ -6565,6 +6574,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(declarations.Count == 0 ? ["- none found"] : declarations.Select(FormatSemanticHit));
         lines.Add("References:");
         lines.AddRange(references.Count == 0 ? ["- none found"] : references.Select(FormatSemanticHit));
+        AddReferenceGraphLines(lines, graph, includeSymbols: false);
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Semantic symbol resolver", Policy.WorkspaceRoot);
     }
 
@@ -6576,19 +6586,25 @@ public sealed class LocalCodingToolService(
         {
             "Impacted tests:",
             "No files were changed.",
-            "Engine: Roslyn semantic hits + workspace test naming",
+            "Engine: Roslyn reference graph + symbol-to-test mapping",
             string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
             $"Source files signaled: {recommendation.SourceFiles.Count}",
+            $"Reference files signaled: {recommendation.ReferenceFiles.Count}",
             $"Likely test files: {recommendation.TestFiles.Count}",
+            $"Likely test symbols: {recommendation.TestSymbols.Count}",
             $"Source projects: {recommendation.SourceProjects.Count}",
             $"Affected projects: {recommendation.AffectedProjects.Count}",
             "Source signals:"
         };
         lines.AddRange(recommendation.SourceFiles.Count == 0 ? ["- none found"] : recommendation.SourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Reference signals:");
+        lines.AddRange(recommendation.ReferenceFiles.Count == 0 ? ["- none found"] : recommendation.ReferenceFiles.Select(file => $"- {file}"));
         lines.Add("Project impact:");
         lines.AddRange(recommendation.AffectedProjects.Count == 0 ? ["- none found"] : recommendation.AffectedProjects.Select(project => $"- {project}"));
         lines.Add("Likely tests:");
         lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Likely test symbols:");
+        lines.AddRange(recommendation.TestSymbols.Count == 0 ? ["- none found"] : recommendation.TestSymbols.Select(symbol => $"- {symbol}"));
         lines.Add("Smallest practical test target:");
         lines.Add(string.IsNullOrWhiteSpace(recommendation.TargetPath) ? "- none found" : $"- {recommendation.Scope}: {recommendation.TargetPath}");
         lines.Add("Build order slice:");
@@ -6606,24 +6622,30 @@ public sealed class LocalCodingToolService(
         {
             "Test target resolver:",
             "No files were changed.",
-            "Engine: semantic hits + changed files + nearest test project",
+            "Engine: semantic reference graph + changed files + nearest test project",
             string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
             recommendation.TargetPath is null ? "Target: none found" : $"Target: {recommendation.TargetPath}",
             $"Scope: {recommendation.Scope}",
             string.IsNullOrWhiteSpace(recommendation.Command) ? "Command: none" : $"Command: {recommendation.Command}",
             $"Source signals: {recommendation.SourceFiles.Count}",
+            $"Reference signals: {recommendation.ReferenceFiles.Count}",
             $"Likely test files: {recommendation.TestFiles.Count}",
+            $"Likely test symbols: {recommendation.TestSymbols.Count}",
             $"Source projects: {recommendation.SourceProjects.Count}",
             $"Affected projects: {recommendation.AffectedProjects.Count}",
             "Source files:"
         };
         lines.AddRange(recommendation.SourceFiles.Count == 0 ? ["- none found"] : recommendation.SourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Reference files:");
+        lines.AddRange(recommendation.ReferenceFiles.Count == 0 ? ["- none found"] : recommendation.ReferenceFiles.Select(file => $"- {file}"));
         lines.Add("Project impact:");
         lines.AddRange(recommendation.AffectedProjects.Count == 0 ? ["- none found"] : recommendation.AffectedProjects.Select(project => $"- {project}"));
         lines.Add("Build order slice:");
         lines.AddRange(recommendation.BuildOrderProjects.Count == 0 ? ["- none found"] : recommendation.BuildOrderProjects.Select((project, index) => $"- {index + 1}. {project}"));
         lines.Add("Test files:");
         lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Test symbols:");
+        lines.AddRange(recommendation.TestSymbols.Count == 0 ? ["- none found"] : recommendation.TestSymbols.Select(symbol => $"- {symbol}"));
         lines.Add("Notes:");
         lines.AddRange(recommendation.Notes.Count == 0 ? ["- none"] : recommendation.Notes.Select(note => $"- {note}"));
         return new CodingToolResult(true, !string.IsNullOrWhiteSpace(recommendation.Command), string.Join(Environment.NewLine, lines), "Test target resolver", recommendation.TargetPath ?? Policy.WorkspaceRoot);
@@ -6633,9 +6655,13 @@ public sealed class LocalCodingToolService(
     {
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
-        var semanticHits = string.IsNullOrWhiteSpace(query) ? [] : FindSemanticSymbolHits(workspace, query, 80);
+        var graph = string.IsNullOrWhiteSpace(query)
+            ? new SemanticReferenceGraph(query, [], [], [], [], [], [])
+            : BuildSemanticReferenceGraph(query, workspace, 100);
+        var semanticHits = graph.Declarations.Concat(graph.References).ToList();
         var sourceFiles = semanticHits
             .Select(hit => hit.Path)
+            .Concat(graph.ReferenceFiles.Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!))
             .Where(path => !IsTestFile(path))
             .Concat(changedFiles.Where(IsSourceFile).Where(file => !IsTestFile(file)).Select(ToAbsoluteWorkspacePath))
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -6660,6 +6686,11 @@ public sealed class LocalCodingToolService(
             testFiles = GetCSharpFiles().Where(IsTestFile).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).Take(12).ToList();
         }
 
+        var testSymbols = graph.TestSymbols
+            .Concat(FindLikelyTestSymbols(sourceTokens, testFiles.Select(RelativeToWorkspace).ToList(), 20))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
         var summaries = GetWorkspaceProjectSummaries();
         var projectImpact = BuildProjectImpact(sourceFiles, summaries);
         var notes = new List<string>();
@@ -6700,13 +6731,17 @@ public sealed class LocalCodingToolService(
         {
             notes.Add($"Project impact includes {projectImpact.AffectedProjects.Count} project(s); validate in dependency build order when build risk is high.");
         }
+        if (graph.ReferenceFiles.Count > 0)
+        {
+            notes.Add($"Reference graph found {graph.ReferenceFiles.Count} related file(s); review those before broad edits.");
+        }
         var command = string.IsNullOrWhiteSpace(target) ? string.Empty : $"confirm dotnet test \"{target}\"";
         if (testFiles.Count == 0)
         {
             notes.Add("No likely test files were detected; run project intelligence if this seems wrong.");
         }
 
-        return new TestTargetRecommendation(query, sourceFiles, testFiles, projectImpact.SourceProjects, projectImpact.AffectedProjects, projectImpact.BuildOrderProjects, target, scope, command, notes);
+        return new TestTargetRecommendation(query, sourceFiles, testFiles, testSymbols, graph.ReferenceFiles, projectImpact.SourceProjects, projectImpact.AffectedProjects, projectImpact.BuildOrderProjects, target, scope, command, notes);
     }
 
     private bool TryFindNearestProjectForFile(string file, out string projectPath)
@@ -6741,8 +6776,14 @@ public sealed class LocalCodingToolService(
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
         var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
-        var hits = goalTerms.SelectMany(term => FindSemanticSymbolHits(workspace, term, 12)).DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal).Take(20).ToList();
+        var graph = BuildSemanticReferenceGraph(goal, workspace, 100);
+        var hits = graph.Declarations
+            .Concat(graph.References)
+            .DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
+            .Take(20)
+            .ToList();
         var candidateFiles = hits.Select(hit => hit.Path)
+            .Concat(graph.ReferenceFiles.Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!))
             .Concat(changedFiles.Select(ToAbsoluteWorkspacePath))
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => path!)
@@ -6766,10 +6807,15 @@ public sealed class LocalCodingToolService(
             "Ranked edit targets:"
         };
         lines.AddRange(rankedTargets.Count == 0 ? ["- none found"] : rankedTargets.Take(8).Select(FormatEditTargetCandidate));
+        AddReferenceGraphLines(lines, graph, includeSymbols: true);
         lines.Add("Symbols to inspect:");
         lines.AddRange(hits.Count == 0 ? ["- none found from goal terms"] : hits.Take(10).Select(FormatSemanticHit));
         lines.Add("Files to inspect first:");
         lines.AddRange(candidateFiles.Count == 0 ? ["- none found"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
+        lines.Add("Edit target validation:");
+        lines.Add(rankedTargets.Count == 0
+            ? "- Needs review - no exact semantic edit target was resolved."
+            : $"- Good - top target is {rankedTargets[0].RelativePath} with {rankedTargets[0].Confidence} confidence.");
         lines.Add("Edit guardrails:");
         lines.Add("- Prefer exact-symbol changes over broad text replacement.");
         lines.Add("- Update tests when source behavior, parser routing, permissions, or UI command bindings change.");
@@ -6859,6 +6905,23 @@ public sealed class LocalCodingToolService(
         lines.AddRange(surface.Notes.Count == 0 ? ["- Notes: none"] : surface.Notes.Select(note => $"- Note: {note}"));
     }
 
+    private void AddReferenceGraphLines(List<string> lines, SemanticReferenceGraph graph, bool includeSymbols)
+    {
+        lines.Add("Reference graph:");
+        lines.Add($"- Declarations: {graph.Declarations.Count}");
+        lines.Add($"- References: {graph.References.Count}");
+        lines.Add($"- Inbound callers: {graph.InboundCalls.Count}");
+        lines.Add($"- Outbound callees: {graph.OutboundCalls.Count}");
+        lines.Add($"- Reference files: {FormatInlineList(graph.ReferenceFiles.Take(8))}");
+        if (includeSymbols)
+        {
+            lines.Add($"- Likely test symbols: {FormatInlineList(graph.TestSymbols.Take(8))}");
+        }
+    }
+
+    private string FormatCallEdge(CSharpCallEdge edge) =>
+        $"- {edge.Caller} -> {edge.Callee} ({RelativeToWorkspace(edge.Path)}:{edge.LineNumber})";
+
     private List<EditTargetCandidate> RankEditTargetCandidates(
         IReadOnlyList<string> goalTerms,
         IReadOnlyList<SemanticSymbolHit> hits,
@@ -6942,12 +7005,14 @@ public sealed class LocalCodingToolService(
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
         var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
-        var hits = goalTerms
-            .SelectMany(term => FindSemanticSymbolHits(workspace, term, 8))
+        var graph = BuildSemanticReferenceGraph(goal, workspace, 100);
+        var hits = graph.Declarations
+            .Concat(graph.References)
             .DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
             .Take(12)
             .ToList();
         var candidateFiles = hits.Select(hit => hit.Path)
+            .Concat(graph.ReferenceFiles.Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!))
             .Concat(changedFiles.Select(ToAbsoluteWorkspacePath))
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path => path!)
@@ -7010,7 +7075,12 @@ public sealed class LocalCodingToolService(
         lines.AddRange(hits.Count == 0 ? ["- no semantic symbol hits from goal terms"] : hits.Take(6).Select(FormatSemanticHit));
         lines.Add("Files to touch only if needed:");
         lines.AddRange(candidateFiles.Count == 0 ? ["- none found yet"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
+        AddReferenceGraphLines(lines, graph, includeSymbols: true);
         AddEditImpactSurfaceLines(lines, impactSurface);
+        lines.Add("Edit target validation:");
+        lines.Add(candidateFiles.Count == 0
+            ? "- Needs review - no exact candidate files resolved."
+            : $"- Good - {candidateFiles.Count} candidate file(s) resolved before patch preview.");
         lines.Add("Patch gate:");
         if (hasPendingPreview)
         {
@@ -7063,6 +7133,8 @@ public sealed class LocalCodingToolService(
             : null;
         var testQuery = BuildDiagnosticTestQuery(parsed, absolutePath, symbolContext);
         var testTarget = await ResolveTestTargetRecommendationAsync(testQuery, cancellationToken).ConfigureAwait(false);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var graph = BuildSemanticReferenceGraph(testQuery, workspace, 80);
         var candidates = BuildDiagnosticFixCandidates(parsed, diagnostic, absolutePath, symbolContext, testTarget);
         var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
@@ -7079,6 +7151,7 @@ public sealed class LocalCodingToolService(
             "Ranked fix candidates:"
         };
         lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates.Select(FormatDiagnosticFixCandidate));
+        AddReferenceGraphLines(lines, graph, includeSymbols: true);
         lines.Add("Likely fix lane:");
         AddKnownErrorGuidance(lines, string.IsNullOrWhiteSpace(parsed.Code) ? diagnostic : parsed.Code);
         lines.Add("Validation after fix:");
@@ -7245,6 +7318,9 @@ public sealed class LocalCodingToolService(
         var xamlFiles = GetXamlFiles();
         var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 10_000);
         var symbolNames = symbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.Ordinal);
+        var symbolByName = symbols
+            .GroupBy(symbol => symbol.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var commands = new List<(string Path, string Name)>();
         foreach (var file in xamlFiles)
         {
@@ -7268,6 +7344,19 @@ public sealed class LocalCodingToolService(
             $"Missing command targets: {missing.Count}"
         };
         lines.AddRange(missing.Count == 0 ? ["- Good - all command binding names were found in code symbols."] : missing.Select(command => $"- {RelativeToWorkspace(command.Path)} -> {command.Name}"));
+        lines.Add("Command/UI binding graph:");
+        lines.AddRange(commands
+            .DistinctBy(command => RelativeToWorkspace(command.Path) + "|" + command.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .Select(command =>
+            {
+                if (!symbolByName.TryGetValue(command.Name, out var symbol))
+                {
+                    return $"- {RelativeToWorkspace(command.Path)} -> {command.Name} -> missing";
+                }
+
+                return $"- {RelativeToWorkspace(command.Path)} -> {command.Name} -> {symbol.DisplayName} ({RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber})";
+            }));
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
     }
 
@@ -7303,8 +7392,12 @@ public sealed class LocalCodingToolService(
         var dashboardCommands = ExtractXamlBindingNames(dashboardText, commandOnly: true)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var commandSymbols = BuildRoslynSymbolIndex([viewModelPath], 10_000)
+            .Where(symbol => symbol.Name.EndsWith("Command", StringComparison.Ordinal))
+            .ToDictionary(symbol => symbol.Name, symbol => symbol, StringComparer.Ordinal);
         var missingDashboardTargets = dashboardCommands
-            .Where(command => !viewModelText.Contains($"ICommand {command}", StringComparison.Ordinal)
+            .Where(command => !commandSymbols.ContainsKey(command)
+                && !viewModelText.Contains($"ICommand {command}", StringComparison.Ordinal)
                 && !viewModelText.Contains($" {command} {{ get; }}", StringComparison.Ordinal))
             .OrderBy(command => command, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -7329,6 +7422,18 @@ public sealed class LocalCodingToolService(
         lines.AddRange(missingParserOrTests.Count == 0 ? ["- none"] : missingParserOrTests.Take(20).Select(action => $"- {action}"));
         lines.Add("Dashboard gaps:");
         lines.AddRange(missingDashboardTargets.Count == 0 ? ["- none"] : missingDashboardTargets.Take(20).Select(command => $"- {command}"));
+        lines.Add("Dashboard command graph:");
+        lines.AddRange(dashboardCommands.Count == 0
+            ? ["- none"]
+            : dashboardCommands.Take(20).Select(command =>
+            {
+                if (!commandSymbols.TryGetValue(command, out var symbol))
+                {
+                    return $"- {command} -> missing";
+                }
+
+                return $"- {command} -> {symbol.DisplayName} ({RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber})";
+            }));
         return new CodingToolResult(true, blockerCount == 0, string.Join(Environment.NewLine, lines), "Command surface doctor", Policy.WorkspaceRoot);
     }
 
@@ -9947,6 +10052,87 @@ public sealed class LocalCodingToolService(
             .ToList();
     }
 
+    private SemanticReferenceGraph BuildSemanticReferenceGraph(string query, RoslynWorkspaceModel workspace, int limit)
+    {
+        var cleanedQuery = CleanGoal(query, string.Empty);
+        if (string.IsNullOrWhiteSpace(cleanedQuery))
+        {
+            return new SemanticReferenceGraph(cleanedQuery, [], [], [], [], [], []);
+        }
+
+        var queryTerms = ExtractMeaningfulGoalTerms(cleanedQuery)
+            .Prepend(cleanedQuery)
+            .Where(term => !string.IsNullOrWhiteSpace(term) && term.Length > 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        var hits = queryTerms
+            .SelectMany(term => FindSemanticSymbolHits(workspace, term, Math.Max(8, limit / Math.Max(queryTerms.Count, 1))))
+            .DistinctBy(hit => $"{hit.Source}|{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
+            .Take(limit)
+            .ToList();
+        var declarations = hits
+            .Where(hit => hit.Source == "declaration")
+            .Take(16)
+            .ToList();
+        var references = hits
+            .Where(hit => hit.Source != "declaration")
+            .Take(40)
+            .ToList();
+        var terms = declarations
+            .Select(hit => hit.Name)
+            .Concat(references.Select(hit => hit.Name))
+            .Concat(queryTerms)
+            .Where(term => !string.IsNullOrWhiteSpace(term) && term.Length > 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList();
+        var edges = BuildRoslynCallGraph(GetCSharpFiles(), 1_000);
+        var inbound = edges
+            .Where(edge => terms.Any(term => edge.Callee.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Take(16)
+            .ToList();
+        var outbound = edges
+            .Where(edge => terms.Any(term => edge.Caller.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Take(16)
+            .ToList();
+        var referenceFiles = references
+            .Select(hit => hit.Path)
+            .Concat(inbound.Select(edge => edge.Path))
+            .Concat(outbound.Select(edge => edge.Path))
+            .Where(File.Exists)
+            .Select(RelativeToWorkspace)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var testSymbols = FindLikelyTestSymbols(terms, referenceFiles, 20);
+        return new SemanticReferenceGraph(cleanedQuery, declarations, references, inbound, outbound, referenceFiles, testSymbols);
+    }
+
+    private IReadOnlyList<string> FindLikelyTestSymbols(IReadOnlyList<string> sourceTerms, IReadOnlyList<string> referenceFiles, int limit)
+    {
+        var terms = sourceTerms
+            .Concat(referenceFiles.Select(Path.GetFileNameWithoutExtension).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!))
+            .Where(term => !string.IsNullOrWhiteSpace(term) && term.Length > 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(24)
+            .ToList();
+        if (terms.Count == 0)
+        {
+            return [];
+        }
+
+        return BuildRoslynSymbolIndex(GetCSharpFiles().Where(IsTestFile).ToList(), 2_000)
+            .Where(symbol => terms.Any(term =>
+                symbol.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || symbol.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || SafeReadText(symbol.Path).Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Select(symbol => $"{symbol.Kind} {symbol.DisplayName} at {RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber}-{symbol.EndLineNumber}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToList();
+    }
+
     private bool TryCreateSemanticDeclarationHit(SemanticModel semanticModel, SyntaxNode node, string query, out SemanticSymbolHit hit)
     {
         hit = new SemanticSymbolHit(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, 0, string.Empty);
@@ -12226,6 +12412,8 @@ public sealed class LocalCodingToolService(
         string Query,
         IReadOnlyList<string> SourceFiles,
         IReadOnlyList<string> TestFiles,
+        IReadOnlyList<string> TestSymbols,
+        IReadOnlyList<string> ReferenceFiles,
         IReadOnlyList<string> SourceProjects,
         IReadOnlyList<string> AffectedProjects,
         IReadOnlyList<string> BuildOrderProjects,
@@ -12380,6 +12568,15 @@ public sealed class LocalCodingToolService(
         int LineNumber,
         int EndLineNumber,
         string Source);
+
+    private sealed record SemanticReferenceGraph(
+        string Query,
+        IReadOnlyList<SemanticSymbolHit> Declarations,
+        IReadOnlyList<SemanticSymbolHit> References,
+        IReadOnlyList<CSharpCallEdge> InboundCalls,
+        IReadOnlyList<CSharpCallEdge> OutboundCalls,
+        IReadOnlyList<string> ReferenceFiles,
+        IReadOnlyList<string> TestSymbols);
 
     private sealed record DiagnosticFixCandidate(
         string Confidence,

@@ -3179,30 +3179,41 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Unknown bindings: 0", binding.Message);
     Contains("Command binding check", command.Message);
     Contains("Missing command targets: 0", command.Message);
+    Contains("Command/UI binding graph:", command.Message);
     Contains("C# symbol index", symbolIndex.Message);
     Contains("Engine: Roslyn syntax tree", symbolIndex.Message);
     Contains("property Title", symbolIndex.Message);
     Contains("Call graph", callGraph.Message);
+    Contains("Inbound callers:", callGraph.Message);
+    Contains("Outbound callees:", callGraph.Message);
     Contains("Save -> Helper", callGraph.Message);
     Contains("Semantic symbol resolver", semantic.Message);
+    Contains("Reference graph:", semantic.Message);
     Contains("method Demo.App.MainWindowViewModel.Save()", semantic.Message);
     Contains("Impacted tests", impacted.Message);
+    Contains("Engine: Roslyn reference graph + symbol-to-test mapping", impacted.Message);
     Contains("MainWindowViewModelTests.cs", impacted.Message);
+    Contains("Likely test symbols:", impacted.Message);
     Contains("Smallest practical test target", impacted.Message);
     Contains("Project impact:", impacted.Message);
     Contains("Build order slice:", impacted.Message);
     Contains("Test target resolver", testTarget.Message);
+    Contains("Reference signals:", testTarget.Message);
+    Contains("Test symbols:", testTarget.Message);
     Contains("Demo.Tests.csproj", testTarget.Message);
     Contains("confirm dotnet test", testTarget.Message);
     Contains("Project impact:", testTarget.Message);
     Contains("Build order slice:", testTarget.Message);
     Contains("Semantic edit plan", editPlan.Message);
     Contains("Ranked edit targets", editPlan.Message);
+    Contains("Edit target validation:", editPlan.Message);
+    Contains("Reference graph:", editPlan.Message);
     Contains("symbol hit", editPlan.Message);
     Contains("MainWindowViewModel.cs", editPlan.Message);
     Contains("Safe edit workflow", safeEdit.Message);
     Contains("Patch gate:", safeEdit.Message);
     Contains("Impact radius:", safeEdit.Message);
+    Contains("Edit target validation:", safeEdit.Message);
     Contains("Direct files:", safeEdit.Message);
     Contains("Test command:", safeEdit.Message);
     Contains("Affected projects:", safeEdit.Message);
@@ -3211,6 +3222,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Code: CS0103", diagnostic.Message);
     Contains("Nearest symbol: method Save", diagnostic.Message);
     Contains("Ranked fix candidates:", diagnostic.Message);
+    Contains("Reference graph:", diagnostic.Message);
     Contains("compiler location", diagnostic.Message);
     Contains("missing name/scope", diagnostic.Message);
     Contains("Validation after fix:", diagnostic.Message);
@@ -3220,6 +3232,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Command surface doctor", commandSurface.Message);
     Contains("Service handlers:", commandSurface.Message);
     Contains("Dashboard bindings:", commandSurface.Message);
+    Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
