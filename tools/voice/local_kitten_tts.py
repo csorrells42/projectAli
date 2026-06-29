@@ -8,6 +8,7 @@ must already have KittenTTS and numpy available.
 from __future__ import annotations
 
 import argparse
+import inspect
 import os
 import sys
 import wave
@@ -43,6 +44,48 @@ def write_wav(path: Path, samples, sample_rate: int) -> None:
         wav.writeframes(audio.tobytes())
 
 
+def first_file(root: Path, pattern: str) -> Path | None:
+    if root.is_file() and root.match(pattern):
+        return root
+    if not root.is_dir():
+        return None
+    return next(root.rglob(pattern), None)
+
+
+def load_kitten_model(kitten_tts, model_path: Path):
+    signature = inspect.signature(kitten_tts)
+    parameters = signature.parameters
+    onnx_path = first_file(model_path, "*.onnx")
+    voices_path = first_file(model_path, "voices.npz")
+    attempts = []
+
+    if "cache_dir" in parameters and model_path.is_dir():
+        attempts.append(lambda: kitten_tts(cache_dir=str(model_path)))
+
+    if "model_path" in parameters and onnx_path is not None:
+        if "voices_path" in parameters and voices_path is not None:
+            attempts.append(lambda: kitten_tts(model_path=str(onnx_path), voices_path=str(voices_path)))
+        attempts.append(lambda: kitten_tts(model_path=str(onnx_path)))
+
+    if "model" in parameters and onnx_path is not None:
+        attempts.append(lambda: kitten_tts(model=str(onnx_path)))
+
+    if onnx_path is not None:
+        attempts.append(lambda: kitten_tts(str(onnx_path)))
+
+    attempts.append(lambda: kitten_tts())
+
+    errors = []
+    for attempt in attempts:
+        try:
+            return attempt()
+        except TypeError as exc:
+            errors.append(str(exc))
+
+    joined = "; ".join(errors[-3:])
+    raise TypeError(f"No compatible KittenTTS constructor worked for {model_path}. {joined}")
+
+
 def main() -> int:
     args = parse_args()
     text = sys.stdin.read().strip()
@@ -65,12 +108,7 @@ def main() -> int:
         from kittentts import KittenTTS
 
         model_path = Path(args.model)
-        if model_path.is_dir():
-            onnx_path = model_path / "kitten_tts_nano_v0_1.onnx"
-            voices_path = model_path / "voices.npz"
-            model = KittenTTS(model_path=str(onnx_path), voices_path=str(voices_path))
-        else:
-            model = KittenTTS(model_path=str(model_path))
+        model = load_kitten_model(KittenTTS, model_path)
 
         speed = max(0.75, min(args.rate, 1.6))
         audio = model.generate(text, voice=args.voice, speed=speed)
