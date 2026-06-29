@@ -1055,6 +1055,62 @@ public static class CodingToolRequestParser
         "repository health score"
     ];
 
+    private static readonly string[] FullCodingReadinessRequests =
+    [
+        "full coding readiness",
+        "show full coding readiness",
+        "run full coding readiness",
+        "coding readiness",
+        "full readiness",
+        "mini codex readiness",
+        "mini-codex readiness"
+    ];
+
+    private static readonly string[] ValidationLedgerRequests =
+    [
+        "show validation ledger",
+        "validation ledger",
+        "before after validation ledger",
+        "before/after validation ledger",
+        "show before after validation"
+    ];
+
+    private static readonly string[] CSharpSymbolIndexRequests =
+    [
+        "show csharp symbol index",
+        "show c# symbol index",
+        "csharp symbol index",
+        "c# symbol index",
+        "show code symbol index"
+    ];
+
+    private static readonly string[] XamlBindingCheckRequests =
+    [
+        "xaml binding check",
+        "verify xaml bindings",
+        "check xaml bindings",
+        "binding check",
+        "wpf binding check"
+    ];
+
+    private static readonly string[] CommandBindingCheckRequests =
+    [
+        "command binding check",
+        "verify command bindings",
+        "check command bindings",
+        "button command check",
+        "wpf command check"
+    ];
+
+    private static readonly string[] DeadCommandScanRequests =
+    [
+        "dead command scan",
+        "scan dead commands",
+        "find dead commands",
+        "dead button scan",
+        "command surface scan"
+    ];
+
     private static readonly string[] DraftCommitMessageRequests =
     [
         "draft commit message",
@@ -1412,6 +1468,42 @@ public static class CodingToolRequestParser
         if (IsWorkspaceHealthScoreRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowWorkspaceHealthScore, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFullCodingReadinessRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFullCodingReadiness, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsValidationLedgerRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowValidationLedger, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCSharpSymbolIndexRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCSharpSymbolIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsXamlBindingCheckRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.VerifyXamlBindings, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCommandBindingCheckRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.VerifyCommandBindings, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDeadCommandScanRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ScanDeadCommands, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -1877,6 +1969,24 @@ public static class CodingToolRequestParser
 
     private static bool IsWorkspaceHealthScoreRequest(string text) =>
         WorkspaceHealthScoreRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFullCodingReadinessRequest(string text) =>
+        FullCodingReadinessRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsValidationLedgerRequest(string text) =>
+        ValidationLedgerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCSharpSymbolIndexRequest(string text) =>
+        CSharpSymbolIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsXamlBindingCheckRequest(string text) =>
+        XamlBindingCheckRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCommandBindingCheckRequest(string text) =>
+        CommandBindingCheckRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDeadCommandScanRequest(string text) =>
+        DeadCommandScanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsDraftCommitMessageRequest(string text) =>
         DraftCommitMessageRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

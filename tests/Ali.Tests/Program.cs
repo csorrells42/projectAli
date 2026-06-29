@@ -122,6 +122,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
     ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
     ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
+    ("local coding tool shows full coding readiness scanners", TestLocalCodingToolShowsFullCodingReadinessScanners),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
@@ -710,6 +711,24 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
 
     Equal(true, CodingToolRequestParser.TryParse("preview rollback patch", out var rollbackRequest));
     Equal(CodingToolAction.PreviewRollbackPatch, rollbackRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("full coding readiness", out var readinessRequest));
+    Equal(CodingToolAction.ShowFullCodingReadiness, readinessRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show validation ledger", out var ledgerRequest));
+    Equal(CodingToolAction.ShowValidationLedger, ledgerRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("show csharp symbol index", out var indexRequest));
+    Equal(CodingToolAction.ShowCSharpSymbolIndex, indexRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("xaml binding check", out var bindingRequest));
+    Equal(CodingToolAction.VerifyXamlBindings, bindingRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("command binding check", out var commandRequest));
+    Equal(CodingToolAction.VerifyCommandBindings, commandRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("dead command scan", out var deadRequest));
+    Equal(CodingToolAction.ScanDeadCommands, deadRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -2645,6 +2664,73 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("Diff stat", rollback.Message);
 }
 
+static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindow.xaml"),
+        """
+        <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+          <StackPanel>
+            <TextBlock Text="{Binding Title}" />
+            <Button Command="{Binding SaveCommand}" />
+          </StackPanel>
+        </Window>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindowViewModel.cs"),
+        """
+        using System.Windows.Input;
+        namespace Demo.App;
+        public sealed class MainWindowViewModel
+        {
+            public string Title { get; } = "Demo";
+            public ICommand SaveCommand { get; }
+            public void Save() { }
+        }
+        """);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher(), runner);
+
+    var readiness = await service.TryHandleAsync("full coding readiness", CancellationToken.None);
+    var binding = await service.TryHandleAsync("xaml binding check", CancellationToken.None);
+    var command = await service.TryHandleAsync("command binding check", CancellationToken.None);
+    var symbolIndex = await service.TryHandleAsync("show csharp symbol index", CancellationToken.None);
+    var deadCommands = await service.TryHandleAsync("dead command scan", CancellationToken.None);
+    var ledger = await service.TryHandleAsync("show validation ledger", CancellationToken.None);
+
+    Equal(true, readiness.Handled);
+    Equal(true, readiness.Succeeded);
+    Contains("Full coding readiness", readiness.Message);
+    Contains("Bindings:", readiness.Message);
+    Contains("Command surface:", readiness.Message);
+    Contains("Symbol index:", readiness.Message);
+    Contains("Validation ledger:", readiness.Message);
+    Contains("XAML binding check", binding.Message);
+    Contains("Unknown bindings: 0", binding.Message);
+    Contains("Command binding check", command.Message);
+    Contains("Missing command targets: 0", command.Message);
+    Contains("C# symbol index", symbolIndex.Message);
+    Contains("Engine: Roslyn syntax tree", symbolIndex.Message);
+    Contains("property Title", symbolIndex.Message);
+    Contains("Dead command scan", deadCommands.Message);
+    Contains("Before/after validation ledger", ledger.Message);
+}
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));

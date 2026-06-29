@@ -4,6 +4,9 @@ using System.Text.Json;
 using System.Xml.Linq;
 using Ali.Core.Coding;
 using Ali.Infrastructure.Runtime;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Ali.Infrastructure.Coding;
 
@@ -194,6 +197,12 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowTestGapReport => await ShowTestGapReportAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ExplainKnownError => ExplainKnownError(request),
             CodingToolAction.PreviewRollbackPatch => await PreviewRollbackPatchAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFullCodingReadiness => await ShowFullCodingReadinessAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowValidationLedger => ShowValidationLedger(),
+            CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
+            CodingToolAction.VerifyXamlBindings => VerifyXamlBindings(),
+            CodingToolAction.VerifyCommandBindings => VerifyCommandBindings(),
+            CodingToolAction.ScanDeadCommands => ScanDeadCommands(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
             CodingToolAction.ShowArchitectureOptions => ShowArchitectureOptions(request),
@@ -5512,6 +5521,191 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session timeline", Policy.WorkspaceRoot);
     }
 
+
+    private async Task<CodingToolResult> ShowFullCodingReadinessAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var health = await ShowWorkspaceHealthScoreAsync(cancellationToken).ConfigureAwait(false);
+        var safeCommit = await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false);
+        var xamlBindings = VerifyXamlBindings();
+        var commandBindings = VerifyCommandBindings();
+        var deadCommands = ScanDeadCommands();
+        var symbolIndex = ShowCSharpSymbolIndex();
+        var validationLedger = ShowValidationLedger();
+
+        var lines = new List<string>
+        {
+            "Full coding readiness:",
+            "No files were changed.",
+            "Workspace:"
+        };
+        AddSelectedLines(lines, health.Message, 8, "Score:", "Workspace:", "Primary target:", "Projects:", "Tests:", "Git:", "Latest validation:");
+        lines.Add("Bindings:");
+        AddSelectedLines(lines, xamlBindings.Message, 5, "XAML files:", "Bindings found:", "Unknown bindings:");
+        AddSelectedLines(lines, commandBindings.Message, 5, "Command bindings found:", "Missing command targets:");
+        lines.Add("Command surface:");
+        AddSelectedLines(lines, deadCommands.Message, 6, "Coding actions:", "Service handlers:", "Dashboard commands:", "Missing dashboard targets:");
+        lines.Add("Symbol index:");
+        AddSelectedLines(lines, symbolIndex.Message, 5, "C# files:", "Types:", "Methods:", "Properties:");
+        lines.Add("Commit gate:");
+        AddSelectedLines(lines, safeCommit.Message, 6, "Safe to commit:", "Git:", "Validation:", "Pending patch preview:", "Required next step:");
+        lines.Add("Validation ledger:");
+        AddSelectedLines(lines, validationLedger.Message, 6, "Receipts found:", "Latest validation:", "Latest edit:", "Latest git check:");
+        lines.Add("Next - fix any Bad, missing, or unknown row, then run Build and Tests.");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Full coding readiness", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowValidationLedger()
+    {
+        var receipts = ReadRecentReceipts(30);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(receipt => receipt.Action is nameof(CodingToolAction.CreateFile)
+            or nameof(CodingToolAction.AppendFile)
+            or nameof(CodingToolAction.ReplaceText)
+            or nameof(CodingToolAction.ApplyLastPatchPreview));
+        var latestGit = receipts.LastOrDefault(receipt => receipt.Action.StartsWith("Git", StringComparison.OrdinalIgnoreCase)
+            || receipt.Action is nameof(CodingToolAction.GitStatus) or nameof(CodingToolAction.GitDiff) or nameof(CodingToolAction.ReviewCurrentChanges));
+        var lines = new List<string>
+        {
+            "Before/after validation ledger:",
+            "No files were changed.",
+            $"Receipts found: {receipts.Count}",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            latestEdit is null ? "Latest edit: none" : FormatReceiptSummary("Latest edit", latestEdit),
+            latestGit is null ? "Latest git check: none" : FormatReceiptSummary("Latest git check", latestGit),
+            "Recent validation receipts:"
+        };
+        var validationReceipts = receipts.Where(IsValidationReceipt).TakeLast(8).ToList();
+        lines.AddRange(validationReceipts.Count == 0 ? ["- none found"] : validationReceipts.Select(receipt => FormatReceiptSummary("-", receipt)));
+        lines.Add("Rule - every non-trivial edit should end with review, build, and test evidence before release.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation ledger", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowCSharpSymbolIndex()
+    {
+        var files = GetCSharpFiles();
+        var symbols = BuildRoslynSymbolIndex(files, 160);
+        var typeCount = symbols.Count(symbol => symbol.Kind is "class" or "record" or "interface" or "enum" or "struct");
+        var methodCount = symbols.Count(symbol => symbol.Kind == "method");
+        var propertyCount = symbols.Count(symbol => symbol.Kind == "property");
+        var lines = new List<string>
+        {
+            "C# symbol index:",
+            "No files were changed.",
+            "Engine: Roslyn syntax tree",
+            $"C# files: {files.Count}",
+            $"Types: {typeCount}",
+            $"Methods: {methodCount}",
+            $"Properties: {propertyCount}",
+            "Examples:"
+        };
+        lines.AddRange(symbols.Count == 0 ? ["- none found"] : symbols.Take(20).Select(symbol => $"- {symbol.Kind} {symbol.Name}: {RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "C# symbol index", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult VerifyXamlBindings()
+    {
+        var xamlFiles = GetXamlFiles();
+        var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 10_000);
+        var symbolNames = symbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.Ordinal);
+        var bindings = new List<(string Path, string Name)>();
+        foreach (var file in xamlFiles)
+        {
+            foreach (var binding in ExtractXamlBindingNames(SafeReadText(file), commandOnly: false))
+            {
+                bindings.Add((file, binding));
+            }
+        }
+
+        var unknown = bindings
+            .Where(binding => !IsIgnoredBindingName(binding.Name))
+            .Where(binding => !symbolNames.Contains(binding.Name))
+            .DistinctBy(binding => RelativeToWorkspace(binding.Path) + "|" + binding.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var lines = new List<string>
+        {
+            "XAML binding check:",
+            "No files were changed.",
+            "Engine: XAML text scan + Roslyn C# symbol index",
+            $"XAML files: {xamlFiles.Count}",
+            $"Bindings found: {bindings.Count}",
+            $"Unknown bindings: {unknown.Count}"
+        };
+        lines.AddRange(unknown.Count == 0 ? ["- Good - no unknown binding names found."] : unknown.Select(binding => $"- {RelativeToWorkspace(binding.Path)} -> {binding.Name}"));
+        lines.Add("Note - dynamic DataContext, generated properties, and converter parameters may still need human review.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult VerifyCommandBindings()
+    {
+        var xamlFiles = GetXamlFiles();
+        var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 10_000);
+        var symbolNames = symbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.Ordinal);
+        var commands = new List<(string Path, string Name)>();
+        foreach (var file in xamlFiles)
+        {
+            foreach (var command in ExtractXamlBindingNames(SafeReadText(file), commandOnly: true))
+            {
+                commands.Add((file, command));
+            }
+        }
+
+        var missing = commands
+            .Where(command => !symbolNames.Contains(command.Name))
+            .DistinctBy(command => RelativeToWorkspace(command.Path) + "|" + command.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var lines = new List<string>
+        {
+            "Command binding check:",
+            "No files were changed.",
+            "Engine: XAML command scan + Roslyn C# symbol index",
+            $"Command bindings found: {commands.Count}",
+            $"Missing command targets: {missing.Count}"
+        };
+        lines.AddRange(missing.Count == 0 ? ["- Good - all command binding names were found in code symbols."] : missing.Select(command => $"- {RelativeToWorkspace(command.Path)} -> {command.Name}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ScanDeadCommands()
+    {
+        var servicePath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.Infrastructure", "Coding", "LocalCodingToolService.cs");
+        var serviceText = SafeReadText(servicePath);
+        var actions = Enum.GetNames<CodingToolAction>();
+        var missingHandlers = actions
+            .Where(action => !serviceText.Contains($"CodingToolAction.{action}", StringComparison.Ordinal))
+            .OrderBy(action => action, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var dashboardPath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.App.Wpf", "ProgrammingDashboardWindow.xaml");
+        var dashboardCommands = ExtractXamlBindingNames(SafeReadText(dashboardPath), commandOnly: true).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var viewModelSymbols = BuildRoslynSymbolIndex([Path.Combine(Policy.WorkspaceRoot, "src", "Ali.App.Wpf", "ViewModels", "MainWindowViewModel.cs")], 10_000)
+            .Select(symbol => symbol.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var missingDashboardTargets = dashboardCommands
+            .Where(command => !viewModelSymbols.Contains(command))
+            .OrderBy(command => command, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var lines = new List<string>
+        {
+            "Dead command scan:",
+            "No files were changed.",
+            "Engine: enum/service text scan + Roslyn view-model symbol index",
+            $"Coding actions: {actions.Length}",
+            $"Service handlers: {(missingHandlers.Count == 0 ? "Good" : "Needs review - " + missingHandlers.Count + " action(s) not referenced in service text")}",
+            $"Dashboard commands: {dashboardCommands.Count}",
+            $"Missing dashboard targets: {missingDashboardTargets.Count}",
+            "Service actions needing review:"
+        };
+        lines.AddRange(missingHandlers.Count == 0 ? ["- none"] : missingHandlers.Select(action => $"- {action}"));
+        lines.Add("Dashboard bindings needing review:");
+        lines.AddRange(missingDashboardTargets.Count == 0 ? ["- none"] : missingDashboardTargets.Select(command => $"- {command}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Dead command scan", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowRollbackPlanAsync(CancellationToken cancellationToken)
     {
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
@@ -7794,7 +7988,198 @@ public sealed class LocalCodingToolService(
             .ToList();
     }
 
-    private IReadOnlyList<string> SuggestLikelyFilesForGoal(string goal)
+
+    private IReadOnlyList<string> GetCSharpFiles() => Directory.Exists(Policy.WorkspaceRoot)
+        ? EnumerateWorkspaceFiles().Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).Take(5_000).ToList()
+        : [];
+
+    private IReadOnlyList<string> GetXamlFiles() => Directory.Exists(Policy.WorkspaceRoot)
+        ? EnumerateWorkspaceFiles().Where(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)).Take(1_000).ToList()
+        : [];
+
+    private List<CSharpSymbolInfo> BuildRoslynSymbolIndex(IReadOnlyList<string> files, int limit)
+    {
+        var symbols = new List<CSharpSymbolInfo>();
+        foreach (var file in files.Where(File.Exists))
+        {
+            if (symbols.Count >= limit)
+            {
+                break;
+            }
+
+            var text = SafeReadText(file);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            SyntaxNode root;
+            try
+            {
+                root = CSharpSyntaxTree.ParseText(text).GetRoot();
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+
+            foreach (var node in root.DescendantNodes())
+            {
+                if (symbols.Count >= limit)
+                {
+                    break;
+                }
+
+                if (TryCreateRoslynSymbol(file, text, node, out var symbol))
+                {
+                    symbols.Add(symbol);
+                }
+            }
+        }
+
+        return symbols;
+    }
+
+    private static bool TryCreateRoslynSymbol(string file, string text, SyntaxNode node, out CSharpSymbolInfo symbol)
+    {
+        symbol = new CSharpSymbolInfo(string.Empty, string.Empty, file, 0);
+        string kind;
+        string name;
+        SyntaxToken identifier;
+        switch (node)
+        {
+            case ClassDeclarationSyntax declaration:
+                kind = "class";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            case RecordDeclarationSyntax declaration:
+                kind = "record";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            case InterfaceDeclarationSyntax declaration:
+                kind = "interface";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            case EnumDeclarationSyntax declaration:
+                kind = "enum";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            case StructDeclarationSyntax declaration:
+                kind = "struct";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            case MethodDeclarationSyntax declaration:
+                kind = "method";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            case PropertyDeclarationSyntax declaration:
+                kind = "property";
+                name = declaration.Identifier.ValueText;
+                identifier = declaration.Identifier;
+                break;
+            default:
+                return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var lineNumber = text[..Math.Min(identifier.SpanStart, text.Length)].Count(character => character == '\n') + 1;
+        symbol = new CSharpSymbolInfo(kind, name, file, lineNumber);
+        return true;
+    }
+
+    private static List<string> ExtractXamlBindingNames(string text, bool commandOnly)
+    {
+        var names = new List<string>();
+        var searchIndex = 0;
+        while (searchIndex < text.Length)
+        {
+            var bindingIndex = text.IndexOf("{Binding", searchIndex, StringComparison.OrdinalIgnoreCase);
+            if (bindingIndex < 0)
+            {
+                break;
+            }
+
+            var endIndex = text.IndexOf('}', bindingIndex);
+            if (endIndex < 0)
+            {
+                break;
+            }
+
+            var prefixStart = Math.Max(0, bindingIndex - 48);
+            var prefix = text[prefixStart..bindingIndex];
+            var bindingText = text[(bindingIndex + "{Binding".Length)..endIndex].Trim();
+            var name = CleanBindingName(bindingText);
+            if (!string.IsNullOrWhiteSpace(name)
+                && (!commandOnly || prefix.Contains("Command=\"", StringComparison.OrdinalIgnoreCase) || name.EndsWith("Command", StringComparison.Ordinal)))
+            {
+                names.Add(name);
+            }
+
+            searchIndex = endIndex + 1;
+        }
+
+        return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string CleanBindingName(string bindingText)
+    {
+        if (string.IsNullOrWhiteSpace(bindingText))
+        {
+            return string.Empty;
+        }
+
+        var path = bindingText;
+        if (path.StartsWith("Path=", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[5..];
+        }
+
+        var comma = path.IndexOf(',');
+        if (comma >= 0)
+        {
+            path = path[..comma];
+        }
+
+        path = path.Trim().Trim('"', '\'', '{', '}');
+        if (path.Length == 0 || path.Contains("RelativeSource", StringComparison.OrdinalIgnoreCase) || path.Contains("ElementName", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? path : parts[^1];
+    }
+
+    private static bool IsIgnoredBindingName(string name) =>
+        name is "DataContext" or "ActualWidth" or "ActualHeight" or "SelectedItem" or "PlacementTarget" or "Tag";
+
+    private static string SafeReadText(string file)
+    {
+        try
+        {
+            return File.Exists(file) && LooksTextReadable(file)
+                ? File.ReadAllText(file)
+                : string.Empty;
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+    }    private IReadOnlyList<string> SuggestLikelyFilesForGoal(string goal)
     {
         var files = Directory.Exists(Policy.WorkspaceRoot)
             ? EnumerateWorkspaceFiles().Take(10_000).Select(RelativeToWorkspace).ToList()
@@ -9622,6 +10007,12 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> Steps,
         string LastReceiptSummary,
         DateTimeOffset UpdatedAt);
+
+    private sealed record CSharpSymbolInfo(
+        string Kind,
+        string Name,
+        string Path,
+        int LineNumber);
 
     private sealed record CodingReceipt(
         DateTimeOffset Timestamp,

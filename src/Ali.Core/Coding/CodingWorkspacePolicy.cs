@@ -123,7 +123,13 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowCrossReferenceMap
             or CodingToolAction.ShowTestGapReport
             or CodingToolAction.ExplainKnownError
-            or CodingToolAction.PreviewRollbackPatch)
+            or CodingToolAction.PreviewRollbackPatch
+            or CodingToolAction.ShowFullCodingReadiness
+            or CodingToolAction.ShowValidationLedger
+            or CodingToolAction.ShowCSharpSymbolIndex
+            or CodingToolAction.VerifyXamlBindings
+            or CodingToolAction.VerifyCommandBindings
+            or CodingToolAction.ScanDeadCommands)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Reviewing coding readiness, summaries, and rollback planning is read-only and allowed.");
         }

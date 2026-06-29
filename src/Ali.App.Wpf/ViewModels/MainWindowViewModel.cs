@@ -265,6 +265,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFullReadinessCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Full readiness", "full coding readiness", "Coding.FullReadiness"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingHealthScoreCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Health score", "workspace health score", "Coding.HealthScore"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -679,6 +680,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingProjectIntelligenceCommand { get; }
 
     public ICommand RunCodingRepoUnderstandingCommand { get; }
+
+    public ICommand RunCodingFullReadinessCommand { get; }
 
     public ICommand RunCodingHealthScoreCommand { get; }
 
@@ -6558,6 +6561,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingRepoUnderstandingCommand is AsyncRelayCommand runCodingRepoUnderstanding)
         {
             runCodingRepoUnderstanding.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFullReadinessCommand is AsyncRelayCommand runCodingFullReadiness)
+        {
+            runCodingFullReadiness.RaiseCanExecuteChanged();
         }
 
         if (RunCodingHealthScoreCommand is AsyncRelayCommand runCodingHealthScore)
