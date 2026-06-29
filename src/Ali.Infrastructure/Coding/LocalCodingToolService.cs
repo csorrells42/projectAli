@@ -187,6 +187,13 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowCodingSessionTimeline => ShowCodingSessionTimeline(),
             CodingToolAction.ShowRollbackPlan => await ShowRollbackPlanAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowUiChangeChecklist => ShowUiChangeChecklist(request),
+            CodingToolAction.ComposeTypedPatch => await ComposeTypedPatchAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFileRiskLabels => await ShowFileRiskLabelsAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.FindSymbol => FindSymbol(request),
+            CodingToolAction.ShowCrossReferenceMap => ShowCrossReferenceMap(request),
+            CodingToolAction.ShowTestGapReport => await ShowTestGapReportAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ExplainKnownError => ExplainKnownError(request),
+            CodingToolAction.PreviewRollbackPatch => await PreviewRollbackPatchAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
             CodingToolAction.ShowArchitectureOptions => ShowArchitectureOptions(request),
@@ -5553,6 +5560,200 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "UI change checklist", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ComposeTypedPatchAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query, "current change");
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var files = changedFiles.Count > 0
+            ? changedFiles.Take(MaxPatchBundleEdits).ToList()
+            : SuggestLikelyFilesForGoal(goal).Take(MaxPatchBundleEdits).ToList();
+        var lines = new List<string>
+        {
+            "Typed patch composer:",
+            $"Goal: {goal}",
+            "No files were changed.",
+            $"Candidate edits: {files.Count}",
+            "Patch bundle template:"
+        };
+
+        if (files.Count == 0)
+        {
+            lines.Add("- No candidate files found yet. Run project intelligence or plan feature files first.");
+        }
+        else
+        {
+            foreach (var file in files)
+            {
+                lines.Add($"- File: {file}");
+                lines.Add($"  Risk: {ClassifyFileRisk(file)}");
+                lines.Add("  Edit type: replace exact old text with reviewed new text");
+                lines.Add("  Needs: old text, new text, validation command");
+            }
+        }
+
+        lines.Add("Next - turn each item into preview patch bundle lines, then review before applying.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Typed patch composer", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowFileRiskLabelsAsync(CancellationToken cancellationToken)
+    {
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "File risk labels:",
+            "No files were changed.",
+            $"Changed files: {changedFiles.Count}"
+        };
+        if (changedFiles.Count == 0)
+        {
+            lines.Add("- No changed files detected.");
+        }
+        else
+        {
+            foreach (var file in changedFiles.Take(20))
+            {
+                lines.Add($"- {file}: {ClassifyFileRisk(file)}");
+            }
+        }
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "File risk labels", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult FindSymbol(CodingToolRequest request)
+    {
+        var symbol = CleanGoal(request.Query, string.Empty);
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return new CodingToolResult(true, false, "Symbol finder needs a symbol name.", "Symbol finder", Policy.WorkspaceRoot);
+        }
+
+        var matches = FindSymbolMatches(symbol, declarationOnly: true, MaxSearchMatches);
+        if (matches.Count == 0)
+        {
+            matches = FindSymbolMatches(symbol, declarationOnly: false, MaxSearchMatches);
+        }
+
+        var lines = new List<string>
+        {
+            "Symbol finder:",
+            $"Symbol: {symbol}",
+            "No files were changed.",
+            $"Matches: {matches.Count}"
+        };
+        lines.AddRange(matches.Count == 0
+            ? ["- No matches found."]
+            : matches.Select(match => $"- {match}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Symbol finder", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowCrossReferenceMap(CodingToolRequest request)
+    {
+        var symbol = CleanGoal(request.Query, string.Empty);
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return new CodingToolResult(true, false, "Cross-reference map needs a symbol name.", "Cross-reference map", Policy.WorkspaceRoot);
+        }
+
+        var declarations = FindSymbolMatches(symbol, declarationOnly: true, 10);
+        var references = FindSymbolMatches(symbol, declarationOnly: false, MaxSearchMatches)
+            .Where(match => !declarations.Contains(match, StringComparer.OrdinalIgnoreCase))
+            .Take(20)
+            .ToList();
+        var lines = new List<string>
+        {
+            "Cross-reference map:",
+            $"Symbol: {symbol}",
+            "No files were changed.",
+            "Declarations:"
+        };
+        lines.AddRange(declarations.Count == 0 ? ["- none found"] : declarations.Select(match => $"- {match}"));
+        lines.Add("References:");
+        lines.AddRange(references.Count == 0 ? ["- none found"] : references.Select(match => $"- {match}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Cross-reference map", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowTestGapReportAsync(CancellationToken cancellationToken)
+    {
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var sourceFiles = changedFiles
+            .Where(IsSourceFile)
+            .Where(file => !IsTestFile(file))
+            .ToList();
+        var testFiles = changedFiles.Where(IsTestFile).ToList();
+        var lines = new List<string>
+        {
+            "Test gap report:",
+            "No files were changed.",
+            $"Changed source files: {sourceFiles.Count}",
+            $"Changed test files: {testFiles.Count}"
+        };
+
+        if (sourceFiles.Count > 0 && testFiles.Count == 0)
+        {
+            lines.Add("Gap: source files changed without obvious test file changes.");
+        }
+        else
+        {
+            lines.Add("Gap: no obvious source/test mismatch detected.");
+        }
+
+        foreach (var file in sourceFiles.Take(12))
+        {
+            lines.Add($"- Source: {file}");
+            lines.Add($"  Suggested test area: {SuggestTestArea(file)}");
+        }
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Test gap report", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ExplainKnownError(CodingToolRequest request)
+    {
+        var query = CleanGoal(request.Query, "last error");
+        var lines = new List<string>
+        {
+            "Known error guidance:",
+            $"Error: {query}",
+            "No files were changed."
+        };
+        AddKnownErrorGuidance(lines, query);
+        lines.Add("Next - diagnose last build failure, then preview an exact patch only when the old text is known.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Known error guidance", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> PreviewRollbackPatchAsync(CancellationToken cancellationToken)
+    {
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var diff = await _commandRunner.RunAsync(
+            "git",
+            ["diff", "--stat", "HEAD"],
+            Policy.WorkspaceRoot,
+            GitCommandTimeout,
+            cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Rollback patch preview:",
+            "No files were changed.",
+            $"Changed files detected: {changedFiles.Count}",
+            "Rollback source: current git diff against HEAD.",
+            "Safe application rule: use an explicit owner-approved reverse patch or confirmed git restore only after reviewing the files."
+        };
+        if (changedFiles.Count == 0)
+        {
+            lines.Add("- No rollback patch needed.");
+        }
+        else
+        {
+            lines.Add("Files that would be affected:");
+            lines.AddRange(changedFiles.Take(20).Select(file => $"- {file}: {ClassifyFileRisk(file)}"));
+            lines.Add("Diff stat:");
+            lines.Add(TrimForChat(MergeCommandOutput(diff), 1_500));
+        }
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Rollback patch preview", Policy.WorkspaceRoot);
+    }
+
     private CodingToolResult ListPackages(CodingToolRequest request)
     {
         if (!ResolveProjectReportTargets(request, out var projectFiles, out var targetPath, out var error))
@@ -7591,6 +7792,215 @@ public sealed class LocalCodingToolService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private IReadOnlyList<string> SuggestLikelyFilesForGoal(string goal)
+    {
+        var files = Directory.Exists(Policy.WorkspaceRoot)
+            ? EnumerateWorkspaceFiles().Take(10_000).Select(RelativeToWorkspace).ToList()
+            : [];
+        var selected = new List<string>();
+        if (MentionsAny(goal, "command", "parser", "coding", "patch", "symbol", "reference", "test gap"))
+        {
+            AddIfExists(selected, files, "src/Ali.Core/Coding/CodingToolContracts.cs");
+            AddIfExists(selected, files, "src/Ali.Core/Coding/CodingToolRequestParser.cs");
+            AddIfExists(selected, files, "src/Ali.Core/Coding/CodingWorkspacePolicy.cs");
+            AddIfExists(selected, files, "src/Ali.Infrastructure/Coding/LocalCodingToolService.cs");
+            AddIfExists(selected, files, "tests/Ali.Tests/Program.cs");
+        }
+
+        if (MentionsAny(goal, "button", "dashboard", "wpf", "ui", "screen"))
+        {
+            AddIfExists(selected, files, "src/Ali.App.Wpf/ProgrammingDashboardWindow.xaml");
+            AddIfExists(selected, files, "src/Ali.App.Wpf/ViewModels/MainWindowViewModel.cs");
+        }
+
+        return selected.Count == 0
+            ? files.Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).Take(6).ToList()
+            : selected.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static void AddIfExists(List<string> selected, IReadOnlyList<string> files, string normalizedPath)
+    {
+        var match = files.FirstOrDefault(file => file.Replace('\\', '/').Equals(normalizedPath, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            selected.Add(match);
+        }
+    }
+
+    private static string ClassifyFileRisk(string file)
+    {
+        var normalized = file.Replace('\\', '/');
+        if (normalized.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("Directory.Build.props", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("package.json", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("installer", StringComparison.OrdinalIgnoreCase))
+        {
+            return "High - dependency, build, or installer behavior";
+        }
+
+        if (normalized.Contains("/Coding/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("CodingToolRequestParser", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("CodingWorkspacePolicy", StringComparison.OrdinalIgnoreCase))
+        {
+            return "High - command or permission behavior";
+        }
+
+        if (normalized.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Medium - user interface behavior";
+        }
+
+        if (IsTestFile(normalized))
+        {
+            return "Low - test coverage";
+        }
+
+        if (normalized.StartsWith("docs/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Low - documentation";
+        }
+
+        return "Medium - application code";
+    }
+
+    private List<string> FindSymbolMatches(string symbol, bool declarationOnly, int limit)
+    {
+        var matches = new List<string>();
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return matches;
+        }
+
+        foreach (var file in EnumerateWorkspaceFiles().Take(5_000))
+        {
+            if (matches.Count >= limit)
+            {
+                break;
+            }
+
+            if (!LooksTextReadable(file))
+            {
+                continue;
+            }
+
+            var lineNumber = 0;
+            try
+            {
+                foreach (var line in File.ReadLines(file))
+                {
+                    lineNumber++;
+                    if (!line.Contains(symbol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (declarationOnly && !LooksLikeSymbolDeclaration(line, symbol))
+                    {
+                        continue;
+                    }
+
+                    matches.Add($"{RelativeToWorkspace(file)}:{lineNumber}: {TrimForChat(line.Trim(), 180)}");
+                    if (matches.Count >= limit)
+                    {
+                        break;
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return matches;
+    }
+
+    private static bool LooksLikeSymbolDeclaration(string line, string symbol)
+    {
+        var trimmed = line.Trim();
+        return trimmed.Contains($"class {symbol}", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains($"record {symbol}", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains($"interface {symbol}", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains($"enum {symbol}", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains($"struct {symbol}", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains($" {symbol}(", StringComparison.OrdinalIgnoreCase)
+               || trimmed.StartsWith($"{symbol}(", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Contains($" {symbol} {{", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string SuggestTestArea(string file)
+    {
+        var normalized = file.Replace('\\', '/');
+        if (normalized.Contains("/Coding/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Ali.Tests coding parser/service/policy tests";
+        }
+
+        if (normalized.Contains("App.Wpf", StringComparison.OrdinalIgnoreCase)
+            || normalized.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return "WPF command binding and compact-output smoke tests";
+        }
+
+        if (normalized.Contains("/Sources/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "curated source retriever and planner tests";
+        }
+
+        return "focused regression test near the changed behavior";
+    }
+
+    private static void AddKnownErrorGuidance(List<string> lines, string query)
+    {
+        if (query.Contains("CS0246", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add("- Pattern: C# type or namespace not found.");
+            lines.Add("- Check: missing using, missing project reference, package reference, or renamed type.");
+            return;
+        }
+
+        if (query.Contains("CS0103", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add("- Pattern: name does not exist in current context.");
+            lines.Add("- Check: missing helper method, wrong scope, typo, or stale generated code.");
+            return;
+        }
+
+        if (query.Contains("CS1061", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add("- Pattern: member not found on type.");
+            lines.Add("- Check: record/property name mismatch, extension namespace, or API version drift.");
+            return;
+        }
+
+        if (query.Contains("NETSDK", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add("- Pattern: SDK/project configuration failure.");
+            lines.Add("- Check: target framework, workload, runtime identifier, restore state, or SDK version.");
+            return;
+        }
+
+        if (query.Contains("NU", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add("- Pattern: NuGet restore/package failure.");
+            lines.Add("- Check: package id/version, source availability, lock file, and network/source permissions.");
+            return;
+        }
+
+        if (query.Contains("xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add("- Pattern: XAML parse/binding/build issue.");
+            lines.Add("- Check: property names, command bindings, resource keys, namespace mappings, and x:Class.");
+            return;
+        }
+
+        lines.Add("- Pattern: no specific known-error card matched.");
+        lines.Add("- Check: run diagnose last build failure and map the first compiler/runtime error to the smallest file.");
     }
 
     private static string SummarizeChangedAreas(IReadOnlyList<string> changedFiles)

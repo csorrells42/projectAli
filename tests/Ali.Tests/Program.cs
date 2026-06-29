@@ -67,6 +67,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser routes project intelligence", TestCodingParserRoutesProjectIntelligence),
     ("coding parser routes repo understanding and safe commit", TestCodingParserRoutesRepoUnderstandingAndSafeCommit),
     ("coding parser routes coding readiness helpers", TestCodingParserRoutesCodingReadinessHelpers),
+    ("coding parser routes advanced coding helpers", TestCodingParserRoutesAdvancedCodingHelpers),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
@@ -120,6 +121,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
     ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
     ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
+    ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
@@ -682,6 +684,32 @@ static Task TestCodingParserRoutesCodingReadinessHelpers()
     Equal(true, CodingToolRequestParser.TryParse("ui change checklist settings panel", out var checklistRequest));
     Equal(CodingToolAction.ShowUiChangeChecklist, checklistRequest.Action);
     Equal("settings panel", checklistRequest.Query);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesAdvancedCodingHelpers()
+{
+    Equal(true, CodingToolRequestParser.TryParse("compose typed patch coding helper", out var patchRequest));
+    Equal(CodingToolAction.ComposeTypedPatch, patchRequest.Action);
+    Equal("coding helper", patchRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("show file risk labels", out var riskRequest));
+    Equal(CodingToolAction.ShowFileRiskLabels, riskRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("find symbol LocalCodingToolService", out var symbolRequest));
+    Equal(CodingToolAction.FindSymbol, symbolRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("cross reference CodingToolRequestParser", out var referenceRequest));
+    Equal(CodingToolAction.ShowCrossReferenceMap, referenceRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("test gap report", out var gapRequest));
+    Equal(CodingToolAction.ShowTestGapReport, gapRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("known error CS0103", out var errorRequest));
+    Equal(CodingToolAction.ExplainKnownError, errorRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("preview rollback patch", out var rollbackRequest));
+    Equal(CodingToolAction.PreviewRollbackPatch, rollbackRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -2561,6 +2589,60 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Coding session timeline", timeline.Message);
     Contains("UI change checklist", checklist.Message);
     Contains("settings panel", checklist.Message);
+}
+
+static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var sourceDirectory = Path.Combine(workspace, "src", "Demo");
+    Directory.CreateDirectory(sourceDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(sourceDirectory, "WidgetService.cs"),
+        """
+        namespace Demo;
+
+        public sealed class WidgetService
+        {
+            public string BuildWidget() => "ok";
+        }
+        """);
+    var changedFiles = $"src/Demo/WidgetService.cs{Environment.NewLine}";
+    var runner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, " src/Demo/WidgetService.cs | 2 +-", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var patch = await service.TryHandleAsync("compose typed patch widget command", CancellationToken.None);
+    var risk = await service.TryHandleAsync("show file risk labels", CancellationToken.None);
+    var symbol = await service.TryHandleAsync("find symbol WidgetService", CancellationToken.None);
+    var references = await service.TryHandleAsync("cross reference WidgetService", CancellationToken.None);
+    var gaps = await service.TryHandleAsync("test gap report", CancellationToken.None);
+    var known = await service.TryHandleAsync("known error CS0103", CancellationToken.None);
+    var rollback = await service.TryHandleAsync("preview rollback patch", CancellationToken.None);
+
+    Contains("Typed patch composer", patch.Message);
+    Contains("src/Demo/WidgetService.cs", patch.Message);
+    Contains("File risk labels", risk.Message);
+    Contains("Medium - application code", risk.Message);
+    Contains("Symbol finder", symbol.Message);
+    Contains("WidgetService.cs", symbol.Message);
+    Contains("Cross-reference map", references.Message);
+    Contains("Declarations:", references.Message);
+    Contains("Test gap report", gaps.Message);
+    Contains("Gap: source files changed without obvious test file changes.", gaps.Message);
+    Contains("Known error guidance", known.Message);
+    Contains("name does not exist", known.Message);
+    Contains("Rollback patch preview", rollback.Message);
+    Contains("Diff stat", rollback.Message);
 }
 
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()

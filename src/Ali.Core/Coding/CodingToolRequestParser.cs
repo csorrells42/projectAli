@@ -1097,6 +1097,72 @@ public static class CodingToolRequestParser
         "screen change checklist"
     ];
 
+    private static readonly string[] TypedPatchComposerPrefixes =
+    [
+        "compose typed patch",
+        "draft typed patch",
+        "typed patch plan",
+        "compose multi file patch",
+        "compose multi-file patch",
+        "draft multi file patch",
+        "draft multi-file patch"
+    ];
+
+    private static readonly string[] FileRiskLabelRequests =
+    [
+        "show file risk labels",
+        "file risk labels",
+        "risk label files",
+        "risk labels for changes",
+        "show change risk labels"
+    ];
+
+    private static readonly string[] SymbolFinderPrefixes =
+    [
+        "find symbol",
+        "find code symbol",
+        "search symbol",
+        "locate symbol",
+        "where is symbol"
+    ];
+
+    private static readonly string[] CrossReferencePrefixes =
+    [
+        "cross reference",
+        "cross-reference",
+        "show references for",
+        "find references for",
+        "who uses",
+        "where is used"
+    ];
+
+    private static readonly string[] TestGapRequests =
+    [
+        "show test gap report",
+        "test gap report",
+        "detect test gaps",
+        "check test gaps",
+        "changed files without tests"
+    ];
+
+    private static readonly string[] KnownErrorPrefixes =
+    [
+        "explain known error",
+        "known error",
+        "diagnose error pattern",
+        "explain compiler error",
+        "explain build error"
+    ];
+
+    private static readonly string[] RollbackPatchRequests =
+    [
+        "preview rollback patch",
+        "show rollback patch",
+        "draft rollback patch",
+        "preview undo patch",
+        "show undo patch"
+    ];
+
     private static readonly string[] PlanTaskPrefixes =
     [
         "plan coding task",
@@ -1375,6 +1441,32 @@ public static class CodingToolRequestParser
 
         if (TryParsePrefixedQuery(trimmed, UiChangeChecklistPrefixes, CodingToolAction.ShowUiChangeChecklist, userConfirmed, out request))
         {
+            return true;
+        }
+
+        if (TryParsePrefixedQuery(trimmed, TypedPatchComposerPrefixes, CodingToolAction.ComposeTypedPatch, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, SymbolFinderPrefixes, CodingToolAction.FindSymbol, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, CrossReferencePrefixes, CodingToolAction.ShowCrossReferenceMap, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, KnownErrorPrefixes, CodingToolAction.ExplainKnownError, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsFileRiskLabelRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFileRiskLabels, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsTestGapRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowTestGapReport, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRollbackPatchRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.PreviewRollbackPatch, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -1797,6 +1889,15 @@ public static class CodingToolRequestParser
 
     private static bool IsRollbackPlanRequest(string text) =>
         RollbackPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFileRiskLabelRequest(string text) =>
+        FileRiskLabelRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsTestGapRequest(string text) =>
+        TestGapRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRollbackPatchRequest(string text) =>
+        RollbackPatchRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsOpenSolutionRequest(string text) =>
         OpenSolutionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

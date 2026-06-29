@@ -116,7 +116,14 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.DraftReleaseNotes
             or CodingToolAction.ShowCodingSessionTimeline
             or CodingToolAction.ShowRollbackPlan
-            or CodingToolAction.ShowUiChangeChecklist)
+            or CodingToolAction.ShowUiChangeChecklist
+            or CodingToolAction.ComposeTypedPatch
+            or CodingToolAction.ShowFileRiskLabels
+            or CodingToolAction.FindSymbol
+            or CodingToolAction.ShowCrossReferenceMap
+            or CodingToolAction.ShowTestGapReport
+            or CodingToolAction.ExplainKnownError
+            or CodingToolAction.PreviewRollbackPatch)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Reviewing coding readiness, summaries, and rollback planning is read-only and allowed.");
         }
