@@ -284,6 +284,7 @@ public static class CodingAbilityCatalog
                 new("Inspect workspace", "Inspect the approved coding workspace.", "inspect coding workspace", "inspect coding workspace"),
                 new("Project intelligence", "Summarize project shape, likely app/test targets, safe commands, and risk notes.", "show project intelligence", "show project intelligence"),
                 new("Understand repo", "Run Ali's orientation rollup: intelligence, architecture, patterns, validation, and commit readiness.", "understand repo", "understand repo"),
+                new("Context packet", "Build a compact coding handoff with workspace shape, git state, targeted tests, and guardrails for the current goal.", "coding context packet Save button", "coding context packet <goal>"),
                 new("Health score", "Score workspace readiness across target, projects, tests, git, and validation.", "workspace health score", "workspace health score"),
                 new("Full readiness", "Run the one-click coding readiness rollup with workspace, bindings, command surface, symbols, commit gate, and validation ledger.", "full coding readiness", "full coding readiness"),
                 new("C# symbol index", "Show a Roslyn-backed index of likely C# types, methods, and properties.", "show csharp symbol index", "show csharp symbol index"),

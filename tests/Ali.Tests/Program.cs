@@ -586,6 +586,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("Here is how I can help", userGuide);
     Contains("For location-based weather", userGuide);
     Contains("Programming", userGuide);
+    Contains("Context packet", userGuide);
+    Contains("coding context packet", userGuide);
     Contains("PDF", userGuide);
     Contains("Computer", userGuide);
     Contains("plan slow computer troubleshooting", ComputerTroubleshootingCatalog.BuildCommandIndex());
