@@ -2995,9 +2995,13 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Impacted tests", impacted.Message);
     Contains("MainWindowViewModelTests.cs", impacted.Message);
     Contains("Smallest practical test target", impacted.Message);
+    Contains("Project impact:", impacted.Message);
+    Contains("Build order slice:", impacted.Message);
     Contains("Test target resolver", testTarget.Message);
     Contains("Demo.Tests.csproj", testTarget.Message);
     Contains("confirm dotnet test", testTarget.Message);
+    Contains("Project impact:", testTarget.Message);
+    Contains("Build order slice:", testTarget.Message);
     Contains("Semantic edit plan", editPlan.Message);
     Contains("Ranked edit targets", editPlan.Message);
     Contains("symbol hit", editPlan.Message);
@@ -3007,6 +3011,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Impact radius:", safeEdit.Message);
     Contains("Direct files:", safeEdit.Message);
     Contains("Test command:", safeEdit.Message);
+    Contains("Affected projects:", safeEdit.Message);
     Contains("MainWindowViewModel.cs", safeEdit.Message);
     Contains("Compiler diagnostic mapper", diagnostic.Message);
     Contains("Code: CS0103", diagnostic.Message);

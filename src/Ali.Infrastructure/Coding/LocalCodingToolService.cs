@@ -6332,13 +6332,19 @@ public sealed class LocalCodingToolService(
             string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
             $"Source files signaled: {recommendation.SourceFiles.Count}",
             $"Likely test files: {recommendation.TestFiles.Count}",
+            $"Source projects: {recommendation.SourceProjects.Count}",
+            $"Affected projects: {recommendation.AffectedProjects.Count}",
             "Source signals:"
         };
         lines.AddRange(recommendation.SourceFiles.Count == 0 ? ["- none found"] : recommendation.SourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Project impact:");
+        lines.AddRange(recommendation.AffectedProjects.Count == 0 ? ["- none found"] : recommendation.AffectedProjects.Select(project => $"- {project}"));
         lines.Add("Likely tests:");
         lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
         lines.Add("Smallest practical test target:");
         lines.Add(string.IsNullOrWhiteSpace(recommendation.TargetPath) ? "- none found" : $"- {recommendation.Scope}: {recommendation.TargetPath}");
+        lines.Add("Build order slice:");
+        lines.AddRange(recommendation.BuildOrderProjects.Count == 0 ? ["- none found"] : recommendation.BuildOrderProjects.Select((project, index) => $"- {index + 1}. {project}"));
         lines.Add("Validation commands:");
         lines.Add(string.IsNullOrWhiteSpace(recommendation.Command) ? "- No test command detected. Run project intelligence first." : $"- {recommendation.Command}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Impacted tests", Policy.WorkspaceRoot);
@@ -6359,9 +6365,15 @@ public sealed class LocalCodingToolService(
             string.IsNullOrWhiteSpace(recommendation.Command) ? "Command: none" : $"Command: {recommendation.Command}",
             $"Source signals: {recommendation.SourceFiles.Count}",
             $"Likely test files: {recommendation.TestFiles.Count}",
+            $"Source projects: {recommendation.SourceProjects.Count}",
+            $"Affected projects: {recommendation.AffectedProjects.Count}",
             "Source files:"
         };
         lines.AddRange(recommendation.SourceFiles.Count == 0 ? ["- none found"] : recommendation.SourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Project impact:");
+        lines.AddRange(recommendation.AffectedProjects.Count == 0 ? ["- none found"] : recommendation.AffectedProjects.Select(project => $"- {project}"));
+        lines.Add("Build order slice:");
+        lines.AddRange(recommendation.BuildOrderProjects.Count == 0 ? ["- none found"] : recommendation.BuildOrderProjects.Select((project, index) => $"- {index + 1}. {project}"));
         lines.Add("Test files:");
         lines.AddRange(recommendation.TestFiles.Count == 0 ? ["- none found"] : recommendation.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
         lines.Add("Notes:");
@@ -6400,6 +6412,8 @@ public sealed class LocalCodingToolService(
             testFiles = GetCSharpFiles().Where(IsTestFile).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).Take(12).ToList();
         }
 
+        var summaries = GetWorkspaceProjectSummaries();
+        var projectImpact = BuildProjectImpact(sourceFiles, summaries);
         var notes = new List<string>();
         string? target = null;
         var scope = "none";
@@ -6415,7 +6429,6 @@ public sealed class LocalCodingToolService(
 
         if (target is null)
         {
-            var summaries = GetWorkspaceProjectSummaries();
             var testProject = summaries.FirstOrDefault(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase));
             if (testProject is not null)
             {
@@ -6435,13 +6448,17 @@ public sealed class LocalCodingToolService(
             }
         }
 
+        if (projectImpact.AffectedProjects.Count > 0)
+        {
+            notes.Add($"Project impact includes {projectImpact.AffectedProjects.Count} project(s); validate in dependency build order when build risk is high.");
+        }
         var command = string.IsNullOrWhiteSpace(target) ? string.Empty : $"confirm dotnet test \"{target}\"";
         if (testFiles.Count == 0)
         {
             notes.Add("No likely test files were detected; run project intelligence if this seems wrong.");
         }
 
-        return new TestTargetRecommendation(query, sourceFiles, testFiles, target, scope, command, notes);
+        return new TestTargetRecommendation(query, sourceFiles, testFiles, projectImpact.SourceProjects, projectImpact.AffectedProjects, projectImpact.BuildOrderProjects, target, scope, command, notes);
     }
 
     private bool TryFindNearestProjectForFile(string file, out string projectPath)
@@ -6563,6 +6580,7 @@ public sealed class LocalCodingToolService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(8)
             .ToList();
+        var affectedProjects = testTarget.AffectedProjects.Take(8).ToList();
         var notes = new List<string>();
         if (directFiles.Count == 0)
         {
@@ -6577,7 +6595,7 @@ public sealed class LocalCodingToolService(
             notes.Add("No targeted test file was resolved; use build plus broader tests.");
         }
 
-        return new EditImpactSurface(directFiles, relatedFiles, testFiles, testTarget.Command, notes);
+        return new EditImpactSurface(directFiles, relatedFiles, testFiles, affectedProjects, testTarget.Command, notes);
     }
 
     private void AddEditImpactSurfaceLines(List<string> lines, EditImpactSurface surface)
@@ -6586,6 +6604,7 @@ public sealed class LocalCodingToolService(
         lines.Add($"- Direct files: {FormatInlineList(surface.DirectFiles)}");
         lines.Add($"- Related references/callers: {FormatInlineList(surface.RelatedFiles)}");
         lines.Add($"- Likely tests: {FormatInlineList(surface.TestFiles)}");
+        lines.Add($"- Affected projects: {FormatInlineList(surface.AffectedProjects)}");
         lines.Add(string.IsNullOrWhiteSpace(surface.TestCommand)
             ? "- Test command: none resolved"
             : $"- Test command: {surface.TestCommand}");
@@ -10324,6 +10343,66 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private ProjectImpact BuildProjectImpact(IReadOnlyList<string> sourceFiles, IReadOnlyList<ProjectSummary> summaries)
+    {
+        if (sourceFiles.Count == 0 || summaries.Count == 0)
+        {
+            return new ProjectImpact([], [], []);
+        }
+
+        var sourceProjects = sourceFiles
+            .Select(file => FindProjectForWorkspaceFile(file, summaries))
+            .Where(project => !string.IsNullOrWhiteSpace(project))
+            .Select(project => project!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (sourceProjects.Count == 0)
+        {
+            return new ProjectImpact([], [], []);
+        }
+
+        var edges = BuildProjectDependencyEdges(summaries);
+        var affected = new HashSet<string>(sourceProjects, StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<string>(sourceProjects);
+        while (pending.Count > 0)
+        {
+            var current = pending.Dequeue();
+            foreach (var dependent in edges.Where(edge => edge.To.Equals(current, StringComparison.OrdinalIgnoreCase)).Select(edge => edge.From))
+            {
+                if (affected.Add(dependent))
+                {
+                    pending.Enqueue(dependent);
+                }
+            }
+        }
+
+        var buildOrder = EstimateBuildOrder(summaries, edges)
+            .Where(project => affected.Contains(project))
+            .ToList();
+        return new ProjectImpact(sourceProjects, affected.OrderBy(project => project, StringComparer.OrdinalIgnoreCase).ToList(), buildOrder);
+    }
+
+    private string? FindProjectForWorkspaceFile(string file, IReadOnlyList<ProjectSummary> summaries)
+    {
+        if (string.IsNullOrWhiteSpace(file))
+        {
+            return null;
+        }
+
+        var fullPath = ToAbsoluteWorkspacePath(file) ?? file;
+        return summaries
+            .Select(summary => new
+            {
+                summary.RelativePath,
+                Directory = Path.GetDirectoryName(Path.Combine(Policy.WorkspaceRoot, summary.RelativePath)) ?? Policy.WorkspaceRoot
+            })
+            .Where(project => fullPath.StartsWith(project.Directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || fullPath.Equals(Path.Combine(Policy.WorkspaceRoot, project.RelativePath), StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(project => project.Directory.Length)
+            .Select(project => project.RelativePath)
+            .FirstOrDefault();
+    }
+
     private static IReadOnlyList<ProjectDependency> BuildProjectDependencyEdges(IReadOnlyList<ProjectSummary> summaries)
     {
         var knownProjects = summaries
@@ -11834,6 +11913,7 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> DirectFiles,
         IReadOnlyList<string> RelatedFiles,
         IReadOnlyList<string> TestFiles,
+        IReadOnlyList<string> AffectedProjects,
         string? TestCommand,
         IReadOnlyList<string> Notes);
 
@@ -11847,6 +11927,9 @@ public sealed class LocalCodingToolService(
         string Query,
         IReadOnlyList<string> SourceFiles,
         IReadOnlyList<string> TestFiles,
+        IReadOnlyList<string> SourceProjects,
+        IReadOnlyList<string> AffectedProjects,
+        IReadOnlyList<string> BuildOrderProjects,
         string? TargetPath,
         string Scope,
         string Command,
@@ -11912,6 +11995,11 @@ public sealed class LocalCodingToolService(
         public static ProjectSummary WithWarning(string relativePath, string warning) =>
             new(relativePath, "unknown", [], [], [], 0, 0, 0, warning);
     }
+
+    private sealed record ProjectImpact(
+        IReadOnlyList<string> SourceProjects,
+        IReadOnlyList<string> AffectedProjects,
+        IReadOnlyList<string> BuildOrderProjects);
 
     private sealed record ProjectDependency(
         string From,
