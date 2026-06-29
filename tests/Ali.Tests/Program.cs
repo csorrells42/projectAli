@@ -105,6 +105,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows next roadmap action", TestLocalCodingToolShowsNextRoadmapAction),
     ("local coding tool shows roadmap execution packet", TestLocalCodingToolShowsRoadmapExecutionPacket),
     ("local coding tool manages approved execution packet", TestLocalCodingToolManagesApprovedExecutionPacket),
+    ("local coding tool blocks unsafe packet closeout", TestLocalCodingToolBlocksUnsafePacketCloseout),
     ("local coding tool runs packet console and build planning", TestLocalCodingToolRunsPacketConsoleAndBuildPlanning),
     ("local coding tool shows windows troubleshooting", TestLocalCodingToolShowsWindowsTroubleshooting),
     ("local coding tool shows computer assistant", TestLocalCodingToolShowsComputerAssistant),
@@ -1541,6 +1542,9 @@ static async Task TestLocalCodingToolPlansGuardedTask()
     Equal(true, result.Handled);
     Equal(true, result.Succeeded);
     Contains("Coding task plan", result.Message);
+    Contains("Task type: bug fix", result.Message);
+    Contains("Risk preview:", result.Message);
+    Contains("Change impact preview", result.Message);
     Contains("Permission gates", result.Message);
     Contains("Impact checklist", result.Message);
     Contains("File writes require", result.Message);
@@ -1980,6 +1984,53 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     Equal("git", runner.Runs[0].FileName);
     Equal("dotnet", runner.Runs[1].FileName);
     Equal("git", runner.Runs[2].FileName);
+}
+
+static async Task TestLocalCodingToolBlocksUnsafePacketCloseout()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var codingDirectory = Path.Combine(directory, "Coding");
+    Directory.CreateDirectory(codingDirectory);
+    var packetPath = Path.Combine(codingDirectory, "approved-step-packet.json");
+    var packetJson = JsonSerializer.Serialize(
+        new
+        {
+            goal = "commit blocked without validation",
+            stepIndex = 0,
+            step = "Stage and commit the completed phase when Chris approves.",
+            roadmapUpdatedAt = DateTimeOffset.UtcNow,
+            approvedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            primaryTarget = workspace,
+            packetStatus = "ready",
+            recommendedAction = "review Git state and commit only after approval",
+            confidence = "high",
+            prepCommands = Array.Empty<string>(),
+            executionCommands = Array.Empty<string>(),
+            validationCommands = Array.Empty<string>(),
+            closeoutCommands = new[] { "confirm git commit \"message\"" },
+            selfScore = new[] { "Self-score: 55/100" }
+        },
+        new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    await File.WriteAllTextAsync(packetPath, packetJson);
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var blocked = await service.TryHandleAsync("confirm run packet item 1", CancellationToken.None);
+
+    Equal(true, blocked.Handled);
+    Equal(false, blocked.Succeeded);
+    Contains("Packet prerequisite blocked item 1", blocked.Message);
+    Contains("No execution receipt exists", blocked.Message);
+    Contains("No successful validation receipt exists", blocked.Message);
+    Contains("Git commit needs a successful build/test validation receipt", blocked.Message);
+    Equal(1, runner.Runs.Count);
+    Equal("git", runner.Runs[0].FileName);
 }
 
 static async Task TestLocalCodingToolRunsPacketConsoleAndBuildPlanning()
@@ -3051,7 +3102,9 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Release notes draft", release.Message);
     Contains("Affected projects:", release.Message);
     Contains("Build order slice:", release.Message);
-    Contains("tests", release.Message);
+    Contains("Customer-ready notes", release.Message);
+    Contains("Internal risk labels", release.Message);
+    Contains("Improved tests", release.Message);
     Contains("Rollback plan", rollback.Message);
     Contains("src/Ali.Core/Coding/CodingToolContracts.cs", rollback.Message);
     Contains("Coding session timeline", timeline.Message);
@@ -3286,7 +3339,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 84%", miniCodex.Message);
+    Contains("Overall score: 88%", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
 }
