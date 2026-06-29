@@ -258,6 +258,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowFullCodingReadiness => await ShowFullCodingReadinessAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationLedger => ShowValidationLedger(),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
+            CodingToolAction.ShowOwnershipMap => await ShowOwnershipMapAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCallGraph => ShowCallGraph(request),
             CodingToolAction.ResolveSemanticSymbol => ResolveSemanticSymbol(request),
             CodingToolAction.ShowImpactedTests => await ShowImpactedTestsAsync(request, cancellationToken).ConfigureAwait(false),
@@ -6273,6 +6274,99 @@ public sealed class LocalCodingToolService(
         };
         lines.AddRange(symbols.Count == 0 ? ["- none found"] : symbols.Take(20).Select(symbol => $"- {symbol.Kind} {symbol.Name}: {RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber}"));
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "C# symbol index", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowOwnershipMapAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var query = CleanGoal(request.Query, string.Empty);
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var terms = ExtractMeaningfulGoalTerms(query).Take(8).ToList();
+        var directFile = ToAbsoluteWorkspacePath(query);
+        var semanticHits = terms.Count == 0
+            ? new List<SemanticSymbolHit>()
+            : terms
+                .SelectMany(term => FindSemanticSymbolHits(workspace, term, 12))
+                .DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
+                .Take(24)
+                .ToList();
+        var candidateFiles = semanticHits
+            .Select(hit => hit.Path)
+            .Concat(directFile is not null && File.Exists(directFile) ? [directFile] : [])
+            .Concat(changedFiles.Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        if (candidateFiles.Count == 0 && !string.IsNullOrWhiteSpace(query))
+        {
+            candidateFiles = SuggestLikelyFilesForGoal(query)
+                .Select(ToAbsoluteWorkspacePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(8)
+                .ToList();
+        }
+
+        var summaries = GetWorkspaceProjectSummaries();
+        var projectImpact = BuildProjectImpact(candidateFiles, summaries);
+        var testTarget = await ResolveTestTargetRecommendationAsync(query, cancellationToken).ConfigureAwait(false);
+        var relatedFiles = FindOwnershipRelatedFiles(terms, semanticHits, candidateFiles);
+        var lines = new List<string>
+        {
+            "Ownership map:",
+            "No files were changed.",
+            string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
+            $"Candidate files: {candidateFiles.Count}",
+            $"Semantic hits: {semanticHits.Count}",
+            "Owning projects:"
+        };
+        lines.AddRange(projectImpact.SourceProjects.Count == 0 ? ["- none resolved"] : projectImpact.SourceProjects.Select(project => $"- {project}"));
+        lines.Add("Affected projects:");
+        lines.AddRange(projectImpact.AffectedProjects.Count == 0 ? ["- none resolved"] : projectImpact.AffectedProjects.Select(project => $"- {project}"));
+        lines.Add("Primary files:");
+        lines.AddRange(candidateFiles.Count == 0 ? ["- none found"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
+        lines.Add("Nearby symbols:");
+        lines.AddRange(semanticHits.Count == 0 ? ["- none found"] : semanticHits.Take(10).Select(FormatSemanticHit));
+        lines.Add("Related files:");
+        lines.AddRange(relatedFiles.Count == 0 ? ["- none found"] : relatedFiles.Select(file => $"- {file}"));
+        lines.Add("Likely tests:");
+        lines.AddRange(testTarget.TestFiles.Count == 0 ? ["- none found"] : testTarget.TestFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Build order slice:");
+        lines.AddRange(projectImpact.BuildOrderProjects.Count == 0 ? ["- none resolved"] : projectImpact.BuildOrderProjects.Select((project, index) => $"- {index + 1}. {project}"));
+        lines.Add("Validation commands:");
+        lines.Add(string.IsNullOrWhiteSpace(testTarget.Command) ? "- No targeted test command resolved." : $"- {testTarget.Command}");
+        lines.Add("Next - inspect the primary files, then use safe edit workflow before changing anything.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Ownership map", Policy.WorkspaceRoot);
+    }
+
+    private IReadOnlyList<string> FindOwnershipRelatedFiles(
+        IReadOnlyList<string> terms,
+        IReadOnlyList<SemanticSymbolHit> semanticHits,
+        IReadOnlyList<string> candidateFiles)
+    {
+        var candidateSet = candidateFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var symbolTerms = semanticHits
+            .Select(hit => hit.Name)
+            .Concat(terms)
+            .Where(term => !string.IsNullOrWhiteSpace(term) && term.Length > 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        if (symbolTerms.Count == 0)
+        {
+            return [];
+        }
+
+        return BuildRoslynCallGraph(GetCSharpFiles(), 500)
+            .Where(edge => symbolTerms.Any(term => edge.Caller.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || edge.Callee.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Select(edge => edge.Path)
+            .Where(path => File.Exists(path) && !candidateSet.Contains(path))
+            .Select(RelativeToWorkspace)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
     }
 
     private CodingToolResult ShowCallGraph(CodingToolRequest request)

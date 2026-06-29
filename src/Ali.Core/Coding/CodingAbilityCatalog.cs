@@ -291,6 +291,7 @@ public static class CodingAbilityCatalog
                 new("Health score", "Score workspace readiness across target, projects, tests, git, and validation.", "workspace health score", "workspace health score"),
                 new("Full readiness", "Run the one-click coding readiness rollup with workspace, bindings, command surface, symbols, commit gate, and validation ledger.", "full coding readiness", "full coding readiness"),
                 new("C# symbol index", "Show a Roslyn-backed index of likely C# types, methods, and properties.", "show csharp symbol index", "show csharp symbol index"),
+                new("Ownership map", "Explain likely owning project, primary files, related files, tests, and validation commands for a symbol or file.", "ownership map Save", "ownership map <symbol-or-file>"),
                 new("Call graph", "Show Roslyn-discovered caller-to-callee edges, optionally filtered by name.", "show call graph Save", "show call graph <name>"),
                 new("Resolve symbol", "Use Roslyn semantic resolution to explain matching declarations and references.", "resolve symbol Save", "resolve symbol <name>"),
                 new("Impacted tests", "Suggest likely source and test files affected by a symbol or current changed files.", "show impacted tests Save", "show impacted tests <name>"),

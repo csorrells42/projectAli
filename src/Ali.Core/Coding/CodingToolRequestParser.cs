@@ -1107,6 +1107,17 @@ public static class CodingToolRequestParser
         "show code symbol index"
     ];
 
+    private static readonly string[] OwnershipMapPrefixes =
+    [
+        "show ownership map",
+        "ownership map",
+        "code ownership map",
+        "explain ownership",
+        "who owns",
+        "what owns",
+        "where does"
+    ];
+
     private static readonly string[] XamlBindingCheckRequests =
     [
         "xaml binding check",
@@ -1652,6 +1663,7 @@ public static class CodingToolRequestParser
         if (TryParsePrefixedQuery(trimmed, TypedPatchComposerPrefixes, CodingToolAction.ComposeTypedPatch, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SymbolFinderPrefixes, CodingToolAction.FindSymbol, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, CrossReferencePrefixes, CodingToolAction.ShowCrossReferenceMap, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, OwnershipMapPrefixes, CodingToolAction.ShowOwnershipMap, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, CallGraphPrefixes, CodingToolAction.ShowCallGraph, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, SemanticSymbolPrefixes, CodingToolAction.ResolveSemanticSymbol, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, ImpactedTestsPrefixes, CodingToolAction.ShowImpactedTests, userConfirmed, out request)

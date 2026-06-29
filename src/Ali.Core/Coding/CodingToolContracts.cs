@@ -29,6 +29,7 @@ public enum CodingToolAction
     ShowFullCodingReadiness,
     ShowValidationLedger,
     ShowCSharpSymbolIndex,
+    ShowOwnershipMap,
     ShowCallGraph,
     ResolveSemanticSymbol,
     ShowImpactedTests,

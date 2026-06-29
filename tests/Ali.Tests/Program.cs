@@ -121,6 +121,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool builds project index", TestLocalCodingToolBuildsProjectIndex),
     ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
     ("local coding tool shows coding context packet", TestLocalCodingToolShowsCodingContextPacket),
+    ("local coding tool shows ownership map", TestLocalCodingToolShowsOwnershipMap),
     ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
     ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
     ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
@@ -715,6 +716,10 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
 
     Equal(true, CodingToolRequestParser.TryParse("cross reference CodingToolRequestParser", out var referenceRequest));
     Equal(CodingToolAction.ShowCrossReferenceMap, referenceRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("ownership map WidgetService", out var ownershipRequest));
+    Equal(CodingToolAction.ShowOwnershipMap, ownershipRequest.Action);
+    Equal("WidgetService", ownershipRequest.Query);
 
     Equal(true, CodingToolRequestParser.TryParse("test gap report", out var gapRequest));
     Equal(CodingToolAction.ShowTestGapReport, gapRequest.Action);
@@ -2758,6 +2763,98 @@ static async Task TestLocalCodingToolShowsCodingContextPacket()
     Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);
     Contains("Preview patches before applying them", result.Message);
     Contains("Claim edits, tests, installs, searches, and receipts only after tool output proves them", result.Message);
+}
+
+static async Task TestLocalCodingToolShowsOwnershipMap()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "WidgetService.cs"),
+        """
+        namespace Demo.App;
+        public sealed class WidgetService
+        {
+            public string Save() => "saved";
+        }
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "WidgetController.cs"),
+        """
+        namespace Demo.App;
+        public sealed class WidgetController
+        {
+            public string Run() => new WidgetService().Save();
+        }
+        """);
+
+    var testsDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testsDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+            <ProjectReference Include="..\Demo.App\Demo.App.csproj" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "WidgetServiceTests.cs"),
+        """
+        namespace Demo.Tests;
+        public sealed class WidgetServiceTests
+        {
+            public void Save_returns_saved() { }
+        }
+        """);
+    var changedFiles = $"Demo.App/WidgetService.cs{Environment.NewLine}";
+    var runner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("ownership map WidgetService", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Ownership map", result.Message);
+    Contains("Query: WidgetService", result.Message);
+    Contains("Owning projects:", result.Message);
+    Contains(Path.Combine("Demo.App", "Demo.App.csproj"), result.Message);
+    Contains("Affected projects:", result.Message);
+    Contains(Path.Combine("Demo.Tests", "Demo.Tests.csproj"), result.Message);
+    Contains("Primary files:", result.Message);
+    Contains("WidgetService.cs", result.Message);
+    Contains("Nearby symbols:", result.Message);
+    Contains("Related files:", result.Message);
+    Contains("Likely tests:", result.Message);
+    Contains("WidgetServiceTests.cs", result.Message);
+    Contains("Build order slice:", result.Message);
+    Contains("Validation commands:", result.Message);
+    Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);
 }
 
 static async Task TestLocalCodingToolShowsSafeCommitCheck()

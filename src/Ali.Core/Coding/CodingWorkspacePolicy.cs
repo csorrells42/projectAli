@@ -128,6 +128,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFullCodingReadiness
             or CodingToolAction.ShowValidationLedger
             or CodingToolAction.ShowCSharpSymbolIndex
+            or CodingToolAction.ShowOwnershipMap
             or CodingToolAction.ShowCallGraph
             or CodingToolAction.ResolveSemanticSymbol
             or CodingToolAction.ShowImpactedTests
