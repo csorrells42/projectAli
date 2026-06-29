@@ -5363,6 +5363,234 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private IReadOnlyList<ProjectIndexFileRole> BuildProjectIndexFileRoles(IReadOnlyList<string> files) =>
+        files
+            .Select(RelativeToWorkspace)
+            .GroupBy(ClassifyProjectIndexFileRole, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ProjectIndexFileRole(
+                group.Key,
+                group.Count(),
+                group.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Take(5).ToList()))
+            .OrderByDescending(role => role.Count)
+            .ThenBy(role => role.Role, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+
+    private IReadOnlyList<ProjectIndexFeatureArea> BuildProjectIndexFeatureAreas(IReadOnlyList<string> files) =>
+        files
+            .Select(RelativeToWorkspace)
+            .GroupBy(ClassifyProjectIndexFeatureArea, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ProjectIndexFeatureArea(
+                group.Key,
+                group.Count(),
+                group.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Take(5).ToList()))
+            .OrderByDescending(area => area.Count)
+            .ThenBy(area => area.Area, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+
+    private static string FormatProjectIndexRoleSummary(IReadOnlyList<ProjectIndexFileRole> roles) =>
+        roles.Count == 0
+            ? "none detected"
+            : string.Join(", ", roles.Take(6).Select(role => $"{role.Role} ({role.Count})"));
+
+    private static string FormatProjectIndexFeatureSummary(IReadOnlyList<ProjectIndexFeatureArea> areas) =>
+        areas.Count == 0
+            ? "none detected"
+            : string.Join(", ", areas.Take(6).Select(area => $"{area.Area} ({area.Count})"));
+
+    private static DateTimeOffset GetLatestWorkspaceWriteUtc(IReadOnlyList<string> files)
+    {
+        var latest = DateTimeOffset.MinValue;
+        foreach (var file in files)
+        {
+            try
+            {
+                if (!File.Exists(file))
+                {
+                    continue;
+                }
+
+                var write = new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
+                if (write > latest)
+                {
+                    latest = write;
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return latest == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : latest;
+    }
+
+    private static string ClassifyProjectIndexFileRole(string relativePath)
+    {
+        var path = NormalizePathForClassification(relativePath);
+        var fileName = Path.GetFileName(path);
+        if (path.Contains("/tests/", StringComparison.OrdinalIgnoreCase) || fileName.Contains("test", StringComparison.OrdinalIgnoreCase))
+        {
+            return "tests";
+        }
+
+        if (path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("package.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return "project/dependency setup";
+        }
+
+        if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/viewmodels/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/views/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/ali.app.wpf/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "desktop UI";
+        }
+
+        if (path.Contains("/coding/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Coding", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("WorkspacePolicy", StringComparison.OrdinalIgnoreCase))
+        {
+            return "programming assistant";
+        }
+
+        if (path.Contains("/sources/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Source", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Retriever", StringComparison.OrdinalIgnoreCase))
+        {
+            return "source retrieval";
+        }
+
+        if (path.Contains("/voice/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Voice", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Speech", StringComparison.OrdinalIgnoreCase))
+        {
+            return "voice/audio";
+        }
+
+        if (path.Contains("/installation/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Installer", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Setup", StringComparison.OrdinalIgnoreCase))
+        {
+            return "installer/deployment";
+        }
+
+        if (path.Contains("/runtime/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Runtime", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("OpenAI", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Ollama", StringComparison.OrdinalIgnoreCase))
+        {
+            return "model runtime";
+        }
+
+        if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return "docs/config";
+        }
+
+        return path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ? "application code" : "other";
+    }
+
+    private static string ClassifyProjectIndexFeatureArea(string relativePath)
+    {
+        var path = NormalizePathForClassification(relativePath);
+        var fileName = Path.GetFileName(path);
+        if (path.Contains("/tests/", StringComparison.OrdinalIgnoreCase) || fileName.Contains("test", StringComparison.OrdinalIgnoreCase))
+        {
+            return "test coverage";
+        }
+
+        if (path.Contains("/coding/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Coding", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Roadmap", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Patch", StringComparison.OrdinalIgnoreCase))
+        {
+            return "programming workflow";
+        }
+
+        if (fileName.Contains("Computer", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Troubleshooting", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Process", StringComparison.OrdinalIgnoreCase))
+        {
+            return "computer maintenance";
+        }
+
+        if (path.Contains("/sources/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Source", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Weather", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Forecast", StringComparison.OrdinalIgnoreCase))
+        {
+            return "web sources and weather";
+        }
+
+        if (path.Contains("/voice/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Voice", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Speech", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Audio", StringComparison.OrdinalIgnoreCase))
+        {
+            return "voice and audio";
+        }
+
+        if (path.Contains("/installation/", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Installer", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Setup", StringComparison.OrdinalIgnoreCase))
+        {
+            return "installer and delivery";
+        }
+
+        if (path.Contains("/ali.app.wpf/", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/viewmodels/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "desktop shell";
+        }
+
+        if (fileName.Contains("Runtime", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("OpenAI", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Ollama", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Model", StringComparison.OrdinalIgnoreCase))
+        {
+            return "local model runtime";
+        }
+
+        if (fileName.Contains("Conversation", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Memory", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Reminder", StringComparison.OrdinalIgnoreCase))
+        {
+            return "conversation memory";
+        }
+
+        if (fileName.Contains("Pdf", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Document", StringComparison.OrdinalIgnoreCase))
+        {
+            return "documents and PDFs";
+        }
+
+        if (path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase))
+        {
+            return "project structure";
+        }
+
+        return "general application";
+    }
+
+    private static string NormalizePathForClassification(string path) =>
+        path.Replace('\\', '/');
+
     private ProjectIndexStatus GetProjectIndexStatus()
     {
         if (!File.Exists(_projectIndexPath))
@@ -5383,16 +5611,40 @@ public sealed class LocalCodingToolService(
             var symbols = root.TryGetProperty("symbols", out var symbolsElement) && symbolsElement.ValueKind == JsonValueKind.Array
                 ? symbolsElement.GetArrayLength()
                 : 0;
+            var fileRoles = root.TryGetProperty("fileRoles", out var rolesElement) && rolesElement.ValueKind == JsonValueKind.Array
+                ? rolesElement.GetArrayLength()
+                : 0;
+            var featureAreas = root.TryGetProperty("featureAreas", out var areasElement) && areasElement.ValueKind == JsonValueKind.Array
+                ? areasElement.GetArrayLength()
+                : 0;
             var created = root.TryGetProperty("createdAtUtc", out var createdElement) && createdElement.TryGetDateTimeOffset(out var parsedCreated)
                 ? parsedCreated.LocalDateTime.ToString("g", CultureInfo.CurrentCulture)
                 : "unknown time";
+            var indexedFileCount = root.TryGetProperty("fileCount", out var fileCountElement) && fileCountElement.TryGetInt32(out var parsedFileCount)
+                ? parsedFileCount
+                : -1;
+            var indexedLatestWrite = root.TryGetProperty("latestWorkspaceWriteUtc", out var latestWriteElement) && latestWriteElement.TryGetDateTimeOffset(out var parsedLatestWrite)
+                ? parsedLatestWrite
+                : (DateTimeOffset?)null;
             if (string.IsNullOrWhiteSpace(workspaceRoot)
                 || !Path.GetFullPath(workspaceRoot).Equals(Path.GetFullPath(Policy.WorkspaceRoot), StringComparison.OrdinalIgnoreCase))
             {
                 return new ProjectIndexStatus(false, "Needs refresh - index is for another workspace.");
             }
 
-            return new ProjectIndexStatus(true, $"Good - {projects} project(s), {symbols} symbol(s), refreshed {created}.");
+            var currentFiles = Directory.Exists(Policy.WorkspaceRoot) ? EnumerateWorkspaceFiles().Take(10_001).ToList() : [];
+            var currentLatestWrite = GetLatestWorkspaceWriteUtc(currentFiles);
+            if (indexedFileCount >= 0 && currentFiles.Count != indexedFileCount)
+            {
+                return new ProjectIndexStatus(false, $"Needs refresh - file count changed from {indexedFileCount} to {currentFiles.Count}.");
+            }
+
+            if (indexedLatestWrite is not null && currentLatestWrite > indexedLatestWrite.Value.AddSeconds(2))
+            {
+                return new ProjectIndexStatus(false, "Needs refresh - workspace files changed after the index was built.");
+            }
+
+            return new ProjectIndexStatus(true, $"Good - {projects} project(s), {symbols} symbol(s), {fileRoles} file role(s), {featureAreas} feature area(s), refreshed {created}.");
         }
         catch (JsonException ex)
         {
@@ -5453,10 +5705,14 @@ public sealed class LocalCodingToolService(
         var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 500)
             .Select(symbol => new ProjectIndexSymbol(symbol.Kind, symbol.Name, RelativeToWorkspace(symbol.Path), symbol.LineNumber))
             .ToList();
+        var fileRoles = BuildProjectIndexFileRoles(files);
+        var featureAreas = BuildProjectIndexFeatureAreas(files);
+        var latestWorkspaceWrite = GetLatestWorkspaceWriteUtc(files);
         var snapshot = new ProjectIndexSnapshot(
             DateTimeOffset.UtcNow,
             Policy.WorkspaceRoot,
             files.Count,
+            latestWorkspaceWrite,
             primaryTarget,
             solutions,
             summaries,
@@ -5466,7 +5722,9 @@ public sealed class LocalCodingToolService(
             entryFiles,
             buildCommands,
             testCommands,
-            symbols);
+            symbols,
+            fileRoles,
+            featureAreas);
 
         Directory.CreateDirectory(Path.GetDirectoryName(_projectIndexPath)!);
         var json = JsonSerializer.Serialize(snapshot, RoadmapJsonOptions);
@@ -5482,11 +5740,14 @@ public sealed class LocalCodingToolService(
             $"Solutions: {solutions.Count}",
             $"Projects: {summaries.Count}",
             $"Symbols: {symbols.Count}",
+            $"File roles: {FormatProjectIndexRoleSummary(fileRoles)}",
+            $"Feature areas: {FormatProjectIndexFeatureSummary(featureAreas)}",
             primaryTarget is null ? "Primary target: not found" : $"Primary target: {primaryTarget}",
             $"Stacks: {FormatInlineList(stackSignals)}",
             $"Style signals: {FormatInlineList(styleSignals)}",
             $"Build commands: {FormatInlineList(buildCommands)}",
             $"Test commands: {FormatInlineList(testCommands)}",
+            $"Latest workspace write: {latestWorkspaceWrite.LocalDateTime:g}",
             "Next - use coding context packet, safe edit workflow, or resolve test target against this refreshed index."
         };
 
@@ -11207,6 +11468,7 @@ public sealed class LocalCodingToolService(
         DateTimeOffset CreatedAtUtc,
         string WorkspaceRoot,
         int FileCount,
+        DateTimeOffset LatestWorkspaceWriteUtc,
         string? PrimaryTarget,
         IReadOnlyList<string> Solutions,
         IReadOnlyList<ProjectSummary> Projects,
@@ -11216,13 +11478,25 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> EntryFiles,
         IReadOnlyList<string> BuildCommands,
         IReadOnlyList<string> TestCommands,
-        IReadOnlyList<ProjectIndexSymbol> Symbols);
+        IReadOnlyList<ProjectIndexSymbol> Symbols,
+        IReadOnlyList<ProjectIndexFileRole> FileRoles,
+        IReadOnlyList<ProjectIndexFeatureArea> FeatureAreas);
 
     private sealed record ProjectIndexSymbol(
         string Kind,
         string Name,
         string RelativePath,
         int LineNumber);
+
+    private sealed record ProjectIndexFileRole(
+        string Role,
+        int Count,
+        IReadOnlyList<string> Examples);
+
+    private sealed record ProjectIndexFeatureArea(
+        string Area,
+        int Count,
+        IReadOnlyList<string> RepresentativeFiles);
     private sealed record ProjectSummary(
         string RelativePath,
         string ProjectRole,

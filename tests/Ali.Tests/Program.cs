@@ -2601,6 +2601,9 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Files indexed:", result.Message);
     Contains("Projects: 2", result.Message);
     Contains("Symbols:", result.Message);
+    Contains("File roles:", result.Message);
+    Contains("Feature areas:", result.Message);
+    Contains("Latest workspace write:", result.Message);
     Contains("Build commands:", result.Message);
     Contains("Test commands:", result.Message);
 
@@ -2611,6 +2614,16 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Demo.Tests.csproj", json);
     Contains("WidgetService", json);
     Contains("Microsoft.NET.Test.Sdk", json);
+    Contains("latestWorkspaceWriteUtc", json);
+    Contains("fileRoles", json);
+    Contains("featureAreas", json);
+    Contains("application code", json);
+    Contains("test coverage", json);
+
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "NewWidget.cs"), "namespace Demo.App; public sealed class NewWidget { }");
+    var stale = await service.TryHandleAsync("coding context packet WidgetService", CancellationToken.None);
+    Equal(true, stale.Handled);
+    Contains("Project index: Needs refresh", stale.Message);
 }
 
 static async Task TestLocalCodingToolShowsRepoUnderstanding()
