@@ -1315,6 +1315,16 @@ public sealed class LocalCodingToolService(
         lines.Add("Closeout commands:");
         AddUniqueCommands(lines, BuildCloseoutCommands(_roadmapState, currentStep));
 
+        lines.Add("Packet self-score:");
+        AddUniqueCommands(lines, BuildExecutionPacketSelfScore(
+            recommendation,
+            BuildExecutionCandidateCommands(_roadmapState, recommendation, currentStep, primaryTarget),
+            BuildValidationCommands(_roadmapState, currentStep, primaryTarget),
+            BuildCloseoutCommands(_roadmapState, currentStep),
+            gitStatus,
+            latestReceipt,
+            latestDotNetReceipt));
+
         lines.Add("Approval gates:");
         lines.Add("- File edits: use preview patch bundle, review it, then confirm apply last patch preview.");
         lines.Add("- Packages: confirm restore/package/check commands before NuGet changes or network checks.");
@@ -3690,6 +3700,9 @@ public sealed class LocalCodingToolService(
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var recommendation = BuildNextRoadmapRecommendation(state, gitStatus, latestDotNetReceipt, primaryTarget);
         var currentStep = GetRoadmapCurrentStep(state);
+        var executionCommands = BuildExecutionCandidateCommands(state, recommendation, currentStep, primaryTarget);
+        var validationCommands = BuildValidationCommands(state, currentStep, primaryTarget);
+        var closeoutCommands = BuildCloseoutCommands(state, currentStep);
         return new ApprovedRoadmapExecutionPacket(
             Goal: state.Goal,
             StepIndex: state.CurrentStepIndex,
@@ -3701,9 +3714,54 @@ public sealed class LocalCodingToolService(
             RecommendedAction: recommendation.Action,
             Confidence: recommendation.Confidence,
             PrepCommands: ["show next coding action", "show crash recovery status", "show coding receipts"],
-            ExecutionCommands: BuildExecutionCandidateCommands(state, recommendation, currentStep, primaryTarget),
-            ValidationCommands: BuildValidationCommands(state, currentStep, primaryTarget),
-            CloseoutCommands: BuildCloseoutCommands(state, currentStep));
+            ExecutionCommands: executionCommands,
+            ValidationCommands: validationCommands,
+            CloseoutCommands: closeoutCommands,
+            SelfScore: BuildExecutionPacketSelfScore(recommendation, executionCommands, validationCommands, closeoutCommands, gitStatus, receipts.LastOrDefault(), latestDotNetReceipt));
+    }
+
+    private static IReadOnlyList<string> BuildExecutionPacketSelfScore(
+        RoadmapNextActionRecommendation recommendation,
+        IReadOnlyList<string> executionCommands,
+        IReadOnlyList<string> validationCommands,
+        IReadOnlyList<string> closeoutCommands,
+        GitWorkingTreeStatus gitStatus,
+        CodingReceipt? latestReceipt,
+        CodingReceipt? latestDotNetReceipt)
+    {
+        var score = 0;
+        var lines = new List<string>();
+        score += recommendation.Commands.Count > 0 ? 15 : 0;
+        score += executionCommands.Count > 0 ? 20 : 0;
+        score += validationCommands.Count > 0 ? 20 : 0;
+        score += closeoutCommands.Count > 0 ? 15 : 0;
+        score += gitStatus.Available ? 10 : 0;
+        score += latestReceipt is not null ? 10 : 0;
+        score += latestDotNetReceipt?.Succeeded == true ? 10 : 0;
+        lines.Add($"Self-score: {score}/100");
+        lines.Add(recommendation.Commands.Count > 0
+            ? "Prep: Good - next-action commands are present."
+            : "Prep: Bad - no next-action commands were resolved.");
+        lines.Add(executionCommands.Count > 0
+            ? $"Execute: Good - {executionCommands.Count} candidate command(s)."
+            : "Execute: Bad - no execution candidate command resolved.");
+        lines.Add(validationCommands.Count > 0
+            ? $"Validate: Good - {validationCommands.Count} validation command(s)."
+            : "Validate: Bad - no validation command resolved.");
+        lines.Add(closeoutCommands.Count > 0
+            ? $"Closeout: Good - {closeoutCommands.Count} closeout command(s)."
+            : "Closeout: Bad - no closeout command resolved.");
+        lines.Add(gitStatus.Available
+            ? $"Git evidence: Good - {gitStatus.Summary}"
+            : $"Git evidence: Bad - {gitStatus.Summary}");
+        lines.Add(latestReceipt is null
+            ? "Receipt evidence: Needs work - no recent receipt."
+            : $"Receipt evidence: Good - latest {latestReceipt.Action} {(latestReceipt.Succeeded ? "succeeded" : "failed")}.");
+        lines.Add(latestDotNetReceipt?.Succeeded == true
+            ? "Validation evidence: Good - latest dotnet-style receipt succeeded."
+            : "Validation evidence: Needs work - no successful dotnet-style validation receipt.");
+        lines.Add("Apply rule: only run one packet command at a time, through its normal confirmation gate.");
+        return lines;
     }
 
     private string FormatApprovedPacket(ApprovedRoadmapExecutionPacket packet, bool includePath)
@@ -3728,6 +3786,8 @@ public sealed class LocalCodingToolService(
         AddUniqueCommands(lines, packet.ValidationCommands);
         lines.Add("Closeout commands:");
         AddUniqueCommands(lines, packet.CloseoutCommands);
+        lines.Add("Packet self-score:");
+        AddUniqueCommands(lines, packet.SelfScore ?? []);
         lines.Add("Next safe commands:");
         lines.Add("- show packet progress");
         lines.Add("- discard approved packet");
@@ -5373,7 +5433,7 @@ public sealed class LocalCodingToolService(
         var status = GetProjectIndexStatus();
         if (!File.Exists(_projectIndexPath))
         {
-            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], [], [], [], [], [], [], [], []);
+            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], [], [], [], [], [], [], [], [], [], []);
         }
 
         try
@@ -5397,19 +5457,21 @@ public sealed class LocalCodingToolService(
                 ReadProjectStringArray(root, "publicApiSurface"),
                 ReadProjectStringArray(root, "architectureSummary"),
                 ReadProjectStringArray(root, "runtimeRoutes"),
+                ReadProjectStringArray(root, "ownershipMap"),
+                ReadProjectStringArray(root, "crossLanguageRoutes"),
                 ReadProjectStringArray(root, "riskModel"));
         }
         catch (JsonException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], [], [], []);
         }
         catch (IOException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], [], [], []);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], [], [], []);
         }
     }
 
@@ -5530,6 +5592,8 @@ public sealed class LocalCodingToolService(
         lines.Add($"- Generated/designer guardrails: {FormatInlineList(awareness.GeneratedCode.Take(limit))}");
         lines.Add($"- Public API surface: {FormatInlineList(awareness.PublicApiSurface.Take(limit))}");
         lines.Add($"- Runtime routes: {FormatInlineList(awareness.RuntimeRoutes.Take(limit))}");
+        lines.Add($"- Ownership map: {FormatInlineList(awareness.OwnershipMap.Take(limit))}");
+        lines.Add($"- Cross-language routes: {FormatInlineList(awareness.CrossLanguageRoutes.Take(limit))}");
         lines.Add($"- Risk model v2: {FormatInlineList(awareness.RiskModel.Take(limit))}");
     }
 
@@ -5789,6 +5853,180 @@ public sealed class LocalCodingToolService(
 
     private static string FormatRouteMapFile(string? path) =>
         string.IsNullOrWhiteSpace(path) ? "missing" : $"found {path}";
+
+    private IReadOnlyList<string> BuildPersistentOwnershipMap(
+        IReadOnlyList<ProjectIndexSymbol> symbols,
+        IReadOnlyList<ProjectSummary> summaries,
+        IReadOnlyList<string> files)
+    {
+        var lines = new List<string>();
+        var projectSymbolCounts = symbols
+            .Where(symbol => !string.IsNullOrWhiteSpace(symbol.ProjectPath))
+            .GroupBy(symbol => symbol.ProjectPath, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(group => $"{group.Key}: {group.Count()} symbol(s), {FormatInlineList(group.Select(symbol => symbol.DisplayName).Distinct(StringComparer.OrdinalIgnoreCase).Take(3))}")
+            .ToList();
+        lines.AddRange(projectSymbolCounts);
+
+        var publicOwners = symbols
+            .Where(symbol => symbol.Kind is "class" or "record" or "interface" or "method")
+            .Where(symbol => !string.IsNullOrWhiteSpace(symbol.Container) || symbol.Kind is "class" or "record" or "interface")
+            .Select(symbol =>
+            {
+                var owner = string.IsNullOrWhiteSpace(symbol.Container) ? symbol.DisplayName : symbol.Container;
+                return $"{owner} owns {symbol.Name} ({symbol.ProjectPath})";
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        lines.AddRange(publicOwners);
+
+        var roleOwners = BuildProjectIndexFileRoles(files)
+            .Take(6)
+            .Select(role => $"{role.Role}: {role.Count} file(s), examples {FormatInlineList(role.Examples.Take(3))}")
+            .ToList();
+        lines.AddRange(roleOwners);
+
+        if (summaries.Count > 0)
+        {
+            lines.AddRange(summaries
+                .Take(6)
+                .Select(summary => $"{summary.RelativePath}: {summary.ProjectRole}, refs {summary.ProjectReferences.Count}, packages {summary.PackageReferences.Count}"));
+        }
+
+        return lines.Count == 0 ? ["none detected"] : lines.Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
+    }
+
+    private IReadOnlyList<string> BuildCrossLanguageRouteMap(IReadOnlyList<string> files)
+    {
+        var lines = new List<string>();
+        var readableFiles = files
+            .Where(LooksTextReadable)
+            .Take(4_000)
+            .ToList();
+        var xamlCommands = readableFiles
+            .Where(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file => ExtractQuotedAttributeValues(file, "Command"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var jsonKeys = readableFiles
+            .Where(file => file.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(ExtractTopLevelJsonKeys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var projectLinks = readableFiles
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(file => ExtractProjectRouteHints(file))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var csharpRoutes = readableFiles
+            .Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            .Select(RelativeToWorkspace)
+            .Where(path => path.Contains("Parser", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("Controller", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("Endpoint", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("Window", StringComparison.OrdinalIgnoreCase)
+                || path.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+
+        lines.Add($"XAML command routes: {FormatInlineList(xamlCommands)}");
+        lines.Add($"JSON config keys: {FormatInlineList(jsonKeys)}");
+        lines.Add($"Project/package routes: {FormatInlineList(projectLinks)}");
+        lines.Add($"C# route surfaces: {FormatInlineList(csharpRoutes)}");
+        lines.Add("Cross-language rule: UI binding, parser/action route, project reference, and JSON setting changes should be validated together.");
+        return lines;
+    }
+
+    private IEnumerable<string> ExtractQuotedAttributeValues(string file, string attributeName)
+    {
+        var text = SafeReadText(file);
+        var marker = attributeName + "=\"";
+        var index = 0;
+        while ((index = text.IndexOf(marker, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            var start = index + marker.Length;
+            var end = text.IndexOf('"', start);
+            if (end <= start)
+            {
+                break;
+            }
+
+            var value = text[start..end].Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                yield return $"{RelativeToWorkspace(file)} -> {value}";
+            }
+
+            index = end + 1;
+        }
+    }
+
+    private IReadOnlyList<string> ExtractTopLevelJsonKeys(string file)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(file));
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return [];
+            }
+
+            return document.RootElement
+                .EnumerateObject()
+                .Take(8)
+                .Select(property => $"{RelativeToWorkspace(file)}:{property.Name}")
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private IEnumerable<string> ExtractProjectRouteHints(string file)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Load(file);
+        }
+        catch (IOException)
+        {
+            yield break;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            yield break;
+        }
+        catch (System.Xml.XmlException)
+        {
+            yield break;
+        }
+
+        foreach (var reference in document.Descendants().Where(element => element.Name.LocalName is "ProjectReference" or "PackageReference").Take(8))
+        {
+            var include = reference.Attribute("Include")?.Value;
+            if (!string.IsNullOrWhiteSpace(include))
+            {
+                yield return $"{RelativeToWorkspace(file)} -> {include}";
+            }
+        }
+    }
 
     private static string FormatYesNo(bool value) => value ? "yes" : "no";
 
@@ -6153,6 +6391,8 @@ public sealed class LocalCodingToolService(
         var publicApiSurface = BuildPublicApiSurface(GetCSharpFiles().Take(1_000).ToList());
         var architectureSummary = BuildRepositoryArchitectureSummary(files, summaries, msBuildProjects);
         var runtimeRoutes = BuildRuntimeRouteMap(files);
+        var ownershipMap = BuildPersistentOwnershipMap(symbols, summaries, files);
+        var crossLanguageRoutes = BuildCrossLanguageRouteMap(files);
         var riskModel = BuildRiskModelV2(files);
         var latestWorkspaceWrite = GetLatestWorkspaceWriteUtc(files);
         var snapshot = new ProjectIndexSnapshot(
@@ -6179,6 +6419,8 @@ public sealed class LocalCodingToolService(
             publicApiSurface,
             architectureSummary,
             runtimeRoutes,
+            ownershipMap,
+            crossLanguageRoutes,
             riskModel);
 
         Directory.CreateDirectory(Path.GetDirectoryName(_projectIndexPath)!);
@@ -6204,6 +6446,8 @@ public sealed class LocalCodingToolService(
             $"Generated/designer guardrails: {FormatInlineList(generatedCode.Take(6))}",
             $"Public API surface: {FormatInlineList(publicApiSurface.Take(6))}",
             $"Runtime route map: {FormatInlineList(runtimeRoutes.Take(6))}",
+            $"Ownership map: {FormatInlineList(ownershipMap.Take(6))}",
+            $"Cross-language routes: {FormatInlineList(crossLanguageRoutes.Take(6))}",
             $"Risk model v2: {FormatInlineList(riskModel.Take(6))}",
             primaryTarget is null ? "Primary target: not found" : $"Primary target: {primaryTarget}",
             $"Stacks: {FormatInlineList(stackSignals)}",
@@ -6676,14 +6920,14 @@ public sealed class LocalCodingToolService(
         var commandSurface = ShowCommandSurfaceDoctor();
         var scores = new (string Name, int Score, string Note)[]
         {
-            ("Codebase awareness", 80, "project index v2, Roslyn symbols, ownership hints, dependency/build order, public API, generated-code guardrails"),
+            ("Codebase awareness", 84, "project index v2, persistent ownership map, cross-language routes, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
             ("Edit planning", 79, "semantic edit targets, reference graph, impact radius, refactor safety hints, autonomous preflight"),
-            ("Patch safety", 76, "exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
+            ("Patch safety", 78, "exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
             ("Validation/release", 75, "prioritized test recommendation, build order, safe commit and release readiness"),
-            ("Autonomous workflow", 72, "self-checking preflight and receipts exist; still requires owner approval for writes and commands"),
+            ("Autonomous workflow", 76, "self-checking preflight, packet self-score, and receipts exist; still requires owner approval for writes and commands"),
             ("Dashboard usability", 73, "one-click programming checks with concise output")
         };
-        var overall = 80;
+        var overall = 83;
         var lines = new List<string>
         {
             "Mini-Codex status:",
@@ -6704,8 +6948,8 @@ public sealed class LocalCodingToolService(
         lines.Add("Command surface:");
         AddSelectedLines(lines, commandSurface.Message, 5, "Overall:", "Actions:", "Service handlers:", "Policy coverage:", "Parser/test coverage:", "Dashboard bindings:");
         lines.Add("Next upgrade path:");
-        lines.Add("- Raise codebase awareness toward 85 by adding persistent ownership maps and cross-language route scanning.");
-        lines.Add("- Raise autonomous workflow toward 80 by making execution packets self-score each planned edit before approval.");
+        lines.Add("- Raise codebase awareness toward 88 by adding durable per-symbol ownership files and route-diff tracking.");
+        lines.Add("- Raise autonomous workflow toward 80 by making packet self-scores block risky run/apply suggestions until prerequisites pass.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Mini-Codex status", Policy.WorkspaceRoot);
     }
@@ -13092,6 +13336,8 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> PublicApiSurface,
         IReadOnlyList<string> ArchitectureSummary,
         IReadOnlyList<string> RuntimeRoutes,
+        IReadOnlyList<string> OwnershipMap,
+        IReadOnlyList<string> CrossLanguageRoutes,
         IReadOnlyList<string> RiskModel);
 
     private sealed record ProjectIndexStatus(bool Available, string Summary);
@@ -13120,6 +13366,8 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> PublicApiSurface,
         IReadOnlyList<string> ArchitectureSummary,
         IReadOnlyList<string> RuntimeRoutes,
+        IReadOnlyList<string> OwnershipMap,
+        IReadOnlyList<string> CrossLanguageRoutes,
         IReadOnlyList<string> RiskModel);
 
     private sealed record ProjectIndexSymbol(
@@ -13209,7 +13457,8 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> PrepCommands,
         IReadOnlyList<string> ExecutionCommands,
         IReadOnlyList<string> ValidationCommands,
-        IReadOnlyList<string> CloseoutCommands);
+        IReadOnlyList<string> CloseoutCommands,
+        IReadOnlyList<string>? SelfScore);
 
     private sealed record RoadmapExecutionState(
         string Goal,

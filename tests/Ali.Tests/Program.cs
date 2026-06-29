@@ -1888,6 +1888,8 @@ static async Task TestLocalCodingToolShowsRoadmapExecutionPacket()
     Contains("Execution candidates", packet.Message);
     Contains("Validation commands", packet.Message);
     Contains("Closeout commands", packet.Message);
+    Contains("Packet self-score", packet.Message);
+    Contains("Self-score:", packet.Message);
     Contains("Approval gates", packet.Message);
     Contains("Stop and compare options", packet.Message);
     Contains("show next coding action", packet.Message);
@@ -1930,6 +1932,7 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     var approvePacket = await service.TryHandleAsync("approve execution packet", CancellationToken.None);
     var packetPath = Path.Combine(directory, "Coding", "approved-step-packet.json");
     var packetExistsAfterApproval = File.Exists(packetPath);
+    var packetJson = packetExistsAfterApproval ? await File.ReadAllTextAsync(packetPath) : string.Empty;
     var validation = await service.TryHandleAsync($"confirm dotnet build \"{solutionPath}\"", CancellationToken.None);
 
     var recoveredService = new LocalCodingToolService(
@@ -1956,7 +1959,10 @@ static async Task TestLocalCodingToolManagesApprovedExecutionPacket()
     Equal(true, show.Succeeded);
     Contains("Approved execution packet", show.Message);
     Contains("Execution candidates", show.Message);
+    Contains("Packet self-score", show.Message);
+    Contains("Self-score:", show.Message);
     Contains("show packet progress", show.Message);
+    Contains("selfScore", packetJson);
     Equal(true, progress.Succeeded);
     Contains("Execution packet progress", progress.Message);
     Contains("Packet status: active", progress.Message);
@@ -2624,6 +2630,8 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Generated/designer guardrails:", result.Message);
     Contains("Public API surface:", result.Message);
     Contains("Runtime route map:", result.Message);
+    Contains("Ownership map:", result.Message);
+    Contains("Cross-language routes:", result.Message);
     Contains("Risk model v2:", result.Message);
     Contains("Latest workspace write:", result.Message);
     Contains("Build commands:", result.Message);
@@ -2652,6 +2660,8 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("publicApiSurface", json);
     Contains("architectureSummary", json);
     Contains("runtimeRoutes", json);
+    Contains("ownershipMap", json);
+    Contains("crossLanguageRoutes", json);
     Contains("riskModel", json);
     Contains("Generated/designer files", json);
     Contains("class WidgetService", json);
@@ -3276,7 +3286,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 80%", miniCodex.Message);
+    Contains("Overall score: 83%", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
 }
