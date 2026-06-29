@@ -34,6 +34,7 @@ public static class CodingAbilityCatalog
         "draft implementation roadmap <goal>",
         "approve last roadmap",
         "start approved roadmap",
+        "coding context packet",
         "show next coding action",
         "show execution packet",
         "validation plan"
@@ -48,6 +49,7 @@ public static class CodingAbilityCatalog
                 new("Interpret goal", "interpret build goal <goal>"),
                 new("Project intelligence", "show project intelligence"),
                 new("Understand repo", "understand repo"),
+                new("Context packet", "coding context packet <goal>"),
                 new("Health score", "workspace health score"),
                 new("Full readiness", "full coding readiness"),
                 new("C# symbol index", "show csharp symbol index"),

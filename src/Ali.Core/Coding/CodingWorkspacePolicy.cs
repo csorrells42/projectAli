@@ -110,6 +110,7 @@ public sealed class CodingWorkspacePolicy
         }
 
         if (request.Action is CodingToolAction.ShowRepoUnderstanding
+            or CodingToolAction.ShowCodingContextPacket
             or CodingToolAction.ShowSafeCommitCheck
             or CodingToolAction.ShowWorkspaceHealthScore
             or CodingToolAction.DraftCommitMessage

@@ -237,6 +237,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.ShowProjectIntelligence => ShowProjectIntelligence(),
             CodingToolAction.ShowRepoUnderstanding => await ShowRepoUnderstandingAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowCodingContextPacket => await ShowCodingContextPacketAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowSafeCommitCheck => await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowWorkspaceHealthScore => await ShowWorkspaceHealthScoreAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DraftCommitMessage => await DraftCommitMessageAsync(cancellationToken).ConfigureAwait(false),
@@ -5403,6 +5404,48 @@ public sealed class LocalCodingToolService(
         lines.Add("Next - Pick Plan, Build, Tests, Review, or Safe Commit from the Programming dashboard.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Repo understanding", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowCodingContextPacketAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var goal = CleanGoal(request.Query, "general coding work");
+        var intelligence = ShowProjectIntelligence();
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
+        var contextPack = await BuildContextPackAsync(goal, force: true, cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+
+        var lines = new List<string>
+        {
+            "Coding context packet:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Workspace:"
+        };
+        AddSelectedLines(lines, intelligence.Message, 8,
+            "Shape:",
+            "Detected stacks:",
+            "Style signals:",
+            "Project roles:",
+            "Primary target:",
+            "Likely app",
+            "Likely test");
+        lines.Add("Current state:");
+        lines.Add($"- Git: {gitStatus.Summary}");
+        lines.Add(latestValidation is null ? "- Latest validation: none" : $"- {FormatReceiptSummary("Latest validation", latestValidation)}");
+        lines.Add("Smallest practical test target:");
+        lines.Add(string.IsNullOrWhiteSpace(testTarget.Command) ? "- none detected" : $"- {testTarget.Command}");
+        lines.Add("Coding guardrails:");
+        lines.Add("- Preview patches before applying them.");
+        lines.Add("- Claim edits, tests, installs, searches, and receipts only after tool output proves them.");
+        lines.Add("- Prefer the smallest targeted test first, then build/full tests when risk is higher.");
+        lines.Add("Context available to model:");
+        lines.Add(contextPack.HasContext ? "- Good - workspace map, packages, relevant files, and matches are available." : "- Bad - no coding context was built.");
+        lines.Add("Next - use safe edit workflow <goal>, resolve test target <goal>, or review current changes.");
+
+        return new CodingToolResult(true, contextPack.HasContext, string.Join(Environment.NewLine, lines), "Coding context packet", Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> ShowSafeCommitCheckAsync(CancellationToken cancellationToken)

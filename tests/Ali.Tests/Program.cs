@@ -119,6 +119,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool shows project intelligence", TestLocalCodingToolShowsProjectIntelligence),
     ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
+    ("local coding tool shows coding context packet", TestLocalCodingToolShowsCodingContextPacket),
     ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
     ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
     ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
@@ -575,6 +576,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
 
     Contains("Ali coding skill command index", builderIndex);
     Contains("show visual studio integration", builderIndex);
+    Contains("coding context packet", builderIndex);
     Contains("confirm run packet item N", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
@@ -659,6 +661,10 @@ static Task TestCodingParserRoutesRepoUnderstandingAndSafeCommit()
 {
     Equal(true, CodingToolRequestParser.TryParse("understand repo", out var understandRequest));
     Equal(CodingToolAction.ShowRepoUnderstanding, understandRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("coding context packet Save button", out var contextRequest));
+    Equal(CodingToolAction.ShowCodingContextPacket, contextRequest.Action);
+    Equal("Save button", contextRequest.Query);
 
     Equal(true, CodingToolRequestParser.TryParse("can i safely commit", out var commitRequest));
     Equal(CodingToolAction.ShowSafeCommitCheck, commitRequest.Action);
@@ -2565,6 +2571,82 @@ static async Task TestLocalCodingToolShowsRepoUnderstanding()
     Contains("Detected stacks:", result.Message);
     Contains("Build commands:", result.Message);
     Contains("Safe to commit:", result.Message);
+}
+
+static async Task TestLocalCodingToolShowsCodingContextPacket()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "WidgetService.cs"),
+        """
+        namespace Demo.App;
+        public sealed class WidgetService
+        {
+            public string Save() => "saved";
+        }
+        """);
+
+    var testsDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testsDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+          </ItemGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "WidgetServiceTests.cs"),
+        """
+        namespace Demo.Tests;
+        public sealed class WidgetServiceTests
+        {
+            public void Save_returns_saved() { }
+        }
+        """);
+
+    var changedFiles = $"Demo.App/WidgetService.cs{Environment.NewLine}";
+    var runner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(0, $"## main{Environment.NewLine} M Demo.App/WidgetService.cs", string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var result = await service.TryHandleAsync("coding context packet WidgetService", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Coding context packet", result.Message);
+    Contains("Goal: WidgetService", result.Message);
+    Contains("Shape: 1 solution(s), 2 .NET project(s)", result.Message);
+    Contains("Git: 1 uncommitted change(s) detected", result.Message);
+    Contains("Smallest practical test target", result.Message);
+    Contains($"confirm dotnet test \"{Path.Combine(testsDirectory, "Demo.Tests.csproj")}\"", result.Message);
+    Contains("Preview patches before applying them", result.Message);
+    Contains("Claim edits, tests, installs, searches, and receipts only after tool output proves them", result.Message);
 }
 
 static async Task TestLocalCodingToolShowsSafeCommitCheck()

@@ -1031,6 +1031,17 @@ public static class CodingToolRequestParser
         "scan this repo"
     ];
 
+    private static readonly string[] CodingContextPacketPrefixes =
+    [
+        "coding context packet",
+        "show coding context packet",
+        "build coding context packet",
+        "prepare coding context",
+        "prepare coding context packet",
+        "mini codex context",
+        "mini-codex context"
+    ];
+
     private static readonly string[] SafeCommitRequests =
     [
         "can i safely commit",
@@ -1529,6 +1540,11 @@ public static class CodingToolRequestParser
         if (IsRepoUnderstandingRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowRepoUnderstanding, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePrefixedQuery(trimmed, CodingContextPacketPrefixes, CodingToolAction.ShowCodingContextPacket, userConfirmed, out request))
+        {
             return true;
         }
 
