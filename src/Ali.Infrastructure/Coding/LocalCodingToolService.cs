@@ -7270,10 +7270,51 @@ public sealed class LocalCodingToolService(
             lines.Add("Gap: no obvious source/test mismatch detected.");
         }
 
+        var allTestFiles = GetCSharpFiles().Where(IsTestFile).ToList();
+        var testProjectFallback = GetWorkspaceProjectSummaries()
+            .FirstOrDefault(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase));
+        lines.Add("Source-to-test map:");
         foreach (var file in sourceFiles.Take(12))
         {
+            var absolutePath = ToAbsoluteWorkspacePath(file) ?? file;
+            var sourceToken = Path.GetFileNameWithoutExtension(file);
+            var likelyTests = allTestFiles
+                .Where(testFile => !string.IsNullOrWhiteSpace(sourceToken)
+                    && (Path.GetFileName(testFile).Contains(sourceToken, StringComparison.OrdinalIgnoreCase)
+                        || SafeReadText(testFile).Contains(sourceToken, StringComparison.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .ToList();
+            string? testProject = null;
+            foreach (var likelyTest in likelyTests)
+            {
+                if (TryFindNearestProjectForFile(likelyTest, out var project))
+                {
+                    testProject = project;
+                    break;
+                }
+            }
+
+            if (testProject is null && testProjectFallback is not null)
+            {
+                testProject = Path.Combine(Policy.WorkspaceRoot, testProjectFallback.RelativePath);
+            }
+
             lines.Add($"- Source: {file}");
             lines.Add($"  Suggested test area: {SuggestTestArea(file)}");
+            lines.Add(likelyTests.Count == 0
+                ? "  Likely tests: none found"
+                : $"  Likely tests: {string.Join(", ", likelyTests.Select(RelativeToWorkspace))}");
+            lines.Add(testProject is null
+                ? "  Test project: none resolved"
+                : $"  Test project: {RelativeToWorkspace(testProject)}");
+            lines.Add(testProject is null
+                ? "  Validation command: none resolved"
+                : $"  Validation command: confirm dotnet test \"{testProject}\"");
+            if (File.Exists(absolutePath))
+            {
+                lines.Add($"  Risk: {ClassifyFileRisk(RelativeToWorkspace(absolutePath))}");
+            }
         }
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Test gap report", Policy.WorkspaceRoot);

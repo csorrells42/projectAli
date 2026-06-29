@@ -2872,6 +2872,10 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("Declarations:", references.Message);
     Contains("Test gap report", gaps.Message);
     Contains("Gap: source files changed without obvious test file changes.", gaps.Message);
+    Contains("Source-to-test map:", gaps.Message);
+    Contains("Likely tests: none found", gaps.Message);
+    Contains("Validation command: none resolved", gaps.Message);
+    Contains("Risk: Medium - application code", gaps.Message);
     Contains("Known error guidance", known.Message);
     Contains("name does not exist", known.Message);
     Contains("Rollback patch preview", rollback.Message);
