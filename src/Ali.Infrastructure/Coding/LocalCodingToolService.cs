@@ -6090,16 +6090,19 @@ public sealed class LocalCodingToolService(
             candidateFiles = SuggestLikelyFilesForGoal(goal).Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).Take(8).ToList();
         }
 
+        var rankedTargets = RankEditTargetCandidates(goalTerms, hits, candidateFiles, changedFiles);
         var lines = new List<string>
         {
             "Semantic edit plan:",
             "No files were changed.",
-            "Engine: Roslyn semantic model + existing risk labels",
+            "Engine: Roslyn semantic model + ranked edit targets",
             $"Goal: {goal}",
             $"Candidate files: {candidateFiles.Count}",
             $"Candidate symbols: {hits.Count}",
-            "Symbols to inspect:"
+            "Ranked edit targets:"
         };
+        lines.AddRange(rankedTargets.Count == 0 ? ["- none found"] : rankedTargets.Take(8).Select(FormatEditTargetCandidate));
+        lines.Add("Symbols to inspect:");
         lines.AddRange(hits.Count == 0 ? ["- none found from goal terms"] : hits.Take(10).Select(FormatSemanticHit));
         lines.Add("Files to inspect first:");
         lines.AddRange(candidateFiles.Count == 0 ? ["- none found"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
@@ -6110,6 +6113,83 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Semantic edit plan", Policy.WorkspaceRoot);
     }
 
+    private List<EditTargetCandidate> RankEditTargetCandidates(
+        IReadOnlyList<string> goalTerms,
+        IReadOnlyList<SemanticSymbolHit> hits,
+        IReadOnlyList<string> candidateFiles,
+        IReadOnlyList<string> changedFiles)
+    {
+        var changedPaths = changedFiles
+            .Select(ToAbsoluteWorkspacePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ranked = new List<EditTargetCandidate>();
+        foreach (var file in candidateFiles.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var reasons = new List<string>();
+            var score = 0;
+            var relativePath = RelativeToWorkspace(file);
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            var fileHits = hits
+                .Where(hit => hit.Path.Equals(file, StringComparison.OrdinalIgnoreCase))
+                .Select(hit => hit.Display)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+
+            if (fileHits.Count > 0)
+            {
+                score += 4 + fileHits.Count;
+                reasons.Add("symbol hit " + string.Join(", ", fileHits));
+            }
+
+            if (changedPaths.Contains(file))
+            {
+                score += 5;
+                reasons.Add("already changed");
+            }
+
+            var matchingTerms = goalTerms
+                .Where(term => fileName.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+            if (matchingTerms.Count > 0)
+            {
+                score += 3;
+                reasons.Add("file name matches " + string.Join(", ", matchingTerms));
+            }
+
+            var text = SafeReadText(file);
+            var contentTerms = goalTerms
+                .Where(term => text.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToList();
+            if (contentTerms.Count > 0)
+            {
+                score += 2;
+                reasons.Add("content matches " + string.Join(", ", contentTerms));
+            }
+
+            if (reasons.Count == 0)
+            {
+                reasons.Add("workspace heuristic");
+            }
+
+            var confidence = score >= 8 ? "High" : score >= 4 ? "Medium" : "Low";
+            ranked.Add(new EditTargetCandidate(relativePath, confidence, score, ClassifyFileRisk(relativePath), reasons));
+        }
+
+        return ranked
+            .OrderByDescending(target => target.Score)
+            .ThenBy(target => target.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string FormatEditTargetCandidate(EditTargetCandidate target) =>
+        $"- {target.Confidence} {target.Score} - {target.RelativePath}: {target.Risk}; {string.Join("; ", target.Reasons.Take(3))}";
     private async Task<CodingToolResult> PlanSafeEditWorkflowAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query, "current change");
@@ -10985,6 +11065,12 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<PreparedPatchEdit> Edits,
         CodingToolResult? Error);
 
+    private sealed record EditTargetCandidate(
+        string RelativePath,
+        string Confidence,
+        int Score,
+        string Risk,
+        IReadOnlyList<string> Reasons);
     private sealed record TestTargetRecommendation(
         string Query,
         IReadOnlyList<string> SourceFiles,

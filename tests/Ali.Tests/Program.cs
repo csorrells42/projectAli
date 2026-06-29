@@ -2964,6 +2964,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Demo.Tests.csproj", testTarget.Message);
     Contains("confirm dotnet test", testTarget.Message);
     Contains("Semantic edit plan", editPlan.Message);
+    Contains("Ranked edit targets", editPlan.Message);
+    Contains("symbol hit", editPlan.Message);
     Contains("MainWindowViewModel.cs", editPlan.Message);
     Contains("Safe edit workflow", safeEdit.Message);
     Contains("Patch gate:", safeEdit.Message);
