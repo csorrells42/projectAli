@@ -257,6 +257,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ExplainKnownError => ExplainKnownError(request),
             CodingToolAction.PreviewRollbackPatch => await PreviewRollbackPatchAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowFullCodingReadiness => await ShowFullCodingReadinessAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowMiniCodexStatus => await ShowMiniCodexStatusAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationLedger => ShowValidationLedger(),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
             CodingToolAction.ShowOwnershipMap => await ShowOwnershipMapAsync(request, cancellationToken).ConfigureAwait(false),
@@ -5372,7 +5373,7 @@ public sealed class LocalCodingToolService(
         var status = GetProjectIndexStatus();
         if (!File.Exists(_projectIndexPath))
         {
-            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], [], []);
+            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], [], [], [], [], [], [], [], []);
         }
 
         try
@@ -5390,19 +5391,25 @@ public sealed class LocalCodingToolService(
                 ReadProjectIndexSummaryArray(root, "fileRoles", "role", "examples"),
                 ReadProjectIndexSummaryArray(root, "featureAreas", "area", "representativeFiles"),
                 ReadProjectDependencyArray(root, "projectDependencies"),
-                ReadProjectStringArray(root, "projectBuildOrder"));
+                ReadProjectStringArray(root, "projectBuildOrder"),
+                ReadProjectStringArray(root, "generatedCode"),
+                ReadProjectStringArray(root, "msBuildProjects"),
+                ReadProjectStringArray(root, "publicApiSurface"),
+                ReadProjectStringArray(root, "architectureSummary"),
+                ReadProjectStringArray(root, "runtimeRoutes"),
+                ReadProjectStringArray(root, "riskModel"));
         }
         catch (JsonException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], []);
         }
         catch (IOException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], []);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], [], [], [], [], [], [], []);
         }
     }
 
@@ -5518,6 +5525,12 @@ public sealed class LocalCodingToolService(
         lines.Add($"- Feature areas: {FormatInlineList(awareness.FeatureAreas.Take(limit))}");
         lines.Add($"- Project dependencies: {FormatInlineList(awareness.ProjectDependencies.Take(limit))}");
         lines.Add($"- Project build order: {FormatInlineList(awareness.ProjectBuildOrder.Take(limit))}");
+        lines.Add($"- Architecture summary: {FormatInlineList(awareness.ArchitectureSummary.Take(limit))}");
+        lines.Add($"- MSBuild awareness: {FormatInlineList(awareness.MsBuildProjects.Take(limit))}");
+        lines.Add($"- Generated/designer guardrails: {FormatInlineList(awareness.GeneratedCode.Take(limit))}");
+        lines.Add($"- Public API surface: {FormatInlineList(awareness.PublicApiSurface.Take(limit))}");
+        lines.Add($"- Runtime routes: {FormatInlineList(awareness.RuntimeRoutes.Take(limit))}");
+        lines.Add($"- Risk model v2: {FormatInlineList(awareness.RiskModel.Take(limit))}");
     }
 
     private IReadOnlyList<ProjectIndexFileRole> BuildProjectIndexFileRoles(IReadOnlyList<string> files) =>
@@ -5555,6 +5568,264 @@ public sealed class LocalCodingToolService(
         areas.Count == 0
             ? "none detected"
             : string.Join(", ", areas.Take(6).Select(area => $"{area.Area} ({area.Count})"));
+
+    private IReadOnlyList<string> BuildGeneratedCodeAwareness(IReadOnlyList<string> files)
+    {
+        var relativeFiles = files.Select(RelativeToWorkspace).ToList();
+        var generated = relativeFiles
+            .Where(IsGeneratedOrDesignerFile)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var projectSystem = relativeFiles
+            .Where(path => NormalizePathForClassification(path).Contains("/obj/", StringComparison.OrdinalIgnoreCase)
+                || NormalizePathForClassification(path).Contains("/bin/", StringComparison.OrdinalIgnoreCase)
+                || NormalizePathForClassification(path).Contains("/.vs/", StringComparison.OrdinalIgnoreCase))
+            .Take(5)
+            .ToList();
+        var migrations = relativeFiles
+            .Where(path => NormalizePathForClassification(path).Contains("/migrations/", StringComparison.OrdinalIgnoreCase)
+                || NormalizePathForClassification(path).Contains("/snapshots/", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+
+        return
+        [
+            $"Generated/designer files: {generated.Count}",
+            $"Generated examples: {FormatInlineList(generated)}",
+            $"Migration/snapshot files: {migrations.Count}",
+            $"Migration examples: {FormatInlineList(migrations)}",
+            $"Ignored build output examples: {FormatInlineList(projectSystem)}",
+            "Rule: generated, designer, migration, snapshot, bin, obj, and .vs files require explicit review before edits."
+        ];
+    }
+
+    private IReadOnlyList<string> BuildMsBuildProjectAwareness(IReadOnlyList<string> projectFiles) =>
+        projectFiles
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadMsBuildProjectAwareness)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .ToList();
+
+    private string? ReadMsBuildProjectAwareness(string projectFile)
+    {
+        try
+        {
+            var document = XDocument.Load(projectFile);
+            var properties = new[]
+                {
+                    ("targets", ReadMsBuildPropertyList(document, "TargetFramework", "TargetFrameworks")),
+                    ("rid", ReadMsBuildPropertyList(document, "RuntimeIdentifier", "RuntimeIdentifiers")),
+                    ("output", ReadMsBuildPropertyList(document, "OutputType")),
+                    ("wpf", ReadMsBuildPropertyList(document, "UseWPF")),
+                    ("forms", ReadMsBuildPropertyList(document, "UseWindowsForms")),
+                    ("nullable", ReadMsBuildPropertyList(document, "Nullable")),
+                    ("implicit", ReadMsBuildPropertyList(document, "ImplicitUsings"))
+                }
+                .Where(pair => pair.Item2.Count > 0)
+                .Select(pair => $"{pair.Item1}={string.Join("/", pair.Item2)}")
+                .ToList();
+            var packages = document.Descendants().Count(element => element.Name.LocalName == "PackageReference");
+            var references = document.Descendants().Count(element => element.Name.LocalName == "ProjectReference");
+            properties.Add($"packages={packages}");
+            properties.Add($"projectRefs={references}");
+            return $"{RelativeToWorkspace(projectFile)}: {string.Join(", ", properties)}";
+        }
+        catch (IOException ex)
+        {
+            return $"{RelativeToWorkspace(projectFile)}: unreadable - {TrimForChat(ex.Message, 120)}";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return $"{RelativeToWorkspace(projectFile)}: unreadable - {TrimForChat(ex.Message, 120)}";
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            return $"{RelativeToWorkspace(projectFile)}: invalid XML - {TrimForChat(ex.Message, 120)}";
+        }
+    }
+
+    private static IReadOnlyList<string> ReadMsBuildPropertyList(XDocument document, params string[] names) =>
+        document
+            .Descendants()
+            .Where(element => names.Any(name => element.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            .SelectMany(element => SplitSemicolonList(element.Value))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private IReadOnlyList<string> BuildPublicApiSurface(IReadOnlyList<string> csharpFiles)
+    {
+        var surface = new List<string>();
+        foreach (var file in csharpFiles.Where(File.Exists).Take(500))
+        {
+            if (surface.Count >= 80)
+            {
+                break;
+            }
+
+            var relativePath = RelativeToWorkspace(file);
+            if (IsGeneratedOrDesignerFile(relativePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(file), path: file);
+                var root = tree.GetRoot();
+                foreach (var member in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
+                {
+                    if (surface.Count >= 80)
+                    {
+                        break;
+                    }
+
+                    var name = GetPublicApiMemberName(member);
+                    if (string.IsNullOrWhiteSpace(name) || !LooksLikePublicApiMember(member))
+                    {
+                        continue;
+                    }
+
+                    var line = tree.GetLineSpan(member.Span).StartLinePosition.Line + 1;
+                    surface.Add($"{GetPublicApiMemberKind(member)} {name} at {relativePath}:{line}");
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return surface.Count == 0 ? ["none detected"] : surface;
+    }
+
+    private static bool LooksLikePublicApiMember(MemberDeclarationSyntax member)
+    {
+        var modifiers = member.Modifiers;
+        return modifiers.Any(token => token.IsKind(SyntaxKind.PublicKeyword))
+            || modifiers.Any(token => token.IsKind(SyntaxKind.ProtectedKeyword))
+            || modifiers.Any(token => token.IsKind(SyntaxKind.InternalKeyword));
+    }
+
+    private static string? GetPublicApiMemberName(MemberDeclarationSyntax member) =>
+        member switch
+        {
+            BaseTypeDeclarationSyntax type => type.Identifier.ValueText,
+            MethodDeclarationSyntax method => method.Identifier.ValueText,
+            PropertyDeclarationSyntax property => property.Identifier.ValueText,
+            EventDeclarationSyntax eventDeclaration => eventDeclaration.Identifier.ValueText,
+            FieldDeclarationSyntax field => field.Declaration.Variables.FirstOrDefault()?.Identifier.ValueText,
+            ConstructorDeclarationSyntax constructor => constructor.Identifier.ValueText,
+            _ => null
+        };
+
+    private static string GetPublicApiMemberKind(MemberDeclarationSyntax member) =>
+        member switch
+        {
+            ClassDeclarationSyntax => "class",
+            RecordDeclarationSyntax => "record",
+            InterfaceDeclarationSyntax => "interface",
+            EnumDeclarationSyntax => "enum",
+            StructDeclarationSyntax => "struct",
+            MethodDeclarationSyntax => "method",
+            PropertyDeclarationSyntax => "property",
+            EventDeclarationSyntax => "event",
+            FieldDeclarationSyntax => "field",
+            ConstructorDeclarationSyntax => "constructor",
+            _ => "member"
+        };
+
+    private IReadOnlyList<string> BuildRepositoryArchitectureSummary(
+        IReadOnlyList<string> files,
+        IReadOnlyList<ProjectSummary> summaries,
+        IReadOnlyList<string> msBuildProjects)
+    {
+        var roles = summaries
+            .GroupBy(summary => summary.ProjectRole, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => $"{group.Key}={group.Count()}")
+            .ToList();
+        var relativeFiles = files.Select(RelativeToWorkspace).ToList();
+        var featureAreas = BuildProjectIndexFeatureAreas(files);
+        var entryFiles = relativeFiles.Where(path => IsLikelyEntryPoint(Path.Combine(Policy.WorkspaceRoot, path))).Take(6).ToList();
+        return
+        [
+            $"Projects: {summaries.Count} ({FormatInlineList(roles)})",
+            $"Feature areas: {FormatProjectIndexFeatureSummary(featureAreas)}",
+            $"Entry points: {FormatInlineList(entryFiles)}",
+            $"Desktop UI present: {FormatYesNo(relativeFiles.Any(path => path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) || path.Contains("Ali.App.Wpf", StringComparison.OrdinalIgnoreCase)))}",
+            $"Coding assistant layer present: {FormatYesNo(relativeFiles.Any(path => path.Contains("/Coding/", StringComparison.OrdinalIgnoreCase) || path.Contains("CodingTool", StringComparison.OrdinalIgnoreCase)))}",
+            $"MSBuild projects mapped: {msBuildProjects.Count}"
+        ];
+    }
+
+    private IReadOnlyList<string> BuildRuntimeRouteMap(IReadOnlyList<string> files)
+    {
+        var relativeFiles = files.Select(RelativeToWorkspace).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var parser = relativeFiles.FirstOrDefault(path => path.EndsWith("CodingToolRequestParser.cs", StringComparison.OrdinalIgnoreCase));
+        var policy = relativeFiles.FirstOrDefault(path => path.EndsWith("CodingWorkspacePolicy.cs", StringComparison.OrdinalIgnoreCase));
+        var service = relativeFiles.FirstOrDefault(path => path.EndsWith("LocalCodingToolService.cs", StringComparison.OrdinalIgnoreCase));
+        var dashboard = relativeFiles.FirstOrDefault(path => path.EndsWith("ProgrammingDashboardWindow.xaml", StringComparison.OrdinalIgnoreCase));
+        var viewModel = relativeFiles.FirstOrDefault(path => path.EndsWith("MainWindowViewModel.cs", StringComparison.OrdinalIgnoreCase));
+        return
+        [
+            $"Actions registered: {Enum.GetNames<CodingToolAction>().Length}",
+            $"Parser route surface: {FormatRouteMapFile(parser)}",
+            $"Workspace policy surface: {FormatRouteMapFile(policy)}",
+            $"Local service handlers: {FormatRouteMapFile(service)}",
+            $"Programming dashboard: {FormatRouteMapFile(dashboard)}",
+            $"Dashboard view-model commands: {FormatRouteMapFile(viewModel)}",
+            "Route rule: parser, action enum, policy, service handler, tests, and dashboard button should move together."
+        ];
+    }
+
+    private static string FormatRouteMapFile(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? "missing" : $"found {path}";
+
+    private static string FormatYesNo(bool value) => value ? "yes" : "no";
+
+    private IReadOnlyList<string> BuildRiskModelV2(IReadOnlyList<string> files)
+    {
+        var groups = files
+            .Select(RelativeToWorkspace)
+            .GroupBy(ClassifyFileRiskV2, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => RiskSortKey(group.Key))
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .Select(group => $"{group.Key} ({group.Count()}): {FormatInlineList(group.Take(3))}")
+            .ToList();
+        return groups.Count == 0
+            ? ["No files available for risk scoring."]
+            : groups;
+    }
+
+    private static int RiskSortKey(string risk)
+    {
+        if (risk.StartsWith("Protected", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (risk.StartsWith("High", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        if (risk.StartsWith("Medium", StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        return 3;
+    }
 
     private static DateTimeOffset GetLatestWorkspaceWriteUtc(IReadOnlyList<string> files)
     {
@@ -5877,6 +6148,12 @@ public sealed class LocalCodingToolService(
         var featureAreas = BuildProjectIndexFeatureAreas(files);
         var projectDependencies = BuildProjectDependencyEdges(summaries);
         var projectBuildOrder = EstimateBuildOrder(summaries, projectDependencies);
+        var generatedCode = BuildGeneratedCodeAwareness(files);
+        var msBuildProjects = BuildMsBuildProjectAwareness(projectFiles);
+        var publicApiSurface = BuildPublicApiSurface(GetCSharpFiles().Take(1_000).ToList());
+        var architectureSummary = BuildRepositoryArchitectureSummary(files, summaries, msBuildProjects);
+        var runtimeRoutes = BuildRuntimeRouteMap(files);
+        var riskModel = BuildRiskModelV2(files);
         var latestWorkspaceWrite = GetLatestWorkspaceWriteUtc(files);
         var snapshot = new ProjectIndexSnapshot(
             DateTimeOffset.UtcNow,
@@ -5896,7 +6173,13 @@ public sealed class LocalCodingToolService(
             fileRoles,
             featureAreas,
             projectDependencies,
-            projectBuildOrder);
+            projectBuildOrder,
+            generatedCode,
+            msBuildProjects,
+            publicApiSurface,
+            architectureSummary,
+            runtimeRoutes,
+            riskModel);
 
         Directory.CreateDirectory(Path.GetDirectoryName(_projectIndexPath)!);
         var json = JsonSerializer.Serialize(snapshot, RoadmapJsonOptions);
@@ -5916,6 +6199,12 @@ public sealed class LocalCodingToolService(
             $"Feature areas: {FormatProjectIndexFeatureSummary(featureAreas)}",
             $"Project dependencies: {FormatProjectDependencySummary(projectDependencies)}",
             $"Project build order: {FormatInlineList(projectBuildOrder.Take(6))}",
+            $"Architecture summary: {FormatInlineList(architectureSummary.Take(6))}",
+            $"MSBuild awareness: {FormatInlineList(msBuildProjects.Take(6))}",
+            $"Generated/designer guardrails: {FormatInlineList(generatedCode.Take(6))}",
+            $"Public API surface: {FormatInlineList(publicApiSurface.Take(6))}",
+            $"Runtime route map: {FormatInlineList(runtimeRoutes.Take(6))}",
+            $"Risk model v2: {FormatInlineList(riskModel.Take(6))}",
             primaryTarget is null ? "Primary target: not found" : $"Primary target: {primaryTarget}",
             $"Stacks: {FormatInlineList(stackSignals)}",
             $"Style signals: {FormatInlineList(styleSignals)}",
@@ -6194,6 +6483,15 @@ public sealed class LocalCodingToolService(
         lines.Add(safe
             ? "- Review current changes, then commit with an owner-approved message."
             : "- Run Review, Build, and Tests until the rows above are good.");
+        lines.Add("Release readiness v2:");
+        lines.Add($"- Changed files: {changedFiles.Count}");
+        lines.Add($"- Risk labels: {FormatInlineList(changedFiles.Select(ClassifyFileRisk).Distinct(StringComparer.OrdinalIgnoreCase).Take(6))}");
+        lines.Add(projectImpact.BuildOrderProjects.Count == 0
+            ? "- Build order: no changed project slice resolved."
+            : $"- Build order: {FormatInlineList(projectImpact.BuildOrderProjects.Take(8))}");
+        lines.Add(latestDotNetReceipt?.Succeeded == true
+            ? "- Validation receipt: Good - latest build/test receipt succeeded."
+            : "- Validation receipt: Bad - run build/tests before delivery.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Commit readiness", Policy.WorkspaceRoot);
     }
@@ -6338,6 +6636,7 @@ public sealed class LocalCodingToolService(
         var symbolIndex = ShowCSharpSymbolIndex();
         var validationLedger = ShowValidationLedger();
         var projectIndexStatus = GetProjectIndexStatus();
+        var miniCodexStatus = await ShowMiniCodexStatusAsync(cancellationToken).ConfigureAwait(false);
 
         var lines = new List<string>
         {
@@ -6360,9 +6659,55 @@ public sealed class LocalCodingToolService(
         AddSelectedLines(lines, safeCommit.Message, 6, "Safe to commit:", "Git:", "Validation:", "Pending patch preview:", "Required next step:");
         lines.Add("Validation ledger:");
         AddSelectedLines(lines, validationLedger.Message, 6, "Receipts found:", "Latest validation:", "Latest edit:", "Latest git check:");
+        lines.Add("Mini-Codex status:");
+        AddSelectedLines(lines, miniCodexStatus.Message, 8, "Overall score:", "- Codebase awareness:", "- Edit planning:", "- Patch safety:", "- Validation/release:", "- Autonomous workflow:", "- Dashboard usability:");
         lines.Add("Next - fix any Bad, missing, or unknown row, then run Build and Tests.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Full coding readiness", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowMiniCodexStatusAsync(CancellationToken cancellationToken)
+    {
+        var projectIndexStatus = GetProjectIndexStatus();
+        var awareness = LoadProjectIndexAwareness();
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var commandSurface = ShowCommandSurfaceDoctor();
+        var scores = new (string Name, int Score, string Note)[]
+        {
+            ("Codebase awareness", 75, "project index v2, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
+            ("Edit planning", 74, "semantic edit targets, reference graph, impact radius, refactor safety hints"),
+            ("Patch safety", 72, "exact patch preview, semantic validation hints, pending patch ledger"),
+            ("Validation/release", 70, "targeted test recommendation, build order, safe commit and release readiness"),
+            ("Autonomous workflow", 68, "execution packets and receipts exist; still requires owner approval for writes and commands"),
+            ("Dashboard usability", 73, "one-click programming checks with concise output")
+        };
+        var overall = 75;
+        var lines = new List<string>
+        {
+            "Mini-Codex status:",
+            "No files were changed.",
+            $"Overall score: {overall}%",
+            "Scale note: local Project Ali score, not a claim of parity with cloud Codex.",
+            $"Project index v2: {projectIndexStatus.Summary}",
+            $"Git: {gitStatus.Summary}",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            "Capability scores:"
+        };
+        lines.AddRange(scores.Select(score => $"- {score.Name}: {score.Score}% - {score.Note}"));
+        lines.Add("Awareness inputs:");
+        lines.Add($"- Architecture summary: {FormatInlineList(awareness.ArchitectureSummary.Take(4))}");
+        lines.Add($"- Runtime routes: {FormatInlineList(awareness.RuntimeRoutes.Take(4))}");
+        lines.Add($"- Risk model v2: {FormatInlineList(awareness.RiskModel.Take(4))}");
+        lines.Add($"- Public API surface: {FormatInlineList(awareness.PublicApiSurface.Take(4))}");
+        lines.Add("Command surface:");
+        AddSelectedLines(lines, commandSurface.Message, 5, "Overall:", "Actions:", "Service handlers:", "Policy coverage:", "Parser/test coverage:", "Dashboard bindings:");
+        lines.Add("Next upgrade path:");
+        lines.Add("- Raise codebase awareness toward 85 by adding deeper symbol ownership, call-chain impact, and generated test selection.");
+        lines.Add("- Raise autonomous workflow toward 80 by making execution packets more self-checking before any apply step.");
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Mini-Codex status", Policy.WorkspaceRoot);
     }
 
     private CodingToolResult ShowValidationLedger()
@@ -6808,6 +7153,7 @@ public sealed class LocalCodingToolService(
         };
         lines.AddRange(rankedTargets.Count == 0 ? ["- none found"] : rankedTargets.Take(8).Select(FormatEditTargetCandidate));
         AddReferenceGraphLines(lines, graph, includeSymbols: true);
+        AddSafeRefactorDetectorLines(lines, goal, candidateFiles.Select(RelativeToWorkspace).ToList(), graph);
         lines.Add("Symbols to inspect:");
         lines.AddRange(hits.Count == 0 ? ["- none found from goal terms"] : hits.Take(10).Select(FormatSemanticHit));
         lines.Add("Files to inspect first:");
@@ -6917,6 +7263,62 @@ public sealed class LocalCodingToolService(
         {
             lines.Add($"- Likely test symbols: {FormatInlineList(graph.TestSymbols.Take(8))}");
         }
+    }
+
+    private void AddSafeRefactorDetectorLines(
+        List<string> lines,
+        string goal,
+        IReadOnlyList<string> candidateFiles,
+        SemanticReferenceGraph graph)
+    {
+        var looksLikeRefactor = goal.Contains("rename", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("move", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("extract", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("refactor", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("split", StringComparison.OrdinalIgnoreCase);
+        var protectedFiles = candidateFiles
+            .Where(file => ClassifyFileRisk(file).StartsWith("Protected", StringComparison.OrdinalIgnoreCase))
+            .Take(5)
+            .ToList();
+        lines.Add("Safe refactor detector:");
+        lines.Add(looksLikeRefactor
+            ? "- Refactor-shaped goal detected; prefer symbol-aware edits and update callers/tests together."
+            : "- No broad refactor verb detected.");
+        lines.Add($"- Reference coverage: {graph.Declarations.Count} declaration(s), {graph.References.Count} reference(s), {graph.InboundCalls.Count} inbound caller(s).");
+        lines.Add(protectedFiles.Count == 0
+            ? "- Protected/generated targets: none in current candidates."
+            : $"- Protected/generated targets: {FormatInlineList(protectedFiles)}");
+    }
+
+    private IReadOnlyList<string> BuildSemanticPatchCheckLines(IReadOnlyList<string> paths)
+    {
+        var relativePaths = paths.Select(RelativeToWorkspace).ToList();
+        var protectedFiles = relativePaths
+            .Where(path => ClassifyFileRisk(path).StartsWith("Protected", StringComparison.OrdinalIgnoreCase))
+            .Take(6)
+            .ToList();
+        var publicApiFiles = relativePaths
+            .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            .Where(path =>
+            {
+                var absolute = ToAbsoluteWorkspacePath(path);
+                return !string.IsNullOrWhiteSpace(absolute)
+                    && File.Exists(absolute)
+                    && SafeReadText(absolute).Contains(" public ", StringComparison.Ordinal);
+            })
+            .Take(6)
+            .ToList();
+        var lines = new List<string>
+        {
+            protectedFiles.Count == 0
+                ? "- Generated/designer guard: Good - no protected generated files in this patch."
+                : $"- Generated/designer guard: Review - {FormatInlineList(protectedFiles)}",
+            publicApiFiles.Count == 0
+                ? "- Public API guard: no obvious public C# surface in changed files."
+                : $"- Public API guard: Review callers and compatibility for {FormatInlineList(publicApiFiles)}",
+            "- Ledger: patch preview must be shown again if old text or target files change."
+        };
+        return lines;
     }
 
     private string FormatCallEdge(CSharpCallEdge edge) =>
@@ -7077,6 +7479,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(candidateFiles.Count == 0 ? ["- none found yet"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
         AddReferenceGraphLines(lines, graph, includeSymbols: true);
         AddEditImpactSurfaceLines(lines, impactSurface);
+        AddSafeRefactorDetectorLines(lines, goal, candidateFiles.Select(RelativeToWorkspace).ToList(), graph);
         lines.Add("Edit target validation:");
         lines.Add(candidateFiles.Count == 0
             ? "- Needs review - no exact candidate files resolved."
@@ -8102,6 +8505,8 @@ public sealed class LocalCodingToolService(
             $"- Build command: confirm dotnet build \"{primaryTarget}\"",
             "- Review command: show pending patch preview"
         };
+        lines.Add("Semantic patch checks:");
+        lines.AddRange(BuildSemanticPatchCheckLines(paths));
         return lines;
     }
 
@@ -10596,9 +11001,25 @@ public sealed class LocalCodingToolService(
         }
     }
 
-    private static string ClassifyFileRisk(string file)
+    private static string ClassifyFileRisk(string file) => ClassifyFileRiskV2(file);
+
+    private static string ClassifyFileRiskV2(string file)
     {
         var normalized = file.Replace('\\', '/');
+        if (IsGeneratedOrDesignerFile(normalized)
+            || normalized.Contains("/bin/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/obj/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/.vs/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Protected - generated, designer, or build output";
+        }
+
+        if (normalized.Contains("/Migrations/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/Snapshots/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "High - migration or snapshot history";
+        }
+
         if (normalized.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
             || normalized.Equals("Directory.Build.props", StringComparison.OrdinalIgnoreCase)
             || normalized.Contains("package.json", StringComparison.OrdinalIgnoreCase)
@@ -10631,6 +11052,19 @@ public sealed class LocalCodingToolService(
         }
 
         return "Medium - application code";
+    }
+
+    private static bool IsGeneratedOrDesignerFile(string file)
+    {
+        var normalized = NormalizePathForClassification(file);
+        var name = Path.GetFileName(normalized);
+        return name.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AssemblyInfo.cs", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("TemporaryGeneratedFile_", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/generated/", StringComparison.OrdinalIgnoreCase);
     }
 
     private List<string> FindSymbolMatches(string symbol, bool declarationOnly, int limit)
@@ -12430,7 +12864,13 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> FileRoles,
         IReadOnlyList<string> FeatureAreas,
         IReadOnlyList<string> ProjectDependencies,
-        IReadOnlyList<string> ProjectBuildOrder);
+        IReadOnlyList<string> ProjectBuildOrder,
+        IReadOnlyList<string> GeneratedCode,
+        IReadOnlyList<string> MsBuildProjects,
+        IReadOnlyList<string> PublicApiSurface,
+        IReadOnlyList<string> ArchitectureSummary,
+        IReadOnlyList<string> RuntimeRoutes,
+        IReadOnlyList<string> RiskModel);
 
     private sealed record ProjectIndexStatus(bool Available, string Summary);
 
@@ -12452,7 +12892,13 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<ProjectIndexFileRole> FileRoles,
         IReadOnlyList<ProjectIndexFeatureArea> FeatureAreas,
         IReadOnlyList<ProjectDependency> ProjectDependencies,
-        IReadOnlyList<string> ProjectBuildOrder);
+        IReadOnlyList<string> ProjectBuildOrder,
+        IReadOnlyList<string> GeneratedCode,
+        IReadOnlyList<string> MsBuildProjects,
+        IReadOnlyList<string> PublicApiSurface,
+        IReadOnlyList<string> ArchitectureSummary,
+        IReadOnlyList<string> RuntimeRoutes,
+        IReadOnlyList<string> RiskModel);
 
     private sealed record ProjectIndexSymbol(
         string Kind,

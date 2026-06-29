@@ -128,6 +128,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ExplainKnownError
             or CodingToolAction.PreviewRollbackPatch
             or CodingToolAction.ShowFullCodingReadiness
+            or CodingToolAction.ShowMiniCodexStatus
             or CodingToolAction.ShowValidationLedger
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowOwnershipMap

@@ -89,6 +89,8 @@
                                         Command="{Binding RunCodingFullReadinessCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Mini-Codex"
+                                        Command="{Binding RunCodingMiniCodexStatusCommand}" />
                                 <Button Content="Health"
                                         Command="{Binding RunCodingHealthScoreCommand}" />
                                 <Button Content="Git"

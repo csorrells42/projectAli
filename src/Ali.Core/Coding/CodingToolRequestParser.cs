@@ -1099,6 +1099,22 @@ public static class CodingToolRequestParser
         "mini-codex readiness"
     ];
 
+    private static readonly string[] MiniCodexStatusRequests =
+    [
+        "mini codex status",
+        "mini-codex status",
+        "show mini codex status",
+        "show mini-codex status",
+        "mini codex score",
+        "mini-codex score",
+        "show mini codex score",
+        "show mini-codex score",
+        "how close are we to codex",
+        "how close are we to mini codex",
+        "coding ability score",
+        "programming ability score"
+    ];
+
     private static readonly string[] ValidationLedgerRequests =
     [
         "show validation ledger",
@@ -1607,6 +1623,12 @@ public static class CodingToolRequestParser
         if (IsFullCodingReadinessRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFullCodingReadiness, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsMiniCodexStatusRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowMiniCodexStatus, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -2122,6 +2144,9 @@ public static class CodingToolRequestParser
 
     private static bool IsFullCodingReadinessRequest(string text) =>
         FullCodingReadinessRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsMiniCodexStatusRequest(string text) =>
+        MiniCodexStatusRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsValidationLedgerRequest(string text) =>
         ValidationLedgerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

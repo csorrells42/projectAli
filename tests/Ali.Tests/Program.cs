@@ -738,6 +738,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("full coding readiness", out var readinessRequest));
     Equal(CodingToolAction.ShowFullCodingReadiness, readinessRequest.Action);
 
+    Equal(true, CodingToolRequestParser.TryParse("mini codex status", out var miniCodexRequest));
+    Equal(CodingToolAction.ShowMiniCodexStatus, miniCodexRequest.Action);
+
     Equal(true, CodingToolRequestParser.TryParse("show validation ledger", out var ledgerRequest));
     Equal(CodingToolAction.ShowValidationLedger, ledgerRequest.Action);
 
@@ -2616,6 +2619,12 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Feature areas:", result.Message);
     Contains("Project dependencies:", result.Message);
     Contains("Project build order:", result.Message);
+    Contains("Architecture summary:", result.Message);
+    Contains("MSBuild awareness:", result.Message);
+    Contains("Generated/designer guardrails:", result.Message);
+    Contains("Public API surface:", result.Message);
+    Contains("Runtime route map:", result.Message);
+    Contains("Risk model v2:", result.Message);
     Contains("Latest workspace write:", result.Message);
     Contains("Build commands:", result.Message);
     Contains("Test commands:", result.Message);
@@ -2638,6 +2647,14 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("featureAreas", json);
     Contains("projectDependencies", json);
     Contains("projectBuildOrder", json);
+    Contains("generatedCode", json);
+    Contains("msBuildProjects", json);
+    Contains("publicApiSurface", json);
+    Contains("architectureSummary", json);
+    Contains("runtimeRoutes", json);
+    Contains("riskModel", json);
+    Contains("Generated/designer files", json);
+    Contains("class WidgetService", json);
     Contains("application code", json);
     Contains("test coverage", json);
 
@@ -2880,6 +2897,12 @@ static async Task TestLocalCodingToolShowsOwnershipMap()
         {
             public string Save() => "saved";
         }
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "WidgetService.g.cs"),
+        """
+        namespace Demo.App;
+        public sealed partial class WidgetServiceGenerated { }
         """);
     await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "WidgetController.cs"),
@@ -3165,6 +3188,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var deadCommands = await service.TryHandleAsync("dead command scan", CancellationToken.None);
     var commandSurface = await service.TryHandleAsync("command surface doctor", CancellationToken.None);
     var ledger = await service.TryHandleAsync("show validation ledger", CancellationToken.None);
+    var miniCodex = await service.TryHandleAsync("mini codex status", CancellationToken.None);
 
     Equal(true, readiness.Handled);
     Equal(true, readiness.Succeeded);
@@ -3175,6 +3199,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Command surface:", readiness.Message);
     Contains("Symbol index:", readiness.Message);
     Contains("Validation ledger:", readiness.Message);
+    Contains("Mini-Codex status:", readiness.Message);
+    Contains("Overall score:", readiness.Message);
     Contains("XAML binding check", binding.Message);
     Contains("Unknown bindings: 0", binding.Message);
     Contains("Command binding check", command.Message);
@@ -3208,11 +3234,13 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Ranked edit targets", editPlan.Message);
     Contains("Edit target validation:", editPlan.Message);
     Contains("Reference graph:", editPlan.Message);
+    Contains("Safe refactor detector:", editPlan.Message);
     Contains("symbol hit", editPlan.Message);
     Contains("MainWindowViewModel.cs", editPlan.Message);
     Contains("Safe edit workflow", safeEdit.Message);
     Contains("Patch gate:", safeEdit.Message);
     Contains("Impact radius:", safeEdit.Message);
+    Contains("Safe refactor detector:", safeEdit.Message);
     Contains("Edit target validation:", safeEdit.Message);
     Contains("Direct files:", safeEdit.Message);
     Contains("Test command:", safeEdit.Message);
@@ -3234,6 +3262,10 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Dashboard bindings:", commandSurface.Message);
     Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
+    Contains("Mini-Codex status", miniCodex.Message);
+    Contains("Overall score: 75%", miniCodex.Message);
+    Contains("Capability scores:", miniCodex.Message);
+    Contains("Codebase awareness", miniCodex.Message);
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
 {

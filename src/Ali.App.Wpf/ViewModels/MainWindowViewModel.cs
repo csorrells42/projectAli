@@ -267,6 +267,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingContextPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Context packet", "coding context packet current coding work", "Coding.ContextPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFullReadinessCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Full readiness", "full coding readiness", "Coding.FullReadiness"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingMiniCodexStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Mini-Codex status", "mini codex status", "Coding.MiniCodexStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBindingCheckCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Binding check", "xaml binding check", "Coding.BindingCheck"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -690,6 +691,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingContextPacketCommand { get; }
 
     public ICommand RunCodingFullReadinessCommand { get; }
+
+    public ICommand RunCodingMiniCodexStatusCommand { get; }
 
     public ICommand RunCodingSymbolIndexCommand { get; }
 
@@ -6589,6 +6592,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingFullReadinessCommand is AsyncRelayCommand runCodingFullReadiness)
         {
             runCodingFullReadiness.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingMiniCodexStatusCommand is AsyncRelayCommand runCodingMiniCodexStatus)
+        {
+            runCodingMiniCodexStatus.RaiseCanExecuteChanged();
         }
 
         if (RunCodingSymbolIndexCommand is AsyncRelayCommand runCodingSymbolIndex)

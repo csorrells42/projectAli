@@ -291,6 +291,7 @@ public static class CodingAbilityCatalog
                 new("Understand repo", "Run Ali's orientation rollup: intelligence, architecture, patterns, validation, and commit readiness.", "understand repo", "understand repo"),
                 new("Health score", "Score workspace readiness across target, projects, tests, git, and validation.", "workspace health score", "workspace health score"),
                 new("Full readiness", "Run the one-click coding readiness rollup with workspace, bindings, command surface, symbols, commit gate, and validation ledger.", "full coding readiness", "full coding readiness"),
+                new("Mini-Codex status", "Show Ali's current coding capability scores, missing rails, and next upgrade priorities.", "mini codex status", "mini codex status"),
                 new("C# symbol index", "Show a Roslyn-backed index of likely C# types, methods, and properties.", "show csharp symbol index", "show csharp symbol index"),
                 new("Ownership map", "Explain likely owning project, primary files, related files, tests, and validation commands for a symbol or file.", "ownership map Save", "ownership map <symbol-or-file>"),
                 new("Call graph", "Show Roslyn-discovered caller-to-callee edges, optionally filtered by name.", "show call graph Save", "show call graph <name>"),

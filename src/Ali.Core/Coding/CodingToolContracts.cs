@@ -28,6 +28,7 @@ public enum CodingToolAction
     ExplainKnownError,
     PreviewRollbackPatch,
     ShowFullCodingReadiness,
+    ShowMiniCodexStatus,
     ShowValidationLedger,
     ShowCSharpSymbolIndex,
     ShowOwnershipMap,
