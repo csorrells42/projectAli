@@ -264,7 +264,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ResolveTestTarget => await ResolveTestTargetAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanSemanticEdit => await PlanSemanticEditAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanSafeEditWorkflow => await PlanSafeEditWorkflowAsync(request, cancellationToken).ConfigureAwait(false),
-            CodingToolAction.MapCompilerDiagnostic => MapCompilerDiagnostic(request),
+            CodingToolAction.MapCompilerDiagnostic => await MapCompilerDiagnosticAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.VerifyXamlBindings => VerifyXamlBindings(),
             CodingToolAction.VerifyCommandBindings => VerifyCommandBindings(),
             CodingToolAction.ShowCommandSurfaceDoctor => ShowCommandSurfaceDoctor(),
@@ -6725,7 +6725,8 @@ public sealed class LocalCodingToolService(
         lines.Add("- can i safely commit");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Safe edit workflow", Policy.WorkspaceRoot);
     }
-    private CodingToolResult MapCompilerDiagnostic(CodingToolRequest request)
+
+    private async Task<CodingToolResult> MapCompilerDiagnosticAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var diagnostic = CleanGoal(request.Query, string.Empty);
         if (string.IsNullOrWhiteSpace(diagnostic) && _lastDotNetResult is not null)
@@ -6743,21 +6744,151 @@ public sealed class LocalCodingToolService(
         var symbolContext = absolutePath is not null && File.Exists(absolutePath)
             ? FindEnclosingSymbolAtLine(absolutePath, parsed.LineNumber)
             : null;
+        var testQuery = BuildDiagnosticTestQuery(parsed, absolutePath, symbolContext);
+        var testTarget = await ResolveTestTargetRecommendationAsync(testQuery, cancellationToken).ConfigureAwait(false);
+        var candidates = BuildDiagnosticFixCandidates(parsed, diagnostic, absolutePath, symbolContext, testTarget);
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
         var lines = new List<string>
         {
             "Compiler diagnostic mapper:",
             "No files were changed.",
-            "Engine: diagnostic parser + Roslyn syntax context",
+            "Engine: diagnostic parser + Roslyn syntax context + ranked fix candidates",
             string.IsNullOrWhiteSpace(parsed.Code) ? "Code: unknown" : $"Code: {parsed.Code}",
             absolutePath is null ? "File: unknown" : $"File: {RelativeToWorkspace(absolutePath)}",
             parsed.LineNumber is null ? "Line: unknown" : $"Line: {parsed.LineNumber}",
             symbolContext is null ? "Nearest symbol: unknown" : $"Nearest symbol: {symbolContext}",
-            "Likely fix lane:"
+            "Ranked fix candidates:"
         };
+        lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates.Select(FormatDiagnosticFixCandidate));
+        lines.Add("Likely fix lane:");
         AddKnownErrorGuidance(lines, string.IsNullOrWhiteSpace(parsed.Code) ? diagnostic : parsed.Code);
-        lines.Add("Next - inspect the mapped file/symbol, make the smallest exact edit, then run impacted tests and build.");
+        lines.Add("Validation after fix:");
+        lines.Add($"- show impacted tests {testQuery}");
+        lines.Add($"- resolve test target {testQuery}");
+        lines.Add($"- confirm dotnet build \"{primaryTarget}\"");
+        if (!string.IsNullOrWhiteSpace(testTarget.Command))
+        {
+            lines.Add($"- {testTarget.Command}");
+        }
+        lines.Add("Next - inspect the top candidate, make the smallest exact edit, then run validation.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Diagnostic mapper", absolutePath ?? Policy.WorkspaceRoot, parsed.LineNumber);
     }
+
+    private List<DiagnosticFixCandidate> BuildDiagnosticFixCandidates(
+        CompilerDiagnosticInfo diagnostic,
+        string diagnosticText,
+        string? absolutePath,
+        string? symbolContext,
+        TestTargetRecommendation testTarget)
+    {
+        var candidates = new List<DiagnosticFixCandidate>();
+        if (absolutePath is not null && File.Exists(absolutePath))
+        {
+            var target = diagnostic.LineNumber is null
+                ? RelativeToWorkspace(absolutePath)
+                : $"{RelativeToWorkspace(absolutePath)}:{diagnostic.LineNumber}";
+            candidates.Add(new DiagnosticFixCandidate(
+                "High",
+                10,
+                target,
+                "compiler location",
+                "inspect the exact line and surrounding symbol before editing"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(symbolContext))
+        {
+            candidates.Add(new DiagnosticFixCandidate(
+                "High",
+                8,
+                symbolContext,
+                "nearest enclosing symbol",
+                "prefer a local symbol-level fix over broad text replacement"));
+        }
+
+        var codeCandidate = BuildDiagnosticCodeCandidate(diagnostic.Code, diagnosticText);
+        if (codeCandidate is not null)
+        {
+            candidates.Add(codeCandidate);
+        }
+
+        if (!string.IsNullOrWhiteSpace(testTarget.Command))
+        {
+            candidates.Add(new DiagnosticFixCandidate(
+                "Medium",
+                5,
+                testTarget.TargetPath ?? Policy.WorkspaceRoot,
+                "validation target",
+                testTarget.Command));
+        }
+
+        return candidates
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenBy(candidate => candidate.Target, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+    }
+
+    private static DiagnosticFixCandidate? BuildDiagnosticCodeCandidate(string? code, string diagnosticText)
+    {
+        var query = string.IsNullOrWhiteSpace(code) ? diagnosticText : code;
+        if (query.Contains("CS0103", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 7, "missing name/scope", "CS0103", "check typo, missing helper, wrong scope, or stale generated code");
+        }
+
+        if (query.Contains("CS0246", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 7, "missing type or namespace", "CS0246", "check using directives, project references, package references, or renamed types");
+        }
+
+        if (query.Contains("CS1061", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 7, "missing member", "CS1061", "check property/member name, extension namespace, or API version drift");
+        }
+
+        if (query.Contains("CS1002", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 7, "missing semicolon", "CS1002", "inspect the reported line; deterministic preview may be available from last failure");
+        }
+
+        if (query.Contains("CS1513", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 7, "missing closing brace", "CS1513", "inspect brace balance near the reported symbol; deterministic preview may be available from last failure");
+        }
+
+        if (query.Contains("NETSDK", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 6, "SDK/project configuration", "NETSDK", "check target framework, workload, runtime identifier, restore state, or SDK version");
+        }
+
+        if (query.Contains("NU", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DiagnosticFixCandidate("Medium", 6, "NuGet/package configuration", "NU", "check package id/version, configured sources, restore state, and network permissions");
+        }
+
+        return null;
+    }
+
+    private string BuildDiagnosticTestQuery(CompilerDiagnosticInfo diagnostic, string? absolutePath, string? symbolContext)
+    {
+        if (absolutePath is not null && File.Exists(absolutePath))
+        {
+            return Path.GetFileNameWithoutExtension(absolutePath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(symbolContext))
+        {
+            return symbolContext;
+        }
+
+        return string.IsNullOrWhiteSpace(diagnostic.Code) ? "compiler diagnostic" : diagnostic.Code;
+    }
+
+    private static string FormatDiagnosticFixCandidate(DiagnosticFixCandidate candidate) =>
+        $"- {candidate.Confidence} {candidate.Score} - {candidate.Target}: {candidate.Reason}; {candidate.NextStep}";
+
     private CodingToolResult VerifyXamlBindings()
     {
         var xamlFiles = GetXamlFiles();
@@ -11679,6 +11810,13 @@ public sealed class LocalCodingToolService(
         string Path,
         int LineNumber,
         string Source);
+
+    private sealed record DiagnosticFixCandidate(
+        string Confidence,
+        int Score,
+        string Target,
+        string Reason,
+        string NextStep);
 
     private sealed record CompilerDiagnosticInfo(
         string? Path,

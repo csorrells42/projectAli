@@ -2997,6 +2997,12 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Compiler diagnostic mapper", diagnostic.Message);
     Contains("Code: CS0103", diagnostic.Message);
     Contains("Nearest symbol: method Save", diagnostic.Message);
+    Contains("Ranked fix candidates:", diagnostic.Message);
+    Contains("compiler location", diagnostic.Message);
+    Contains("missing name/scope", diagnostic.Message);
+    Contains("Validation after fix:", diagnostic.Message);
+    Contains("resolve test target MainWindowViewModel", diagnostic.Message);
+    Contains("confirm dotnet build", diagnostic.Message);
     Contains("Dead command scan", deadCommands.Message);
     Contains("Command surface doctor", commandSurface.Message);
     Contains("Service handlers:", commandSurface.Message);
