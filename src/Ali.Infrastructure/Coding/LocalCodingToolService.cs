@@ -5996,6 +5996,8 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> ShowSafeCommitCheckAsync(CancellationToken cancellationToken)
     {
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var projectImpact = BuildProjectImpact(changedFiles, GetWorkspaceProjectSummaries());
         var receipts = ReadRecentReceipts(MaxReceiptEntries);
         var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
         LoadPendingPatchPreviewIfNeeded();
@@ -6035,6 +6037,8 @@ public sealed class LocalCodingToolService(
             hasPendingPatchPreview
                 ? "Pending patch preview: yes"
                 : "Pending patch preview: none",
+            $"Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}",
+            $"Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}",
             "Decision factors:"
         };
 
@@ -6099,6 +6103,7 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> DraftCommitMessageAsync(CancellationToken cancellationToken)
     {
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var projectImpact = BuildProjectImpact(changedFiles, GetWorkspaceProjectSummaries());
         var summary = SummarizeChangedAreas(changedFiles);
         var message = changedFiles.Count == 0
             ? "No commit needed"
@@ -6108,6 +6113,8 @@ public sealed class LocalCodingToolService(
             "Commit message draft:",
             "No files were changed.",
             $"Changed files: {changedFiles.Count}",
+            $"Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}",
+            $"Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}",
             $"Suggested message: {message}",
             "Body bullets:"
         };
@@ -6130,10 +6137,13 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> DraftReleaseNotesAsync(CancellationToken cancellationToken)
     {
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var projectImpact = BuildProjectImpact(changedFiles, GetWorkspaceProjectSummaries());
         var lines = new List<string>
         {
             "Release notes draft:",
             "No files were changed.",
+            $"Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}",
+            $"Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}",
             "Highlights:"
         };
         if (changedFiles.Count == 0)
@@ -8909,6 +8919,7 @@ public sealed class LocalCodingToolService(
         var testFiles = changedFiles
             .Where(IsTestFile)
             .ToList();
+        var projectImpact = BuildProjectImpact(changedFiles, GetWorkspaceProjectSummaries());
 
         var lines = new List<string>
         {
@@ -8918,7 +8929,9 @@ public sealed class LocalCodingToolService(
             $"Changed files: {changedFiles.Count}",
             $"Staged: {stagedCount}",
             $"Unstaged: {unstagedCount}",
-            $"Untracked: {untrackedCount}"
+            $"Untracked: {untrackedCount}",
+            $"Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}",
+            $"Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}"
         };
 
         if (changedFiles.Count == 0)

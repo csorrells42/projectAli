@@ -2779,6 +2779,8 @@ static async Task TestLocalCodingToolShowsSafeCommitCheck()
     Contains("Commit readiness check", result.Message);
     Contains("Safe to commit: No", result.Message);
     Contains("Git: 1 uncommitted change(s) detected", result.Message);
+    Contains("Affected projects:", result.Message);
+    Contains("Build order slice:", result.Message);
     Contains("No successful build/test validation receipt", result.Message);
 }
 
@@ -2824,8 +2826,12 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Workspace health score", health.Message);
     Contains("Score:", health.Message);
     Contains("Commit message draft", commit.Message);
+    Contains("Affected projects:", commit.Message);
+    Contains("Build order slice:", commit.Message);
     Contains("coding assistant behavior", commit.Message);
     Contains("Release notes draft", release.Message);
+    Contains("Affected projects:", release.Message);
+    Contains("Build order slice:", release.Message);
     Contains("tests", release.Message);
     Contains("Rollback plan", rollback.Message);
     Contains("src/Ali.Core/Coding/CodingToolContracts.cs", rollback.Message);
@@ -3536,6 +3542,8 @@ static async Task TestLocalCodingToolReviewsCurrentChanges()
     Contains("Changed files: 2", result.Message);
     Contains("Unstaged: 1", result.Message);
     Contains("Untracked: 1", result.Message);
+    Contains("Affected projects:", result.Message);
+    Contains("Build order slice:", result.Message);
     Contains("src/Ali.cs", result.Message);
     Contains("Diff check: Good", result.Message);
     Contains("Run build/tests", result.Message);
