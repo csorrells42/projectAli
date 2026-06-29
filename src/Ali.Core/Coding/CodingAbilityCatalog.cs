@@ -46,6 +46,7 @@ public static class CodingAbilityCatalog
             "Understand the workspace and compare build paths before editing.",
             [
                 new("Interpret goal", "interpret build goal <goal>"),
+                new("Project intelligence", "show project intelligence"),
                 new("Explore idea", "explore build idea <goal>"),
                 new("Architecture options", "show architecture options <goal>"),
                 new("Package lookup plan", "plan package lookup <goal>"),
@@ -255,6 +256,7 @@ public static class CodingAbilityCatalog
             [
                 new("Command index", "Show deterministic coding commands Ali supports.", "show coding skill command index", "show coding skill command index"),
                 new("Inspect workspace", "Inspect the approved coding workspace.", "inspect coding workspace", "inspect coding workspace"),
+                new("Project intelligence", "Summarize project shape, likely app/test targets, safe commands, and risk notes.", "show project intelligence", "show project intelligence"),
                 new("Analyze solution", "Analyze solution architecture.", "analyze solution architecture", "analyze solution architecture"),
                 new("List packages", "List package references.", "list packages", "list packages"),
                 new("Plan coding task", "Draft a guarded implementation plan.", "plan coding task add a settings button", "plan coding task <goal>"),

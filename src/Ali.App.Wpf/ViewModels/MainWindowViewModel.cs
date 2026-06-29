@@ -263,6 +263,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunAppInstallTroubleshootingCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("App install troubleshooting", "plan app install troubleshooting recent installer issue", "Maintenance.AppInstallTroubleshooting"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunPeripheralSetupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Peripheral setup plan", "plan peripheral setup audio microphone or USB device", "Maintenance.PeripheralSetupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingValidationPlanCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation plan", "validation plan", "Coding.ValidationPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -667,6 +668,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunPeripheralSetupPlanCommand { get; }
 
     public ICommand RunCodingWorkspaceDiagnosticCommand { get; }
+
+    public ICommand RunCodingProjectIntelligenceCommand { get; }
 
     public ICommand RunCodingGitStatusCommand { get; }
 
@@ -3207,6 +3210,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return CompactCodingWorkspaceLines(lines);
         }
 
+        if (command.StartsWith("show project intelligence", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactProjectIntelligenceLines(lines);
+        }
+
         if (command.StartsWith("git status", StringComparison.OrdinalIgnoreCase))
         {
             return CompactGitStatusLines(lines);
@@ -3266,6 +3274,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (command.StartsWith("git status", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Review changed files before build, test, or commit.";
+        }
+
+        if (command.StartsWith("show project intelligence", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Use Plan, Build, Tests, or Review from the Programming dashboard.";
         }
 
         if (command.StartsWith("review current changes", StringComparison.OrdinalIgnoreCase))
@@ -3361,6 +3374,27 @@ public sealed class MainWindowViewModel : ObservableObject
             .Take(8)
             .ToList();
         return compact.Count > 0 ? compact : ["Workspace - No workspace summary returned"];
+    }
+
+    private static IReadOnlyList<string> CompactProjectIntelligenceLines(IReadOnlyList<string> lines)
+    {
+        var compact = lines
+            .Where(line => line.StartsWith("Shape:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Project roles:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Primary target:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Likely app", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Likely test", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Important entry", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("Other project", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Build:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Tests:", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- No obvious", StringComparison.OrdinalIgnoreCase)
+                           || line.StartsWith("- Multiple", StringComparison.OrdinalIgnoreCase))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(line => ShortMaintenanceDetail(line.TrimStart('-', ' ')))
+            .Take(10)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Project intelligence - No project summary returned"];
     }
 
     private static IReadOnlyList<string> CompactGitStatusLines(IReadOnlyList<string> lines)
@@ -6436,6 +6470,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingWorkspaceDiagnosticCommand is AsyncRelayCommand runCodingWorkspaceDiagnostic)
         {
             runCodingWorkspaceDiagnostic.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingProjectIntelligenceCommand is AsyncRelayCommand runCodingProjectIntelligence)
+        {
+            runCodingProjectIntelligence.RaiseCanExecuteChanged();
         }
 
         if (RunCodingGitStatusCommand is AsyncRelayCommand runCodingGitStatus)

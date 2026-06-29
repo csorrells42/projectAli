@@ -8,6 +8,7 @@ public enum CodingToolAction
     ListWorkspace,
     InspectWorkspace,
     AnalyzeArchitecture,
+    ShowProjectIntelligence,
     PlanTask,
     InterpretBuildGoal,
     ShowArchitectureOptions,

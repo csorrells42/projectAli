@@ -64,6 +64,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("coding parser extracts quoted path and line", TestCodingParserExtractsQuotedPathAndLine),
     ("coding parser routes workspace inspection", TestCodingParserRoutesWorkspaceInspection),
     ("coding parser routes architecture analysis", TestCodingParserRoutesArchitectureAnalysis),
+    ("coding parser routes project intelligence", TestCodingParserRoutesProjectIntelligence),
     ("coding parser routes guarded task planning", TestCodingParserRoutesGuardedTaskPlanning),
     ("coding parser routes build idea scouting", TestCodingParserRoutesBuildIdeaScouting),
     ("coding parser routes implementation roadmap", TestCodingParserRoutesImplementationRoadmap),
@@ -113,6 +114,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool handles PDF workspace tools", TestLocalCodingToolHandlesPdfWorkspaceTools),
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
+    ("local coding tool shows project intelligence", TestLocalCodingToolShowsProjectIntelligence),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
@@ -632,6 +634,16 @@ static Task TestCodingParserRoutesArchitectureAnalysis()
 
     Equal(true, CodingToolRequestParser.TryParse("show architecture map", out var mapRequest));
     Equal(CodingToolAction.AnalyzeArchitecture, mapRequest.Action);
+    return Task.CompletedTask;
+}
+
+static Task TestCodingParserRoutesProjectIntelligence()
+{
+    Equal(true, CodingToolRequestParser.TryParse("show project intelligence", out var intelligenceRequest));
+    Equal(CodingToolAction.ShowProjectIntelligence, intelligenceRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("repo intelligence", out var repoRequest));
+    Equal(CodingToolAction.ShowProjectIntelligence, repoRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -2334,6 +2346,62 @@ static async Task TestLocalCodingToolInspectsWorkspaceProjectMap()
     Contains("net10.0", result.Message);
     Contains("CommunityToolkit.Mvvm", result.Message);
     Contains(Path.Combine("Demo", "Program.cs"), result.Message);
+}
+
+static async Task TestLocalCodingToolShowsProjectIntelligence()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "README.md"), "# Demo");
+
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "MainWindow.xaml"), "<Window />");
+
+    var testsDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testsDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+          </ItemGroup>
+        </Project>
+        """);
+
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+
+    var result = await service.TryHandleAsync("show project intelligence", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Project intelligence scan", result.Message);
+    Contains("No files were changed", result.Message);
+    Contains("Shape: 1 solution(s), 2 .NET project(s)", result.Message);
+    Contains("Project roles: desktop app/UI: 1, test: 1", result.Message);
+    Contains($"Primary target: Demo.sln", result.Message);
+    Contains($"Likely app/host projects: {Path.Combine("Demo.App", "Demo.App.csproj")}", result.Message);
+    Contains($"Likely test projects: {Path.Combine("Demo.Tests", "Demo.Tests.csproj")}", result.Message);
+    Contains("Other project markers: README.md", result.Message);
+    Contains("Recommended commands:", result.Message);
+    Contains("confirm dotnet build", result.Message);
+    Contains("confirm dotnet test", result.Message);
 }
 
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()

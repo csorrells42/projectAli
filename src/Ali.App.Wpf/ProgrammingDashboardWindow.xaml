@@ -79,6 +79,8 @@
                             <WrapPanel>
                                 <Button Content="Workspace"
                                         Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
+                                <Button Content="Intelligence"
+                                        Command="{Binding RunCodingProjectIntelligenceCommand}" />
                                 <Button Content="Git"
                                         Command="{Binding RunCodingGitStatusCommand}" />
                                 <Button Content="Review"

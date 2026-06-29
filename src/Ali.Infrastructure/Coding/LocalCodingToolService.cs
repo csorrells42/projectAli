@@ -178,6 +178,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ListWorkspace => ListWorkspace(),
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
+            CodingToolAction.ShowProjectIntelligence => ShowProjectIntelligence(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
             CodingToolAction.ShowArchitectureOptions => ShowArchitectureOptions(request),
@@ -5107,6 +5108,120 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult ShowProjectIntelligence()
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding workspace does not exist yet: {Policy.WorkspaceRoot}",
+                "Project intelligence",
+                Policy.WorkspaceRoot);
+        }
+
+        var files = EnumerateWorkspaceFiles().Take(10_000).ToList();
+        var solutions = files
+            .Where(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var projects = files
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var summaries = projects
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadProjectSummary)
+            .ToList();
+        var primaryTarget = TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : null;
+        var appProjects = summaries
+            .Where(summary => summary.ProjectRole.Contains("app", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+        var testProjects = summaries
+            .Where(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase))
+            .Select(summary => summary.RelativePath)
+            .ToList();
+        var roleSummary = summaries.Count == 0
+            ? "none"
+            : string.Join(", ", summaries
+                .GroupBy(summary => summary.ProjectRole, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => $"{group.Key}: {group.Count()}"));
+        var markers = FindProjectMarkers(files);
+        var entryFiles = files
+            .Where(IsLikelyEntryPoint)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(RelativeToWorkspace)
+            .ToList();
+
+        var lines = new List<string>
+        {
+            $"Project intelligence scan: {Policy.WorkspaceRoot}",
+            "No files were changed.",
+            $"Shape: {solutions.Count} solution(s), {projects.Count} .NET project(s), {files.Count} file(s) scanned.",
+            $"Project roles: {roleSummary}",
+            primaryTarget is null
+                ? "Primary target: not found"
+                : $"Primary target: {RelativeToWorkspace(primaryTarget)}"
+        };
+
+        AddCompactList(lines, "Likely app/host projects", appProjects);
+        AddCompactList(lines, "Likely test projects", testProjects);
+        AddCompactList(lines, "Important entry/config files", entryFiles);
+        AddCompactList(lines, "Other project markers", markers);
+
+        lines.Add("Recommended commands:");
+        if (primaryTarget is not null)
+        {
+            lines.Add($"- Build: confirm dotnet build \"{primaryTarget}\"");
+            lines.Add(testProjects.Count > 0
+                ? $"- Tests: confirm dotnet test \"{primaryTarget}\""
+                : "- Tests: no test project detected; add or identify tests before risky changes.");
+        }
+        else
+        {
+            lines.Add("- Build: choose a solution or project first.");
+            lines.Add("- Tests: choose a test project first.");
+        }
+
+        lines.Add("- Review: review current changes");
+        lines.Add("- Plan: plan coding task <goal>");
+        lines.Add("Risk notes:");
+        if (solutions.Count > 1)
+        {
+            lines.Add("- Multiple solutions found; choose the intended solution before build/test work.");
+        }
+
+        if (testProjects.Count == 0)
+        {
+            lines.Add("- No obvious test project found; prefer small edits plus manual validation notes.");
+        }
+
+        if (appProjects.Count == 0 && projects.Count > 0)
+        {
+            lines.Add("- No obvious app/host project found; this may be a library or support package.");
+        }
+
+        if (projects.Count == 0 && markers.Count == 0)
+        {
+            lines.Add("- No common project files found; inspect the workspace before planning edits.");
+        }
+
+        lines.Add("Next - Use Plan, Build, Tests, or Review from the Programming dashboard.");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Project intelligence",
+            Policy.WorkspaceRoot);
+    }
+
     private CodingToolResult ListPackages(CodingToolRequest request)
     {
         if (!ResolveProjectReportTargets(request, out var projectFiles, out var targetPath, out var error))
@@ -6916,6 +7031,40 @@ public sealed class LocalCodingToolService(
         if (testProjects.Count > 0)
         {
             lines.Add($"Test projects: {string.Join(", ", testProjects.Take(6))}");
+        }
+    }
+
+    private List<string> FindProjectMarkers(IReadOnlyList<string> files)
+    {
+        var markerNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "README.md",
+            "package.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "package-lock.json",
+            "pyproject.toml",
+            "requirements.txt",
+            "Dockerfile",
+            "docker-compose.yml",
+            "Directory.Build.props",
+            "global.json"
+        };
+
+        return files
+            .Where(file => markerNames.Contains(Path.GetFileName(file)))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .Select(RelativeToWorkspace)
+            .ToList();
+    }
+
+    private static void AddCompactList(List<string> lines, string title, IReadOnlyList<string> items)
+    {
+        lines.Add($"{title}: {(items.Count == 0 ? "none found" : string.Join(", ", items.Take(6)))}");
+        if (items.Count > 6)
+        {
+            lines.Add($"- ...{items.Count - 6} more {title.ToLowerInvariant()} omitted.");
         }
     }
 
