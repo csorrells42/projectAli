@@ -2619,6 +2619,7 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Latest workspace write:", result.Message);
     Contains("Build commands:", result.Message);
     Contains("Test commands:", result.Message);
+    Contains("Semantic symbol examples:", result.Message);
 
     var indexPath = Path.Combine(directory, "Coding", "project-index.json");
     Equal(true, File.Exists(indexPath));
@@ -2626,6 +2627,11 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Demo.App.csproj", json);
     Contains("Demo.Tests.csproj", json);
     Contains("WidgetService", json);
+    Contains("displayName", json);
+    Contains("container", json);
+    Contains("projectPath", json);
+    Contains("endLineNumber", json);
+    Contains("Demo.App.WidgetService.Save()", json);
     Contains("Microsoft.NET.Test.Sdk", json);
     Contains("latestWorkspaceWriteUtc", json);
     Contains("fileRoles", json);
@@ -2745,6 +2751,7 @@ static async Task TestLocalCodingToolShowsRepoUnderstanding()
     Equal(true, result.Succeeded);
     Contains("Repo understanding", result.Message);
     Contains("Codebase awareness map", result.Message);
+    Contains("Semantic symbols:", result.Message);
     Contains("File roles:", result.Message);
     Contains("Feature areas:", result.Message);
     Contains("Project dependencies:", result.Message);
@@ -3062,8 +3069,10 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("File risk labels", risk.Message);
     Contains("Medium - application code", risk.Message);
     Contains("Symbol finder", symbol.Message);
+    Contains("Engine: Roslyn semantic model", symbol.Message);
     Contains("WidgetService.cs", symbol.Message);
     Contains("Cross-reference map", references.Message);
+    Contains("Engine: Roslyn semantic model", references.Message);
     Contains("Declarations:", references.Message);
     Contains("Test gap report", gaps.Message);
     Contains("Gap: source files changed without obvious test file changes.", gaps.Message);

@@ -5372,7 +5372,7 @@ public sealed class LocalCodingToolService(
         var status = GetProjectIndexStatus();
         if (!File.Exists(_projectIndexPath))
         {
-            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], []);
+            return new ProjectIndexAwareness(false, status.Summary, null, [], [], [], [], []);
         }
 
         try
@@ -5386,6 +5386,7 @@ public sealed class LocalCodingToolService(
                 status.Available,
                 status.Summary,
                 primaryTarget,
+                ReadProjectIndexSymbolArray(root, "symbols"),
                 ReadProjectIndexSummaryArray(root, "fileRoles", "role", "examples"),
                 ReadProjectIndexSummaryArray(root, "featureAreas", "area", "representativeFiles"),
                 ReadProjectDependencyArray(root, "projectDependencies"),
@@ -5393,15 +5394,15 @@ public sealed class LocalCodingToolService(
         }
         catch (JsonException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - unreadable project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], []);
         }
         catch (IOException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], []);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], []);
+            return new ProjectIndexAwareness(false, $"Bad - cannot read project index: {TrimForChat(ex.Message, 240)}", null, [], [], [], [], []);
         }
     }
 
@@ -5475,6 +5476,34 @@ public sealed class LocalCodingToolService(
         return summaries;
     }
 
+    private static IReadOnlyList<string> ReadProjectIndexSymbolArray(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var symbols = new List<string>();
+        foreach (var item in element.EnumerateArray().Take(16))
+        {
+            var kind = item.TryGetProperty("kind", out var kindElement) ? kindElement.GetString() : null;
+            var name = item.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : null;
+            var display = item.TryGetProperty("displayName", out var displayElement) ? displayElement.GetString() : null;
+            var path = item.TryGetProperty("relativePath", out var pathElement) ? pathElement.GetString() : null;
+            var line = item.TryGetProperty("lineNumber", out var lineElement) && lineElement.TryGetInt32(out var parsedLine)
+                ? parsedLine
+                : 0;
+            if (!string.IsNullOrWhiteSpace(kind) && !string.IsNullOrWhiteSpace(name))
+            {
+                var symbolDisplay = string.IsNullOrWhiteSpace(display) ? name : display;
+                var location = string.IsNullOrWhiteSpace(path) ? string.Empty : $" at {path}:{line}";
+                symbols.Add($"{kind} {symbolDisplay}{location}");
+            }
+        }
+
+        return symbols;
+    }
+
     private static void AddProjectIndexAwarenessLines(List<string> lines, ProjectIndexAwareness awareness, int limit)
     {
         lines.Add("Codebase awareness map:");
@@ -5484,6 +5513,7 @@ public sealed class LocalCodingToolService(
             lines.Add($"- Primary target: {awareness.PrimaryTarget}");
         }
 
+        lines.Add($"- Semantic symbols: {FormatInlineList(awareness.SemanticSymbols.Take(limit))}");
         lines.Add($"- File roles: {FormatInlineList(awareness.FileRoles.Take(limit))}");
         lines.Add($"- Feature areas: {FormatInlineList(awareness.FeatureAreas.Take(limit))}");
         lines.Add($"- Project dependencies: {FormatInlineList(awareness.ProjectDependencies.Take(limit))}");
@@ -5833,7 +5863,15 @@ public sealed class LocalCodingToolService(
         var buildCommands = DiscoverBuildCommands(files, summaries, primary is null ? null : primary).ToList();
         var testCommands = DiscoverTestCommands(files, summaries, primary is null ? null : primary).ToList();
         var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 500)
-            .Select(symbol => new ProjectIndexSymbol(symbol.Kind, symbol.Name, RelativeToWorkspace(symbol.Path), symbol.LineNumber))
+            .Select(symbol => new ProjectIndexSymbol(
+                symbol.Kind,
+                symbol.Name,
+                symbol.DisplayName,
+                symbol.Container,
+                RelativeToWorkspace(symbol.Path),
+                string.IsNullOrWhiteSpace(symbol.ProjectPath) ? string.Empty : RelativeToWorkspace(symbol.ProjectPath),
+                symbol.LineNumber,
+                symbol.EndLineNumber))
             .ToList();
         var fileRoles = BuildProjectIndexFileRoles(files);
         var featureAreas = BuildProjectIndexFeatureAreas(files);
@@ -5884,6 +5922,7 @@ public sealed class LocalCodingToolService(
             $"Build commands: {FormatInlineList(buildCommands)}",
             $"Test commands: {FormatInlineList(testCommands)}",
             $"Latest workspace write: {latestWorkspaceWrite.LocalDateTime:g}",
+            $"Semantic symbol examples: {FormatInlineList(symbols.Take(8).Select(symbol => $"{symbol.Kind} {symbol.DisplayName}"))}",
             "Next - use coding context packet, safe edit workflow, or resolve test target against this refreshed index."
         };
 
@@ -6363,14 +6402,21 @@ public sealed class LocalCodingToolService(
         {
             "C# symbol index:",
             "No files were changed.",
-            "Engine: Roslyn syntax tree",
+            "Engine: Roslyn syntax tree + semantic model",
             $"C# files: {files.Count}",
             $"Types: {typeCount}",
             $"Methods: {methodCount}",
             $"Properties: {propertyCount}",
+            $"Projects represented: {symbols.Select(symbol => symbol.ProjectPath).Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).Count()}",
             "Examples:"
         };
-        lines.AddRange(symbols.Count == 0 ? ["- none found"] : symbols.Take(20).Select(symbol => $"- {symbol.Kind} {symbol.Name}: {RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber}"));
+        lines.AddRange(symbols.Count == 0
+            ? ["- none found"]
+            : symbols.Take(20).Select(symbol =>
+            {
+                var projectText = string.IsNullOrWhiteSpace(symbol.ProjectPath) ? "no project" : RelativeToWorkspace(symbol.ProjectPath);
+                return $"- {symbol.Kind} {symbol.Name}: {RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber}-{symbol.EndLineNumber} ({symbol.DisplayName}; {projectText})";
+            }));
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "C# symbol index", Policy.WorkspaceRoot);
     }
 
@@ -6482,7 +6528,7 @@ public sealed class LocalCodingToolService(
         {
             "Call graph:",
             "No files were changed.",
-            "Engine: Roslyn invocation syntax scan",
+            "Engine: Roslyn semantic invocation graph",
             string.IsNullOrWhiteSpace(query) ? "Filter: none" : $"Filter: {query}",
             $"Edges found: {edges.Count}",
             $"Edges shown: {filtered.Count}"
@@ -6490,7 +6536,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(filtered.Count == 0
             ? ["- none found"]
             : filtered.Select(edge => $"- {edge.Caller} -> {edge.Callee} ({RelativeToWorkspace(edge.Path)}:{edge.LineNumber})"));
-        lines.Add("Note - this is syntax-level and does not resolve overloads, virtual dispatch, reflection, or generated code yet.");
+        lines.Add("Note - this resolves normal C# invocations; virtual dispatch, reflection, and generated code may still need manual review.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Call graph", Policy.WorkspaceRoot);
     }
     private CodingToolResult ResolveSemanticSymbol(CodingToolRequest request)
@@ -7471,10 +7517,15 @@ public sealed class LocalCodingToolService(
             return new CodingToolResult(true, false, "Symbol finder needs a symbol name.", "Symbol finder", Policy.WorkspaceRoot);
         }
 
-        var matches = FindSymbolMatches(symbol, declarationOnly: true, MaxSearchMatches);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var semanticMatches = FindSemanticSymbolHits(workspace, symbol, MaxSearchMatches);
+        var declarations = semanticMatches.Where(hit => hit.Source == "declaration").Take(MaxSearchMatches).ToList();
+        var matches = declarations.Select(FormatSemanticHit).ToList();
+        var engine = "Roslyn semantic model";
         if (matches.Count == 0)
         {
             matches = FindSymbolMatches(symbol, declarationOnly: false, MaxSearchMatches);
+            engine = "text fallback";
         }
 
         var lines = new List<string>
@@ -7482,11 +7533,12 @@ public sealed class LocalCodingToolService(
             "Symbol finder:",
             $"Symbol: {symbol}",
             "No files were changed.",
+            $"Engine: {engine}",
             $"Matches: {matches.Count}"
         };
         lines.AddRange(matches.Count == 0
             ? ["- No matches found."]
-            : matches.Select(match => $"- {match}"));
+            : matches.Select(match => match.StartsWith("- ", StringComparison.Ordinal) ? match : $"- {match}"));
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Symbol finder", Policy.WorkspaceRoot);
     }
 
@@ -7498,21 +7550,42 @@ public sealed class LocalCodingToolService(
             return new CodingToolResult(true, false, "Cross-reference map needs a symbol name.", "Cross-reference map", Policy.WorkspaceRoot);
         }
 
-        var declarations = FindSymbolMatches(symbol, declarationOnly: true, 10);
-        var references = FindSymbolMatches(symbol, declarationOnly: false, MaxSearchMatches)
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var semanticMatches = FindSemanticSymbolHits(workspace, symbol, MaxSearchMatches);
+        var declarations = semanticMatches
+            .Where(hit => hit.Source == "declaration")
+            .Take(10)
+            .Select(FormatSemanticHit)
+            .ToList();
+        var references = semanticMatches
+            .Where(hit => hit.Source != "declaration")
+            .Select(FormatSemanticHit)
             .Where(match => !declarations.Contains(match, StringComparer.OrdinalIgnoreCase))
             .Take(20)
             .ToList();
+        var engine = "Roslyn semantic model";
+        if (declarations.Count == 0 && references.Count == 0)
+        {
+            declarations = FindSymbolMatches(symbol, declarationOnly: true, 10).Select(match => $"- {match}").ToList();
+            references = FindSymbolMatches(symbol, declarationOnly: false, MaxSearchMatches)
+                .Select(match => $"- {match}")
+                .Where(match => !declarations.Contains(match, StringComparer.OrdinalIgnoreCase))
+                .Take(20)
+                .ToList();
+            engine = "text fallback";
+        }
+
         var lines = new List<string>
         {
             "Cross-reference map:",
             $"Symbol: {symbol}",
             "No files were changed.",
+            $"Engine: {engine}",
             "Declarations:"
         };
-        lines.AddRange(declarations.Count == 0 ? ["- none found"] : declarations.Select(match => $"- {match}"));
+        lines.AddRange(declarations.Count == 0 ? ["- none found"] : declarations);
         lines.Add("References:");
-        lines.AddRange(references.Count == 0 ? ["- none found"] : references.Select(match => $"- {match}"));
+        lines.AddRange(references.Count == 0 ? ["- none found"] : references);
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Cross-reference map", Policy.WorkspaceRoot);
     }
 
@@ -9874,9 +9947,9 @@ public sealed class LocalCodingToolService(
             .ToList();
     }
 
-    private static bool TryCreateSemanticDeclarationHit(SemanticModel semanticModel, SyntaxNode node, string query, out SemanticSymbolHit hit)
+    private bool TryCreateSemanticDeclarationHit(SemanticModel semanticModel, SyntaxNode node, string query, out SemanticSymbolHit hit)
     {
-        hit = new SemanticSymbolHit(string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty);
+        hit = new SemanticSymbolHit(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, 0, string.Empty);
         ISymbol? symbol = node switch
         {
             ClassDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
@@ -9904,20 +9977,31 @@ public sealed class LocalCodingToolService(
         symbol.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
         || symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat).Contains(query, StringComparison.OrdinalIgnoreCase);
 
-    private static SemanticSymbolHit CreateSemanticHit(ISymbol symbol, SyntaxNode node, string source)
+    private SemanticSymbolHit CreateSemanticHit(ISymbol symbol, SyntaxNode node, string source)
     {
         var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        var span = node.SyntaxTree.GetLineSpan(node.Span);
+        var projectPath = TryFindNearestProjectForFile(node.SyntaxTree.FilePath, out var nearestProject)
+            ? nearestProject
+            : string.Empty;
         return new SemanticSymbolHit(
             symbol.Name,
             symbol.Kind.ToString(),
             display,
+            symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ?? string.Empty,
             node.SyntaxTree.FilePath,
-            GetLineNumber(node),
+            projectPath,
+            span.StartLinePosition.Line + 1,
+            span.EndLinePosition.Line + 1,
             source);
     }
 
-    private static string FormatSemanticHit(SemanticSymbolHit hit) =>
-        $"- {hit.Kind} {hit.Display} ({hit.Source}) at {Path.GetFileName(hit.Path)}:{hit.LineNumber}";
+    private string FormatSemanticHit(SemanticSymbolHit hit)
+    {
+        var containerText = string.IsNullOrWhiteSpace(hit.Container) ? string.Empty : $"; in {hit.Container}";
+        var projectText = string.IsNullOrWhiteSpace(hit.ProjectPath) ? string.Empty : $"; project {RelativeToWorkspace(hit.ProjectPath)}";
+        return $"- {hit.Kind} {hit.Display} ({hit.Source}{containerText}{projectText}) at {Path.GetFileName(hit.Path)}:{hit.LineNumber}-{hit.EndLineNumber}";
+    }
 
     private static int GetLineNumber(SyntaxNode node) =>
         node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition.Line + 1;
@@ -10046,29 +10130,25 @@ public sealed class LocalCodingToolService(
     private List<CSharpCallEdge> BuildRoslynCallGraph(IReadOnlyList<string> files, int limit)
     {
         var edges = new List<CSharpCallEdge>();
-        foreach (var file in files.Where(File.Exists))
+        var workspace = BuildRoslynWorkspaceModel(files, Math.Min(files.Count, 5_000));
+        foreach (var tree in workspace.Trees)
         {
             if (edges.Count >= limit)
             {
                 break;
             }
 
-            var text = SafeReadText(file);
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                continue;
-            }
-
-            SyntaxNode root;
+            SemanticModel? semanticModel = null;
             try
             {
-                root = CSharpSyntaxTree.ParseText(text).GetRoot();
+                semanticModel = workspace.Compilation.GetSemanticModel(tree, ignoreAccessibility: true);
             }
             catch (ArgumentException)
             {
                 continue;
             }
 
+            var root = tree.GetRoot();
             foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 if (edges.Count >= limit)
@@ -10076,17 +10156,17 @@ public sealed class LocalCodingToolService(
                     break;
                 }
 
-                var caller = invocation.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
-                    ?? invocation.Ancestors().OfType<ConstructorDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
-                    ?? "<initializer>";
-                var callee = ExtractInvocationName(invocation.Expression);
+                var caller = GetCallGraphCallerName(invocation);
+                var resolved = semanticModel.GetSymbolInfo(invocation).Symbol
+                    ?? semanticModel.GetSymbolInfo(invocation.Expression).Symbol
+                    ?? semanticModel.GetSymbolInfo(invocation).CandidateSymbols.FirstOrDefault();
+                var callee = resolved?.Name ?? ExtractInvocationName(invocation.Expression);
                 if (string.IsNullOrWhiteSpace(callee))
                 {
                     continue;
                 }
 
-                var lineNumber = text[..Math.Min(invocation.SpanStart, text.Length)].Count(character => character == '\n') + 1;
-                edges.Add(new CSharpCallEdge(caller, callee, file, lineNumber));
+                edges.Add(new CSharpCallEdge(caller, callee, tree.FilePath, GetLineNumber(invocation)));
             }
         }
 
@@ -10094,6 +10174,13 @@ public sealed class LocalCodingToolService(
             .DistinctBy(edge => $"{edge.Caller}|{edge.Callee}|{edge.Path}|{edge.LineNumber}", StringComparer.Ordinal)
             .ToList();
     }
+
+    private static string GetCallGraphCallerName(SyntaxNode node) =>
+        node.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
+        ?? node.Ancestors().OfType<ConstructorDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
+        ?? node.Ancestors().OfType<PropertyDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
+        ?? node.Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText
+        ?? "<initializer>";
 
     private static string ExtractInvocationName(ExpressionSyntax expression) => expression switch
     {
@@ -10105,101 +10192,105 @@ public sealed class LocalCodingToolService(
     private List<CSharpSymbolInfo> BuildRoslynSymbolIndex(IReadOnlyList<string> files, int limit)
     {
         var symbols = new List<CSharpSymbolInfo>();
-        foreach (var file in files.Where(File.Exists))
+        var workspace = BuildRoslynWorkspaceModel(files, Math.Min(files.Count, 5_000));
+        foreach (var tree in workspace.Trees)
         {
             if (symbols.Count >= limit)
             {
                 break;
             }
 
-            var text = SafeReadText(file);
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                continue;
-            }
-
-            SyntaxNode root;
+            SemanticModel? semanticModel = null;
             try
             {
-                root = CSharpSyntaxTree.ParseText(text).GetRoot();
+                semanticModel = workspace.Compilation.GetSemanticModel(tree, ignoreAccessibility: true);
             }
             catch (ArgumentException)
             {
                 continue;
             }
 
-            foreach (var node in root.DescendantNodes())
+            foreach (var node in tree.GetRoot().DescendantNodes())
             {
                 if (symbols.Count >= limit)
                 {
                     break;
                 }
 
-                if (TryCreateRoslynSymbol(file, text, node, out var symbol))
+                if (TryCreateRoslynSymbol(semanticModel, node, out var symbol))
                 {
                     symbols.Add(symbol);
                 }
             }
         }
 
-        return symbols;
+        return symbols
+            .DistinctBy(symbol => $"{symbol.Kind}|{symbol.DisplayName}|{symbol.Path}|{symbol.LineNumber}", StringComparer.Ordinal)
+            .ToList();
     }
 
-    private static bool TryCreateRoslynSymbol(string file, string text, SyntaxNode node, out CSharpSymbolInfo symbol)
+    private bool TryCreateRoslynSymbol(SemanticModel semanticModel, SyntaxNode node, out CSharpSymbolInfo symbol)
     {
-        symbol = new CSharpSymbolInfo(string.Empty, string.Empty, file, 0);
-        string kind;
-        string name;
-        SyntaxToken identifier;
-        switch (node)
-        {
-            case ClassDeclarationSyntax declaration:
-                kind = "class";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            case RecordDeclarationSyntax declaration:
-                kind = "record";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            case InterfaceDeclarationSyntax declaration:
-                kind = "interface";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            case EnumDeclarationSyntax declaration:
-                kind = "enum";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            case StructDeclarationSyntax declaration:
-                kind = "struct";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            case MethodDeclarationSyntax declaration:
-                kind = "method";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            case PropertyDeclarationSyntax declaration:
-                kind = "property";
-                name = declaration.Identifier.ValueText;
-                identifier = declaration.Identifier;
-                break;
-            default:
-                return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
+        symbol = new CSharpSymbolInfo(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, 0);
+        var declaredSymbol = GetDeclaredSymbolForIndex(semanticModel, node);
+        if (declaredSymbol is null || string.IsNullOrWhiteSpace(declaredSymbol.Name))
         {
             return false;
         }
 
-        var lineNumber = text[..Math.Min(identifier.SpanStart, text.Length)].Count(character => character == '\n') + 1;
-        symbol = new CSharpSymbolInfo(kind, name, file, lineNumber);
+        var span = node.SyntaxTree.GetLineSpan(node.Span);
+        var startLine = span.StartLinePosition.Line + 1;
+        var endLine = span.EndLinePosition.Line + 1;
+        var projectPath = TryFindNearestProjectForFile(node.SyntaxTree.FilePath, out var nearestProject)
+            ? nearestProject
+            : string.Empty;
+        symbol = new CSharpSymbolInfo(
+            GetIndexSymbolKind(declaredSymbol, node),
+            declaredSymbol.Name,
+            declaredSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            declaredSymbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ?? string.Empty,
+            node.SyntaxTree.FilePath,
+            projectPath,
+            startLine,
+            endLine);
         return true;
+    }
+
+    private static ISymbol? GetDeclaredSymbolForIndex(SemanticModel semanticModel, SyntaxNode node) => node switch
+    {
+        ClassDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        RecordDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        InterfaceDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        EnumDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        StructDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        MethodDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        ConstructorDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        PropertyDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        EventDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+        FieldDeclarationSyntax declaration => declaration.Declaration.Variables.Select(variable => semanticModel.GetDeclaredSymbol(variable)).FirstOrDefault(symbol => symbol is not null),
+        _ => null
+    };
+
+    private static string GetIndexSymbolKind(ISymbol symbol, SyntaxNode node)
+    {
+        if (node is RecordDeclarationSyntax)
+        {
+            return "record";
+        }
+
+        return symbol.Kind switch
+        {
+            SymbolKind.NamedType when symbol is INamedTypeSymbol { TypeKind: TypeKind.Class } => "class",
+            SymbolKind.NamedType when symbol is INamedTypeSymbol { TypeKind: TypeKind.Interface } => "interface",
+            SymbolKind.NamedType when symbol is INamedTypeSymbol { TypeKind: TypeKind.Enum } => "enum",
+            SymbolKind.NamedType when symbol is INamedTypeSymbol { TypeKind: TypeKind.Struct } => "struct",
+            SymbolKind.Method when symbol is IMethodSymbol { MethodKind: MethodKind.Constructor } => "constructor",
+            SymbolKind.Method => "method",
+            SymbolKind.Property => "property",
+            SymbolKind.Field => "field",
+            SymbolKind.Event => "event",
+            _ => symbol.Kind.ToString().ToLowerInvariant()
+        };
     }
 
     private static List<string> ExtractXamlBindingNames(string text, bool commandOnly)
@@ -12147,6 +12238,7 @@ public sealed class LocalCodingToolService(
         bool Available,
         string Status,
         string? PrimaryTarget,
+        IReadOnlyList<string> SemanticSymbols,
         IReadOnlyList<string> FileRoles,
         IReadOnlyList<string> FeatureAreas,
         IReadOnlyList<string> ProjectDependencies,
@@ -12177,8 +12269,12 @@ public sealed class LocalCodingToolService(
     private sealed record ProjectIndexSymbol(
         string Kind,
         string Name,
+        string DisplayName,
+        string Container,
         string RelativePath,
-        int LineNumber);
+        string ProjectPath,
+        int LineNumber,
+        int EndLineNumber);
 
     private sealed record ProjectIndexFileRole(
         string Role,
@@ -12278,8 +12374,11 @@ public sealed class LocalCodingToolService(
         string Name,
         string Kind,
         string Display,
+        string Container,
         string Path,
+        string ProjectPath,
         int LineNumber,
+        int EndLineNumber,
         string Source);
 
     private sealed record DiagnosticFixCandidate(
@@ -12303,8 +12402,12 @@ public sealed class LocalCodingToolService(
     private sealed record CSharpSymbolInfo(
         string Kind,
         string Name,
+        string DisplayName,
+        string Container,
         string Path,
-        int LineNumber);
+        string ProjectPath,
+        int LineNumber,
+        int EndLineNumber);
 
     private sealed record CodingReceipt(
         DateTimeOffset Timestamp,
