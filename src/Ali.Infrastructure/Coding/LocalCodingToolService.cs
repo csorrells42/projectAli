@@ -208,6 +208,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.MapCompilerDiagnostic => MapCompilerDiagnostic(request),
             CodingToolAction.VerifyXamlBindings => VerifyXamlBindings(),
             CodingToolAction.VerifyCommandBindings => VerifyCommandBindings(),
+            CodingToolAction.ShowCommandSurfaceDoctor => ShowCommandSurfaceDoctor(),
             CodingToolAction.ScanDeadCommands => ScanDeadCommands(),
             CodingToolAction.PlanTask => await PlanTaskAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.InterpretBuildGoal => InterpretBuildGoal(request),
@@ -5535,6 +5536,7 @@ public sealed class LocalCodingToolService(
         var safeCommit = await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false);
         var xamlBindings = VerifyXamlBindings();
         var commandBindings = VerifyCommandBindings();
+        var surfaceDoctor = ShowCommandSurfaceDoctor();
         var deadCommands = ScanDeadCommands();
         var symbolIndex = ShowCSharpSymbolIndex();
         var validationLedger = ShowValidationLedger();
@@ -5550,7 +5552,8 @@ public sealed class LocalCodingToolService(
         AddSelectedLines(lines, xamlBindings.Message, 5, "XAML files:", "Bindings found:", "Unknown bindings:");
         AddSelectedLines(lines, commandBindings.Message, 5, "Command bindings found:", "Missing command targets:");
         lines.Add("Command surface:");
-        AddSelectedLines(lines, deadCommands.Message, 6, "Coding actions:", "Service handlers:", "Dashboard commands:", "Missing dashboard targets:");
+        AddSelectedLines(lines, surfaceDoctor.Message, 8, "Overall:", "Actions:", "Service handlers:", "Policy coverage:", "Parser/test coverage:", "Dashboard bindings:");
+        AddSelectedLines(lines, deadCommands.Message, 4, "Missing dashboard targets:");
         lines.Add("Symbol index:");
         AddSelectedLines(lines, symbolIndex.Message, 5, "C# files:", "Types:", "Methods:", "Properties:");
         lines.Add("Commit gate:");
@@ -5956,6 +5959,98 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult ShowCommandSurfaceDoctor()
+    {
+        var servicePath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.Infrastructure", "Coding", "LocalCodingToolService.cs");
+        var parserPath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.Core", "Coding", "CodingToolRequestParser.cs");
+        var policyPath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.Core", "Coding", "CodingWorkspacePolicy.cs");
+        var testsPath = Path.Combine(Policy.WorkspaceRoot, "tests", "Ali.Tests", "Program.cs");
+        var dashboardPath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.App.Wpf", "ProgrammingDashboardWindow.xaml");
+        var viewModelPath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.App.Wpf", "ViewModels", "MainWindowViewModel.cs");
+
+        var serviceText = SafeReadText(servicePath);
+        var parserText = SafeReadText(parserPath);
+        var policyText = SafeReadText(policyPath);
+        var testsText = SafeReadText(testsPath);
+        var dashboardText = SafeReadText(dashboardPath);
+        var viewModelText = SafeReadText(viewModelPath);
+        var actions = Enum.GetNames<CodingToolAction>();
+        var missingService = actions
+            .Where(action => !serviceText.Contains($"CodingToolAction.{action}", StringComparison.Ordinal))
+            .OrderBy(action => action, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var missingPolicy = actions
+            .Where(action => !HasPolicyCoverage(action, policyText))
+            .OrderBy(action => action, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var missingParserOrTests = actions
+            .Where(action => !parserText.Contains($"CodingToolAction.{action}", StringComparison.Ordinal)
+                && !testsText.Contains($"CodingToolAction.{action}", StringComparison.Ordinal))
+            .OrderBy(action => action, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var dashboardCommands = ExtractXamlBindingNames(dashboardText, commandOnly: true)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var missingDashboardTargets = dashboardCommands
+            .Where(command => !viewModelText.Contains($"ICommand {command}", StringComparison.Ordinal)
+                && !viewModelText.Contains($" {command} {{ get; }}", StringComparison.Ordinal))
+            .OrderBy(command => command, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var blockerCount = missingService.Count + missingPolicy.Count + missingDashboardTargets.Count;
+        var reviewCount = missingParserOrTests.Count;
+        var lines = new List<string>
+        {
+            "Command surface doctor:",
+            "No files were changed.",
+            blockerCount == 0 ? "Overall: Good" : $"Overall: Bad - {blockerCount} command-surface blocker(s)",
+            $"Actions: {actions.Length}",
+            missingService.Count == 0 ? "Service handlers: Good" : $"Service handlers: Bad - {missingService.Count} missing action reference(s)",
+            missingPolicy.Count == 0 ? "Policy coverage: Good" : $"Policy coverage: Bad - {missingPolicy.Count} uncovered action(s)",
+            missingParserOrTests.Count == 0 ? "Parser/test coverage: Good" : $"Parser/test coverage: Needs review - {reviewCount} action(s) lack direct parser or test references",
+            missingDashboardTargets.Count == 0 ? "Dashboard bindings: Good" : $"Dashboard bindings: Bad - {missingDashboardTargets.Count} missing target(s)",
+            "Service gaps:"
+        };
+        lines.AddRange(missingService.Count == 0 ? ["- none"] : missingService.Take(20).Select(action => $"- {action}"));
+        lines.Add("Policy gaps:");
+        lines.AddRange(missingPolicy.Count == 0 ? ["- none"] : missingPolicy.Take(20).Select(action => $"- {action}"));
+        lines.Add("Parser/test review:");
+        lines.AddRange(missingParserOrTests.Count == 0 ? ["- none"] : missingParserOrTests.Take(20).Select(action => $"- {action}"));
+        lines.Add("Dashboard gaps:");
+        lines.AddRange(missingDashboardTargets.Count == 0 ? ["- none"] : missingDashboardTargets.Take(20).Select(command => $"- {command}"));
+        return new CodingToolResult(true, blockerCount == 0, string.Join(Environment.NewLine, lines), "Command surface doctor", Policy.WorkspaceRoot);
+    }
+
+    private static bool HasPolicyCoverage(string action, string policyText)
+    {
+        if (policyText.Contains($"CodingToolAction.{action}", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return action is nameof(CodingToolAction.Build)
+            or nameof(CodingToolAction.Test)
+            or nameof(CodingToolAction.Restore)
+            or nameof(CodingToolAction.RunProject)
+            or nameof(CodingToolAction.GitStatus)
+            or nameof(CodingToolAction.GitDiff)
+            or nameof(CodingToolAction.GitLog)
+            or nameof(CodingToolAction.GitAdd)
+            or nameof(CodingToolAction.GitCommit)
+            or nameof(CodingToolAction.GitMerge)
+            or nameof(CodingToolAction.GitPull)
+            or nameof(CodingToolAction.GitPush)
+            or nameof(CodingToolAction.OpenFile)
+            or nameof(CodingToolAction.OpenSolution)
+            or nameof(CodingToolAction.SearchWorkspace)
+            or nameof(CodingToolAction.ReadFile)
+            or nameof(CodingToolAction.CreateFile)
+            or nameof(CodingToolAction.AppendFile)
+            or nameof(CodingToolAction.ReplaceText)
+            or nameof(CodingToolAction.PreviewReplaceText)
+            or nameof(CodingToolAction.AddPackage)
+            or nameof(CodingToolAction.ListPackages)
+            or nameof(CodingToolAction.ListOutdatedPackages);
+    }
     private CodingToolResult ScanDeadCommands()
     {
         var servicePath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.Infrastructure", "Coding", "LocalCodingToolService.cs");

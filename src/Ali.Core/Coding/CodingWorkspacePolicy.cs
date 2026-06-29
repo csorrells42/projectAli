@@ -135,6 +135,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.MapCompilerDiagnostic
             or CodingToolAction.VerifyXamlBindings
             or CodingToolAction.VerifyCommandBindings
+            or CodingToolAction.ShowCommandSurfaceDoctor
             or CodingToolAction.ScanDeadCommands)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Reviewing coding readiness, summaries, and rollback planning is read-only and allowed.");

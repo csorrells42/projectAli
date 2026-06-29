@@ -1111,6 +1111,17 @@ public static class CodingToolRequestParser
         "command surface scan"
     ];
 
+    private static readonly string[] CommandSurfaceDoctorRequests =
+    [
+        "command surface doctor",
+        "show command surface doctor",
+        "check command surface",
+        "coding command doctor",
+        "command surface check",
+        "mini codex command doctor",
+        "mini-codex command doctor"
+    ];
+
     private static readonly string[] DraftCommitMessageRequests =
     [
         "draft commit message",
@@ -1556,6 +1567,12 @@ public static class CodingToolRequestParser
         if (IsDeadCommandScanRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ScanDeadCommands, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCommandSurfaceDoctorRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCommandSurfaceDoctor, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -2045,6 +2062,9 @@ public static class CodingToolRequestParser
 
     private static bool IsDeadCommandScanRequest(string text) =>
         DeadCommandScanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCommandSurfaceDoctorRequest(string text) =>
+        CommandSurfaceDoctorRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsDraftCommitMessageRequest(string text) =>
         DraftCommitMessageRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

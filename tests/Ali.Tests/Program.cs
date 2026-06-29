@@ -753,6 +753,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
 
     Equal(true, CodingToolRequestParser.TryParse("dead command scan", out var deadRequest));
     Equal(CodingToolAction.ScanDeadCommands, deadRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("command surface doctor", out var doctorRequest));
+    Equal(CodingToolAction.ShowCommandSurfaceDoctor, doctorRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -2755,6 +2758,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var diagnosticText = $"{Path.Combine(appDirectory, "MainWindowViewModel.cs")}(7,20): error CS0103: The name 'MissingName' does not exist in the current context";
     var diagnostic = await service.TryHandleAsync($"map compiler diagnostic {diagnosticText}", CancellationToken.None);
     var deadCommands = await service.TryHandleAsync("dead command scan", CancellationToken.None);
+    var commandSurface = await service.TryHandleAsync("command surface doctor", CancellationToken.None);
     var ledger = await service.TryHandleAsync("show validation ledger", CancellationToken.None);
 
     Equal(true, readiness.Handled);
@@ -2786,6 +2790,9 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Code: CS0103", diagnostic.Message);
     Contains("Nearest symbol: method Save", diagnostic.Message);
     Contains("Dead command scan", deadCommands.Message);
+    Contains("Command surface doctor", commandSurface.Message);
+    Contains("Service handlers:", commandSurface.Message);
+    Contains("Dashboard bindings:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()

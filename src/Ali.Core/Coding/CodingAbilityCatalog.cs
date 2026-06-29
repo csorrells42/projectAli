@@ -293,6 +293,7 @@ public static class CodingAbilityCatalog
                 new("Diagnostic mapper", "Map compiler diagnostics to file, line, nearest symbol, and fix lane.", "map compiler diagnostic CS0103", "map compiler diagnostic <error>"),
                 new("XAML bindings", "Check WPF binding names against Roslyn-discovered code symbols.", "xaml binding check", "xaml binding check"),
                 new("Command bindings", "Check button command bindings against view-model command properties.", "command binding check", "command binding check"),
+                new("Command surface doctor", "Check action, parser, policy, service, test, and dashboard alignment before adding more coding tools.", "command surface doctor", "command surface doctor"),
                 new("Dead commands", "Scan coding actions and dashboard bindings for missing handlers or targets.", "dead command scan", "dead command scan"),
                 new("Analyze solution", "Analyze solution architecture.", "analyze solution architecture", "analyze solution architecture"),
                 new("Find symbol", "Find likely declarations and matches for a class, method, property, or command name.", "find symbol LocalCodingToolService", "find symbol <name>"),

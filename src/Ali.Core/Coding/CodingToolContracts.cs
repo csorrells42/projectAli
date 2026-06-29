@@ -35,6 +35,7 @@ public enum CodingToolAction
     MapCompilerDiagnostic,
     VerifyXamlBindings,
     VerifyCommandBindings,
+    ShowCommandSurfaceDoctor,
     ScanDeadCommands,
     PlanTask,
     InterpretBuildGoal,
