@@ -264,15 +264,23 @@ public sealed class MainWindowViewModel : ObservableObject
         RunPeripheralSetupPlanCommand = CreateAsyncCommand(() => RunMaintenanceDiagnosticAsync("Peripheral setup plan", "plan peripheral setup audio microphone or USB device", "Maintenance.PeripheralSetupPlan"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingProjectIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project index", "project index", "Coding.ProjectIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingContextPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Context packet", "coding context packet current coding work", "Coding.ContextPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFullReadinessCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Full readiness", "full coding readiness", "Coding.FullReadiness"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingMiniCodexStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Mini-Codex status", "mini codex status", "Coding.MiniCodexStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingOwnershipMapCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Ownership map", "ownership map current coding work", "Coding.OwnershipMap"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBindingCheckCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Binding check", "xaml binding check", "Coding.BindingCheck"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImpactedTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Impacted tests", "show impacted tests", "Coding.ImpactedTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingTestTargetCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Test target", "resolve test target current coding work", "Coding.TestTarget"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSafeEditWorkflowCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Safe edit", "safe edit workflow current change", "Coding.SafeEditWorkflow"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingExecutionPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Execution packet", "show execution packet", "Coding.ExecutionPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingApprovePacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Approve packet", "approve execution packet", "Coding.ApprovePacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingShowApprovedPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Approved packet", "show approved packet", "Coding.ApprovedPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPacketProgressCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Packet progress", "show packet progress", "Coding.PacketProgress"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPacketCommandsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Packet commands", "show packet commands", "Coding.PacketCommands"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingHealthScoreCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Health score", "workspace health score", "Coding.HealthScore"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -686,6 +694,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingProjectIntelligenceCommand { get; }
 
+    public ICommand RunCodingProjectIndexCommand { get; }
+
     public ICommand RunCodingRepoUnderstandingCommand { get; }
 
     public ICommand RunCodingContextPacketCommand { get; }
@@ -698,11 +708,25 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingCallGraphCommand { get; }
 
+    public ICommand RunCodingOwnershipMapCommand { get; }
+
     public ICommand RunCodingBindingCheckCommand { get; }
 
     public ICommand RunCodingImpactedTestsCommand { get; }
 
+    public ICommand RunCodingTestTargetCommand { get; }
+
     public ICommand RunCodingSafeEditWorkflowCommand { get; }
+
+    public ICommand RunCodingExecutionPacketCommand { get; }
+
+    public ICommand RunCodingApprovePacketCommand { get; }
+
+    public ICommand RunCodingShowApprovedPacketCommand { get; }
+
+    public ICommand RunCodingPacketProgressCommand { get; }
+
+    public ICommand RunCodingPacketCommandsCommand { get; }
 
     public ICommand RunCodingHealthScoreCommand { get; }
 
@@ -6579,6 +6603,11 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingProjectIntelligence.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingProjectIndexCommand is AsyncRelayCommand runCodingProjectIndex)
+        {
+            runCodingProjectIndex.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingRepoUnderstandingCommand is AsyncRelayCommand runCodingRepoUnderstanding)
         {
             runCodingRepoUnderstanding.RaiseCanExecuteChanged();
@@ -6609,6 +6638,11 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingCallGraph.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingOwnershipMapCommand is AsyncRelayCommand runCodingOwnershipMap)
+        {
+            runCodingOwnershipMap.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingBindingCheckCommand is AsyncRelayCommand runCodingBindingCheck)
         {
             runCodingBindingCheck.RaiseCanExecuteChanged();
@@ -6619,9 +6653,39 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingImpactedTests.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingTestTargetCommand is AsyncRelayCommand runCodingTestTarget)
+        {
+            runCodingTestTarget.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingSafeEditWorkflowCommand is AsyncRelayCommand runCodingSafeEditWorkflow)
         {
             runCodingSafeEditWorkflow.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingExecutionPacketCommand is AsyncRelayCommand runCodingExecutionPacket)
+        {
+            runCodingExecutionPacket.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingApprovePacketCommand is AsyncRelayCommand runCodingApprovePacket)
+        {
+            runCodingApprovePacket.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingShowApprovedPacketCommand is AsyncRelayCommand runCodingShowApprovedPacket)
+        {
+            runCodingShowApprovedPacket.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPacketProgressCommand is AsyncRelayCommand runCodingPacketProgress)
+        {
+            runCodingPacketProgress.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPacketCommandsCommand is AsyncRelayCommand runCodingPacketCommands)
+        {
+            runCodingPacketCommands.RaiseCanExecuteChanged();
         }
 
         if (RunCodingHealthScoreCommand is AsyncRelayCommand runCodingHealthScore)

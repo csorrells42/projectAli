@@ -3286,7 +3286,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Before/after validation ledger", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 83%", miniCodex.Message);
+    Contains("Overall score: 84%", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
 }

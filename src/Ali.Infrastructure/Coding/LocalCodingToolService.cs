@@ -6925,9 +6925,9 @@ public sealed class LocalCodingToolService(
             ("Patch safety", 78, "exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
             ("Validation/release", 75, "prioritized test recommendation, build order, safe commit and release readiness"),
             ("Autonomous workflow", 76, "self-checking preflight, packet self-score, and receipts exist; still requires owner approval for writes and commands"),
-            ("Dashboard usability", 73, "one-click programming checks with concise output")
+            ("Dashboard usability", 78, "one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
         };
-        var overall = 83;
+        var overall = 84;
         var lines = new List<string>
         {
             "Mini-Codex status:",

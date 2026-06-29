@@ -79,8 +79,8 @@
                             <WrapPanel>
                                 <Button Content="Workspace"
                                         Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
-                                <Button Content="Intelligence"
-                                        Command="{Binding RunCodingProjectIntelligenceCommand}" />
+                                <Button Content="Project Index"
+                                        Command="{Binding RunCodingProjectIndexCommand}" />
                                 <Button Content="Understand Repo"
                                         Command="{Binding RunCodingRepoUnderstandingCommand}" />
                                 <Button Content="Context"
@@ -91,16 +91,6 @@
                                         Background="#152A22" />
                                 <Button Content="Mini-Codex"
                                         Command="{Binding RunCodingMiniCodexStatusCommand}" />
-                                <Button Content="Health"
-                                        Command="{Binding RunCodingHealthScoreCommand}" />
-                                <Button Content="Git"
-                                        Command="{Binding RunCodingGitStatusCommand}" />
-                                <Button Content="Review"
-                                        Command="{Binding RunCodingReviewChangesCommand}" />
-                                <Button Content="Validate"
-                                        Command="{Binding RunCodingValidationPlanCommand}" />
-                                <Button Content="Safe Commit"
-                                        Command="{Binding RunCodingSafeCommitCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
@@ -120,12 +110,43 @@
                                         Command="{Binding RunCodingSymbolIndexCommand}" />
                                 <Button Content="Call Graph"
                                         Command="{Binding RunCodingCallGraphCommand}" />
+                                <Button Content="Ownership"
+                                        Command="{Binding RunCodingOwnershipMapCommand}" />
                                 <Button Content="Bindings"
                                         Command="{Binding RunCodingBindingCheckCommand}" />
                                 <Button Content="Impacted Tests"
                                         Command="{Binding RunCodingImpactedTestsCommand}" />
+                                <Button Content="Test Target"
+                                        Command="{Binding RunCodingTestTargetCommand}" />
                                 <Button Content="Safe Edit"
                                         Command="{Binding RunCodingSafeEditWorkflowCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Execution Packet"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Prepare, approve, inspect, and track one self-scored coding packet."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="Prepare"
+                                        Command="{Binding RunCodingExecutionPacketCommand}" />
+                                <Button Content="Approve"
+                                        Command="{Binding RunCodingApprovePacketCommand}"
+                                        BorderBrush="#8A6A18"
+                                        Background="#2A2415" />
+                                <Button Content="Show Packet"
+                                        Command="{Binding RunCodingShowApprovedPacketCommand}" />
+                                <Button Content="Progress"
+                                        Command="{Binding RunCodingPacketProgressCommand}" />
+                                <Button Content="Commands"
+                                        Command="{Binding RunCodingPacketCommandsCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
@@ -140,6 +161,8 @@
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
+                                <Button Content="Review"
+                                        Command="{Binding RunCodingReviewChangesCommand}" />
                                 <Button Content="Build"
                                         Command="{Binding RunCodingBuildCommand}"
                                         BorderBrush="#1E6B49"
@@ -158,6 +181,8 @@
                                         Command="{Binding RunCodingApplyPreviewCommand}"
                                         BorderBrush="#8A6A18"
                                         Background="#2A2415" />
+                                <Button Content="Safe Commit"
+                                        Command="{Binding RunCodingSafeCommitCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
