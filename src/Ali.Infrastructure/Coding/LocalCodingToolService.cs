@@ -117,12 +117,14 @@ public sealed class LocalCodingToolService(
     private readonly string _actionLogPath = Path.Combine(dataRoot, "coding-tool-actions.jsonl");
     private readonly string _roadmapStatePath = Path.Combine(dataRoot, "Coding", "roadmap-execution-state.json");
     private readonly string _approvedPacketPath = Path.Combine(dataRoot, "Coding", "approved-step-packet.json");
+    private readonly string _pendingPatchPreviewPath = Path.Combine(dataRoot, "Coding", "pending-patch-preview.json");
     private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
         ? Path.Combine(dataRoot, "GeneratedDocuments")
         : Path.GetFullPath(pdfWorkspaceRoot.Trim().Trim('"'));
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
     private CodingToolRequest? _lastPatchPreviewRequest;
+    private bool _pendingPatchPreviewLoaded;
     private CodingToolRequest? _lastRoadmapRequest;
     private bool _lastRoadmapApproved;
     private bool _approvedRoadmapStarted;
@@ -148,6 +150,58 @@ public sealed class LocalCodingToolService(
         _pdfWorkspaceRoot = settings.ResolvePdfWorkspaceRoot(dataRoot);
     }
 
+    private void LoadPendingPatchPreviewIfNeeded()
+    {
+        if (_pendingPatchPreviewLoaded)
+        {
+            return;
+        }
+
+        _pendingPatchPreviewLoaded = true;
+        if (!File.Exists(_pendingPatchPreviewPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_pendingPatchPreviewPath);
+            var request = JsonSerializer.Deserialize<CodingToolRequest>(stream, RoadmapJsonOptions);
+            _lastPatchPreviewRequest = request?.Action is CodingToolAction.PreviewReplaceText or CodingToolAction.PreviewPatchBundle
+                ? request
+                : null;
+        }
+        catch (IOException)
+        {
+            _lastPatchPreviewRequest = null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _lastPatchPreviewRequest = null;
+        }
+        catch (JsonException)
+        {
+            _lastPatchPreviewRequest = null;
+        }
+    }
+
+    private void SavePendingPatchPreview()
+    {
+        _pendingPatchPreviewLoaded = true;
+        if (_lastPatchPreviewRequest is null)
+        {
+            if (File.Exists(_pendingPatchPreviewPath))
+            {
+                File.Delete(_pendingPatchPreviewPath);
+            }
+
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_pendingPatchPreviewPath)!);
+        using var stream = File.Create(_pendingPatchPreviewPath);
+        JsonSerializer.Serialize(stream, _lastPatchPreviewRequest, RoadmapJsonOptions);
+    }
     public async Task<CodingToolResult> TryHandleAsync(
         string userText,
         CancellationToken cancellationToken)
@@ -5356,6 +5410,7 @@ public sealed class LocalCodingToolService(
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var receipts = ReadRecentReceipts(MaxReceiptEntries);
         var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        LoadPendingPatchPreviewIfNeeded();
         var hasPendingPatchPreview = _lastPatchPreviewRequest is not null;
         var hasSuccessfulValidation = latestDotNetReceipt?.Succeeded == true
             || _lastDotNetResult?.Succeeded == true;
@@ -5918,6 +5973,7 @@ public sealed class LocalCodingToolService(
         var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
             : Policy.WorkspaceRoot;
+        LoadPendingPatchPreviewIfNeeded();
         var hasPendingPreview = _lastPatchPreviewRequest is not null;
         var lines = new List<string>
         {
@@ -6683,6 +6739,7 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> ApplyLastPatchPreviewAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        LoadPendingPatchPreviewIfNeeded();
         if (_lastPatchPreviewRequest is null)
         {
             return new CodingToolResult(
@@ -6696,6 +6753,7 @@ public sealed class LocalCodingToolService(
         {
             var patchBundleRequest = _lastPatchPreviewRequest;
             _lastPatchPreviewRequest = null;
+            SavePendingPatchPreview();
             return await ApplyPatchBundlePreviewAsync(patchBundleRequest, cancellationToken).ConfigureAwait(false);
         }
 
@@ -6705,6 +6763,7 @@ public sealed class LocalCodingToolService(
             UserConfirmed = true
         };
         _lastPatchPreviewRequest = null;
+        SavePendingPatchPreview();
 
         var permission = Policy.Evaluate(applyRequest);
         if (permission.Kind != CodingToolPermissionKind.Allow)
@@ -6806,6 +6865,7 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> ShowLastPatchPreviewAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        LoadPendingPatchPreviewIfNeeded();
         if (_lastPatchPreviewRequest is null)
         {
             return new CodingToolResult(
@@ -6821,6 +6881,7 @@ public sealed class LocalCodingToolService(
         if (!preview.Succeeded)
         {
             _lastPatchPreviewRequest = null;
+            SavePendingPatchPreview();
             return preview with
             {
                 Message = $"Pending patch preview is no longer valid and was discarded.{Environment.NewLine}{preview.Message}",
@@ -6837,6 +6898,7 @@ public sealed class LocalCodingToolService(
 
     private CodingToolResult DiscardLastPatchPreview()
     {
+        LoadPendingPatchPreviewIfNeeded();
         if (_lastPatchPreviewRequest is null)
         {
             return new CodingToolResult(
@@ -6849,6 +6911,7 @@ public sealed class LocalCodingToolService(
         var path = _lastPatchPreviewRequest.Path
                    ?? $"{_lastPatchPreviewRequest.PatchEdits?.Count ?? 0} bundled edit(s)";
         _lastPatchPreviewRequest = null;
+        SavePendingPatchPreview();
         return new CodingToolResult(
             true,
             true,
@@ -7443,6 +7506,7 @@ public sealed class LocalCodingToolService(
         if (preview.Succeeded)
         {
             _lastPatchPreviewRequest = previewRequest;
+            SavePendingPatchPreview();
         }
 
         return preview with
@@ -9953,6 +10017,7 @@ public sealed class LocalCodingToolService(
         _lastPatchPreviewRequest = result.Succeeded
             ? request
             : null;
+        SavePendingPatchPreview();
     }
 
     private void StoreLastRoadmap(CodingToolRequest request, CodingToolResult result)

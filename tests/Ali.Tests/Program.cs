@@ -3486,6 +3486,11 @@ static async Task TestLocalCodingToolManagesPendingPatchPreview()
 
     var emptyShow = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
     var preview = await service.TryHandleAsync($"preview replace in file \"{filePath}\" \"Demo\" with \"Widget\"", CancellationToken.None);
+    var recoveredService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+    var recoveredShow = await recoveredService.TryHandleAsync("show pending patch preview", CancellationToken.None);
     var show = await service.TryHandleAsync("show pending patch preview", CancellationToken.None);
     var discard = await service.TryHandleAsync("discard pending patch preview", CancellationToken.None);
     var applyAfterDiscard = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
@@ -3494,6 +3499,9 @@ static async Task TestLocalCodingToolManagesPendingPatchPreview()
     Equal(true, emptyShow.Succeeded);
     Contains("No patch preview", emptyShow.Message);
     Equal(true, preview.Succeeded);
+    Equal(true, recoveredShow.Handled);
+    Equal(true, recoveredShow.Succeeded);
+    Contains("Pending patch preview is still valid", recoveredShow.Message);
     Equal(true, show.Handled);
     Equal(true, show.Succeeded);
     Contains("Pending patch preview is still valid", show.Message);
