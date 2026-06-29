@@ -7524,7 +7524,17 @@ public sealed class LocalCodingToolService(
                 fullPath);
         }
 
-        return await PreviewReplaceTextAsync(fullPath, request.Content, request.Replacement, cancellationToken).ConfigureAwait(false);
+        var preview = await PreviewReplaceTextAsync(fullPath, request.Content, request.Replacement, cancellationToken).ConfigureAwait(false);
+        if (!preview.Succeeded)
+        {
+            return preview;
+        }
+
+        var validationHint = await BuildPatchPreviewValidationHintAsync([fullPath], cancellationToken).ConfigureAwait(false);
+        return preview with
+        {
+            Message = preview.Message + Environment.NewLine + string.Join(Environment.NewLine, validationHint)
+        };
     }
 
     private async Task<CodingToolResult> PreviewPatchBundleAsync(

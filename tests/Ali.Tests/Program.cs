@@ -3541,6 +3541,9 @@ static async Task TestLocalCodingToolPreviewsLiteralReplacePatch()
     Equal(true, preview.Succeeded);
     Contains("Patch preview", preview.Message);
     Contains("No files were changed", preview.Message);
+    Contains("Validation hint:", preview.Message);
+    Contains("Changed files:", preview.Message);
+    Contains("Build command:", preview.Message);
     Contains("Before:", preview.Message);
     Contains("After:", preview.Message);
     Contains("class Demo", preview.Message);
