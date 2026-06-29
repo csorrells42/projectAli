@@ -406,7 +406,9 @@ public sealed class ConversationOrchestrator(
 
         var lines = new List<string>
         {
-            "Saved local user memories. Use these only when they directly help answer the current user message.",
+            "Saved local user memories. These are facts about the human user and their context, not facts about the assistant identity.",
+            "Use them only when they directly help answer the current user message.",
+            "Never use saved memories, user names, friend names, or customer profile details to rename the assistant or answer as if they are the assistant's name.",
             "Use them for location-dependent requests, explicit memory questions, preferences, and continuity.",
             "Do not mention or paraphrase saved memories unless the user asked about them or they are essential to the answer.",
             "If the current user contradicts a saved memory, follow the current user."

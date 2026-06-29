@@ -130,11 +130,11 @@
                         <TextBox x:Name="InstallRootTextBox"
                                  Style="{StaticResource InputBox}"
                                  TextChanged="InstallerOptionChanged" />
-                        <TextBlock Text="Assistant name" Style="{StaticResource FieldLabel}" />
+                        <TextBlock Text="Assistant name (not the user name)" Style="{StaticResource FieldLabel}" />
                         <TextBox x:Name="AssistantNameTextBox"
                                  Style="{StaticResource InputBox}"
                                  TextChanged="InstallerOptionChanged" />
-                        <TextBlock Text="Leave blank to ask on first launch."
+                        <TextBlock Text="Leave blank to ask on first launch. Use Ali unless intentionally renaming the assistant."
                                    Foreground="#6B7280"
                                    Margin="0,-10,0,0" />
                     </StackPanel>

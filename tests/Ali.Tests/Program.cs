@@ -5214,6 +5214,7 @@ static async Task TestRuntimePinsAliPersona()
     Contains("\"role\":\"system\"", handler.LastChatBody);
     Contains("You are Ali", handler.LastChatBody);
     Contains("If asked who you are or what your name is", handler.LastChatBody);
+    Contains("assistant name is separate from the human user", handler.LastChatBody);
     Contains("Do not prepend your name or identity to ordinary answers", handler.LastChatBody);
     Contains("Do not argue that your name is Qwen", handler.LastChatBody);
     Contains("Answer in the user", handler.LastChatBody);
@@ -5239,6 +5240,7 @@ static async Task TestRuntimeUsesConfiguredAssistantName()
     Equal("OK", answer);
     Contains("You are Nova", handler.LastChatBody);
     Contains("identify yourself as Nova", handler.LastChatBody);
+    Contains("never treat saved memories", handler.LastChatBody);
     Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
 }
 
@@ -7325,6 +7327,15 @@ static async Task TestOrchestratorInjectsSavedLocalMemories()
         MemorySource.ExplicitUserRequest,
         MemorySensitivity.Normal,
         Active: true));
+    memories.Save(new MemoryEntry(
+        "mem_user_name",
+        "My name is Chris.",
+        "general",
+        now,
+        now,
+        MemorySource.ExplicitUserRequest,
+        MemorySensitivity.Normal,
+        Active: true));
     var planner = new CapturingSourceQueryPlanner(SourceQueryPlan.NoSources);
     var orchestrator = new ConversationOrchestrator(
         runtime,
@@ -7349,7 +7360,10 @@ static async Task TestOrchestratorInjectsSavedLocalMemories()
 
     Equal("OK", string.Concat(chunks));
     Contains("Saved local user memories", handler.LastChatBody);
+    Contains("not facts about the assistant identity", handler.LastChatBody);
+    Contains("Never use saved memories, user names", handler.LastChatBody);
     Contains("We are in Andalusia, AL.", handler.LastChatBody);
+    Contains("My name is Chris.", handler.LastChatBody);
     Equal(true, planner.LastHistory.Any(message => message.Text.Contains("We are in Andalusia, AL.", StringComparison.Ordinal)));
 }
 
