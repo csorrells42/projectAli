@@ -1525,7 +1525,11 @@ static async Task TestLocalCodingToolPlansGuardedTask()
     Contains("Impact checklist", result.Message);
     Contains("File writes require", result.Message);
     Contains("Build, test, restore, package install, and run require confirmation", result.Message);
-    Equal(0, runner.Runs.Count);
+    Equal(2, runner.Runs.Count);
+    Equal("git", runner.Runs[0].FileName);
+    Equal("status --short --branch", string.Join(" ", runner.Runs[0].Arguments));
+    Equal("git", runner.Runs[1].FileName);
+    Equal("diff --name-only HEAD", string.Join(" ", runner.Runs[1].Arguments));
 }
 
 static async Task TestLocalCodingToolExploresBuildIdea()
@@ -3812,7 +3816,14 @@ static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
         """);
     await File.WriteAllTextAsync(Path.Combine(projectDirectory, "WidgetFactory.cs"), "public sealed class WidgetFactory { }");
 
-    var codingTool = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+    var contextRunner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false));
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        contextRunner);
     var runtime = new FixedTextRuntime("I can help with this project.");
     var orchestrator = new ConversationOrchestrator(
         runtime,
@@ -3838,6 +3849,10 @@ static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
     Contains("Permission gates", context);
     Contains("Demo.csproj", context);
     Contains("CommunityToolkit.Mvvm 8.4.0", context);
+    Contains("Current coding state", context);
+    Contains("Git: clean", context);
+    Contains("Targeted validation", context);
+    Contains("confirm dotnet test", context);
     Contains("WidgetFactory.cs", context);
 }
 

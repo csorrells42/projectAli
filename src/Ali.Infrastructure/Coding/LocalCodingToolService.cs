@@ -418,6 +418,15 @@ public sealed class LocalCodingToolService(
             AddContextSection(lines, "Package references", packageReport.Message, 4_000);
         }
 
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var testTarget = await ResolveTestTargetRecommendationAsync(userText.Trim(), cancellationToken).ConfigureAwait(false);
+        lines.Add("Current coding state:");
+        lines.Add($"- Git: {gitStatus.Summary}");
+        lines.Add("Targeted validation:");
+        lines.Add(string.IsNullOrWhiteSpace(testTarget.Command)
+            ? "- No targeted test command detected yet."
+            : $"- {testTarget.Command}");
+
         var relevantFiles = EnumerateWorkspaceFiles()
             .Where(IsContextRelevantFile)
             .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
