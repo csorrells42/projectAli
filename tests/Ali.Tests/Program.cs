@@ -2718,6 +2718,11 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("class WidgetService", json);
     Contains("application code", json);
     Contains("test coverage", json);
+    var symbolLedgerPath = Path.Combine(directory, "Coding", "symbol-ownership-ledger.json");
+    Equal(true, File.Exists(symbolLedgerPath));
+    var symbolLedger = await File.ReadAllTextAsync(symbolLedgerPath);
+    Contains("WidgetService", symbolLedger);
+    Contains("Risk", symbolLedger);
 
     await File.WriteAllTextAsync(Path.Combine(appDirectory, "NewWidget.cs"), "namespace Demo.App; public sealed class NewWidget { }");
     var stale = await service.TryHandleAsync("coding context packet WidgetService", CancellationToken.None);
@@ -3079,6 +3084,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
         new CodingCommandRun(0, $"## main{Environment.NewLine} M src/Ali.Core/Coding/CodingToolContracts.cs", string.Empty, TimedOut: false),
         new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
         new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false),
         new CodingCommandRun(0, changedFiles, string.Empty, TimedOut: false));
     var service = new LocalCodingToolService(
         new CodingWorkspacePolicy(workspace),
@@ -3104,10 +3110,14 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Build order slice:", release.Message);
     Contains("Customer-ready notes", release.Message);
     Contains("Internal risk labels", release.Message);
+    Contains("Release readiness score", release.Message);
     Contains("Improved tests", release.Message);
     Contains("Rollback plan", rollback.Message);
     Contains("src/Ali.Core/Coding/CodingToolContracts.cs", rollback.Message);
     Contains("Coding session timeline", timeline.Message);
+    Contains("Session journal:", timeline.Message);
+    Contains("Next recommended action:", timeline.Message);
+    Equal(true, File.Exists(Path.Combine(directory, "Coding", "coding-session-journal.json")));
     Contains("UI change checklist", checklist.Message);
     Contains("settings panel", checklist.Message);
 }
@@ -3337,11 +3347,15 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Service handlers:", commandSurface.Message);
     Contains("Dashboard bindings:", commandSurface.Message);
     Contains("Dashboard command graph:", commandSurface.Message);
+    Contains("Route diff tracker:", commandSurface.Message);
+    Contains("Route drift rows:", commandSurface.Message);
+    Equal(true, File.Exists(Path.Combine(directory, "Coding", "route-diff-tracker.json")));
     Contains("Before/after validation ledger", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 88%", miniCodex.Message);
+    Contains("Overall score: 92%", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
+    Contains("Mini-Codex self audit", miniCodex.Message);
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
 {

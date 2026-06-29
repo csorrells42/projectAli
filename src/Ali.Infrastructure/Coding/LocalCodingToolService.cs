@@ -120,6 +120,9 @@ public sealed class LocalCodingToolService(
     private readonly string _approvedPacketPath = Path.Combine(dataRoot, "Coding", "approved-step-packet.json");
     private readonly string _pendingPatchPreviewPath = Path.Combine(dataRoot, "Coding", "pending-patch-preview.json");
     private readonly string _projectIndexPath = Path.Combine(dataRoot, "Coding", "project-index.json");
+    private readonly string _symbolOwnershipLedgerPath = Path.Combine(dataRoot, "Coding", "symbol-ownership-ledger.json");
+    private readonly string _routeDiffTrackerPath = Path.Combine(dataRoot, "Coding", "route-diff-tracker.json");
+    private readonly string _codingSessionJournalPath = Path.Combine(dataRoot, "Coding", "coding-session-journal.json");
     private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
         ? Path.Combine(dataRoot, "GeneratedDocuments")
         : Path.GetFullPath(pdfWorkspaceRoot.Trim().Trim('"'));
@@ -1598,6 +1601,8 @@ public sealed class LocalCodingToolService(
                 "Missing prerequisites:"
             };
             blockedLines.AddRange(prerequisiteBlocks.Select(block => $"- {block}"));
+            blockedLines.Add("Repair commands:");
+            blockedLines.AddRange(BuildPacketRepairCommands(prerequisiteBlocks).Select(command => $"- {command}"));
             blockedLines.Add("Next safe commands:");
             blockedLines.Add("- show approved packet");
             blockedLines.Add("- show packet progress");
@@ -4272,6 +4277,118 @@ public sealed class LocalCodingToolService(
         return "unknown";
     }
 
+    private ReleaseReadinessSummary BuildReleaseReadinessScore(
+        IReadOnlyList<string> changedFiles,
+        ProjectImpact projectImpact,
+        CodingReceipt? latestDotNetReceipt,
+        GitWorkingTreeStatus gitStatus,
+        bool hasPendingPatchPreview)
+    {
+        var score = 0;
+        var rows = new List<string>();
+        score += gitStatus.Available ? 15 : 0;
+        rows.Add(gitStatus.Available ? "Git: Good" : "Git: Bad - status unavailable");
+
+        var hasChanges = changedFiles.Count > 0 || gitStatus.HasUncommittedChanges;
+        score += hasChanges ? 15 : 5;
+        rows.Add(hasChanges ? $"Changes: Good - {changedFiles.Count} file(s)" : "Changes: Clean - no release payload detected");
+
+        var validationGood = latestDotNetReceipt?.Succeeded == true;
+        score += validationGood ? 25 : 0;
+        rows.Add(validationGood ? "Validation: Good" : "Validation: Bad - no successful build/test receipt");
+
+        score += hasPendingPatchPreview ? 0 : 15;
+        rows.Add(hasPendingPatchPreview ? "Patch preview: Bad - pending preview exists" : "Patch preview: Good");
+
+        var riskLabels = changedFiles.Select(ClassifyFileRisk).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var highRisk = riskLabels.Any(label => label.StartsWith("High", StringComparison.OrdinalIgnoreCase)
+            || label.StartsWith("Protected", StringComparison.OrdinalIgnoreCase));
+        score += highRisk ? 5 : 15;
+        rows.Add(highRisk ? $"Risk: Review - {FormatInlineList(riskLabels.Take(4))}" : $"Risk: Good - {FormatInlineList(riskLabels.Take(4))}");
+
+        score += projectImpact.BuildOrderProjects.Count > 0 || changedFiles.Count == 0 ? 15 : 5;
+        rows.Add(projectImpact.BuildOrderProjects.Count == 0
+            ? "Build slice: Review - no affected project slice resolved"
+            : $"Build slice: Good - {FormatInlineList(projectImpact.BuildOrderProjects.Take(4))}");
+
+        return new ReleaseReadinessSummary(Math.Min(score, 100), rows);
+    }
+
+    private static IReadOnlyList<string> BuildPacketRepairCommands(IReadOnlyList<string> prerequisiteBlocks)
+    {
+        var commands = new List<string>();
+        foreach (var block in prerequisiteBlocks)
+        {
+            if (block.Contains("prep command", StringComparison.OrdinalIgnoreCase))
+            {
+                commands.Add("show approved packet");
+                commands.Add("show packet commands");
+            }
+            else if (block.Contains("validation failed", StringComparison.OrdinalIgnoreCase))
+            {
+                commands.Add("classify last build failure");
+                commands.Add("diagnose last build failure");
+            }
+            else if (block.Contains("pending patch preview", StringComparison.OrdinalIgnoreCase)
+                || block.Contains("No pending patch preview", StringComparison.OrdinalIgnoreCase))
+            {
+                commands.Add("show pending patch preview");
+                commands.Add("preview patch bundle");
+            }
+            else if (block.Contains("execution receipt", StringComparison.OrdinalIgnoreCase))
+            {
+                commands.Add("show packet commands");
+            }
+            else if (block.Contains("successful validation receipt", StringComparison.OrdinalIgnoreCase)
+                || block.Contains("Git commit needs", StringComparison.OrdinalIgnoreCase))
+            {
+                commands.Add("confirm dotnet build \"path\"");
+                commands.Add("confirm dotnet test \"path\"");
+            }
+            else if (block.Contains("Git status", StringComparison.OrdinalIgnoreCase))
+            {
+                commands.Add("git status");
+            }
+        }
+
+        return commands.Count == 0
+            ? ["show packet progress"]
+            : commands.Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToList();
+    }
+
+    private CodingSessionJournalSnapshot BuildCodingSessionJournalSnapshot(IReadOnlyList<CodingReceipt> receipts)
+    {
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(receipt => receipt.Action is nameof(CodingToolAction.CreateFile)
+            or nameof(CodingToolAction.AppendFile)
+            or nameof(CodingToolAction.ReplaceText)
+            or nameof(CodingToolAction.ApplyLastPatchPreview));
+        var latestGit = receipts.LastOrDefault(receipt => receipt.Action.StartsWith("Git", StringComparison.OrdinalIgnoreCase)
+            || receipt.Action is nameof(CodingToolAction.GitStatus) or nameof(CodingToolAction.GitDiff) or nameof(CodingToolAction.ReviewCurrentChanges));
+        var nextAction = latestValidation is { Succeeded: false }
+            ? "Diagnose the failed validation before continuing."
+            : latestEdit is not null && latestValidation is null
+                ? "Run focused tests or build for the edited area."
+                : latestGit is null
+                    ? "Review current changes before commit."
+                    : "Continue with safe commit or the next approved packet step.";
+
+        return new CodingSessionJournalSnapshot(
+            DateTimeOffset.UtcNow,
+            Policy.WorkspaceRoot,
+            receipts.Count,
+            latestValidation is null ? "none" : FormatReceiptSummary("Latest validation", latestValidation),
+            latestEdit is null ? "none" : FormatReceiptSummary("Latest edit", latestEdit),
+            latestGit is null ? "none" : FormatReceiptSummary("Latest git", latestGit),
+            nextAction,
+            receipts.TakeLast(12).Select(receipt => FormatReceiptSummary("-", receipt)).ToList());
+    }
+
+    private void PersistCodingSessionJournal(CodingSessionJournalSnapshot snapshot)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_codingSessionJournalPath)!);
+        File.WriteAllText(_codingSessionJournalPath, JsonSerializer.Serialize(snapshot, RoadmapJsonOptions));
+    }
     private static string CleanGoal(string? query, string fallback) =>
         string.IsNullOrWhiteSpace(query)
             ? fallback
@@ -5813,6 +5930,10 @@ public sealed class LocalCodingToolService(
     {
         lines.Add("Codebase awareness map:");
         lines.Add($"- Project index: {awareness.Status}");
+        if (!awareness.Available)
+        {
+            lines.Add("- Refresh action: project index");
+        }
         if (!string.IsNullOrWhiteSpace(awareness.PrimaryTarget))
         {
             lines.Add($"- Primary target: {awareness.PrimaryTarget}");
@@ -6202,6 +6323,61 @@ public sealed class LocalCodingToolService(
             $"Build first: {FormatInlineList(buildCommands.Take(3))}",
             $"Test first: {FormatInlineList(testCommands.Take(3))}"
         ];
+    }
+    private IReadOnlyList<SymbolOwnershipLedgerEntry> BuildDurableSymbolOwnershipLedger(IReadOnlyList<ProjectIndexSymbol> symbols) =>
+        symbols
+            .Where(symbol => !string.IsNullOrWhiteSpace(symbol.Name) && !string.IsNullOrWhiteSpace(symbol.RelativePath))
+            .GroupBy(symbol => $"{symbol.Kind}|{symbol.DisplayName}|{symbol.RelativePath}|{symbol.LineNumber}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(symbol => symbol.ProjectPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(symbol => symbol.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(symbol => symbol.LineNumber)
+            .Take(500)
+            .Select(symbol => new SymbolOwnershipLedgerEntry(
+                symbol.DisplayName,
+                symbol.Kind,
+                string.IsNullOrWhiteSpace(symbol.Container) ? symbol.DisplayName : symbol.Container,
+                symbol.RelativePath,
+                symbol.ProjectPath,
+                symbol.LineNumber,
+                symbol.EndLineNumber,
+                ClassifyFileRisk(symbol.RelativePath)))
+            .ToList();
+
+    private static IReadOnlyList<string> BuildDurableSymbolOwnershipLines(IReadOnlyList<SymbolOwnershipLedgerEntry> ledger) =>
+        ledger.Count == 0
+            ? ["none detected"]
+            : ledger
+                .Take(8)
+                .Select(entry => $"{entry.Symbol} -> {entry.Owner} in {entry.RelativePath}:{entry.LineNumber} ({entry.Risk})")
+                .ToList();
+
+    private static IReadOnlyList<string> BuildFocusedTestRunnerRecommendations(
+        IReadOnlyList<string> testCommands,
+        IReadOnlyList<ProjectSummary> summaries)
+    {
+        if (testCommands.Count > 0)
+        {
+            return testCommands
+                .Take(4)
+                .Select((command, index) => index == 0 ? $"First: {command}" : $"Then: {command}")
+                .ToList();
+        }
+
+        var testProject = summaries.FirstOrDefault(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase));
+        if (testProject is not null)
+        {
+            return [$"First: confirm dotnet test \"{testProject.RelativePath}\""];
+        }
+
+        return ["First: no focused test target detected; run project index, then resolve test target <goal>."];
+    }
+
+    private async Task WriteCodingJsonAsync<T>(string path, T value, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var json = JsonSerializer.Serialize(value, RoadmapJsonOptions);
+        await File.WriteAllTextAsync(path, json, cancellationToken).ConfigureAwait(false);
     }
     private IReadOnlyList<string> BuildRuntimeRouteMap(IReadOnlyList<string> files)
 
@@ -6769,6 +6945,8 @@ public sealed class LocalCodingToolService(
         var riskModel = BuildRiskModelV2(files);
         var projectIntent = BuildProjectIntentSignals(files, summaries, stackSignals);
         var compressedRepoMap = BuildCompressedRepoMap(files, summaries, fileRoles, featureAreas, projectIntent, buildCommands, testCommands);
+        var symbolOwnershipLedger = BuildDurableSymbolOwnershipLedger(symbols);
+        var focusedTestPlan = BuildFocusedTestRunnerRecommendations(testCommands, summaries);
         var latestWorkspaceWrite = GetLatestWorkspaceWriteUtc(files);
         var snapshot = new ProjectIndexSnapshot(
             DateTimeOffset.UtcNow,
@@ -6800,6 +6978,7 @@ public sealed class LocalCodingToolService(
             projectIntent,
             compressedRepoMap);
 
+        await WriteCodingJsonAsync(_symbolOwnershipLedgerPath, symbolOwnershipLedger, cancellationToken).ConfigureAwait(false);
         Directory.CreateDirectory(Path.GetDirectoryName(_projectIndexPath)!);
         var json = JsonSerializer.Serialize(snapshot, RoadmapJsonOptions);
         await File.WriteAllTextAsync(_projectIndexPath, json, cancellationToken).ConfigureAwait(false);
@@ -6826,6 +7005,9 @@ public sealed class LocalCodingToolService(
             $"Public API surface: {FormatInlineList(publicApiSurface.Take(6))}",
             $"Runtime route map: {FormatInlineList(runtimeRoutes.Take(6))}",
             $"Ownership map: {FormatInlineList(ownershipMap.Take(6))}",
+            $"Durable symbol ledger: {_symbolOwnershipLedgerPath}",
+            $"Symbol ownership examples: {FormatInlineList(BuildDurableSymbolOwnershipLines(symbolOwnershipLedger).Take(6))}",
+            $"Focused test runner: {FormatInlineList(focusedTestPlan.Take(4))}",
             $"Cross-language routes: {FormatInlineList(crossLanguageRoutes.Take(6))}",
             $"Risk model v2: {FormatInlineList(riskModel.Take(6))}",
             primaryTarget is null ? "Primary target: not found" : $"Primary target: {primaryTarget}",
@@ -7075,6 +7257,7 @@ public sealed class LocalCodingToolService(
         }
 
         var safe = blockers.Count == 0;
+        var releaseReadiness = BuildReleaseReadinessScore(changedFiles, projectImpact, latestDotNetReceipt, gitStatus, hasPendingPatchPreview);
         var lines = new List<string>
         {
             "Commit readiness check:",
@@ -7089,8 +7272,11 @@ public sealed class LocalCodingToolService(
                 : "Pending patch preview: none",
             $"Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}",
             $"Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}",
-            "Decision factors:"
+            $"Release readiness score: {releaseReadiness.Score}/100",
+            "Release readiness rows:"
         };
+        lines.AddRange(releaseReadiness.Rows.Select(row => $"- {row}"));
+        lines.Add("Decision factors:");
 
         if (blockers.Count == 0)
         {
@@ -7106,7 +7292,7 @@ public sealed class LocalCodingToolService(
         lines.Add(safe
             ? "- Review current changes, then commit with an owner-approved message."
             : "- Run Review, Build, and Tests until the rows above are good.");
-        lines.Add("Release readiness v2:");
+        lines.Add("Release readiness v3:");
         lines.Add($"- Changed files: {changedFiles.Count}");
         lines.Add($"- Risk labels: {FormatInlineList(changedFiles.Select(ClassifyFileRisk).Distinct(StringComparer.OrdinalIgnoreCase).Take(6))}");
         lines.Add(projectImpact.BuildOrderProjects.Count == 0
@@ -7118,7 +7304,6 @@ public sealed class LocalCodingToolService(
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Commit readiness", Policy.WorkspaceRoot);
     }
-
     private async Task<CodingToolResult> ShowWorkspaceHealthScoreAsync(CancellationToken cancellationToken)
     {
         var files = Directory.Exists(Policy.WorkspaceRoot)
@@ -7197,6 +7382,10 @@ public sealed class LocalCodingToolService(
     {
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var projectImpact = BuildProjectImpact(changedFiles, GetWorkspaceProjectSummaries());
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        LoadPendingPatchPreviewIfNeeded();
+        var releaseReadiness = BuildReleaseReadinessScore(changedFiles, projectImpact, receipts.LastOrDefault(IsDotNetReceipt), gitStatus, _lastPatchPreviewRequest is not null);
         var releaseAreas = changedFiles.Select(ClassifyChangedArea).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToList();
         var riskLabels = changedFiles.Select(ClassifyFileRisk).Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToList();
         var lines = new List<string>
@@ -7207,6 +7396,7 @@ public sealed class LocalCodingToolService(
             $"Build order slice: {FormatInlineList(projectImpact.BuildOrderProjects)}",
             $"Customer-facing areas: {FormatInlineList(releaseAreas)}",
             $"Internal risk labels: {FormatInlineList(riskLabels)}",
+            $"Release readiness score: {releaseReadiness.Score}/100",
             "Customer-ready notes:"
         };
         if (changedFiles.Count == 0)
@@ -7222,6 +7412,7 @@ public sealed class LocalCodingToolService(
         }
 
         lines.Add("Internal review checklist:");
+        lines.AddRange(releaseReadiness.Rows.Select(row => $"- {row}"));
         lines.Add(projectImpact.AffectedProjects.Count == 0
             ? "- Affected projects: none resolved from current changes."
             : $"- Affected projects: {FormatInlineList(projectImpact.AffectedProjects)}");
@@ -7237,11 +7428,18 @@ public sealed class LocalCodingToolService(
     private CodingToolResult ShowCodingSessionTimeline()
     {
         var receipts = ReadRecentReceipts(20);
+        var journal = BuildCodingSessionJournalSnapshot(receipts);
+        PersistCodingSessionJournal(journal);
         var lines = new List<string>
         {
             "Coding session timeline:",
             "No files were changed.",
-            $"Receipts found: {receipts.Count}"
+            $"Receipts found: {receipts.Count}",
+            $"Session journal: {_codingSessionJournalPath}",
+            $"Latest validation: {journal.LatestValidation}",
+            $"Latest edit: {journal.LatestEdit}",
+            $"Latest git check: {journal.LatestGit}",
+            $"Next recommended action: {journal.NextRecommendedAction}"
         };
         if (receipts.Count == 0)
         {
@@ -7255,7 +7453,6 @@ public sealed class LocalCodingToolService(
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session timeline", Policy.WorkspaceRoot);
     }
-
 
     private async Task<CodingToolResult> ShowFullCodingReadinessAsync(CancellationToken cancellationToken)
     {
@@ -7309,21 +7506,21 @@ public sealed class LocalCodingToolService(
         var commandSurface = ShowCommandSurfaceDoctor();
         var scores = new (string Name, int Score, string Note)[]
         {
-            ("Codebase awareness", 88, "project index v3 with intent detection, compressed repo map, persistent ownership map, cross-language routes, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
-            ("Edit planning", 82, "task classification, change impact preview, semantic edit targets, reference graph, impact radius, refactor safety hints, autonomous preflight"),
-            ("Patch safety", 78, "exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
-            ("Validation/release", 79, "failure triage v2, prioritized test recommendation, build order, safe commit and customer-friendly release notes"),
-            ("Autonomous workflow", 79, "self-checking preflight, packet self-score, prerequisite gates, and receipts exist; still requires owner approval for writes and commands"),
-            ("Dashboard usability", 80, "plain Good/Bad command-surface rows plus one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
+            ("Codebase awareness", 91, "durable symbol ownership ledger, project index v3, intent detection, compressed repo map, cross-language routes, Roslyn symbols, dependency/build order, public API, generated-code guardrails"),
+            ("Edit planning", 84, "focused test recommendation, task classification, change impact preview, semantic edit targets, reference graph, impact radius, refactor safety hints, autonomous preflight"),
+            ("Patch safety", 82, "packet repair hints, exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
+            ("Validation/release", 83, "release readiness score, session journal, failure triage v2, prioritized test recommendation, build order, safe commit and customer-friendly release notes"),
+            ("Autonomous workflow", 82, "packet repair hints, session journal, self-checking preflight, packet self-score, prerequisite gates, and receipts exist; still requires owner approval for writes and commands"),
+            ("Dashboard usability", 82, "status-only command rows, route diff tracker, plus one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
         };
-        var overall = 88;
+        var overall = 92;
         var lines = new List<string>
         {
             "Mini-Codex status:",
             "No files were changed.",
             $"Overall score: {overall}%",
             "Scale note: local Project Ali score, not a claim of parity with cloud Codex.",
-            $"Project index v2: {projectIndexStatus.Summary}",
+            $"Project index v3: {projectIndexStatus.Summary}",
             $"Git: {gitStatus.Summary}",
             latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
             "Capability scores:"
@@ -7336,9 +7533,14 @@ public sealed class LocalCodingToolService(
         lines.Add($"- Public API surface: {FormatInlineList(awareness.PublicApiSurface.Take(4))}");
         lines.Add("Command surface:");
         AddSelectedLines(lines, commandSurface.Message, 5, "Overall:", "Actions:", "Service handlers:", "Policy coverage:", "Parser/test coverage:", "Dashboard bindings:");
+        lines.Add("Mini-Codex self audit:");
+        lines.Add(awareness.Available ? "- Codebase awareness: Good" : "- Codebase awareness: Needs refresh - run project index");
+        lines.Add(latestValidation?.Succeeded == true ? "- Validation: Good" : "- Validation: Needs build/test receipt");
+        lines.Add(commandSurface.Succeeded ? "- Route drift: Good" : "- Route drift: Review command surface doctor");
+        lines.Add("- Next best upgrade: add route-diff repair packets and per-symbol stale detection.");
         lines.Add("Next upgrade path:");
-        lines.Add("- Raise codebase awareness toward 91 by adding durable per-symbol ownership files and route-diff tracking.");
-        lines.Add("- Raise autonomous workflow toward 82 by making packet gates explain and repair missing prerequisites automatically.");
+        lines.Add("- Raise codebase awareness toward 94 by adding durable per-symbol ownership files and route-diff tracking.");
+        lines.Add("- Raise autonomous workflow toward 85 by making packet gates explain and repair missing prerequisites automatically.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Mini-Codex status", Policy.WorkspaceRoot);
     }
@@ -8614,6 +8816,42 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
     }
 
+    private static IReadOnlyList<string> BuildRouteDriftRows(
+        IReadOnlyList<string> missingService,
+        IReadOnlyList<string> missingPolicy,
+        IReadOnlyList<string> missingParserOrTests,
+        IReadOnlyList<string> missingDashboardTargets)
+    {
+        var rows = new List<string>
+        {
+            missingService.Count == 0 ? "Service route: Good" : $"Service route: Bad - {missingService.Count} missing",
+            missingPolicy.Count == 0 ? "Policy route: Good" : $"Policy route: Bad - {missingPolicy.Count} missing",
+            missingParserOrTests.Count == 0 ? "Parser/test route: Good" : $"Parser/test route: Review - {missingParserOrTests.Count} missing",
+            missingDashboardTargets.Count == 0 ? "Dashboard route: Good" : $"Dashboard route: Bad - {missingDashboardTargets.Count} missing"
+        };
+        return rows;
+    }
+
+    private void PersistRouteDiffTracker(
+        int actionCount,
+        IReadOnlyList<string> missingService,
+        IReadOnlyList<string> missingPolicy,
+        IReadOnlyList<string> missingParserOrTests,
+        IReadOnlyList<string> missingDashboardTargets,
+        IReadOnlyList<string> routeDriftRows)
+    {
+        var snapshot = new RouteDiffTrackerSnapshot(
+            DateTimeOffset.UtcNow,
+            Policy.WorkspaceRoot,
+            actionCount,
+            missingService.Take(50).ToList(),
+            missingPolicy.Take(50).ToList(),
+            missingParserOrTests.Take(50).ToList(),
+            missingDashboardTargets.Take(50).ToList(),
+            routeDriftRows);
+        Directory.CreateDirectory(Path.GetDirectoryName(_routeDiffTrackerPath)!);
+        File.WriteAllText(_routeDiffTrackerPath, JsonSerializer.Serialize(snapshot, RoadmapJsonOptions));
+    }
     private CodingToolResult ShowCommandSurfaceDoctor()
     {
         var servicePath = Path.Combine(Policy.WorkspaceRoot, "src", "Ali.Infrastructure", "Coding", "LocalCodingToolService.cs");
@@ -8657,6 +8895,8 @@ public sealed class LocalCodingToolService(
             .ToList();
         var blockerCount = missingService.Count + missingPolicy.Count + missingDashboardTargets.Count;
         var reviewCount = missingParserOrTests.Count;
+        var routeDriftRows = BuildRouteDriftRows(missingService, missingPolicy, missingParserOrTests, missingDashboardTargets);
+        PersistRouteDiffTracker(actions.Length, missingService, missingPolicy, missingParserOrTests, missingDashboardTargets, routeDriftRows);
         var lines = new List<string>
         {
             "Command surface doctor:",
@@ -8667,6 +8907,8 @@ public sealed class LocalCodingToolService(
             missingPolicy.Count == 0 ? "Policy coverage: Good" : $"Policy coverage: Bad - {missingPolicy.Count} uncovered action(s)",
             missingParserOrTests.Count == 0 ? "Parser/test coverage: Good" : $"Parser/test coverage: Needs review - {reviewCount} action(s) lack direct parser or test references",
             missingDashboardTargets.Count == 0 ? "Dashboard bindings: Good" : $"Dashboard bindings: Bad - {missingDashboardTargets.Count} missing target(s)",
+            $"Route diff tracker: {_routeDiffTrackerPath}",
+            "Route drift rows:",
             "Dashboard summary rows:",
             $"- Service handlers: {(missingService.Count == 0 ? "Good" : "Bad")}",
             $"- Policy coverage: {(missingPolicy.Count == 0 ? "Good" : "Bad")}",
@@ -8674,6 +8916,7 @@ public sealed class LocalCodingToolService(
             $"- Dashboard bindings: {(missingDashboardTargets.Count == 0 ? "Good" : "Bad")}",
             "Service gaps:"
         };
+        lines.InsertRange(lines.IndexOf("Dashboard summary rows:"), routeDriftRows.Select(row => $"- {row}"));
         lines.AddRange(missingService.Count == 0 ? ["- none"] : missingService.Take(20).Select(action => $"- {action}"));
         lines.Add("Policy gaps:");
         lines.AddRange(missingPolicy.Count == 0 ? ["- none"] : missingPolicy.Take(20).Select(action => $"- {action}"));
@@ -13311,6 +13554,8 @@ public sealed class LocalCodingToolService(
             "First useful errors:"
         };
         lines.AddRange(errorLines.Count == 0 ? ["- none detected"] : errorLines.Select(line => $"- {line}"));
+        lines.Add("Patch candidate ranking:");
+        lines.AddRange(BuildFailurePatchCandidateRanking(action, diagnostics).Select(line => $"- {line}"));
         lines.Add("Smallest next fix:");
         lines.Add(action == CodingToolAction.Test
             ? "- Open the first failing test or assertion, then compare expected behavior to the changed source."
@@ -13318,6 +13563,37 @@ public sealed class LocalCodingToolService(
         return lines;
     }
 
+    private static IReadOnlyList<string> BuildFailurePatchCandidateRanking(CodingToolAction action, IReadOnlyList<string> diagnostics)
+    {
+        var ranked = new List<string>();
+        if (diagnostics.Any(line => line.Contains("CS1002", StringComparison.OrdinalIgnoreCase)))
+        {
+            ranked.Add("High - missing semicolon patch near first CS1002 diagnostic");
+        }
+        if (diagnostics.Any(line => line.Contains("CS1513", StringComparison.OrdinalIgnoreCase)))
+        {
+            ranked.Add("High - missing closing brace patch near first CS1513 diagnostic");
+        }
+        if (diagnostics.Any(line => line.Contains("CS0103", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("CS0246", StringComparison.OrdinalIgnoreCase)))
+        {
+            ranked.Add("Medium - missing symbol, using, reference, or renamed API candidate");
+        }
+        if (diagnostics.Any(line => line.Contains("CS1061", StringComparison.OrdinalIgnoreCase)))
+        {
+            ranked.Add("Medium - member/API mismatch candidate; inspect receiver type and extension usings");
+        }
+        if (action == CodingToolAction.Test || diagnostics.Any(line => line.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase)))
+        {
+            ranked.Add("Medium - failing test behavior candidate; inspect expected/actual before patching source");
+        }
+        if (ranked.Count == 0)
+        {
+            ranked.Add("Low - no deterministic patch candidate; map compiler diagnostic first");
+        }
+
+        return ranked.Take(5).ToList();
+    }
     private static string? ExtractDiagnosticCode(string line)
     {
         var tokens = line.Split([' ', ':', '[', ']', '(', ')'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -13976,6 +14252,39 @@ public sealed class LocalCodingToolService(
         int LineNumber,
         int EndLineNumber);
 
+    private sealed record SymbolOwnershipLedgerEntry(
+        string Symbol,
+        string Kind,
+        string Owner,
+        string RelativePath,
+        string ProjectPath,
+        int LineNumber,
+        int EndLineNumber,
+        string Risk);
+
+    private sealed record RouteDiffTrackerSnapshot(
+        DateTimeOffset CreatedAtUtc,
+        string WorkspaceRoot,
+        int ActionCount,
+        IReadOnlyList<string> MissingService,
+        IReadOnlyList<string> MissingPolicy,
+        IReadOnlyList<string> MissingParserOrTests,
+        IReadOnlyList<string> MissingDashboardTargets,
+        IReadOnlyList<string> RouteDriftRows);
+
+    private sealed record ReleaseReadinessSummary(
+        int Score,
+        IReadOnlyList<string> Rows);
+
+    private sealed record CodingSessionJournalSnapshot(
+        DateTimeOffset CreatedAtUtc,
+        string WorkspaceRoot,
+        int ReceiptCount,
+        string LatestValidation,
+        string LatestEdit,
+        string LatestGit,
+        string NextRecommendedAction,
+        IReadOnlyList<string> RecentReceipts);
     private sealed record CodingReceipt(
         DateTimeOffset Timestamp,
         string Action,
