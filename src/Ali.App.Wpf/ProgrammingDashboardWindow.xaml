@@ -83,6 +83,8 @@
                                         Command="{Binding RunCodingProjectIntelligenceCommand}" />
                                 <Button Content="Understand Repo"
                                         Command="{Binding RunCodingRepoUnderstandingCommand}" />
+                                <Button Content="Context"
+                                        Command="{Binding RunCodingContextPacketCommand}" />
                                 <Button Content="Full Readiness"
                                         Command="{Binding RunCodingFullReadinessCommand}"
                                         BorderBrush="#1E6B49"

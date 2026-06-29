@@ -265,6 +265,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingWorkspaceDiagnosticCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding workspace", "inspect coding workspace", "Coding.WorkspaceDiagnostic"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingContextPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Context packet", "coding context packet current coding work", "Coding.ContextPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFullReadinessCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Full readiness", "full coding readiness", "Coding.FullReadiness"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -685,6 +686,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingProjectIntelligenceCommand { get; }
 
     public ICommand RunCodingRepoUnderstandingCommand { get; }
+
+    public ICommand RunCodingContextPacketCommand { get; }
 
     public ICommand RunCodingFullReadinessCommand { get; }
 
@@ -6576,6 +6579,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingRepoUnderstandingCommand is AsyncRelayCommand runCodingRepoUnderstanding)
         {
             runCodingRepoUnderstanding.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingContextPacketCommand is AsyncRelayCommand runCodingContextPacket)
+        {
+            runCodingContextPacket.RaiseCanExecuteChanged();
         }
 
         if (RunCodingFullReadinessCommand is AsyncRelayCommand runCodingFullReadiness)
