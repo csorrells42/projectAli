@@ -118,6 +118,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool reads and searches workspace", TestLocalCodingToolReadsAndSearchesWorkspace),
     ("local coding tool inspects workspace project map", TestLocalCodingToolInspectsWorkspaceProjectMap),
     ("local coding tool shows project intelligence", TestLocalCodingToolShowsProjectIntelligence),
+    ("local coding tool builds project index", TestLocalCodingToolBuildsProjectIndex),
     ("local coding tool shows repo understanding", TestLocalCodingToolShowsRepoUnderstanding),
     ("local coding tool shows coding context packet", TestLocalCodingToolShowsCodingContextPacket),
     ("local coding tool shows safe commit check", TestLocalCodingToolShowsSafeCommitCheck),
@@ -577,6 +578,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("Ali coding skill command index", builderIndex);
     Contains("show visual studio integration", builderIndex);
     Contains("coding context packet", builderIndex);
+    Contains("project index", builderIndex);
     Contains("confirm run packet item N", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
@@ -656,6 +658,9 @@ static Task TestCodingParserRoutesProjectIntelligence()
 
     Equal(true, CodingToolRequestParser.TryParse("repo intelligence", out var repoRequest));
     Equal(CodingToolAction.ShowProjectIntelligence, repoRequest.Action);
+
+    Equal(true, CodingToolRequestParser.TryParse("project index", out var indexRequest));
+    Equal(CodingToolAction.ShowProjectIndex, indexRequest.Action);
     return Task.CompletedTask;
 }
 
@@ -2541,6 +2546,71 @@ static async Task TestLocalCodingToolShowsProjectIntelligence()
     Contains("confirm dotnet test", result.Message);
     Contains("npm run build", result.Message);
     Contains("pytest", result.Message);
+}
+
+static async Task TestLocalCodingToolBuildsProjectIndex()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Demo.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "Demo.App.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "WidgetService.cs"),
+        """
+        namespace Demo.App;
+        public sealed class WidgetService
+        {
+            public string Save() => "saved";
+        }
+        """);
+
+    var testsDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testsDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+          </ItemGroup>
+        </Project>
+        """);
+
+    var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher());
+
+    var result = await service.TryHandleAsync("project index", CancellationToken.None);
+
+    Equal(true, result.Handled);
+    Equal(true, result.Succeeded);
+    Contains("Project index", result.Message);
+    Contains("Files indexed:", result.Message);
+    Contains("Projects: 2", result.Message);
+    Contains("Symbols:", result.Message);
+    Contains("Build commands:", result.Message);
+    Contains("Test commands:", result.Message);
+
+    var indexPath = Path.Combine(directory, "Coding", "project-index.json");
+    Equal(true, File.Exists(indexPath));
+    var json = await File.ReadAllTextAsync(indexPath);
+    Contains("Demo.App.csproj", json);
+    Contains("Demo.Tests.csproj", json);
+    Contains("WidgetService", json);
+    Contains("Microsoft.NET.Test.Sdk", json);
 }
 
 static async Task TestLocalCodingToolShowsRepoUnderstanding()

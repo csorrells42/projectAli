@@ -104,7 +104,7 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Analyzing solution architecture in the approved coding workspace is read-only and allowed.");
         }
 
-        if (request.Action == CodingToolAction.ShowProjectIntelligence)
+        if (request.Action is CodingToolAction.ShowProjectIntelligence or CodingToolAction.ShowProjectIndex)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Scanning project intelligence in the approved coding workspace is read-only and allowed.");
         }

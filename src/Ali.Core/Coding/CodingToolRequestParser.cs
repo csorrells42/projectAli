@@ -1015,6 +1015,18 @@ public static class CodingToolRequestParser
         "summarize project intelligence"
     ];
 
+    private static readonly string[] ProjectIndexRequests =
+    [
+        "project index",
+        "show project index",
+        "build project index",
+        "rebuild project index",
+        "coding project index",
+        "persistent project index",
+        "mini codex project index",
+        "mini-codex project index"
+    ];
+
     private static readonly string[] RepoUnderstandingRequests =
     [
         "understand repo",
@@ -1534,6 +1546,12 @@ public static class CodingToolRequestParser
         if (IsProjectIntelligenceRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowProjectIntelligence, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsProjectIndexRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowProjectIndex, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -2062,6 +2080,9 @@ public static class CodingToolRequestParser
 
     private static bool IsProjectIntelligenceRequest(string text) =>
         ProjectIntelligenceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsProjectIndexRequest(string text) =>
+        ProjectIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsRepoUnderstandingRequest(string text) =>
         RepoUnderstandingRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

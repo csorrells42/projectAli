@@ -118,6 +118,7 @@ public sealed class LocalCodingToolService(
     private readonly string _roadmapStatePath = Path.Combine(dataRoot, "Coding", "roadmap-execution-state.json");
     private readonly string _approvedPacketPath = Path.Combine(dataRoot, "Coding", "approved-step-packet.json");
     private readonly string _pendingPatchPreviewPath = Path.Combine(dataRoot, "Coding", "pending-patch-preview.json");
+    private readonly string _projectIndexPath = Path.Combine(dataRoot, "Coding", "project-index.json");
     private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
         ? Path.Combine(dataRoot, "GeneratedDocuments")
         : Path.GetFullPath(pdfWorkspaceRoot.Trim().Trim('"'));
@@ -236,6 +237,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.InspectWorkspace => InspectWorkspace(),
             CodingToolAction.AnalyzeArchitecture => AnalyzeArchitecture(),
             CodingToolAction.ShowProjectIntelligence => ShowProjectIntelligence(),
+            CodingToolAction.ShowProjectIndex => await ShowProjectIndexAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowRepoUnderstanding => await ShowRepoUnderstandingAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCodingContextPacket => await ShowCodingContextPacketAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowSafeCommitCheck => await ShowSafeCommitCheckAsync(cancellationToken).ConfigureAwait(false),
@@ -5356,6 +5358,91 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Project intelligence",
             Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowProjectIndexAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                $"Coding workspace does not exist yet: {Policy.WorkspaceRoot}",
+                "Project index",
+                Policy.WorkspaceRoot);
+        }
+
+        var files = EnumerateWorkspaceFiles().Take(10_000).ToList();
+        var solutions = files
+            .Where(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Select(RelativeToWorkspace)
+            .ToList();
+        var projectFiles = files
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var summaries = projectFiles
+            .Take(MaxWorkspaceSummaryEntries)
+            .Select(ReadProjectSummary)
+            .ToList();
+        var primaryTarget = TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? RelativeToWorkspace(primary)
+            : null;
+        var stackSignals = DetectStackSignals(files, summaries);
+        var styleSignals = DetectStyleSignals(files, summaries);
+        var markers = FindProjectMarkers(files);
+        var entryFiles = files
+            .Where(IsLikelyEntryPoint)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .Select(RelativeToWorkspace)
+            .ToList();
+        var buildCommands = DiscoverBuildCommands(files, summaries, primary is null ? null : primary).ToList();
+        var testCommands = DiscoverTestCommands(files, summaries, primary is null ? null : primary).ToList();
+        var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 500)
+            .Select(symbol => new ProjectIndexSymbol(symbol.Kind, symbol.Name, RelativeToWorkspace(symbol.Path), symbol.LineNumber))
+            .ToList();
+        var snapshot = new ProjectIndexSnapshot(
+            DateTimeOffset.UtcNow,
+            Policy.WorkspaceRoot,
+            files.Count,
+            primaryTarget,
+            solutions,
+            summaries,
+            stackSignals,
+            styleSignals,
+            markers,
+            entryFiles,
+            buildCommands,
+            testCommands,
+            symbols);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_projectIndexPath)!);
+        var json = JsonSerializer.Serialize(snapshot, RoadmapJsonOptions);
+        await File.WriteAllTextAsync(_projectIndexPath, json, cancellationToken).ConfigureAwait(false);
+
+        var lines = new List<string>
+        {
+            "Project index:",
+            "No files were changed in the workspace.",
+            $"Index file: {_projectIndexPath}",
+            $"Workspace: {Policy.WorkspaceRoot}",
+            $"Files indexed: {files.Count}",
+            $"Solutions: {solutions.Count}",
+            $"Projects: {summaries.Count}",
+            $"Symbols: {symbols.Count}",
+            primaryTarget is null ? "Primary target: not found" : $"Primary target: {primaryTarget}",
+            $"Stacks: {FormatInlineList(stackSignals)}",
+            $"Style signals: {FormatInlineList(styleSignals)}",
+            $"Build commands: {FormatInlineList(buildCommands)}",
+            $"Test commands: {FormatInlineList(testCommands)}",
+            "Next - use coding context packet, safe edit workflow, or resolve test target against this refreshed index."
+        };
+
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Project index", _projectIndexPath);
     }
 
     private async Task<CodingToolResult> ShowRepoUnderstandingAsync(CancellationToken cancellationToken)
@@ -10854,6 +10941,26 @@ public sealed class LocalCodingToolService(
         string Command,
         IReadOnlyList<string> Notes);
 
+    private sealed record ProjectIndexSnapshot(
+        DateTimeOffset CreatedAtUtc,
+        string WorkspaceRoot,
+        int FileCount,
+        string? PrimaryTarget,
+        IReadOnlyList<string> Solutions,
+        IReadOnlyList<ProjectSummary> Projects,
+        IReadOnlyList<string> StackSignals,
+        IReadOnlyList<string> StyleSignals,
+        IReadOnlyList<string> Markers,
+        IReadOnlyList<string> EntryFiles,
+        IReadOnlyList<string> BuildCommands,
+        IReadOnlyList<string> TestCommands,
+        IReadOnlyList<ProjectIndexSymbol> Symbols);
+
+    private sealed record ProjectIndexSymbol(
+        string Kind,
+        string Name,
+        string RelativePath,
+        int LineNumber);
     private sealed record ProjectSummary(
         string RelativePath,
         string ProjectRole,
