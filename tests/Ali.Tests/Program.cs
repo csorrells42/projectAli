@@ -725,6 +725,22 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowCallGraph, callGraphRequest.Action);
     Equal("Save", callGraphRequest.Query);
 
+    Equal(true, CodingToolRequestParser.TryParse("resolve symbol Save", out var semanticRequest));
+    Equal(CodingToolAction.ResolveSemanticSymbol, semanticRequest.Action);
+    Equal("Save", semanticRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("show impacted tests Save", out var impactedRequest));
+    Equal(CodingToolAction.ShowImpactedTests, impactedRequest.Action);
+    Equal("Save", impactedRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("semantic edit plan Save button", out var editPlanRequest));
+    Equal(CodingToolAction.PlanSemanticEdit, editPlanRequest.Action);
+    Equal("Save button", editPlanRequest.Query);
+
+    Equal(true, CodingToolRequestParser.TryParse("map compiler diagnostic CS0103", out var diagnosticRequest));
+    Equal(CodingToolAction.MapCompilerDiagnostic, diagnosticRequest.Action);
+    Equal("CS0103", diagnosticRequest.Query);
+
     Equal(true, CodingToolRequestParser.TryParse("xaml binding check", out var bindingRequest));
     Equal(CodingToolAction.VerifyXamlBindings, bindingRequest.Action);
 
@@ -2709,6 +2725,17 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
             private void Helper() { }
         }
         """);
+    var testsDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testsDirectory);
+    await File.WriteAllTextAsync(
+        Path.Combine(testsDirectory, "MainWindowViewModelTests.cs"),
+        """
+        namespace Demo.Tests;
+        public sealed class MainWindowViewModelTests
+        {
+            public void Save_runs_helper_path() { }
+        }
+        """);
     var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false));
     var service = new LocalCodingToolService(new CodingWorkspacePolicy(workspace), directory, new FakeCodingProcessLauncher(), runner);
 
@@ -2717,6 +2744,11 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var command = await service.TryHandleAsync("command binding check", CancellationToken.None);
     var symbolIndex = await service.TryHandleAsync("show csharp symbol index", CancellationToken.None);
     var callGraph = await service.TryHandleAsync("show call graph Save", CancellationToken.None);
+    var semantic = await service.TryHandleAsync("resolve symbol Save", CancellationToken.None);
+    var impacted = await service.TryHandleAsync("show impacted tests Save", CancellationToken.None);
+    var editPlan = await service.TryHandleAsync("semantic edit plan Save button", CancellationToken.None);
+    var diagnosticText = $"{Path.Combine(appDirectory, "MainWindowViewModel.cs")}(7,20): error CS0103: The name 'MissingName' does not exist in the current context";
+    var diagnostic = await service.TryHandleAsync($"map compiler diagnostic {diagnosticText}", CancellationToken.None);
     var deadCommands = await service.TryHandleAsync("dead command scan", CancellationToken.None);
     var ledger = await service.TryHandleAsync("show validation ledger", CancellationToken.None);
 
@@ -2736,6 +2768,15 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("property Title", symbolIndex.Message);
     Contains("Call graph", callGraph.Message);
     Contains("Save -> Helper", callGraph.Message);
+    Contains("Semantic symbol resolver", semantic.Message);
+    Contains("method Demo.App.MainWindowViewModel.Save()", semantic.Message);
+    Contains("Impacted tests", impacted.Message);
+    Contains("MainWindowViewModelTests.cs", impacted.Message);
+    Contains("Semantic edit plan", editPlan.Message);
+    Contains("MainWindowViewModel.cs", editPlan.Message);
+    Contains("Compiler diagnostic mapper", diagnostic.Message);
+    Contains("Code: CS0103", diagnostic.Message);
+    Contains("Nearest symbol: method Save", diagnostic.Message);
     Contains("Dead command scan", deadCommands.Message);
     Contains("Before/after validation ledger", ledger.Message);
 }
@@ -9243,3 +9284,4 @@ internal sealed class FakeSpeechPlayer(bool completeImmediately = false) : ISpee
         IsSpeaking = false;
     }
 }
+

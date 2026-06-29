@@ -1201,6 +1201,40 @@ public static class CodingToolRequestParser
         "what calls"
     ];
 
+    private static readonly string[] SemanticSymbolPrefixes =
+    [
+        "resolve symbol",
+        "semantic symbol",
+        "explain symbol",
+        "what is symbol"
+    ];
+
+    private static readonly string[] ImpactedTestsPrefixes =
+    [
+        "show impacted tests",
+        "impacted tests",
+        "impact report",
+        "what tests should i run for",
+        "tests for change"
+    ];
+
+    private static readonly string[] SemanticEditPlanPrefixes =
+    [
+        "semantic edit plan",
+        "plan semantic edit",
+        "safe edit plan",
+        "plan edit"
+    ];
+
+    private static readonly string[] DiagnosticMapperPrefixes =
+    [
+        "map compiler diagnostic",
+        "map build diagnostic",
+        "diagnostic mapper",
+        "map diagnostic",
+        "explain diagnostic"
+    ];
+
     private static readonly string[] TestGapRequests =
     [
         "show test gap report",
@@ -1549,6 +1583,10 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(trimmed, SymbolFinderPrefixes, CodingToolAction.FindSymbol, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, CrossReferencePrefixes, CodingToolAction.ShowCrossReferenceMap, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, CallGraphPrefixes, CodingToolAction.ShowCallGraph, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, SemanticSymbolPrefixes, CodingToolAction.ResolveSemanticSymbol, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, ImpactedTestsPrefixes, CodingToolAction.ShowImpactedTests, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, SemanticEditPlanPrefixes, CodingToolAction.PlanSemanticEdit, userConfirmed, out request)
+            || TryParsePrefixedQuery(trimmed, DiagnosticMapperPrefixes, CodingToolAction.MapCompilerDiagnostic, userConfirmed, out request)
             || TryParsePrefixedQuery(trimmed, KnownErrorPrefixes, CodingToolAction.ExplainKnownError, userConfirmed, out request))
         {
             return true;

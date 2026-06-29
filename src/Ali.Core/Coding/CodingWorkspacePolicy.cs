@@ -128,6 +128,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowValidationLedger
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowCallGraph
+            or CodingToolAction.ResolveSemanticSymbol
+            or CodingToolAction.ShowImpactedTests
+            or CodingToolAction.PlanSemanticEdit
+            or CodingToolAction.MapCompilerDiagnostic
             or CodingToolAction.VerifyXamlBindings
             or CodingToolAction.VerifyCommandBindings
             or CodingToolAction.ScanDeadCommands)

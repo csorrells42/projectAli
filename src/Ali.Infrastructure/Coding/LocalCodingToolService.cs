@@ -201,6 +201,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowValidationLedger => ShowValidationLedger(),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
             CodingToolAction.ShowCallGraph => ShowCallGraph(request),
+            CodingToolAction.ResolveSemanticSymbol => ResolveSemanticSymbol(request),
+            CodingToolAction.ShowImpactedTests => await ShowImpactedTestsAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PlanSemanticEdit => await PlanSemanticEditAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.MapCompilerDiagnostic => MapCompilerDiagnostic(request),
             CodingToolAction.VerifyXamlBindings => VerifyXamlBindings(),
             CodingToolAction.VerifyCommandBindings => VerifyCommandBindings(),
             CodingToolAction.ScanDeadCommands => ScanDeadCommands(),
@@ -5631,6 +5635,159 @@ public sealed class LocalCodingToolService(
         lines.Add("Note - this is syntax-level and does not resolve overloads, virtual dispatch, reflection, or generated code yet.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Call graph", Policy.WorkspaceRoot);
     }
+    private CodingToolResult ResolveSemanticSymbol(CodingToolRequest request)
+    {
+        var query = CleanGoal(request.Query, string.Empty);
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return new CodingToolResult(true, false, "Semantic symbol resolver needs a symbol name.", "Semantic symbol resolver", Policy.WorkspaceRoot);
+        }
+
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var hits = FindSemanticSymbolHits(workspace, query, 40);
+        var declarations = hits.Where(hit => hit.Source == "declaration").Take(12).ToList();
+        var references = hits.Where(hit => hit.Source != "declaration").Take(12).ToList();
+        var lines = new List<string>
+        {
+            "Semantic symbol resolver:",
+            "No files were changed.",
+            "Engine: Roslyn semantic model",
+            $"Query: {query}",
+            $"C# files: {workspace.Trees.Count}",
+            $"Declarations found: {declarations.Count}",
+            $"References found: {references.Count}",
+            "Declarations:"
+        };
+        lines.AddRange(declarations.Count == 0 ? ["- none found"] : declarations.Select(FormatSemanticHit));
+        lines.Add("References:");
+        lines.AddRange(references.Count == 0 ? ["- none found"] : references.Select(FormatSemanticHit));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Semantic symbol resolver", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowImpactedTestsAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var query = CleanGoal(request.Query, string.Empty);
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var semanticHits = string.IsNullOrWhiteSpace(query) ? [] : FindSemanticSymbolHits(workspace, query, 60);
+        var sourceFiles = semanticHits
+            .Select(hit => hit.Path)
+            .Where(path => !IsTestFile(path))
+            .Concat(changedFiles.Where(IsSourceFile).Where(file => !IsTestFile(file)).Select(ToAbsoluteWorkspacePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var sourceTokens = sourceFiles
+            .Select(Path.GetFileNameWithoutExtension)
+            .OfType<string>()
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var testFiles = GetCSharpFiles()
+            .Where(IsTestFile)
+            .Where(file => sourceTokens.Count == 0 || sourceTokens.Any(token => file.Contains(token, StringComparison.OrdinalIgnoreCase)) || !string.IsNullOrWhiteSpace(query) && file.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        if (testFiles.Count == 0)
+        {
+            testFiles = GetCSharpFiles().Where(IsTestFile).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).Take(12).ToList();
+        }
+
+        var summaries = GetWorkspaceProjectSummaries();
+        var validationCommands = DiscoverTestCommands(GetCSharpFiles().Cast<string>().Concat(GetXamlFiles()).ToList(), summaries, GetPrimaryTarget()).Take(5).ToList();
+        var lines = new List<string>
+        {
+            "Impacted tests:",
+            "No files were changed.",
+            "Engine: Roslyn semantic hits + workspace test naming",
+            string.IsNullOrWhiteSpace(query) ? "Query: current changed files" : $"Query: {query}",
+            $"Source files signaled: {sourceFiles.Count}",
+            $"Likely test files: {testFiles.Count}",
+            "Source signals:"
+        };
+        lines.AddRange(sourceFiles.Count == 0 ? ["- none found"] : sourceFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Likely tests:");
+        lines.AddRange(testFiles.Count == 0 ? ["- none found"] : testFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
+        lines.Add("Validation commands:");
+        lines.AddRange(validationCommands.Count == 0 ? ["- No test command detected. Run project intelligence first."] : validationCommands.Select(command => $"- {command}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Impacted tests", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> PlanSemanticEditAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query, "current change");
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
+        var hits = goalTerms.SelectMany(term => FindSemanticSymbolHits(workspace, term, 12)).DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal).Take(20).ToList();
+        var candidateFiles = hits.Select(hit => hit.Path)
+            .Concat(changedFiles.Select(ToAbsoluteWorkspacePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        if (candidateFiles.Count == 0)
+        {
+            candidateFiles = SuggestLikelyFilesForGoal(goal).Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!).Take(8).ToList();
+        }
+
+        var lines = new List<string>
+        {
+            "Semantic edit plan:",
+            "No files were changed.",
+            "Engine: Roslyn semantic model + existing risk labels",
+            $"Goal: {goal}",
+            $"Candidate files: {candidateFiles.Count}",
+            $"Candidate symbols: {hits.Count}",
+            "Symbols to inspect:"
+        };
+        lines.AddRange(hits.Count == 0 ? ["- none found from goal terms"] : hits.Take(10).Select(FormatSemanticHit));
+        lines.Add("Files to inspect first:");
+        lines.AddRange(candidateFiles.Count == 0 ? ["- none found"] : candidateFiles.Select(file => $"- {RelativeToWorkspace(file)}: {ClassifyFileRisk(RelativeToWorkspace(file))}"));
+        lines.Add("Edit guardrails:");
+        lines.Add("- Prefer exact-symbol changes over broad text replacement.");
+        lines.Add("- Update tests when source behavior, parser routing, permissions, or UI command bindings change.");
+        lines.Add("- Run impacted tests, then build, then safe commit check.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Semantic edit plan", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult MapCompilerDiagnostic(CodingToolRequest request)
+    {
+        var diagnostic = CleanGoal(request.Query, string.Empty);
+        if (string.IsNullOrWhiteSpace(diagnostic) && _lastDotNetResult is not null)
+        {
+            diagnostic = _lastDotNetResult.Message;
+        }
+
+        if (string.IsNullOrWhiteSpace(diagnostic))
+        {
+            return new CodingToolResult(true, false, "Diagnostic mapper needs a compiler diagnostic or a recent build failure.", "Diagnostic mapper", Policy.WorkspaceRoot);
+        }
+
+        var parsed = ParseCompilerDiagnostic(diagnostic);
+        var absolutePath = string.IsNullOrWhiteSpace(parsed.Path) ? null : ToAbsoluteWorkspacePath(parsed.Path);
+        var symbolContext = absolutePath is not null && File.Exists(absolutePath)
+            ? FindEnclosingSymbolAtLine(absolutePath, parsed.LineNumber)
+            : null;
+        var lines = new List<string>
+        {
+            "Compiler diagnostic mapper:",
+            "No files were changed.",
+            "Engine: diagnostic parser + Roslyn syntax context",
+            string.IsNullOrWhiteSpace(parsed.Code) ? "Code: unknown" : $"Code: {parsed.Code}",
+            absolutePath is null ? "File: unknown" : $"File: {RelativeToWorkspace(absolutePath)}",
+            parsed.LineNumber is null ? "Line: unknown" : $"Line: {parsed.LineNumber}",
+            symbolContext is null ? "Nearest symbol: unknown" : $"Nearest symbol: {symbolContext}",
+            "Likely fix lane:"
+        };
+        AddKnownErrorGuidance(lines, string.IsNullOrWhiteSpace(parsed.Code) ? diagnostic : parsed.Code);
+        lines.Add("Next - inspect the mapped file/symbol, make the smallest exact edit, then run impacted tests and build.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Diagnostic mapper", absolutePath ?? Policy.WorkspaceRoot, parsed.LineNumber);
+    }
     private CodingToolResult VerifyXamlBindings()
     {
         var xamlFiles = GetXamlFiles();
@@ -8016,6 +8173,256 @@ public sealed class LocalCodingToolService(
     }
 
 
+    private RoslynWorkspaceModel BuildRoslynWorkspaceModel(IReadOnlyList<string> files, int maxFiles)
+    {
+        var trees = new List<SyntaxTree>();
+        foreach (var file in files.Where(File.Exists).Take(maxFiles))
+        {
+            var text = SafeReadText(file);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            trees.Add(CSharpSyntaxTree.ParseText(text, path: file));
+        }
+
+        var compilation = CSharpCompilation.Create(
+            "AliSemanticWorkspace",
+            trees,
+            GetTrustedPlatformReferences(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        return new RoslynWorkspaceModel(compilation, trees);
+    }
+
+    private static IReadOnlyList<MetadataReference> GetTrustedPlatformReferences()
+    {
+        var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
+        {
+            return [];
+        }
+
+        return trustedPlatformAssemblies
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(path => path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToList();
+    }
+
+    private List<SemanticSymbolHit> FindSemanticSymbolHits(RoslynWorkspaceModel workspace, string query, int limit)
+    {
+        var hits = new List<SemanticSymbolHit>();
+        foreach (var tree in workspace.Trees)
+        {
+            if (hits.Count >= limit)
+            {
+                break;
+            }
+
+            var semanticModel = workspace.Compilation.GetSemanticModel(tree, ignoreAccessibility: true);
+            var root = tree.GetRoot();
+            foreach (var node in root.DescendantNodes())
+            {
+                if (hits.Count >= limit)
+                {
+                    break;
+                }
+
+                if (TryCreateSemanticDeclarationHit(semanticModel, node, query, out var declarationHit))
+                {
+                    hits.Add(declarationHit);
+                    continue;
+                }
+
+                if (node is InvocationExpressionSyntax invocation)
+                {
+                    var symbol = semanticModel.GetSymbolInfo(invocation).Symbol;
+                    if (symbol is not null && SymbolMatches(symbol, query))
+                    {
+                        hits.Add(CreateSemanticHit(symbol, invocation, "reference"));
+                    }
+                }
+                else if (node is IdentifierNameSyntax identifier && identifier.Identifier.ValueText.Contains(query, StringComparison.OrdinalIgnoreCase))
+                {
+                    var symbol = semanticModel.GetSymbolInfo(identifier).Symbol;
+                    if (symbol is not null && SymbolMatches(symbol, query))
+                    {
+                        hits.Add(CreateSemanticHit(symbol, identifier, "reference"));
+                    }
+                }
+            }
+        }
+
+        return hits
+            .DistinctBy(hit => $"{hit.Source}|{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
+            .Take(limit)
+            .ToList();
+    }
+
+    private static bool TryCreateSemanticDeclarationHit(SemanticModel semanticModel, SyntaxNode node, string query, out SemanticSymbolHit hit)
+    {
+        hit = new SemanticSymbolHit(string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty);
+        ISymbol? symbol = node switch
+        {
+            ClassDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            RecordDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            InterfaceDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            EnumDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            StructDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            MethodDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            ConstructorDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            PropertyDeclarationSyntax declaration => semanticModel.GetDeclaredSymbol(declaration),
+            FieldDeclarationSyntax declaration => declaration.Declaration.Variables.Select(variable => semanticModel.GetDeclaredSymbol(variable)).FirstOrDefault(symbol => symbol is not null && SymbolMatches(symbol, query)),
+            _ => null
+        };
+
+        if (symbol is null || !SymbolMatches(symbol, query))
+        {
+            return false;
+        }
+
+        hit = CreateSemanticHit(symbol, node, "declaration");
+        return true;
+    }
+
+    private static bool SymbolMatches(ISymbol symbol, string query) =>
+        symbol.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat).Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private static SemanticSymbolHit CreateSemanticHit(ISymbol symbol, SyntaxNode node, string source)
+    {
+        var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+        return new SemanticSymbolHit(
+            symbol.Name,
+            symbol.Kind.ToString(),
+            display,
+            node.SyntaxTree.FilePath,
+            GetLineNumber(node),
+            source);
+    }
+
+    private static string FormatSemanticHit(SemanticSymbolHit hit) =>
+        $"- {hit.Kind} {hit.Display} ({hit.Source}) at {Path.GetFileName(hit.Path)}:{hit.LineNumber}";
+
+    private static int GetLineNumber(SyntaxNode node) =>
+        node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition.Line + 1;
+
+    private string? ToAbsoluteWorkspacePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var candidate = Path.IsPathFullyQualified(path)
+            ? path
+            : Path.Combine(Policy.WorkspaceRoot, path);
+        try
+        {
+            var fullPath = Path.GetFullPath(candidate.Trim().Trim('"'));
+            return Policy.IsInsideWorkspace(fullPath) ? fullPath : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractMeaningfulGoalTerms(string goal)
+    {
+        return goal.Split(ContextTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length >= 3)
+            .Where(term => !ContextStopWords.Contains(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private CompilerDiagnosticInfo ParseCompilerDiagnostic(string diagnostic)
+    {
+        var line = SplitNonEmptyLines(diagnostic).FirstOrDefault(candidate => candidate.Contains(" CS", StringComparison.OrdinalIgnoreCase)
+            || candidate.Contains(": error ", StringComparison.OrdinalIgnoreCase)
+            || candidate.Contains(": warning ", StringComparison.OrdinalIgnoreCase))
+            ?? diagnostic;
+        string? path = null;
+        int? lineNumber = null;
+        var pathMarker = line.IndexOf(".cs(", StringComparison.OrdinalIgnoreCase);
+        if (pathMarker >= 0)
+        {
+            path = line[..(pathMarker + 3)].Trim();
+            var close = line.IndexOf(')', pathMarker);
+            if (close > pathMarker)
+            {
+                var location = line[(pathMarker + 4)..close];
+                var first = location.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+                if (int.TryParse(first, out var parsedLine))
+                {
+                    lineNumber = parsedLine;
+                }
+            }
+        }
+
+        string? code = ExtractCSharpDiagnosticCode(line);
+
+        return new CompilerDiagnosticInfo(path, lineNumber, code);
+    }
+
+    private static string? ExtractCSharpDiagnosticCode(string line)
+    {
+        for (var index = 0; index < line.Length - 5; index++)
+        {
+            if ((line[index] == 'C' || line[index] == 'c')
+                && (line[index + 1] == 'S' || line[index + 1] == 's')
+                && char.IsDigit(line[index + 2])
+                && char.IsDigit(line[index + 3])
+                && char.IsDigit(line[index + 4])
+                && char.IsDigit(line[index + 5]))
+            {
+                return line.Substring(index, 6).ToUpperInvariant();
+            }
+        }
+
+        return null;
+    }
+
+    private string? FindEnclosingSymbolAtLine(string file, int? lineNumber)
+    {
+        if (lineNumber is null || !File.Exists(file))
+        {
+            return null;
+        }
+
+        var text = SafeReadText(file);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var tree = CSharpSyntaxTree.ParseText(text, path: file);
+        var root = tree.GetRoot();
+        var matchingMember = root.DescendantNodes()
+            .OfType<MemberDeclarationSyntax>()
+            .Where(member =>
+            {
+                var span = tree.GetLineSpan(member.Span);
+                var start = span.StartLinePosition.Line + 1;
+                var end = span.EndLinePosition.Line + 1;
+                return lineNumber.Value >= start && lineNumber.Value <= end;
+            })
+            .OrderBy(member => member.Span.Length)
+            .FirstOrDefault();
+        return matchingMember switch
+        {
+            MethodDeclarationSyntax method => $"method {method.Identifier.ValueText}",
+            ConstructorDeclarationSyntax constructor => $"constructor {constructor.Identifier.ValueText}",
+            PropertyDeclarationSyntax property => $"property {property.Identifier.ValueText}",
+            ClassDeclarationSyntax type => $"class {type.Identifier.ValueText}",
+            RecordDeclarationSyntax type => $"record {type.Identifier.ValueText}",
+            _ => null
+        };
+    }
     private IReadOnlyList<string> GetCSharpFiles() => Directory.Exists(Policy.WorkspaceRoot)
         ? EnumerateWorkspaceFiles().Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).Take(5_000).ToList()
         : [];
@@ -10093,6 +10500,23 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> Steps,
         string LastReceiptSummary,
         DateTimeOffset UpdatedAt);
+
+    private sealed record RoslynWorkspaceModel(
+        CSharpCompilation Compilation,
+        IReadOnlyList<SyntaxTree> Trees);
+
+    private sealed record SemanticSymbolHit(
+        string Name,
+        string Kind,
+        string Display,
+        string Path,
+        int LineNumber,
+        string Source);
+
+    private sealed record CompilerDiagnosticInfo(
+        string? Path,
+        int? LineNumber,
+        string? Code);
 
     private sealed record CSharpCallEdge(
         string Caller,
