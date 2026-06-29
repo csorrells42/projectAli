@@ -4597,6 +4597,7 @@ static async Task TestVisionHealthCheckSendsImageContent()
     Equal(true, health.Succeeded);
     Equal(true, handler.ImageRequestCount > 0);
     Contains("\"image_url\":{\"url\":\"data:image/png;base64,", handler.LastChatBody);
+    Equal(false, handler.LastChatBody.Contains("patch preview before apply", StringComparison.OrdinalIgnoreCase));
 }
 
 static Task TestOpenAiResponseParserExtractsMessageContent()
@@ -4639,6 +4640,9 @@ static async Task TestRuntimePinsAliPersona()
     Contains("for English prompts, answer only in English", handler.LastChatBody);
     Contains("do not claim live web browsing", handler.LastChatBody);
     Contains("Keep normal replies concise", handler.LastChatBody);
+    Contains("patch preview before apply", handler.LastChatBody);
+    Contains("targeted tests", handler.LastChatBody);
+    Contains("Do not claim files were edited", handler.LastChatBody);
 }
 
 static async Task TestRuntimeUsesConfiguredAssistantName()
@@ -4694,6 +4698,7 @@ static async Task TestRuntimeOmitsAliPersonaForSourcePlanner()
     Contains("source query planner", handler.LastChatBody);
     Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
     Equal(false, handler.LastChatBody.Contains("do not claim live web browsing", StringComparison.OrdinalIgnoreCase));
+    Equal(false, handler.LastChatBody.Contains("patch preview before apply", StringComparison.OrdinalIgnoreCase));
     Contains("\"think\":false", handler.LastChatBody);
 }
 
