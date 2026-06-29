@@ -1691,6 +1691,10 @@ public sealed class LocalCodingToolService(
         var latestReceipt = receipts.LastOrDefault();
         var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var testTarget = await ResolveTestTargetRecommendationAsync(string.Empty, cancellationToken).ConfigureAwait(false);
+        var testCommand = string.IsNullOrWhiteSpace(testTarget.Command)
+            ? $"confirm dotnet test \"{primaryTarget}\""
+            : testTarget.Command;
         var lines = new List<string>
         {
             "Post-edit build loop:",
@@ -1702,7 +1706,8 @@ public sealed class LocalCodingToolService(
             "Validation plan:",
             "- Patch preview: review any pending patch before applying edits.",
             $"- Build: run a confirmed build for {primaryTarget}.",
-            $"- Tests: run confirmed tests for {primaryTarget}.",
+            $"- Tests: run {testCommand}.",
+            $"- Smallest test target: {testTarget.Scope}.",
             "- Review: check Git status and diff after validation.",
             "- Commit: commit only after expected changes and receipts look good.",
             "Failure loop:",
@@ -5945,16 +5950,17 @@ public sealed class LocalCodingToolService(
             lines.Add("- confirm apply last patch preview");
         }
 
+        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
         lines.Add("Likely tests to run:");
         lines.AddRange(testFiles.Count == 0 ? ["- no obvious targeted test file found"] : testFiles.Select(file => $"- {RelativeToWorkspace(file)}"));
         lines.Add("Validation after apply:");
         lines.Add($"- show impacted tests {goal}");
+        lines.Add($"- resolve test target {goal}");
         lines.Add($"- confirm dotnet build \"{primaryTarget}\"");
-        if (testFiles.Count > 0 || MentionsAny(goal, "test", "parser", "command", "runtime", "source", "weather"))
+        if (!string.IsNullOrWhiteSpace(testTarget.Command))
         {
-            lines.Add($"- confirm dotnet test \"{primaryTarget}\"");
+            lines.Add($"- {testTarget.Command}");
         }
-
         lines.Add("Commit gate:");
         lines.Add("- review current changes");
         lines.Add("- can i safely commit");
