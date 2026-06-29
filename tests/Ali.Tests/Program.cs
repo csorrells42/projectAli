@@ -2684,6 +2684,8 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("Ownership map:", result.Message);
     Contains("Cross-language routes:", result.Message);
     Contains("Risk model v2:", result.Message);
+    Contains("Per-symbol stale detection:", result.Message);
+    Contains("Project index refresh automation:", result.Message);
     Contains("Latest workspace write:", result.Message);
     Contains("Build commands:", result.Message);
     Contains("Test commands:", result.Message);
@@ -2714,6 +2716,8 @@ static async Task TestLocalCodingToolBuildsProjectIndex()
     Contains("ownershipMap", json);
     Contains("crossLanguageRoutes", json);
     Contains("riskModel", json);
+    Contains("symbolStalenessRows", json);
+    Contains("refreshAutomationRows", json);
     Contains("Generated/designer files", json);
     Contains("class WidgetService", json);
     Contains("application code", json);
@@ -3314,6 +3318,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Build order slice:", testTarget.Message);
     Contains("Semantic edit plan", editPlan.Message);
     Contains("Ranked edit targets", editPlan.Message);
+    Contains("Edit impact score:", editPlan.Message);
     Contains("Edit target validation:", editPlan.Message);
     Contains("Reference graph:", editPlan.Message);
     Contains("Safe refactor detector:", editPlan.Message);
@@ -3325,6 +3330,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Impact radius:", safeEdit.Message);
     Contains("Safe refactor detector:", safeEdit.Message);
     Contains("Autonomous preflight:", safeEdit.Message);
+    Contains("Autonomous validation plan:", safeEdit.Message);
+    Contains("Edit impact score:", safeEdit.Message);
     Contains("Prioritized tests:", safeEdit.Message);
     Contains("Call-chain impact:", safeEdit.Message);
     Contains("Edit target validation:", safeEdit.Message);
@@ -3349,10 +3356,12 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Dashboard command graph:", commandSurface.Message);
     Contains("Route diff tracker:", commandSurface.Message);
     Contains("Route drift rows:", commandSurface.Message);
+    Contains("Route repair packets:", commandSurface.Message);
     Equal(true, File.Exists(Path.Combine(directory, "Coding", "route-diff-tracker.json")));
     Contains("Before/after validation ledger", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 92%", miniCodex.Message);
+    Contains("Overall score: 94%", miniCodex.Message);
+    Contains("Project index refresh automation", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
     Contains("Mini-Codex self audit", miniCodex.Message);
