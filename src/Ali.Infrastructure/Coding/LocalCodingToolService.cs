@@ -7063,6 +7063,7 @@ public sealed class LocalCodingToolService(
             return prepared.Error;
         }
 
+        var validationHint = await BuildPatchPreviewValidationHintAsync(prepared.Edits.Select(edit => edit.FullPath), cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
         {
             "Patch bundle preview:",
@@ -7070,6 +7071,7 @@ public sealed class LocalCodingToolService(
             $"Edits: {prepared.Edits.Count}",
             "To apply this exact bundle, use: confirm apply last patch preview"
         };
+        lines.AddRange(validationHint);
 
         for (var index = 0; index < prepared.Edits.Count; index++)
         {
@@ -7088,6 +7090,36 @@ public sealed class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Patch bundle preview",
             prepared.Edits.Count == 1 ? prepared.Edits[0].FullPath : Policy.WorkspaceRoot);
+    }
+
+    private async Task<IReadOnlyList<string>> BuildPatchPreviewValidationHintAsync(
+        IEnumerable<string> changedPaths,
+        CancellationToken cancellationToken)
+    {
+        var paths = changedPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var query = string.Join(" ", paths
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+        var testTarget = await ResolveTestTargetRecommendationAsync(query, cancellationToken).ConfigureAwait(false);
+        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+            ? primary
+            : Policy.WorkspaceRoot;
+        var lines = new List<string>
+        {
+            "Validation hint:",
+            $"- Changed files: {FormatInlineList(paths.Select(RelativeToWorkspace))}",
+            $"- Likely tests: {FormatInlineList(testTarget.TestFiles.Select(RelativeToWorkspace))}",
+            string.IsNullOrWhiteSpace(testTarget.Command)
+                ? "- Test command: none resolved"
+                : $"- Test command: {testTarget.Command}",
+            $"- Build command: confirm dotnet build \"{primaryTarget}\"",
+            "- Review command: show pending patch preview"
+        };
+        return lines;
     }
 
     private async Task<CodingToolResult> ApplyLastPatchPreviewAsync(CancellationToken cancellationToken)

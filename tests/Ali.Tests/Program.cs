@@ -3550,6 +3550,10 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Equal(true, preview.Succeeded);
     Contains("Patch bundle preview", preview.Message);
     Contains("Edits: 2", preview.Message);
+    Contains("Validation hint:", preview.Message);
+    Contains("Changed files:", preview.Message);
+    Contains("Build command:", preview.Message);
+    Contains("Review command:", preview.Message);
     Contains("class Demo", preview.Message);
     Contains("class NewName", preview.Message);
     Equal("class Demo { }", await File.ReadAllTextAsync(firstPath));
@@ -3597,6 +3601,10 @@ static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()
     Equal(true, preview.Succeeded);
     Contains("Patch bundle preview", preview.Message);
     Contains("Edits: 2", preview.Message);
+    Contains("Validation hint:", preview.Message);
+    Contains("Changed files:", preview.Message);
+    Contains("Build command:", preview.Message);
+    Contains("Review command:", preview.Message);
     Contains("class Widget", preview.Message);
     Contains("NewName", preview.Message);
     Equal(true, applied.Handled);
