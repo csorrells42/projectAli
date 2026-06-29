@@ -103,6 +103,28 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
+                            <TextBlock Text="Code Intelligence"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Roslyn-backed symbol, call, binding, and test-impact checks."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="Symbols"
+                                        Command="{Binding RunCodingSymbolIndexCommand}" />
+                                <Button Content="Call Graph"
+                                        Command="{Binding RunCodingCallGraphCommand}" />
+                                <Button Content="Bindings"
+                                        Command="{Binding RunCodingBindingCheckCommand}" />
+                                <Button Content="Impacted Tests"
+                                        Command="{Binding RunCodingImpactedTestsCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
                             <TextBlock Text="Build Loop"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"

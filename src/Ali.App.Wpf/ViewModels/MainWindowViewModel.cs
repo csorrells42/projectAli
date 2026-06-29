@@ -266,6 +266,10 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingProjectIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project intelligence", "show project intelligence", "Coding.ProjectIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingRepoUnderstandingCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Understand repo", "understand repo", "Coding.RepoUnderstanding"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFullReadinessCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Full readiness", "full coding readiness", "Coding.FullReadiness"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBindingCheckCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Binding check", "xaml binding check", "Coding.BindingCheck"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingImpactedTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Impacted tests", "show impacted tests", "Coding.ImpactedTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingHealthScoreCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Health score", "workspace health score", "Coding.HealthScore"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGitStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Git status", "git status", "Coding.GitStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingReviewChangesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Review changes", "review current changes", "Coding.ReviewChanges"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -682,6 +686,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingRepoUnderstandingCommand { get; }
 
     public ICommand RunCodingFullReadinessCommand { get; }
+
+    public ICommand RunCodingSymbolIndexCommand { get; }
+
+    public ICommand RunCodingCallGraphCommand { get; }
+
+    public ICommand RunCodingBindingCheckCommand { get; }
+
+    public ICommand RunCodingImpactedTestsCommand { get; }
 
     public ICommand RunCodingHealthScoreCommand { get; }
 
@@ -6566,6 +6578,26 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingFullReadinessCommand is AsyncRelayCommand runCodingFullReadiness)
         {
             runCodingFullReadiness.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSymbolIndexCommand is AsyncRelayCommand runCodingSymbolIndex)
+        {
+            runCodingSymbolIndex.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingCallGraphCommand is AsyncRelayCommand runCodingCallGraph)
+        {
+            runCodingCallGraph.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingBindingCheckCommand is AsyncRelayCommand runCodingBindingCheck)
+        {
+            runCodingBindingCheck.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingImpactedTestsCommand is AsyncRelayCommand runCodingImpactedTests)
+        {
+            runCodingImpactedTests.RaiseCanExecuteChanged();
         }
 
         if (RunCodingHealthScoreCommand is AsyncRelayCommand runCodingHealthScore)
