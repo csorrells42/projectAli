@@ -19,6 +19,29 @@ public sealed class FileCorrectionQueueStore(string dataDirectory) : ICorrection
         var reports = (await ListAsync(cancellationToken).ConfigureAwait(false)).ToList();
         reports.Add(report);
 
+        await WriteReportsAsync(reports, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task UpdateAsync(CorrectionReport report, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
+
+        var reports = (await ListAsync(cancellationToken).ConfigureAwait(false)).ToList();
+        var index = reports.FindIndex(existing => existing.Id.Equals(report.Id, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            reports[index] = report;
+        }
+        else
+        {
+            reports.Add(report);
+        }
+
+        await WriteReportsAsync(reports, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task WriteReportsAsync(IReadOnlyList<CorrectionReport> reports, CancellationToken cancellationToken)
+    {
         await using var stream = File.Create(_filePath);
         await JsonSerializer.SerializeAsync(stream, reports, JsonOptions, cancellationToken).ConfigureAwait(false);
     }

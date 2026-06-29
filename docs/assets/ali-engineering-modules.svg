@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
+  <title id="title">Ali engineering modules and endpoints</title>
+  <desc id="desc">Engineering module map showing WPF, core orchestration, infrastructure adapters, local stores, Ollama endpoint, and voice tools.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .lane { fill: #eef2ff; stroke: #6366f1; stroke-width: 2; rx: 12; }
+      .core { fill: #ecfeff; stroke: #0891b2; stroke-width: 2; rx: 10; }
+      .infra { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; rx: 10; }
+      .store { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; rx: 10; }
+      .blocked { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; rx: 10; }
+      .title { font: 700 24px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .laneTitle { font: 700 18px Segoe UI, Arial, sans-serif; fill: #312e81; }
+      .label { font: 700 15px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .text { font: 12.5px Segoe UI, Arial, sans-serif; fill: #334155; }
+      .line { stroke: #334155; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #64748b; stroke-width: 2; stroke-dasharray: 7 7; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect class="bg" width="1280" height="820"/>
+  <text class="title" x="42" y="48">Ali engineering module map</text>
+  <text class="text" x="42" y="76">V1 keeps UI, orchestration, runtime adapters, local stores, and external endpoints separated.</text>
+
+  <rect class="lane" x="35" y="115" width="250" height="615"/>
+  <text class="laneTitle" x="58" y="150">Ali.App.Wpf</text>
+  <rect class="core" x="62" y="185" width="195" height="85"/>
+  <text class="label" x="82" y="216">MainWindow</text>
+  <text class="text" x="82" y="239">Chat, composer, recents</text>
+  <rect class="core" x="62" y="315" width="195" height="85"/>
+  <text class="label" x="82" y="346">SettingsWindow</text>
+  <text class="text" x="82" y="369">Runtime, voice, corrections</text>
+  <rect class="core" x="62" y="445" width="195" height="85"/>
+  <text class="label" x="82" y="476">ViewModels</text>
+  <text class="text" x="82" y="499">Status and safe commands</text>
+  <rect class="core" x="62" y="575" width="195" height="85"/>
+  <text class="label" x="82" y="606">User actions</text>
+  <text class="text" x="82" y="629">Send, Stop, Check, Activate</text>
+
+  <rect class="lane" x="340" y="115" width="300" height="615"/>
+  <text class="laneTitle" x="365" y="150">Ali.Core</text>
+  <rect class="core" x="372" y="185" width="235" height="85"/>
+  <text class="label" x="392" y="216">ConversationOrchestrator</text>
+  <text class="text" x="392" y="239">Prompt, stream, evidence</text>
+  <rect class="core" x="372" y="315" width="235" height="85"/>
+  <text class="label" x="392" y="346">ILocalModelRuntime</text>
+  <text class="text" x="392" y="369">Runtime boundary</text>
+  <rect class="core" x="372" y="445" width="235" height="85"/>
+  <text class="label" x="392" y="476">Safety contracts</text>
+  <text class="text" x="392" y="499">Evidence, permissions, truth</text>
+  <rect class="core" x="372" y="575" width="235" height="85"/>
+  <text class="label" x="392" y="606">Memory/Reminder parsers</text>
+  <text class="text" x="392" y="629">Explicit local behavior</text>
+
+  <rect class="lane" x="695" y="115" width="305" height="615"/>
+  <text class="laneTitle" x="720" y="150">Ali.Infrastructure</text>
+  <rect class="infra" x="730" y="185" width="230" height="85"/>
+  <text class="label" x="750" y="216">OpenAI runtime adapter</text>
+  <text class="text" x="750" y="239">/models, /chat/completions</text>
+  <rect class="infra" x="730" y="315" width="230" height="85"/>
+  <text class="label" x="750" y="346">SafeActivatingLocalRuntime</text>
+  <text class="text" x="750" y="369">Stub until health passes</text>
+  <rect class="infra" x="730" y="445" width="230" height="85"/>
+  <text class="label" x="750" y="476">File stores</text>
+  <text class="text" x="750" y="499">Conversations, corrections</text>
+  <rect class="infra" x="730" y="575" width="230" height="85"/>
+  <text class="label" x="750" y="606">Voice adapters</text>
+  <text class="text" x="750" y="629">NAudio, Whisper, Piper</text>
+
+  <rect class="lane" x="1050" y="115" width="195" height="615"/>
+  <text class="laneTitle" x="1072" y="150">Local endpoints</text>
+  <rect class="store" x="1075" y="185" width="145" height="85"/>
+  <text class="label" x="1094" y="216">Ollama</text>
+  <text class="text" x="1094" y="239">127.0.0.1:11434</text>
+  <rect class="store" x="1075" y="315" width="145" height="85"/>
+  <text class="label" x="1094" y="346">BootstrapData</text>
+  <text class="text" x="1094" y="369">%LOCALAPPDATA%</text>
+  <rect class="store" x="1075" y="445" width="145" height="85"/>
+  <text class="label" x="1094" y="476">lib/voice</text>
+  <text class="text" x="1094" y="499">local tools</text>
+  <rect class="blocked" x="1075" y="575" width="145" height="85"/>
+  <text class="label" x="1094" y="606">Cloud APIs</text>
+  <text class="text" x="1094" y="629">refused</text>
+
+  <path class="line" d="M 257 226 L 372 226"/>
+  <path class="line" d="M 607 226 L 730 226"/>
+  <path class="line" d="M 960 226 L 1075 226"/>
+  <path class="line" d="M 257 357 L 372 357"/>
+  <path class="line" d="M 607 357 L 730 357"/>
+  <path class="line" d="M 960 357 L 1075 357"/>
+  <path class="line" d="M 257 487 L 372 487"/>
+  <path class="line" d="M 607 487 L 730 487"/>
+  <path class="line" d="M 960 487 L 1075 357"/>
+  <path class="dash" d="M 960 617 L 1075 487"/>
+  <path class="dash" d="M 960 617 L 1075 617"/>
+
+  <text class="text" x="286" y="213">chat stream</text>
+  <text class="text" x="650" y="213">runtime call</text>
+  <text class="text" x="1010" y="213">HTTP</text>
+  <text class="text" x="1010" y="344">JSON</text>
+  <text class="text" x="1010" y="602">blocked</text>
+</svg>

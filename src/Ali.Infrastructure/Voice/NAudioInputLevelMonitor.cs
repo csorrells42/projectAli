@@ -5,6 +5,7 @@ namespace Ali.Infrastructure.Voice;
 public sealed class NAudioInputLevelMonitor : IDisposable
 {
     private const int SampleRate = 44100;
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromMilliseconds(500);
     private readonly object _sync = new();
     private readonly SpectrumAnalyzer _spectrumAnalyzer = new();
     private WaveInEvent? _capture;
@@ -39,12 +40,21 @@ public sealed class NAudioInputLevelMonitor : IDisposable
             _deviceNumber = deviceNumber;
             _deviceName = string.IsNullOrWhiteSpace(deviceName) ? $"Device {deviceNumber}" : deviceName;
             _processor = new VoiceSampleProcessor(ProcessorSettings);
-            _capture = StartCapture(deviceNumber);
+            try
+            {
+                _capture = StartCapture(deviceNumber);
+            }
+            catch
+            {
+                _processor = null;
+                throw;
+            }
         }
     }
 
     public void Stop()
     {
+        WaveInEvent capture;
         lock (_sync)
         {
             if (_capture is null)
@@ -52,13 +62,12 @@ public sealed class NAudioInputLevelMonitor : IDisposable
                 return;
             }
 
-            _capture.DataAvailable -= CaptureDataAvailable;
-            _capture.RecordingStopped -= CaptureRecordingStopped;
-            _capture.StopRecording();
-            _capture.Dispose();
+            capture = _capture;
             _capture = null;
             _processor = null;
         }
+
+        StopAndDisposeCapture(capture);
     }
 
     public void Dispose() => Stop();
@@ -92,11 +101,42 @@ public sealed class NAudioInputLevelMonitor : IDisposable
         {
             DeviceNumber = deviceNumber,
             WaveFormat = new WaveFormat(SampleRate, 16, channelCount),
-            BufferMilliseconds = 15
+            BufferMilliseconds = 50
         };
         capture.DataAvailable += CaptureDataAvailable;
         capture.RecordingStopped += CaptureRecordingStopped;
         return capture;
+    }
+
+    private void StopAndDisposeCapture(WaveInEvent capture)
+    {
+        using var stopped = new ManualResetEventSlim(false);
+        void MarkStopped(object? _, StoppedEventArgs __) => stopped.Set();
+
+        capture.RecordingStopped += MarkStopped;
+        try
+        {
+            capture.StopRecording();
+            stopped.Wait(StopTimeout);
+        }
+        catch
+        {
+            // Some audio drivers throw while stopping; the UI will report the meter as unavailable.
+        }
+        finally
+        {
+            capture.DataAvailable -= CaptureDataAvailable;
+            capture.RecordingStopped -= CaptureRecordingStopped;
+            capture.RecordingStopped -= MarkStopped;
+            try
+            {
+                capture.Dispose();
+            }
+            catch
+            {
+                // Device cleanup is best-effort after a failed capture stop.
+            }
+        }
     }
 
     private void CaptureDataAvailable(object? sender, WaveInEventArgs e)

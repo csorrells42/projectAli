@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Ali user flow</title>
+  <desc id="desc">User-facing flow from chat, settings, local runtime, correction queue, memory, reminders, and voice boundaries.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; rx: 10; }
+      .primary { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; rx: 10; }
+      .safe { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; rx: 10; }
+      .warn { fill: #fef3c7; stroke: #d97706; stroke-width: 2; rx: 10; }
+      .blocked { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; rx: 10; }
+      .title { font: 700 24px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .label { font: 700 17px Segoe UI, Arial, sans-serif; fill: #0f172a; }
+      .text { font: 14px Segoe UI, Arial, sans-serif; fill: #334155; }
+      .small { font: 12px Segoe UI, Arial, sans-serif; fill: #475569; }
+      .line { stroke: #4b5563; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #64748b; stroke-width: 2; fill: none; stroke-dasharray: 7 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1200" height="760"/>
+  <text class="title" x="40" y="48">Ali V1 user flow</text>
+  <text class="text" x="40" y="76">Everything stays local. Ali either shows evidence, reports Unknown, or refuses unsafe/uncertified paths.</text>
+
+  <rect class="primary" x="50" y="130" width="245" height="120"/>
+  <text class="label" x="78" y="165">Chat cockpit</text>
+  <text class="text" x="78" y="194">Typed prompt</text>
+  <text class="text" x="78" y="216">Image attachment</text>
+  <text class="text" x="78" y="238">Stop response</text>
+
+  <rect class="panel" x="390" y="90" width="270" height="145"/>
+  <text class="label" x="420" y="126">Runtime Settings</text>
+  <text class="text" x="420" y="156">Endpoint: 127.0.0.1</text>
+  <text class="text" x="420" y="178">Model: qwen3-vl:8b</text>
+  <text class="text" x="420" y="200">Check, then Activate</text>
+
+  <rect class="safe" x="765" y="90" width="290" height="145"/>
+  <text class="label" x="795" y="126">Local runtime</text>
+  <text class="text" x="795" y="156">Ollama OpenAI endpoint</text>
+  <text class="text" x="795" y="178">Streaming response</text>
+  <text class="text" x="795" y="200">Reasoning hidden from chat</text>
+
+  <rect class="panel" x="390" y="330" width="270" height="150"/>
+  <text class="label" x="420" y="366">Saved chats</text>
+  <text class="text" x="420" y="396">Recents</text>
+  <text class="text" x="420" y="418">Search</text>
+  <text class="text" x="420" y="440">Erase History scoped to chats</text>
+
+  <rect class="panel" x="765" y="330" width="290" height="150"/>
+  <text class="label" x="795" y="366">Correction queue</text>
+  <text class="text" x="795" y="396">Exact question</text>
+  <text class="text" x="795" y="418">Exact answer</text>
+  <text class="text" x="795" y="440">Runtime/evidence metadata</text>
+
+  <rect class="panel" x="390" y="565" width="270" height="125"/>
+  <text class="label" x="420" y="601">Memory / Reminders</text>
+  <text class="text" x="420" y="631">Memory is explicit-only</text>
+  <text class="text" x="420" y="653">Reminders run while Ali runs</text>
+
+  <rect class="blocked" x="765" y="565" width="290" height="125"/>
+  <text class="label" x="795" y="601">Voice / Mic / Piper</text>
+  <text class="text" x="795" y="631">Local-only design</text>
+  <text class="text" x="795" y="653">Live certification pending</text>
+
+  <rect class="warn" x="50" y="565" width="245" height="125"/>
+  <text class="label" x="78" y="601">Truth rule</text>
+  <text class="text" x="78" y="631">No fake certainty</text>
+  <text class="text" x="78" y="653">Show failures clearly</text>
+
+  <path class="line" d="M 295 170 C 330 170, 350 162, 390 162"/>
+  <path class="line" d="M 660 162 C 700 162, 725 162, 765 162"/>
+  <path class="line" d="M 765 205 C 625 280, 410 270, 295 220"/>
+  <path class="line" d="M 202 250 C 250 355, 315 405, 390 405"/>
+  <path class="line" d="M 660 405 C 705 405, 725 405, 765 405"/>
+  <path class="line" d="M 525 480 L 525 565"/>
+  <path class="dash" d="M 295 210 C 440 550, 590 625, 765 625"/>
+  <path class="line" d="M 172 565 L 172 250"/>
+
+  <text class="small" x="318" y="151">configure/check</text>
+  <text class="small" x="675" y="151">local HTTP only</text>
+  <text class="small" x="565" y="286">stream back to chat</text>
+  <text class="small" x="258" y="370">persist locally</text>
+  <text class="small" x="675" y="392">flag incorrect</text>
+  <text class="small" x="540" y="532">local stores</text>
+  <text class="small" x="555" y="646">not live-certified yet</text>
+</svg>

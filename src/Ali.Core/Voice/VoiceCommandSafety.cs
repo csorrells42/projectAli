@@ -14,8 +14,11 @@ public static partial class VoiceCommandSafety
         var normalized = transcript.Trim();
         return DestructiveCommandRegex().IsMatch(normalized)
             || ExecutionCommandRegex().IsMatch(normalized)
+            || ShellToolRegex().IsMatch(normalized)
             || InstallCommandRegex().IsMatch(normalized)
             || CalendarWriteRegex().IsMatch(normalized)
+            || EmailWriteRegex().IsMatch(normalized)
+            || FileWriteRegex().IsMatch(normalized)
             || MemoryDeleteRegex().IsMatch(normalized)
             || ModelSwitchRegex().IsMatch(normalized);
     }
@@ -29,11 +32,20 @@ public static partial class VoiceCommandSafety
     [GeneratedRegex(@"\b(run|execute|launch|start|open powershell|open command prompt|cmd|terminal)\b", RegexOptions.IgnoreCase)]
     private static partial Regex ExecutionCommandRegex();
 
+    [GeneratedRegex(@"\b(powershell|pwsh|command prompt|cmd\.exe|shell command|terminal)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ShellToolRegex();
+
     [GeneratedRegex(@"\b(install|uninstall|upgrade|download package|pull model)\b", RegexOptions.IgnoreCase)]
     private static partial Regex InstallCommandRegex();
 
     [GeneratedRegex(@"\b(add|create|move|modify|change|delete|cancel)\b.*\b(calendar|appointment|meeting|reminder)\b", RegexOptions.IgnoreCase)]
     private static partial Regex CalendarWriteRegex();
+
+    [GeneratedRegex(@"\b(send|delete|remove|modify|change|draft|reply|forward)\b.*\b(email|mail|message)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex EmailWriteRegex();
+
+    [GeneratedRegex(@"\b(copy|move|rename|edit|modify|change|write|save)\b.*\b(file|folder|directory)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex FileWriteRegex();
 
     [GeneratedRegex(@"\b(delete|forget|remove|change|modify)\b.*\b(memory|memories|remembered)\b", RegexOptions.IgnoreCase)]
     private static partial Regex MemoryDeleteRegex();

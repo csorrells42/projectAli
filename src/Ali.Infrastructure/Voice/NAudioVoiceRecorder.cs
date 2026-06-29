@@ -6,6 +6,7 @@ namespace Ali.Infrastructure.Voice;
 public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
 {
     private const int SampleRate = 44100;
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromMilliseconds(500);
     private readonly object _sync = new();
     private readonly SpectrumAnalyzer _spectrumAnalyzer = new();
     private WaveInEvent? _capture;
@@ -82,7 +83,20 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
             _startedAt = DateTimeOffset.UtcNow;
             _processor = new VoiceSampleProcessor(ProcessorSettings);
             _writer = new WaveFileWriter(_currentFilePath, new WaveFormat(SampleRate, 16, 1));
-            _capture = StartCapture(InputDeviceNumber);
+            try
+            {
+                _capture = StartCapture(InputDeviceNumber);
+            }
+            catch
+            {
+                var filePath = _currentFilePath;
+                _writer?.Dispose();
+                _writer = null;
+                _processor = null;
+                _currentFilePath = null;
+                TryDelete(filePath);
+                throw;
+            }
         }
 
         return Task.CompletedTask;
@@ -93,6 +107,8 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         string? filePath;
         DateTimeOffset startedAt;
+        WaveInEvent capture;
+        WaveFileWriter? writer;
 
         lock (_sync)
         {
@@ -101,11 +117,18 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
                 throw new InvalidOperationException("No voice recording is active.");
             }
 
+            capture = _capture;
+            writer = _writer;
             filePath = _currentFilePath;
             startedAt = _startedAt;
-            _capture.StopRecording();
-            ReleaseCapture();
+            _capture = null;
+            _writer = null;
+            _processor = null;
+            _currentFilePath = null;
         }
+
+        StopAndDisposeCapture(capture);
+        writer?.Dispose();
 
         return Task.FromResult(new VoiceAudioInput(
             filePath,
@@ -117,13 +140,25 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
     public void Cancel()
     {
         string? filePath;
+        WaveInEvent? capture;
+        WaveFileWriter? writer;
         lock (_sync)
         {
             filePath = _currentFilePath;
-            _capture?.StopRecording();
-            ReleaseCapture();
+            capture = _capture;
+            writer = _writer;
+            _capture = null;
+            _writer = null;
+            _processor = null;
+            _currentFilePath = null;
         }
 
+        if (capture is not null)
+        {
+            StopAndDisposeCapture(capture);
+        }
+
+        writer?.Dispose();
         TryDelete(filePath);
     }
 
@@ -158,7 +193,7 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
         {
             DeviceNumber = deviceNumber,
             WaveFormat = new WaveFormat(SampleRate, 16, channelCount),
-            BufferMilliseconds = 15
+            BufferMilliseconds = 50
         };
         capture.DataAvailable += CaptureDataAvailable;
         capture.RecordingStopped += CaptureRecordingStopped;
@@ -212,7 +247,41 @@ public sealed class NAudioVoiceRecorder : IVoiceRecorder, IDisposable
     {
         lock (_sync)
         {
-            ReleaseCapture();
+            if (ReferenceEquals(sender, _capture))
+            {
+                ReleaseCapture();
+            }
+        }
+    }
+
+    private void StopAndDisposeCapture(WaveInEvent capture)
+    {
+        using var stopped = new ManualResetEventSlim(false);
+        void MarkStopped(object? _, StoppedEventArgs __) => stopped.Set();
+
+        capture.RecordingStopped += MarkStopped;
+        try
+        {
+            capture.StopRecording();
+            stopped.Wait(StopTimeout);
+        }
+        catch
+        {
+            // Some audio drivers throw while stopping; cleanup continues best-effort.
+        }
+        finally
+        {
+            capture.DataAvailable -= CaptureDataAvailable;
+            capture.RecordingStopped -= CaptureRecordingStopped;
+            capture.RecordingStopped -= MarkStopped;
+            try
+            {
+                capture.Dispose();
+            }
+            catch
+            {
+                // Device cleanup is best-effort after a failed capture stop.
+            }
         }
     }
 

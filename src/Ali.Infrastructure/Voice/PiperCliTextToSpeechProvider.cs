@@ -30,6 +30,8 @@ public sealed class PiperCliTextToSpeechProvider(PiperCliTextToSpeechOptions opt
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(options.ExecutablePath)
         && !string.IsNullOrWhiteSpace(options.ModelPath)
+        && File.Exists(options.ExecutablePath)
+        && File.Exists(options.ModelPath)
         && !LocalSpeechToolPolicy.ContainsCloudReference(
             options.ExecutablePath,
             options.ModelPath,
@@ -50,6 +52,22 @@ public sealed class PiperCliTextToSpeechProvider(PiperCliTextToSpeechOptions opt
         {
             throw new InvalidOperationException(
                 "Local TTS is not configured. Set ALI_PIPER_EXE and ALI_PIPER_MODEL.");
+        }
+
+        if (!File.Exists(options.ExecutablePath))
+        {
+            throw new FileNotFoundException("Local TTS executable was not found.", options.ExecutablePath);
+        }
+
+        if (!File.Exists(options.ModelPath))
+        {
+            throw new FileNotFoundException("Local TTS voice model was not found.", options.ModelPath);
+        }
+
+        if (!string.Equals(settings.VoiceId, options.VoiceId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Selected TTS voice '{settings.VoiceId}' does not match configured Piper voice '{options.VoiceId}'.");
         }
 
         var spokenText = SpeechOutputCleaner.Clean(text);

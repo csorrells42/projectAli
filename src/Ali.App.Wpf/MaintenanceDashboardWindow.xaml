@@ -1,0 +1,261 @@
+<Window x:Class="Ali.App.Wpf.MaintenanceDashboardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Computer Maintenance"
+        Height="760"
+        MinHeight="660"
+        Width="1120"
+        MinWidth="980"
+        Background="#0B0B0D"
+        FontFamily="Segoe UI">
+    <Window.Resources>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B0B0D" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#18181B" />
+        <SolidColorBrush x:Key="PanelAltBrush" Color="#202024" />
+        <SolidColorBrush x:Key="BorderBrushDark" Color="#323236" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,8,8,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#2A2A2E" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+        </Style>
+        <Style x:Key="PanelCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,12,12" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{StaticResource AppBackgroundBrush}" Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,14">
+            <Button DockPanel.Dock="Right"
+                    Content="Close"
+                    Click="CloseButtonClick"
+                    MinWidth="82"
+                    Margin="12,0,0,0" />
+            <StackPanel>
+                <TextBlock Text="Computer Maintenance"
+                           Foreground="{StaticResource TextBrush}"
+                           FontSize="24"
+                           FontWeight="SemiBold" />
+                <TextBlock Text="Health checks, repair, setup, backups, and receipts for this Ali install."
+                           Foreground="{StaticResource MutedTextBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,3,0,0" />
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.1*" />
+                <ColumnDefinition Width="0.9*" />
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <UniformGrid Columns="2">
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Check Status"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Install, sources, assistant lanes, PDF, Visual Studio, and recent receipts."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <Button Content="Check Status"
+                                    Command="{Binding RunComputerHealthCheckCommand}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Repair"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Confirmed repair for install data, Sources &amp; Topics, examples, and local voice paths."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <Button Content="Repair Ali Install"
+                                    Command="{Binding RepairAliInstallCommand}"
+                                    BorderBrush="#8A6A18"
+                                    Background="#2A2415" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Check Tools"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Supported lanes, deterministic command indexes, tool readiness, and permissions."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <Button Content="Check Tools"
+                                    Command="{Binding RunComputerAssistantSetupCommand}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Recommend Next Step"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Read-only plan with recommended next actions. Repairs stay separately confirmed."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <Button Content="Recommend"
+                                    Command="{Binding RunMaintenancePlanCommand}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Sources &amp; Local Library"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Maintain approved research sources and local documents Ali can use for grounded answers."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="Sources"
+                                        Command="{Binding OpenSourcesTopicsCommand}" />
+                                <Button Content="Local Library"
+                                        Command="{Binding OpenLocalLibraryCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Processes"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Read-only checks for running processes, build locks, and local port owners."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="Running"
+                                        Command="{Binding RunProcessEvidenceCommand}" />
+                                <Button Content="Build Locks"
+                                        Command="{Binding RunBuildLockDiagnosticCommand}" />
+                                <Button Content="Port 8765"
+                                        Command="{Binding RunPortDiagnosticCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Windows Checks"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Inspect startup/services and plan cleanup or suspicious-activity review without changing Windows."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="Startup"
+                                        Command="{Binding RunServicesStartupInspectionCommand}" />
+                                <Button Content="Cleanup"
+                                        Command="{Binding RunDiskCleanupPlanCommand}" />
+                                <Button Content="Suspicious"
+                                        Command="{Binding RunSuspiciousActivityPlanCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Receipts"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Open the Ali-owned folder where maintenance receipts are written."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <Button Content="Open Receipt Folder"
+                                    Command="{Binding OpenMaintenanceReceiptFolderCommand}" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Troubleshooting Plans"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Plan app install and peripheral setup fixes before anything changes."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="App Install"
+                                        Command="{Binding RunAppInstallTroubleshootingCommand}" />
+                                <Button Content="Peripheral"
+                                        Command="{Binding RunPeripheralSetupPlanCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+            </ScrollViewer>
+
+            <Border Grid.Column="1"
+                    Background="{StaticResource PanelAltBrush}"
+                    BorderBrush="{StaticResource BorderBrushDark}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0"
+                               Text="Latest Result"
+                               Foreground="{StaticResource TextBrush}"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,8" />
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <TextBlock Text="{Binding MaintenanceStatusText}"
+                                   Foreground="{StaticResource TextBrush}"
+                                   TextWrapping="Wrap" />
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="2"
+                               Text="{Binding MaintenanceReceiptPath, StringFormat=Receipts: {0}}"
+                               Foreground="{StaticResource SubtleTextBrush}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,12,0,0" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

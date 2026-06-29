@@ -1,8 +1,12 @@
+using System.Diagnostics;
 using System.Windows.Input;
 
 namespace Ali.App.Wpf.ViewModels;
 
-public sealed class AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute = null) : ICommand
+public sealed class AsyncRelayCommand(
+    Func<Task> execute,
+    Func<bool>? canExecute = null,
+    Action<Exception>? onException = null) : ICommand
 {
     private bool _isExecuting;
 
@@ -22,6 +26,11 @@ public sealed class AsyncRelayCommand(Func<Task> execute, Func<bool>? canExecute
             _isExecuting = true;
             RaiseCanExecuteChanged();
             await execute().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            onException?.Invoke(ex);
         }
         finally
         {

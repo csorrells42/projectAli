@@ -1,0 +1,138 @@
+<Window x:Class="Ali.App.Wpf.LocalLibraryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Local Library"
+        Height="430"
+        Width="760"
+        MinHeight="380"
+        MinWidth="680"
+        Background="#0B0B0D"
+        FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#18181B" />
+        <SolidColorBrush x:Key="InputBrush" Color="#0F0F11" />
+        <SolidColorBrush x:Key="BorderBrushDark" Color="#323236" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#00BEE6" />
+        <Style TargetType="{x:Type Button}">
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#2A2A2E" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+        </Style>
+        <Style TargetType="{x:Type TextBox}">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="Local Library"
+                       Foreground="{StaticResource TextBrush}"
+                       FontSize="24"
+                       FontWeight="SemiBold" />
+            <TextBlock Text="Approved local RAG folder and vector index"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       Margin="0,2,0,0" />
+        </StackPanel>
+
+        <Border Grid.Row="1"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrushDark}"
+                BorderThickness="1"
+                Padding="16">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0"
+                           Text="Folder"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           FontWeight="SemiBold" />
+                <DockPanel Grid.Row="1" Margin="0,6,0,14">
+                    <Button DockPanel.Dock="Right"
+                            Content="Choose"
+                            Click="ChooseFolderButton_OnClick"
+                            MinWidth="88"
+                            Margin="8,0,0,0" />
+                    <TextBox x:Name="FolderTextBox"
+                             ToolTip="Only approved local RAG documents from this folder are read." />
+                </DockPanel>
+
+                <Grid Grid.Row="2" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Embedding model"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="EmbeddingModelText"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="Index"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="IndexSummaryText"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Grid.Row="3"
+                           x:Name="SettingsPathText"
+                           Foreground="{StaticResource SubtleTextBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,12" />
+
+                <TextBlock Grid.Row="4"
+                           x:Name="StatusText"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           TextWrapping="Wrap" />
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="2"
+                    Margin="0,14,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Save"
+                    MinWidth="88"
+                    Click="SaveButton_OnClick" />
+            <Button Content="Open Folder"
+                    MinWidth="104"
+                    Click="OpenFolderButton_OnClick" />
+            <Button x:Name="ScanButton"
+                    Content="Scan Now"
+                    MinWidth="96"
+                    Click="ScanButton_OnClick" />
+            <Button Content="Close"
+                    MinWidth="88"
+                    Click="CloseButton_OnClick" />
+        </StackPanel>
+    </Grid>
+</Window>

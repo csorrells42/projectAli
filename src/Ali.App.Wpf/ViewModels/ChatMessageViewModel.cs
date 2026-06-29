@@ -1,4 +1,5 @@
 using Ali.Core.Evidence;
+using Ali.Core.Conversations;
 using Ali.Core.Runtime;
 using Ali.Core.Voice;
 
@@ -20,7 +21,9 @@ public sealed class ChatMessageViewModel : ObservableObject
         VoiceInputOrigin sourceInputOrigin = VoiceInputOrigin.Typed,
         VoiceTurnMetadata? sourceVoiceMetadata = null,
         string? sourceUserMessageId = null,
-        string? sourceQuestion = null)
+        string? sourceQuestion = null,
+        IReadOnlyList<StoredAttachmentMetadata>? attachmentMetadata = null,
+        string? correctionId = null)
     {
         Id = id;
         Role = role;
@@ -32,6 +35,8 @@ public sealed class ChatMessageViewModel : ObservableObject
         SourceVoiceMetadata = sourceVoiceMetadata;
         SourceUserMessageId = sourceUserMessageId;
         SourceQuestion = sourceQuestion;
+        AttachmentMetadata = attachmentMetadata;
+        CorrectionId = correctionId;
     }
 
     public string Id { get; }
@@ -39,6 +44,14 @@ public sealed class ChatMessageViewModel : ObservableObject
     public ChatRole Role { get; }
 
     public string RoleName => Role.ToString();
+
+    public System.Windows.HorizontalAlignment MessageAlignment => Role == ChatRole.User
+        ? System.Windows.HorizontalAlignment.Right
+        : System.Windows.HorizontalAlignment.Left;
+
+    public System.Windows.TextAlignment MessageTextAlignment => Role == ChatRole.User
+        ? System.Windows.TextAlignment.Right
+        : System.Windows.TextAlignment.Left;
 
     public DateTimeOffset CreatedAt { get; }
 
@@ -51,6 +64,10 @@ public sealed class ChatMessageViewModel : ObservableObject
     public VoiceInputOrigin SourceInputOrigin { get; }
 
     public VoiceTurnMetadata? SourceVoiceMetadata { get; }
+
+    public IReadOnlyList<StoredAttachmentMetadata>? AttachmentMetadata { get; }
+
+    public string? CorrectionId { get; private set; }
 
     public bool CanFlagAsIncorrect => Role == ChatRole.Assistant;
 
@@ -72,6 +89,56 @@ public sealed class ChatMessageViewModel : ObservableObject
         set => SetProperty(ref _isFlaggedForCorrection, value);
     }
 
+    public void MarkCorrection(string correctionId)
+    {
+        CorrectionId = correctionId;
+        IsFlaggedForCorrection = true;
+    }
+
     public ChatMessage ToCoreMessage() =>
         new(Id, Role, Text, CreatedAt, EvidenceStatus);
+
+    public StoredChatMessage ToStoredMessage(string conversationId)
+    {
+        var origin = SourceInputOrigin switch
+        {
+            VoiceInputOrigin.Voice => ChatMessageOrigin.Voice,
+            _ when AttachmentMetadata?.Count > 0 || SourceAttachmentCount > 0 => ChatMessageOrigin.Image,
+            _ => ChatMessageOrigin.Typed
+        };
+
+        return new StoredChatMessage(
+            Id,
+            conversationId,
+            Role,
+            Text,
+            CreatedAt,
+            origin,
+            EvidenceStatus,
+            AttachmentMetadata,
+            CorrectionId,
+            SourceUserMessageId: SourceUserMessageId,
+            SourceQuestion: SourceQuestion,
+            SourceAttachmentCount: SourceAttachmentCount,
+            SourceInputOrigin: SourceInputOrigin,
+            SourceVoiceMetadata: SourceVoiceMetadata);
+    }
+
+    public static ChatMessageViewModel FromStoredMessage(StoredChatMessage message) =>
+        new(
+            message.MessageId,
+            message.Role,
+            message.Text,
+            message.CreatedAt,
+            message.EvidenceStatus,
+            message.SourceAttachmentCount,
+            message.SourceInputOrigin,
+            message.SourceVoiceMetadata,
+            message.SourceUserMessageId,
+            message.SourceQuestion,
+            message.Attachments,
+            message.CorrectionId)
+        {
+            IsFlaggedForCorrection = !string.IsNullOrWhiteSpace(message.CorrectionId)
+        };
 }

@@ -46,7 +46,11 @@ public sealed record VoiceTurnMetadata(
     bool NormalizeBeforeStt = false,
     string? SpeechToTextModel = null,
     string? TextToSpeechModel = null,
-    bool SuspiciousOrNoSpeech = false);
+    bool SuspiciousOrNoSpeech = false,
+    string? RejectionReason = null,
+    double? InputPeak = null,
+    double? InputRms = null,
+    string? InputLevelState = null);
 
 public interface IVoiceRecorder
 {
