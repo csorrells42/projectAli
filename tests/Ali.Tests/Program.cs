@@ -5578,6 +5578,7 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         "MainWindowViewModel.cs",
         ["INotifyPropertyChanged", "INotifyDataErrorInfo", "IDashboardDialogService", "DashboardDialogRequest", "NullDashboardDialogService", "DashboardStatusBrushConverter", "DashboardSelectionSummaryConverter", "DashboardFocusBehavior", "IValueConverter", "IMultiValueConverter", "CultureInfo", "Brushes.SeaGreen", "Binding.DoNothing", "Array.Fill(results, Binding.DoNothing)", "RegisterAttached", "FocusOnLoadedProperty", "GetFocusOnLoaded", "SetFocusOnLoaded", "DependencyPropertyChangedEventArgs", "FrameworkElement", "FocusElementOnLoaded", "ObservableCollection<DashboardItem>", "ObservableCollection<DashboardMetric>", "DashboardMetric", "UpdateMetrics", "CountVisibleItems", "CountItemsByStatus", "ObservableCollection<string> StatusOptions", "ObservableCollection<string> ValidationSummary", "ICollectionView ItemsView", "CollectionViewSource.GetDefaultView", "ItemsView.DeferRefresh", "ICollectionViewLiveShaping", "CanChangeLiveSorting", "IsLiveSorting", "LiveSortingProperties", "CanChangeLiveGrouping", "LiveGroupingProperties", "NavigationItems", "DashboardNavigationItem", "SelectedNavigation", "SelectedNavigationSummary", "SelectedWorkspaceView", "SelectedViewIndex", "OverviewView", "ActivityView", "SettingsView", "OverviewDashboardViewModel", "ActivityDashboardViewModel", "SettingsDashboardViewModel", "SeedNavigation", "SelectNavigationItem", "FindNavigationItemByViewIndex", "ConfigureItemsView", "SortDescriptions", "PropertyGroupDescription", "SearchText", "FilterItem", "FirstVisibleItem", "ICommand RefreshCommand", "CancelRefreshCommand", "ApplySelectedItemCommand", "CanApplySelectedItem", "ApplySelectedItem", "MarkItemReadyCommand", "MarkItemForReviewCommand", "CanMarkItemStatus", "MarkItemStatus", "RaiseRowActionCanExecuteChanged", "LoadSelectedItemEditor", "ValidateSelectedItemEditor", "SelectedItemName", "SelectedItemOwner", "SelectedItemStatus", "SelectedItemError", "RemoveSelectedItemCommand", "CanRemoveSelectedItem", "RemoveSelectedItem", "_dialogService.Confirm", "IsBusy", "ProgressText", "CancellationTokenSource", "RefreshAsync", "Task.Delay", "NewItemError", "ErrorsChanged", "GetErrors", "ValidateNewItemName", "SetErrors", "DashboardItem? SelectedItem", "DashboardItemCardTemplateSelector", "DataTemplateSelector", "DataTemplate? ReadyTemplate", "SelectTemplate", "DependencyObject container", "MainWindowViewModel.DashboardItem", "AsyncRelayCommand", "RelayCommand", "CanExecuteChanged"]);
     var generatedDashboardXaml = await File.ReadAllTextAsync(xamlPath);
+    var generatedDashboardCodeBehind = await File.ReadAllTextAsync(codeBehindPath);
     var generatedDashboardViewModel = await File.ReadAllTextAsync(Path.Combine(projectDirectory, "MainWindowViewModel.cs"));
     Contains("Header=\"_Toggle theme\"", generatedDashboardXaml);
     Contains("Content=\"{Binding ThemeButtonText}\"", generatedDashboardXaml);
@@ -5587,6 +5588,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("DashboardCommandsProxy", generatedDashboardXaml);
     Contains("Data.MarkItemReadyCommand", generatedDashboardXaml);
     Contains("Data.MarkItemForReviewCommand", generatedDashboardXaml);
+    Contains("PromoteRequested=\"DashboardDetailCard_PromoteRequested\"", generatedDashboardXaml);
+    Contains("DashboardDetailCard_PromoteRequested", generatedDashboardCodeBehind);
+    Contains("viewModel.MarkItemReadyCommand.CanExecute(item)", generatedDashboardCodeBehind);
+    Contains("viewModel.MarkItemReadyCommand.Execute(item)", generatedDashboardCodeBehind);
     Contains("ToggleThemeCommand", generatedDashboardViewModel);
     Contains("ThemeButtonText", generatedDashboardViewModel);
     Contains("IsDarkTheme", generatedDashboardViewModel);
@@ -5649,8 +5654,15 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("x:Name=\"Root\"", detailCard);
     Contains("DashboardDetailCardStyle", detailCard);
     Contains("Item.Name, ElementName=Root", detailCard);
+    Contains("Click=\"PromoteButton_Click\"", detailCard);
+    Contains("DashboardSecondaryButtonStyle", detailCard);
     Contains("partial class DashboardDetailCard : UserControl", detailCardCodeBehind);
     Contains("DependencyProperty.Register", detailCardCodeBehind);
+    Contains("EventManager.RegisterRoutedEvent", detailCardCodeBehind);
+    Contains("RoutingStrategy.Bubble", detailCardCodeBehind);
+    Contains("PromoteRequestedEvent", detailCardCodeBehind);
+    Contains("public event RoutedEventHandler PromoteRequested", detailCardCodeBehind);
+    Contains("RaiseEvent(new RoutedEventArgs(PromoteRequestedEvent, this))", detailCardCodeBehind);
     Contains("MainWindowViewModel.DashboardItem? Item", detailCardCodeBehind);
     Contains("GetValue(ItemProperty)", detailCardCodeBehind);
 }

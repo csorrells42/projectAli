@@ -14268,7 +14268,7 @@ public sealed class LocalCodingToolService(
                     <local:DashboardSelectionSummaryConverter x:Key="DashboardSelectionSummaryConverter" />
                     <local:DashboardBindingProxy x:Key="DashboardCommandsProxy" Data="{Binding}" />
                     <DataTemplate x:Key="DashboardDetailTemplate">
-                        <local:DashboardDetailCard Item="{Binding}" />
+                        <local:DashboardDetailCard Item="{Binding}" PromoteRequested="DashboardDetailCard_PromoteRequested" />
                     </DataTemplate>
                     <DataTemplate x:Key="ReadyDashboardItemCardTemplate">
                         <Border Padding="10" Background="#ECFDF3" BorderBrush="#17B26A" BorderThickness="1" CornerRadius="4">
@@ -14825,6 +14825,19 @@ public sealed class LocalCodingToolService(
                     DetailsPaneGroupBox.Focus();
                     e.Handled = true;
                 }
+
+                private void DashboardDetailCard_PromoteRequested(object sender, RoutedEventArgs e)
+                {
+                    if (DataContext is not MainWindowViewModel viewModel
+                        || sender is not DashboardDetailCard { Item: { } item }
+                        || !viewModel.MarkItemReadyCommand.CanExecute(item))
+                    {
+                        return;
+                    }
+
+                    viewModel.MarkItemReadyCommand.Execute(item);
+                    e.Handled = true;
+                }
             }
 
             public sealed class DashboardDialogService : IDashboardDialogService
@@ -15081,6 +15094,11 @@ public sealed class LocalCodingToolService(
                             <Run Text="Status: " />
                             <Run Text="{Binding Item.Status, ElementName=Root, TargetNullValue=none}" />
                         </TextBlock>
+                        <Button Content="Mark Ready"
+                                Style="{StaticResource DashboardSecondaryButtonStyle}"
+                                Click="PromoteButton_Click"
+                                HorizontalAlignment="Left"
+                                Margin="0,10,0,0" />
                     </StackPanel>
                 </Border>
             </UserControl>
@@ -15106,15 +15124,33 @@ public sealed class LocalCodingToolService(
                         typeof(DashboardDetailCard),
                         new PropertyMetadata(null));
 
+                public static readonly RoutedEvent PromoteRequestedEvent =
+                    EventManager.RegisterRoutedEvent(
+                        nameof(PromoteRequested),
+                        RoutingStrategy.Bubble,
+                        typeof(RoutedEventHandler),
+                        typeof(DashboardDetailCard));
+
                 public DashboardDetailCard()
                 {
                     InitializeComponent();
+                }
+
+                public event RoutedEventHandler PromoteRequested
+                {
+                    add => AddHandler(PromoteRequestedEvent, value);
+                    remove => RemoveHandler(PromoteRequestedEvent, value);
                 }
 
                 public MainWindowViewModel.DashboardItem? Item
                 {
                     get => (MainWindowViewModel.DashboardItem?)GetValue(ItemProperty);
                     set => SetValue(ItemProperty, value);
+                }
+
+                private void PromoteButton_Click(object sender, RoutedEventArgs e)
+                {
+                    RaiseEvent(new RoutedEventArgs(PromoteRequestedEvent, this));
                 }
             }
             """;
