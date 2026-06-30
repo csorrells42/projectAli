@@ -746,6 +746,28 @@ public static class CodingToolRequestParser
         "show feature build loop"
     ];
 
+    private static readonly string[] FeatureSessionLedgerPrefixes =
+    [
+        "feature session ledger ",
+        "show feature session ledger ",
+        "coding feature ledger ",
+        "feature checkpoint ",
+        "show feature checkpoint ",
+        "build checkpoint ",
+        "show build checkpoint "
+    ];
+
+    private static readonly string[] FeatureSessionLedgerRequests =
+    [
+        "feature session ledger",
+        "show feature session ledger",
+        "coding feature ledger",
+        "feature checkpoint",
+        "show feature checkpoint",
+        "build checkpoint",
+        "show build checkpoint"
+    ];
+
     private static readonly string[] PostPatchValidationRouterPrefixes =
     [
         "post patch validation ",
@@ -2750,6 +2772,9 @@ public static class CodingToolRequestParser
     private static bool IsAutonomousPatchLoopRequest(string text) =>
         AutonomousPatchLoopRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsFeatureSessionLedgerRequest(string text) =>
+        FeatureSessionLedgerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPostPatchValidationRouterRequest(string text) =>
         PostPatchValidationRouterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2916,6 +2941,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, ExactPatchSynthesisPrefixes, CodingToolAction.ShowExactPatchSynthesis, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PreviewSynthesizedFeaturePatchPrefixes, CodingToolAction.PreviewSynthesizedFeaturePatch, userConfirmed, out request)
             || TryParsePrefixedQuery(text, AutonomousPatchLoopPrefixes, CodingToolAction.ShowAutonomousPatchLoop, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureSessionLedgerPrefixes, CodingToolAction.ShowFeatureSessionLedger, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
@@ -3005,6 +3031,12 @@ public static class CodingToolRequestParser
         if (IsAutonomousPatchLoopRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowAutonomousPatchLoop, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeatureSessionLedgerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeatureSessionLedger, null, UserConfirmed: userConfirmed);
             return true;
         }
 

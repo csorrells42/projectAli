@@ -58,6 +58,7 @@ public enum CodingToolAction
     ShowExactPatchSynthesis,
     PreviewSynthesizedFeaturePatch,
     ShowAutonomousPatchLoop,
+    ShowFeatureSessionLedger,
     ShowPostPatchValidationRouter,
     ShowPatchPreviewIntelligence,
     ShowPlainEnglishFeatureBuilder,

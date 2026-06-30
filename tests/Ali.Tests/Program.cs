@@ -808,6 +808,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.PreviewSynthesizedFeaturePatch, synthesizedPreviewRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("autonomous patch loop Save button", out var patchLoopRequest));
     Equal(CodingToolAction.ShowAutonomousPatchLoop, patchLoopRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature session ledger Save button", out var sessionLedgerRequest));
+    Equal(CodingToolAction.ShowFeatureSessionLedger, sessionLedgerRequest.Action);
+    Equal("Save button", sessionLedgerRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("post patch validation Save button", out var validationRouterRequest));
     Equal(CodingToolAction.ShowPostPatchValidationRouter, validationRouterRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("patch intelligence Save button", out var patchIntelligenceRequest));
@@ -3199,6 +3202,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var featurePatchDraft = await service.TryHandleAsync("feature patch draft Save button", CancellationToken.None);
     var exactPatch = await service.TryHandleAsync("exact patch synthesis Save button", CancellationToken.None);
     var patchLoop = await service.TryHandleAsync("autonomous patch loop Save button", CancellationToken.None);
+    var sessionLedger = await service.TryHandleAsync("feature session ledger Save button", CancellationToken.None);
     var validationRouter = await service.TryHandleAsync("post patch validation Save button", CancellationToken.None);
     var patchIntelligence = await service.TryHandleAsync("patch intelligence Save button", CancellationToken.None);
     var featureBuilder = await service.TryHandleAsync("feature builder Save button", CancellationToken.None);
@@ -3254,6 +3258,12 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Autonomous patch loop v1", patchLoop.Message);
     Contains("Loop steps:", patchLoop.Message);
     Contains("Failure classifier:", patchLoop.Message);
+    Contains("Feature session ledger v1", sessionLedger.Message);
+    Contains("Current stage:", sessionLedger.Message);
+    Contains("Session score:", sessionLedger.Message);
+    Contains("Checklist:", sessionLedger.Message);
+    Contains("Evidence:", sessionLedger.Message);
+    Contains("Owner-safe rule:", sessionLedger.Message);
     Contains("Post-patch validation router", validationRouter.Message);
     Contains("Patch preview intelligence v1", patchIntelligence.Message);
     Contains("Slice approval packet:", patchIntelligence.Message);
@@ -3581,6 +3591,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingExactPatchCommand", dashboard);
     Contains("RunCodingPatchIntelligenceCommand", dashboard);
     Contains("RunCodingPatchLoopCommand", dashboard);
+    Contains("RunCodingFeatureSessionLedgerCommand", dashboard);
     Contains("RunCodingFeatureExecutionPacketCommand", dashboard);
     Contains("RunCodingApplyGateCommand", dashboard);
     Contains("RunCodingPostPatchValidationCommand", dashboard);
@@ -3602,6 +3613,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingExactPatchCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchIntelligenceCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchLoopCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureSessionLedgerCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingApplyGateCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPostPatchValidationCommand = CreateAsyncCommand", viewModel);
