@@ -153,6 +153,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool creates hello world Program file", TestLocalCodingToolCreatesHelloWorldProgramFile),
     ("local coding tool synthesizes add two integers console patch", TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch),
     ("local coding tool synthesizes escalating console starters", TestLocalCodingToolSynthesizesEscalatingConsoleStarters),
+    ("local coding tool synthesizes WPF counter starter", TestLocalCodingToolSynthesizesWpfCounterStarter),
     ("local coding tool previews behavior test patch", TestLocalCodingToolPreviewsBehaviorTestPatch),
     ("local coding tool previews guided feature bundle", TestLocalCodingToolPreviewsGuidedFeatureBundle),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
@@ -5362,6 +5363,76 @@ static async Task AssertConsoleStarterAsync(
     }
 
     Equal(false, content.Contains("Hello, World!", StringComparison.Ordinal));
+}
+
+static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    var xamlPath = Path.Combine(projectDirectory, "MainWindow.xaml");
+    var codeBehindPath = Path.Combine(projectDirectory, "MainWindow.xaml.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        xamlPath,
+        """
+        <Window x:Class="Demo.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="MainWindow" Height="450" Width="800">
+            <Grid />
+        </Window>
+        """);
+    await File.WriteAllTextAsync(
+        codeBehindPath,
+        """
+        using System.Windows;
+
+        namespace Demo;
+
+        public partial class MainWindow : Window
+        {
+            public MainWindow()
+            {
+                InitializeComponent();
+            }
+        }
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+
+    var goal = "Build a simple WPF counter app with a button that increases the count on screen.";
+    var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Next command: confirm apply last patch preview", preview.Message);
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    var xaml = await File.ReadAllTextAsync(xamlPath);
+    var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
+    Contains("CounterTextBlock", xaml);
+    Contains("IncrementButton_Click", xaml);
+    Contains("private int _count;", codeBehind);
+    Contains("_count++;", codeBehind);
+    Contains("CounterTextBlock.Text", codeBehind);
 }
 
 static async Task TestLocalCodingToolPreviewsBehaviorTestPatch()

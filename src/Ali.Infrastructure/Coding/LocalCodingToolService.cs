@@ -12594,6 +12594,20 @@ public sealed class LocalCodingToolService(
                 continue;
             }
 
+            if (!hasTransform
+                && TryBuildSimpleWpfPatchBlock(content, context.Goal, fullPath, out var wpfOldText, out var wpfNewText, out var wpfNote))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "deterministic WPF starter recipe",
+                    wpfOldText,
+                    wpfNewText,
+                    true,
+                    wpfNote));
+                continue;
+            }
+
             if (TryBuildAnchorPatchBlock(content, context.GoalTerms, hasTransform ? oldValue : null, out var anchorText, out var anchorNote))
             {
                 candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12633,11 +12647,21 @@ public sealed class LocalCodingToolService(
 
     private IReadOnlyList<string> FindDeterministicFeaturePatchTargets(FeatureWorkContext context)
     {
-        if (!IsSimpleConsoleProgramGoal(context.Goal))
+        if (IsSimpleConsoleProgramGoal(context.Goal))
         {
-            return [];
+            return FindDeterministicConsolePatchTargets(context);
         }
 
+        if (IsSimpleWpfProgramGoal(context.Goal))
+        {
+            return FindDeterministicWpfPatchTargets(context);
+        }
+
+        return [];
+    }
+
+    private IReadOnlyList<string> FindDeterministicConsolePatchTargets(FeatureWorkContext context)
+    {
         var targets = new List<string>();
         var primaryTarget = GetPrimaryTarget();
         if (!string.IsNullOrWhiteSpace(primaryTarget) && IsSafeProjectPath(primaryTarget))
@@ -12678,6 +12702,62 @@ public sealed class LocalCodingToolService(
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private IReadOnlyList<string> FindDeterministicWpfPatchTargets(FeatureWorkContext context)
+    {
+        var targets = new List<string>();
+        var primaryTarget = GetPrimaryTarget();
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            var primaryDirectory = Path.GetDirectoryName(primaryTarget);
+            if (!string.IsNullOrWhiteSpace(primaryDirectory))
+            {
+                AddIfEditableWpfSurface(targets, Path.Combine(primaryDirectory, "MainWindow.xaml"));
+                AddIfEditableWpfSurface(targets, Path.Combine(primaryDirectory, "MainWindow.xaml.cs"));
+            }
+        }
+
+        foreach (var candidate in context.RankedTargets
+            .Select(target => ToAbsoluteWorkspacePath(target.RelativePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Concat(context.CandidateFiles))
+        {
+            AddIfEditableWpfSurface(targets, candidate);
+        }
+
+        targets.AddRange(GetXamlFiles()
+            .Where(IsEditableWpfSurfaceFile)
+            .OrderBy(path => RelativeToWorkspace(path), StringComparer.OrdinalIgnoreCase)
+            .Take(1));
+
+        return targets
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void AddIfEditableWpfSurface(List<string> targets, string path)
+    {
+        if (IsEditableWpfSurfaceFile(path))
+        {
+            targets.Add(path);
+        }
+    }
+
+    private bool IsEditableWpfSurfaceFile(string path) =>
+        File.Exists(path)
+        && IsSafeWpfSurfacePath(path);
+
+    private bool IsSafeWpfSurfacePath(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return (fileName.Equals("MainWindow.xaml", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("MainWindow.xaml.cs", StringComparison.OrdinalIgnoreCase))
+               && Policy.IsInsideWorkspace(path)
+               && !IsBuildArtifactPath(path)
+               && !IsGeneratedOrDesignerFile(path);
     }
 
     private bool IsEditableProgramFile(string path) =>
@@ -13496,6 +13576,160 @@ public sealed class LocalCodingToolService(
     private static bool IsGenericConsoleListManagerGoal(string goal) =>
         MentionsAny(goal, "list", "manager", "tracker", "address book", "inventory", "shopping", "grocery", "contacts", "contact", "books", "library", "recipes", "movies")
         && MentionsAny(goal, "add", "create", "list", "show", "remove", "delete", "clear", "save", "quit", "menu");
+
+    private static bool TryBuildSimpleWpfPatchBlock(
+        string content,
+        string goal,
+        string fullPath,
+        out string oldText,
+        out string newText,
+        out string note)
+    {
+        oldText = string.Empty;
+        newText = string.Empty;
+        note = string.Empty;
+        if (!IsSimpleWpfProgramGoal(goal))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(fullPath);
+        if (fileName.Equals("MainWindow.xaml", StringComparison.OrdinalIgnoreCase)
+            && content.Contains("<Window", StringComparison.OrdinalIgnoreCase))
+        {
+            oldText = content;
+            var xamlClass = ExtractXamlClassName(content) ?? "MainWindow";
+            newText = IsWpfCounterGoal(goal)
+                ? BuildWpfCounterWindowXaml(xamlClass)
+                : BuildWpfHelloWindowXaml(xamlClass);
+            note = IsWpfCounterGoal(goal)
+                ? "WPF counter MainWindow.xaml starter recipe."
+                : "WPF hello MainWindow.xaml starter recipe.";
+            return true;
+        }
+
+        if (fileName.Equals("MainWindow.xaml.cs", StringComparison.OrdinalIgnoreCase)
+            && IsWpfCounterGoal(goal)
+            && content.Contains("partial class MainWindow", StringComparison.OrdinalIgnoreCase))
+        {
+            oldText = content;
+            newText = BuildWpfCounterCodeBehind(ExtractCSharpNamespaceName(content));
+            note = "WPF counter MainWindow.xaml.cs starter recipe.";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string BuildWpfCounterWindowXaml(string xamlClass) =>
+        $"""
+        <Window x:Class="{xamlClass}"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Counter" Height="320" Width="420">
+            <Grid Margin="24">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="Counter"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock x:Name="CounterTextBlock"
+                               Text="Count: 0"
+                               FontSize="22"
+                               Margin="0,18,0,18"
+                               HorizontalAlignment="Center" />
+                    <Button Content="Add One"
+                            Width="140"
+                            Height="38"
+                            Click="IncrementButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Window>
+        """;
+
+    private static string BuildWpfHelloWindowXaml(string xamlClass) =>
+        $"""
+        <Window x:Class="{xamlClass}"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Hello" Height="280" Width="420">
+            <Grid Margin="24">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="Hello, World!"
+                               FontSize="30"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Your WPF app is running."
+                               FontSize="16"
+                               Margin="0,12,0,0"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+        </Window>
+        """;
+
+    private static string BuildWpfCounterCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Windows;
+
+            {{namespaceLine}}public partial class MainWindow : Window
+            {
+                private int _count;
+
+                public MainWindow()
+                {
+                    InitializeComponent();
+                }
+
+                private void IncrementButton_Click(object sender, RoutedEventArgs e)
+                {
+                    _count++;
+                    CounterTextBlock.Text = $"Count: {_count}";
+                }
+            }
+            """;
+    }
+
+    private static string? ExtractXamlClassName(string content)
+    {
+        var match = Regex.Match(
+            content,
+            @"x:Class\s*=\s*""(?<name>[^""]+)""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["name"].Value.Trim() : null;
+    }
+
+    private static string? ExtractCSharpNamespaceName(string content)
+    {
+        var match = Regex.Match(
+            content,
+            """\bnamespace\s+(?<name>[A-Za-z_][\w.]*)\s*(?:;|\{)""",
+            RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["name"].Value.Trim() : null;
+    }
+
+    private static bool IsSimpleWpfProgramGoal(string goal)
+    {
+        if (string.IsNullOrWhiteSpace(goal))
+        {
+            return false;
+        }
+
+        return MentionsAny(goal, "wpf", "xaml", "desktop window", "desktop app", "windowed app")
+               && (IsWpfCounterGoal(goal) || IsWpfHelloGoal(goal) || MentionsAny(goal, "button", "window", "screen"));
+    }
+
+    private static bool IsWpfCounterGoal(string goal) =>
+        MentionsAny(goal, "counter", "count", "increment", "increase")
+        && MentionsAny(goal, "button", "click", "press");
+
+    private static bool IsWpfHelloGoal(string goal) =>
+        MentionsAny(goal, "hello world", "hello-world", "says hello", "display hello");
 
     private static bool IsBuildArtifactPath(string path)
     {
