@@ -625,6 +625,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("authoring sequence flow <goal>", builderIndex);
     Contains("validation chain planner <goal>", builderIndex);
     Contains("data systems guide <goal>", builderIndex);
+    Contains("console app guide <goal>", builderIndex);
+    Contains("wpf app guide <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
     Contains("semantic diff summary <goal>", builderIndex);
     Contains("mini codex score v3 <goal>", builderIndex);
@@ -804,6 +806,12 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("data systems guide fast SQL order service", out var dataSystemsRequest));
     Equal(CodingToolAction.ShowDataSystemsGuide, dataSystemsRequest.Action);
     Equal("fast SQL order service", dataSystemsRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("console app guide calculator", out var consoleGuideRequest));
+    Equal(CodingToolAction.ShowConsoleCodingGuide, consoleGuideRequest.Action);
+    Equal("calculator", consoleGuideRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("wpf app guide todo list", out var wpfGuideRequest));
+    Equal(CodingToolAction.ShowWpfCodingGuide, wpfGuideRequest.Action);
+    Equal("todo list", wpfGuideRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("show validation queue runner", out var queueRunnerRequest));
     Equal(CodingToolAction.ShowValidationQueueRunner, queueRunnerRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("validation repair runner Save button", out var repairRunnerRequest));
@@ -3528,6 +3536,8 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     var known = await service.TryHandleAsync("known error CS0103", CancellationToken.None);
     var rollback = await service.TryHandleAsync("preview rollback patch", CancellationToken.None);
     var dataSystems = await service.TryHandleAsync("data systems guide fast SQL order service", CancellationToken.None);
+    var consoleGuide = await service.TryHandleAsync("console app guide calculator", CancellationToken.None);
+    var wpfGuide = await service.TryHandleAsync("wpf app guide todo list", CancellationToken.None);
 
     Contains("Typed patch composer", patch.Message);
     Contains("src/Demo/WidgetService.cs", patch.Message);
@@ -3553,6 +3563,12 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("Dictionary<TKey,TValue>", dataSystems.Message);
     Contains("SQL Server/PostgreSQL/MySQL/MariaDB", dataSystems.Message);
     Contains("connection pooling", dataSystems.Message);
+    Contains("Console app guide", consoleGuide.Message);
+    Contains("TryParse", consoleGuide.Message);
+    Contains("preview synthesized feature patch calculator", consoleGuide.Message);
+    Contains("WPF app guide", wpfGuide.Message);
+    Contains("INotifyPropertyChanged", wpfGuide.Message);
+    Contains("ObservableCollection<T>", wpfGuide.Message);
 }
 
 static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
@@ -8649,6 +8665,8 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     var instruction = runtime.LastRequest!.History[0].Text;
     Contains("Programming lane map:", instruction);
     Contains("If recent assistant text contains `Next:` or `Next command:`", instruction);
+    Contains("console app guide <goal>", instruction);
+    Contains("wpf app guide <goal>", instruction);
     Contains("feature patch draft <goal>", instruction);
     Contains("exact patch synthesis <goal>", instruction);
     Contains("preview synthesized feature patch <goal>", instruction);

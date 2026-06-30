@@ -96,6 +96,8 @@ public enum CodingToolAction
     ShowSemanticChangeReceipt,
     ShowValidationChainPlanner,
     ShowDataSystemsGuide,
+    ShowConsoleCodingGuide,
+    ShowWpfCodingGuide,
     ShowActiveWorkspaceProject,
     ShowProjectControlCenter,
     ShowCurrentProjectMemory,

@@ -1343,6 +1343,46 @@ public static class CodingToolRequestParser
         "service design guide"
     ];
 
+    private static readonly string[] ConsoleCodingGuidePrefixes =
+    [
+        "console app guide",
+        "console coding guide",
+        "console program guide",
+        "console guide",
+        "cli app guide",
+        "command line app guide"
+    ];
+
+    private static readonly string[] ConsoleCodingGuideRequests =
+    [
+        "console app guide",
+        "console coding guide",
+        "console program guide",
+        "console guide",
+        "cli app guide",
+        "command line app guide"
+    ];
+
+    private static readonly string[] WpfCodingGuidePrefixes =
+    [
+        "wpf app guide",
+        "wpf coding guide",
+        "wpf guide",
+        "xaml guide",
+        "mvvm guide",
+        "desktop ui guide"
+    ];
+
+    private static readonly string[] WpfCodingGuideRequests =
+    [
+        "wpf app guide",
+        "wpf coding guide",
+        "wpf guide",
+        "xaml guide",
+        "mvvm guide",
+        "desktop ui guide"
+    ];
+
     private static readonly string[] ActiveWorkspaceProjectPrefixes =
     [
         "active workspace project ",
@@ -4024,6 +4064,8 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, SemanticChangeReceiptPrefixes, CodingToolAction.ShowSemanticChangeReceipt, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ValidationChainPlannerPrefixes, CodingToolAction.ShowValidationChainPlanner, userConfirmed, out request)
             || TryParsePrefixedQuery(text, DataSystemsGuidePrefixes, CodingToolAction.ShowDataSystemsGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ConsoleCodingGuidePrefixes, CodingToolAction.ShowConsoleCodingGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, WpfCodingGuidePrefixes, CodingToolAction.ShowWpfCodingGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ActiveWorkspaceProjectPrefixes, CodingToolAction.ShowActiveWorkspaceProject, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ProjectControlCenterPrefixes, CodingToolAction.ShowProjectControlCenter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, CurrentProjectMemoryPrefixes, CodingToolAction.ShowCurrentProjectMemory, userConfirmed, out request)
@@ -4077,6 +4119,18 @@ public static class CodingToolRequestParser
         if (IsDataSystemsGuideRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowDataSystemsGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsConsoleCodingGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowConsoleCodingGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsWpfCodingGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWpfCodingGuide, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -4464,6 +4518,12 @@ public static class CodingToolRequestParser
 
     private static bool IsDataSystemsGuideRequest(string text) =>
         DataSystemsGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsConsoleCodingGuideRequest(string text) =>
+        ConsoleCodingGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWpfCodingGuideRequest(string text) =>
+        WpfCodingGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePrefixedQuery(
         string text,

@@ -43,6 +43,8 @@ public static class CodingAbilityCatalog
         "authoring sequence flow <goal>",
         "validation chain planner <goal>",
         "data systems guide <goal>",
+        "console app guide <goal>",
+        "wpf app guide <goal>",
         "show architecture options <goal>",
         "write acceptance criteria <goal>",
         "suggest tests for <goal>",
@@ -149,6 +151,17 @@ public static class CodingAbilityCatalog
                 new("SQL/service plan", "feature implementation planner <goal>"),
                 new("Package lookup", "plan package lookup <goal>"),
                 new("Dependency install packet", "plan dependency install packet <goal>"),
+                new("Validation chain", "validation chain planner <goal>")
+            ]),
+        new(
+            "Console and WPF app craft",
+            "Plan small console apps and WPF desktop apps with usable input, output, binding, and validation habits.",
+            [
+                new("Console guide", "console app guide <goal>"),
+                new("WPF guide", "wpf app guide <goal>"),
+                new("Build front door", "build this for me <goal>"),
+                new("Starter preview", "preview synthesized feature patch <goal>"),
+                new("Apply packet", "owner approved apply packet <goal>"),
                 new("Validation chain", "validation chain planner <goal>")
             ]),
         new(

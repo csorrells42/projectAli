@@ -343,6 +343,8 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowSemanticChangeReceipt => await ShowSemanticChangeReceiptAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationChainPlanner => await ShowValidationChainPlannerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowDataSystemsGuide => ShowDataSystemsGuide(request),
+            CodingToolAction.ShowConsoleCodingGuide => ShowConsoleCodingGuide(request),
+            CodingToolAction.ShowWpfCodingGuide => ShowWpfCodingGuide(request),
             CodingToolAction.ShowActiveWorkspaceProject => await ShowActiveWorkspaceProjectAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowProjectControlCenter => await ShowProjectControlCenterAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCurrentProjectMemory => ShowCurrentProjectMemory(),
@@ -10303,6 +10305,63 @@ public sealed class LocalCodingToolService(
             $"- validation chain planner {goal}"
         };
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Data systems guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowConsoleCodingGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current console app");
+        var lines = new List<string>
+        {
+            "Console app guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Program shape:",
+            "- Start with one clear user workflow: prompt, parse/validate input, compute, print result, then exit or loop.",
+            "- Keep reusable logic in small methods/classes when the program grows past one screen.",
+            "- Use TryParse for numeric input and show a useful message on invalid input.",
+            "- Use collections deliberately: List<T> for menus/lists, Dictionary<TKey,TValue> for lookup, Queue<T> for work order.",
+            "- For file-backed programs, centralize path choice, read once at startup when practical, and write atomically when data matters.",
+            "Common starter patterns:",
+            "- Hello/status output, calculator, guessing game, menu loop, todo/list manager, notes/contact manager, CSV/file reader.",
+            "Validation:",
+            "- Run the app manually for the happy path and at least one bad input path.",
+            "- Add pure-method tests once calculation, parsing, or storage logic leaves top-level Program.cs.",
+            "Next commands:",
+            $"- build this for me {goal}",
+            $"- preview synthesized feature patch {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Console app guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowWpfCodingGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current WPF app");
+        var lines = new List<string>
+        {
+            "WPF app guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Project shape:",
+            "- Keep XAML for layout/resources/bindings and C# for state, commands, validation, and services.",
+            "- Prefer MVVM for anything beyond a tiny starter: public properties, ICommand actions, and INotifyPropertyChanged.",
+            "- Use ObservableCollection<T> for list UIs and keep selected item state explicit.",
+            "- Keep code-behind minimal: InitializeComponent, view-only events, and safe UI handoff only.",
+            "- Use async commands for slow work; expose IsBusy/status text instead of blocking the UI thread.",
+            "Binding checklist:",
+            "- Match Binding names to real properties, command names to real ICommand properties, and x:Class to the code-behind namespace.",
+            "- Keep DataContext setup obvious and test command methods separately when possible.",
+            "- Use validation/error text for bad input instead of silent failures.",
+            "Validation:",
+            "- Build the WPF project, run xaml binding check, run command binding check, and smoke-test the main click/input path.",
+            "Next commands:",
+            $"- build this for me {goal}",
+            $"- wpf app guide {goal}",
+            $"- xaml binding check",
+            $"- command binding check",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF app guide", Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> ShowActiveWorkspaceProjectAsync(CancellationToken cancellationToken)
