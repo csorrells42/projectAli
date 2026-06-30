@@ -12501,7 +12501,7 @@ public sealed class LocalCodingToolService(
             if (!File.Exists(fullPath))
             {
                 if (!hasTransform
-                    && TryBuildConsoleHelloWorldCreateBlock(context.Goal, fullPath, out var createText, out var createNote))
+                    && TryBuildSimpleConsoleProgramCreateBlock(context.Goal, fullPath, out var createText, out var createNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
                         RelativeToWorkspace(fullPath),
@@ -12581,7 +12581,7 @@ public sealed class LocalCodingToolService(
             }
 
             if (!hasTransform
-                && TryBuildConsoleHelloWorldPatchBlock(content, context.Goal, fullPath, out var consoleOldText, out var consoleNewText, out var consoleNote))
+                && TryBuildSimpleConsoleProgramPatchBlock(content, context.Goal, fullPath, out var consoleOldText, out var consoleNewText, out var consoleNote))
             {
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
@@ -12633,7 +12633,7 @@ public sealed class LocalCodingToolService(
 
     private IReadOnlyList<string> FindDeterministicFeaturePatchTargets(FeatureWorkContext context)
     {
-        if (!IsConsoleHelloWorldGoal(context.Goal))
+        if (!IsSimpleConsoleProgramGoal(context.Goal))
         {
             return [];
         }
@@ -12792,7 +12792,7 @@ public sealed class LocalCodingToolService(
         return false;
     }
 
-    private static bool TryBuildConsoleHelloWorldCreateBlock(
+    private static bool TryBuildSimpleConsoleProgramCreateBlock(
         string goal,
         string fullPath,
         out string newText,
@@ -12801,12 +12801,12 @@ public sealed class LocalCodingToolService(
         newText = string.Empty;
         note = string.Empty;
         if (!Path.GetFileName(fullPath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase)
-            || !IsConsoleHelloWorldGoal(goal))
+            || !IsSimpleConsoleProgramGoal(goal))
         {
             return false;
         }
 
-        newText = BuildConsoleHelloWorldProgramText(goal, Environment.NewLine, out note);
+        newText = BuildSimpleConsoleProgramText(goal, Environment.NewLine, out note);
         note = "Create Program.cs. " + note;
         return true;
     }
@@ -12823,7 +12823,7 @@ public sealed class LocalCodingToolService(
         newText = string.Empty;
         note = string.Empty;
         if (!fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-            || !IsConsoleHelloWorldGoal(goal)
+            || !IsSimpleConsoleProgramGoal(goal)
             || content.Contains("<OutputType>Exe</OutputType>", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -12874,7 +12874,7 @@ public sealed class LocalCodingToolService(
         return false;
     }
 
-    private static bool TryBuildConsoleHelloWorldPatchBlock(
+    private static bool TryBuildSimpleConsoleProgramPatchBlock(
         string content,
         string goal,
         string fullPath,
@@ -12886,18 +12886,18 @@ public sealed class LocalCodingToolService(
         newText = string.Empty;
         note = string.Empty;
         if (!Path.GetFileName(fullPath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase)
-            || !IsConsoleHelloWorldGoal(goal))
+            || !IsSimpleConsoleProgramGoal(goal))
         {
             return false;
         }
 
         var newline = GetPreferredNewline(content);
         oldText = content;
-        newText = BuildConsoleHelloWorldProgramText(goal, newline, out note);
+        newText = BuildSimpleConsoleProgramText(goal, newline, out note);
         return !content.Equals(newText, StringComparison.Ordinal);
     }
 
-    private static string BuildConsoleHelloWorldProgramText(string goal, string newline, out string note)
+    private static string BuildSimpleConsoleProgramText(string goal, string newline, out string note)
     {
         var waitsForKey = MentionsAny(
             goal,
@@ -12910,34 +12910,93 @@ public sealed class LocalCodingToolService(
             "before closing",
             "before it closes",
             "waits for");
-        string[] replacementLines = waitsForKey
-            ? new[]
-            {
-                "Console.WriteLine(\"Hello, World!\");",
-                "Console.WriteLine(\"Press any key to exit...\");",
-                "Console.ReadKey(intercept: true);"
-            }
-            : ["Console.WriteLine(\"Hello, World!\");"];
+        var replacementLines = BuildSimpleConsoleProgramLines(goal, waitsForKey).ToList();
 
-        note = waitsForKey
-            ? "Console hello-world recipe with a keypress hold before exit."
-            : "Console hello-world recipe.";
+        note = ClassifySimpleConsoleProgramNote(goal, waitsForKey);
         return string.Join(newline, replacementLines) + newline;
+    }
+
+    private static IReadOnlyList<string> BuildSimpleConsoleProgramLines(string goal, bool waitsForKey)
+    {
+        var lines = IsConsoleAddTwoIntegersGoal(goal)
+            ? BuildAddTwoIntegersConsoleProgramLines()
+            : IsConsoleFactorialGoal(goal)
+                ? BuildFactorialConsoleProgramLines()
+                : BuildHelloWorldConsoleProgramLines();
+        return waitsForKey
+            ? lines.Concat(
+                [
+                    string.Empty,
+                    "Console.WriteLine(\"Press any key to exit...\");",
+                    "Console.ReadKey(intercept: true);"
+                ]).ToList()
+            : lines;
+    }
+
+    private static IReadOnlyList<string> BuildHelloWorldConsoleProgramLines() =>
+        ["Console.WriteLine(\"Hello, World!\");"];
+
+    private static IReadOnlyList<string> BuildAddTwoIntegersConsoleProgramLines() =>
+    [
+        "Console.Write(\"Enter the first integer: \");",
+        "var firstInput = Console.ReadLine();",
+        string.Empty,
+        "Console.Write(\"Enter the second integer: \");",
+        "var secondInput = Console.ReadLine();",
+        string.Empty,
+        "if (!int.TryParse(firstInput, out var firstNumber) || !int.TryParse(secondInput, out var secondNumber))",
+        "{",
+        "    Console.WriteLine(\"Please enter valid whole numbers.\");",
+        "}",
+        "else",
+        "{",
+        "    var sum = firstNumber + secondNumber;",
+        "    Console.WriteLine($\"{firstNumber} + {secondNumber} = {sum}\");",
+        "}"
+    ];
+
+    private static IReadOnlyList<string> BuildFactorialConsoleProgramLines() =>
+    [
+        "Console.Write(\"Enter an integer between 1 and 9: \");",
+        "var input = Console.ReadLine();",
+        string.Empty,
+        "if (!int.TryParse(input, out var number) || number < 1 || number > 9)",
+        "{",
+        "    Console.WriteLine(\"Please enter a whole number from 1 to 9.\");",
+        "}",
+        "else",
+        "{",
+        "    var factorial = 1;",
+        "    for (var value = 2; value <= number; value++)",
+        "    {",
+        "        factorial *= value;",
+        "    }",
+        string.Empty,
+        "    Console.WriteLine($\"{number}! = {factorial}\");",
+        "}"
+    ];
+
+    private static string ClassifySimpleConsoleProgramNote(string goal, bool waitsForKey)
+    {
+        var shape = IsConsoleAddTwoIntegersGoal(goal)
+            ? "Console add-two-integers starter recipe"
+            : IsConsoleFactorialGoal(goal)
+                ? "Console factorial starter recipe"
+                : "Console hello-world starter recipe";
+        return waitsForKey ? $"{shape} with a keypress hold before exit." : $"{shape}.";
     }
 
     private static string GetPreferredNewline(string content) =>
         content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
 
-    private static bool IsConsoleHelloWorldGoal(string goal)
+    private static bool IsSimpleConsoleProgramGoal(string goal)
     {
-        if (string.IsNullOrWhiteSpace(goal)
-            || (!goal.Contains("hello world", StringComparison.OrdinalIgnoreCase)
-                && !goal.Contains("hello-world", StringComparison.OrdinalIgnoreCase)))
+        if (string.IsNullOrWhiteSpace(goal))
         {
             return false;
         }
 
-        return MentionsAny(
+        var isConsoleish = MentionsAny(
             goal,
             "console",
             "c#",
@@ -12950,7 +13009,23 @@ public sealed class LocalCodingToolService(
             "says",
             "display",
             "write");
+        return isConsoleish
+               && (IsConsoleHelloWorldGoal(goal)
+                   || IsConsoleAddTwoIntegersGoal(goal)
+                   || IsConsoleFactorialGoal(goal));
     }
+
+    private static bool IsConsoleHelloWorldGoal(string goal) =>
+        goal.Contains("hello world", StringComparison.OrdinalIgnoreCase)
+        || goal.Contains("hello-world", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsConsoleAddTwoIntegersGoal(string goal) =>
+        MentionsAny(goal, "add", "sum", "adds", "together", "total")
+        && MentionsAny(goal, "two", "2")
+        && MentionsAny(goal, "integer", "integers", "number", "numbers", "whole number");
+
+    private static bool IsConsoleFactorialGoal(string goal) =>
+        goal.Contains("factorial", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsBuildArtifactPath(string path)
     {

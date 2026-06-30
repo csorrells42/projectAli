@@ -351,6 +351,20 @@ public sealed class ConversationOrchestrator(
                     yield break;
                 }
             }
+
+            var synthesizedPreview = await LocalCodingTool.TryHandleAsync(
+                $"preview synthesized feature patch {NormalizeProgrammingGoal(userText)}",
+                cancellationToken).ConfigureAwait(false);
+            if (synthesizedPreview.Handled && synthesizedPreview.Succeeded)
+            {
+                yield return new AssistantStreamChunk(
+                    conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    BuildProgrammingToolMessage(synthesizedPreview),
+                    EvidenceStatus.Verified);
+                yield break;
+            }
         }
 
         var plan = CodingPlanner is null
@@ -431,6 +445,11 @@ public sealed class ConversationOrchestrator(
             return true;
         }
 
+        if (ShouldAttemptModelPatch(userText) && IsValidationOnlyProgrammingCommand(command))
+        {
+            return false;
+        }
+
         var userTerms = ExtractProgrammingTerms(userText);
         if (userTerms.Count == 0)
         {
@@ -441,6 +460,14 @@ public sealed class ConversationOrchestrator(
             .Where(term => !IsCodingCommandScaffoldTerm(term))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return commandTerms.Count == 0 || userTerms.Overlaps(commandTerms);
+    }
+
+    private static bool IsValidationOnlyProgrammingCommand(string command)
+    {
+        var normalized = command.ReplaceLineEndings(" ").Trim();
+        return normalized.StartsWith("post patch validation", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("validation command", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("validation chain", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsCodingCommandScaffoldTerm(string term) =>

@@ -151,6 +151,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
     ("local coding tool synthesizes hello world console patch", TestLocalCodingToolSynthesizesHelloWorldConsolePatch),
     ("local coding tool creates hello world Program file", TestLocalCodingToolCreatesHelloWorldProgramFile),
+    ("local coding tool synthesizes add two integers console patch", TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch),
     ("local coding tool previews behavior test patch", TestLocalCodingToolPreviewsBehaviorTestPatch),
     ("local coding tool previews guided feature bundle", TestLocalCodingToolPreviewsGuidedFeatureBundle),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
@@ -5217,6 +5218,62 @@ static async Task TestLocalCodingToolCreatesHelloWorldProgramFile()
     Contains("<OutputType>Exe</OutputType>", await File.ReadAllTextAsync(projectPath));
 }
 
+static async Task TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    var programPath = Path.Combine(projectDirectory, "Program.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net10.0</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        programPath,
+        """
+        Console.WriteLine("Hello, World!");
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey(intercept: true);
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    const string goal = "Build a simple C# console program that asks the user for two integers, adds them together, shows the answer, and waits for a keypress before closing.";
+
+    var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Synthesized feature patch preview", preview.Message);
+    Contains("Patch bundle preview", preview.Message);
+    Contains("Edits: 1", preview.Message);
+    Contains("Enter the first integer", preview.Message);
+    Contains("Next command: confirm apply last patch preview", preview.Message);
+    Contains("Hello, World!", await File.ReadAllTextAsync(programPath));
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    var content = await File.ReadAllTextAsync(programPath);
+    Contains("Enter the first integer", content);
+    Contains("Enter the second integer", content);
+    Contains("var sum = firstNumber + secondNumber;", content);
+    Contains("Console.ReadKey(intercept: true);", content);
+    Equal(false, content.Contains("Hello, World!", StringComparison.Ordinal));
+}
+
 static async Task TestLocalCodingToolPreviewsBehaviorTestPatch()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -5743,7 +5800,8 @@ static async Task TestOrchestratorKeepsNextStepAfterFeaturePatchDraft()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Contains("Next: exact patch synthesis create a hello world console app", answer);
+    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Status: No files changed yet.", answer);
     Contains("Use Next to run that step.", answer);
     Equal(false, answer.Contains("Next: no queued step", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
@@ -5965,10 +6023,9 @@ static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal(2, runtime.Requests.Count);
+    Equal(1, runtime.Requests.Count);
     Equal("coding_patch_plan", runtime.Requests[0].ConversationId);
-    Equal("coding_action_plan", runtime.Requests[1].ConversationId);
-    Contains("Next:", answer);
+    Contains("Next: confirm apply last patch preview", answer);
     Equal(false, answer.Contains("add export button", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("post patch validation add export button", StringComparison.OrdinalIgnoreCase));
 }
