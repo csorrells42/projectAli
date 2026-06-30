@@ -668,6 +668,26 @@ public static class CodingToolRequestParser
         "patch apply gate"
     ];
 
+    private static readonly string[] FeaturePatchDraftPlanPrefixes =
+    [
+        "feature patch draft ",
+        "show feature patch draft ",
+        "patch draft plan ",
+        "draft feature patch ",
+        "build patch draft ",
+        "plain english patch draft "
+    ];
+
+    private static readonly string[] FeaturePatchDraftPlanRequests =
+    [
+        "feature patch draft",
+        "show feature patch draft",
+        "patch draft plan",
+        "draft feature patch",
+        "build patch draft",
+        "plain english patch draft"
+    ];
+
     private static readonly string[] PostPatchValidationRouterPrefixes =
     [
         "post patch validation ",
@@ -2660,6 +2680,9 @@ public static class CodingToolRequestParser
     private static bool IsApplyGateRequest(string text) =>
         ApplyGateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsFeaturePatchDraftPlanRequest(string text) =>
+        FeaturePatchDraftPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPostPatchValidationRouterRequest(string text) =>
         PostPatchValidationRouterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2822,6 +2845,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, BehaviorContractPrefixes, CodingToolAction.ShowBehaviorContract, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchSlicePlanPrefixes, CodingToolAction.ShowPatchSlicePlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ApplyGatePrefixes, CodingToolAction.ShowApplyGate, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeaturePatchDraftPlanPrefixes, CodingToolAction.ShowFeaturePatchDraftPlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
@@ -2887,6 +2911,12 @@ public static class CodingToolRequestParser
         if (IsApplyGateRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowApplyGate, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeaturePatchDraftPlanRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeaturePatchDraftPlan, null, UserConfirmed: userConfirmed);
             return true;
         }
 

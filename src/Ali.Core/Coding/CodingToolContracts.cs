@@ -54,6 +54,7 @@ public enum CodingToolAction
     ShowBehaviorContract,
     ShowPatchSlicePlan,
     ShowApplyGate,
+    ShowFeaturePatchDraftPlan,
     ShowPostPatchValidationRouter,
     ShowPatchPreviewIntelligence,
     ShowPlainEnglishFeatureBuilder,

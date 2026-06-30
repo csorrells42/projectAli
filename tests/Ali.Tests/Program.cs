@@ -797,6 +797,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowPatchSlicePlan, patchSliceRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("apply gate", out var applyGateRequest));
     Equal(CodingToolAction.ShowApplyGate, applyGateRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature patch draft Save button", out var featurePatchDraftRequest));
+    Equal(CodingToolAction.ShowFeaturePatchDraftPlan, featurePatchDraftRequest.Action);
+    Equal("Save button", featurePatchDraftRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("post patch validation Save button", out var validationRouterRequest));
     Equal(CodingToolAction.ShowPostPatchValidationRouter, validationRouterRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("patch intelligence Save button", out var patchIntelligenceRequest));
@@ -3185,6 +3188,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var behaviorContract = await service.TryHandleAsync("behavior contract Save button", CancellationToken.None);
     var patchSlices = await service.TryHandleAsync("patch slice plan Save button", CancellationToken.None);
     var applyGate = await service.TryHandleAsync("apply gate", CancellationToken.None);
+    var featurePatchDraft = await service.TryHandleAsync("feature patch draft Save button", CancellationToken.None);
     var validationRouter = await service.TryHandleAsync("post patch validation Save button", CancellationToken.None);
     var patchIntelligence = await service.TryHandleAsync("patch intelligence Save button", CancellationToken.None);
     var featureBuilder = await service.TryHandleAsync("feature builder Save button", CancellationToken.None);
@@ -3229,6 +3233,10 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Behavior contract v1", behaviorContract.Message);
     Contains("Patch slice plan v1", patchSlices.Message);
     Contains("Apply gate v2", applyGate.Message);
+    Contains("Feature patch draft plan v1", featurePatchDraft.Message);
+    Contains("Edit recipes:", featurePatchDraft.Message);
+    Contains("Preview bundle candidates:", featurePatchDraft.Message);
+    Contains("Before/after requirements:", featurePatchDraft.Message);
     Contains("Post-patch validation router", validationRouter.Message);
     Contains("Patch preview intelligence v1", patchIntelligence.Message);
     Contains("Slice approval packet:", patchIntelligence.Message);

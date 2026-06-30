@@ -287,6 +287,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowBehaviorContract => await ShowBehaviorContractAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchSlicePlan => await ShowPatchSlicePlanAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowApplyGate => await ShowApplyGateAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFeaturePatchDraftPlan => await ShowFeaturePatchDraftPlanAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPlainEnglishFeatureBuilder => await ShowPlainEnglishFeatureBuilderAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8381,6 +8382,30 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Apply gate", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowFeaturePatchDraftPlanAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var lines = new List<string>
+        {
+            "Feature patch draft plan v1:",
+            "No files were changed.",
+            "Mode: draft-only until a visible preview bundle is produced.",
+            $"Goal: {context.Goal}",
+            $"Draft readiness: {BuildFeaturePatchDraftReadiness(context)}",
+            "Edit recipes:"
+        };
+        lines.AddRange(BuildFeaturePatchEditRecipeRows(context).Select(row => $"- {row}"));
+        lines.Add("Preview bundle candidates:");
+        lines.AddRange(BuildFeaturePreviewBundleCandidateRows(context).Select(row => $"- {row}"));
+        lines.Add("Before/after requirements:");
+        lines.AddRange(BuildFeatureBeforeAfterRequirementRows(context).Select(row => $"- {row}"));
+        lines.Add("Validation handshake:");
+        lines.AddRange(BuildFeaturePatchValidationHandshakeRows(context, latestValidation).Select(row => $"- {row}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature patch draft plan", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowPostPatchValidationRouterAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
@@ -8584,8 +8609,105 @@ public sealed class LocalCodingToolService(
             "1. Behavior contract: lock the request, expected result, failure behavior, and confirmation boundary.",
             "2. File slice: edit the primary file first, then only touch related files if the contract requires it."
         };
-        rows.AddRange(BuildDeterministicPatchDraftRows(context).Take(4).Select((row, index) => $"{index + 3}. {row}"));
+        rows.AddRange(BuildFeaturePatchEditRecipeRows(context).Take(4).Select((row, index) => $"{index + 3}. {row}"));
         rows.Add("Final. Preview bundle: produce a visible diff before any apply step.");
+        return rows;
+    }
+
+    private static string BuildFeaturePatchDraftReadiness(FeatureWorkContext context)
+    {
+        var hasTarget = context.RankedTargets.Count > 0;
+        var hasTest = !string.IsNullOrWhiteSpace(context.TestTarget.Command);
+        var hasProtectedFile = context.RelativeCandidateFiles.Any(file => ClassifyFileRisk(file).StartsWith("Protected", StringComparison.OrdinalIgnoreCase));
+        if (!hasTarget)
+        {
+            return "Hold - resolve a primary file target first.";
+        }
+
+        if (hasProtectedFile)
+        {
+            return "Review - protected/generated files may be involved.";
+        }
+
+        if (!hasTest)
+        {
+            return "Plan ready - targeted test still needs resolution.";
+        }
+
+        return "Ready for preview-bundle drafting.";
+    }
+
+    private static IReadOnlyList<string> BuildFeaturePatchEditRecipeRows(FeatureWorkContext context)
+    {
+        if (context.RankedTargets.Count == 0)
+        {
+            return
+            [
+                "Discovery recipe: inspect likely files and semantic references before drafting exact before/after text."
+            ];
+        }
+
+        var validation = string.IsNullOrWhiteSpace(context.TestTarget.Command)
+            ? "resolve targeted validation"
+            : context.TestTarget.Command;
+        var anchorTerms = FormatInlineList(context.GoalTerms.Take(5));
+        return context.RankedTargets
+            .Take(4)
+            .Select((target, index) =>
+                $"{index + 1}. {target.RelativePath}: {ClassifyPatchDraftTemplate(target.RelativePath)}; anchors {anchorTerms}; behavior {context.Goal}; risk {target.Risk}; validation {validation}")
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> BuildFeaturePreviewBundleCandidateRows(FeatureWorkContext context)
+    {
+        var files = context.RankedTargets
+            .Select(target => target.RelativePath)
+            .Concat(context.RelativeCandidateFiles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxPatchBundleEdits)
+            .ToList();
+        if (files.Count == 0)
+        {
+            return
+            [
+                "Bundle size: 0/" + MaxPatchBundleEdits,
+                "Files: none resolved yet",
+                "Preview command: hold until a target file is resolved."
+            ];
+        }
+
+        return
+        [
+            $"Bundle size: {files.Count}/{MaxPatchBundleEdits}",
+            $"Files: {FormatInlineList(files)}",
+            "Preview command shape: preview patch bundle with one exact replace block per approved file.",
+            "Apply rule: apply only after the visible diff matches the feature brief and no stale preview exists."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeatureBeforeAfterRequirementRows(FeatureWorkContext context)
+    {
+        return
+        [
+            "Old text: must be copied from the current file exactly, including spacing and nearby context.",
+            "New text: must preserve the local style and make one behavior change per edit block.",
+            $"Behavior proof: output or UI must satisfy {context.Goal}.",
+            "Test proof: targeted test first when available, then build, then review current changes.",
+            "Receipt proof: completion requires latest validation and safe commit check rows."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeaturePatchValidationHandshakeRows(
+        FeatureWorkContext context,
+        CodingReceipt? latestValidation)
+    {
+        var rows = new List<string>
+        {
+            string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "1. Targeted test: missing - resolve test target before apply." : $"1. Targeted test: {context.TestTarget.Command}",
+            latestValidation is null ? "2. Latest validation: none." : $"2. {FormatReceiptSummary("Latest validation", latestValidation)}",
+            "3. Repair trigger: any failed validation routes to failure repair linkage before another patch.",
+            "4. Closeout: review current changes, then can i safely commit."
+        };
         return rows;
     }
 
