@@ -216,6 +216,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowCacheQueueGuide
             or CodingToolAction.ShowConsoleCodingGuide
             or CodingToolAction.ShowWpfCodingGuide
+            or CodingToolAction.ShowWpfLayoutGuide
+            or CodingToolAction.ShowWpfControlsGuide
+            or CodingToolAction.ShowWpfStylingGuide
+            or CodingToolAction.ShowWpfComplexWindowGuide
             or CodingToolAction.ShowActiveWorkspaceProject
             or CodingToolAction.ShowProjectControlCenter
             or CodingToolAction.ShowCurrentProjectMemory

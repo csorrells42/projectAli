@@ -631,6 +631,10 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("cache queue guide <goal>", builderIndex);
     Contains("console app guide <goal>", builderIndex);
     Contains("wpf app guide <goal>", builderIndex);
+    Contains("wpf layout guide <goal>", builderIndex);
+    Contains("wpf controls guide <goal>", builderIndex);
+    Contains("wpf styling guide <goal>", builderIndex);
+    Contains("wpf complex window guide <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
     Contains("semantic diff summary <goal>", builderIndex);
     Contains("mini codex score v3 <goal>", builderIndex);
@@ -828,6 +832,18 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("wpf app guide todo list", out var wpfGuideRequest));
     Equal(CodingToolAction.ShowWpfCodingGuide, wpfGuideRequest.Action);
     Equal("todo list", wpfGuideRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("wpf layout guide dashboard", out var wpfLayoutRequest));
+    Equal(CodingToolAction.ShowWpfLayoutGuide, wpfLayoutRequest.Action);
+    Equal("dashboard", wpfLayoutRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("wpf controls guide data entry", out var wpfControlsRequest));
+    Equal(CodingToolAction.ShowWpfControlsGuide, wpfControlsRequest.Action);
+    Equal("data entry", wpfControlsRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("wpf styling guide dark theme", out var wpfStylingRequest));
+    Equal(CodingToolAction.ShowWpfStylingGuide, wpfStylingRequest.Action);
+    Equal("dark theme", wpfStylingRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("wpf complex window guide project manager", out var wpfComplexWindowRequest));
+    Equal(CodingToolAction.ShowWpfComplexWindowGuide, wpfComplexWindowRequest.Action);
+    Equal("project manager", wpfComplexWindowRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("show validation queue runner", out var queueRunnerRequest));
     Equal(CodingToolAction.ShowValidationQueueRunner, queueRunnerRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("validation repair runner Save button", out var repairRunnerRequest));
@@ -3558,6 +3574,10 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     var cacheQueueGuide = await service.TryHandleAsync("cache queue guide email worker", CancellationToken.None);
     var consoleGuide = await service.TryHandleAsync("console app guide calculator", CancellationToken.None);
     var wpfGuide = await service.TryHandleAsync("wpf app guide todo list", CancellationToken.None);
+    var wpfLayoutGuide = await service.TryHandleAsync("wpf layout guide dashboard", CancellationToken.None);
+    var wpfControlsGuide = await service.TryHandleAsync("wpf controls guide data entry", CancellationToken.None);
+    var wpfStylingGuide = await service.TryHandleAsync("wpf styling guide dark theme", CancellationToken.None);
+    var wpfComplexWindowGuide = await service.TryHandleAsync("wpf complex window guide project manager", CancellationToken.None);
 
     Contains("Typed patch composer", patch.Message);
     Contains("src/Demo/WidgetService.cs", patch.Message);
@@ -3603,6 +3623,18 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("WPF app guide", wpfGuide.Message);
     Contains("INotifyPropertyChanged", wpfGuide.Message);
     Contains("ObservableCollection<T>", wpfGuide.Message);
+    Contains("WPF layout guide", wpfLayoutGuide.Message);
+    Contains("GridSplitter", wpfLayoutGuide.Message);
+    Contains("ScrollViewer", wpfLayoutGuide.Message);
+    Contains("WPF controls guide", wpfControlsGuide.Message);
+    Contains("DataGrid", wpfControlsGuide.Message);
+    Contains("DependencyProperty", wpfControlsGuide.Message);
+    Contains("WPF styling and templates guide", wpfStylingGuide.Message);
+    Contains("ResourceDictionary", wpfStylingGuide.Message);
+    Contains("ControlTemplate", wpfStylingGuide.Message);
+    Contains("WPF complex window guide", wpfComplexWindowGuide.Message);
+    Contains("ContentControl region", wpfComplexWindowGuide.Message);
+    Contains("virtualization", wpfComplexWindowGuide.Message);
 }
 
 static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
@@ -8701,6 +8733,11 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("If recent assistant text contains `Next:` or `Next command:`", instruction);
     Contains("console app guide <goal>", instruction);
     Contains("wpf app guide <goal>", instruction);
+    Contains("wpf layout guide <goal>", instruction);
+    Contains("wpf controls guide <goal>", instruction);
+    Contains("wpf styling guide <goal>", instruction);
+    Contains("wpf complex window guide <goal>", instruction);
+    Contains("WPF layout/object checklist", instruction);
     Contains("feature patch draft <goal>", instruction);
     Contains("exact patch synthesis <goal>", instruction);
     Contains("preview synthesized feature patch <goal>", instruction);

@@ -349,6 +349,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowCacheQueueGuide => ShowCacheQueueGuide(request),
             CodingToolAction.ShowConsoleCodingGuide => ShowConsoleCodingGuide(request),
             CodingToolAction.ShowWpfCodingGuide => ShowWpfCodingGuide(request),
+            CodingToolAction.ShowWpfLayoutGuide => ShowWpfLayoutGuide(request),
+            CodingToolAction.ShowWpfControlsGuide => ShowWpfControlsGuide(request),
+            CodingToolAction.ShowWpfStylingGuide => ShowWpfStylingGuide(request),
+            CodingToolAction.ShowWpfComplexWindowGuide => ShowWpfComplexWindowGuide(request),
             CodingToolAction.ShowActiveWorkspaceProject => await ShowActiveWorkspaceProjectAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowProjectControlCenter => await ShowProjectControlCenterAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCurrentProjectMemory => ShowCurrentProjectMemory(),
@@ -10484,11 +10488,129 @@ public sealed class LocalCodingToolService(
             "Next commands:",
             $"- build this for me {goal}",
             $"- wpf app guide {goal}",
+            $"- wpf layout guide {goal}",
+            $"- wpf controls guide {goal}",
+            $"- wpf styling guide {goal}",
+            $"- wpf complex window guide {goal}",
             $"- xaml binding check",
             $"- command binding check",
             $"- validation chain planner {goal}"
         };
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF app guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowWpfLayoutGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current WPF layout");
+        var lines = new List<string>
+        {
+            "WPF layout guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Layout choices:",
+            "- Grid: default for complex windows; use star/auto/fixed rows deliberately and name important regions.",
+            "- DockPanel: strong shell frame for menu/tool/status bars around a main content region.",
+            "- StackPanel: simple one-axis groups; avoid it where children need proportional sizing.",
+            "- WrapPanel/UniformGrid: compact repeated controls, swatches, button groups, and equal tiles.",
+            "- GridSplitter: owner-resizable panes; set MinWidth/MinHeight so panes cannot collapse into unusable UI.",
+            "- ScrollViewer: wrap only the content that should scroll; avoid nested scroll fights around DataGrid/ListView.",
+            "- Alignment/margins: keep spacing consistent and prefer layout containers over absolute Canvas placement.",
+            "Responsive rules:",
+            "- Use MinWidth/MinHeight, MaxWidth, SharedSizeGroup, star sizing, and wrapping text before adding resize code.",
+            "- Keep command bars and status rows stable while the main content grows or scrolls.",
+            "Next commands:",
+            $"- wpf controls guide {goal}",
+            $"- wpf complex window guide {goal}",
+            $"- build this for me {goal}",
+            $"- xaml binding check"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF layout guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowWpfControlsGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current WPF controls");
+        var lines = new List<string>
+        {
+            "WPF controls guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Control/object choices:",
+            "- Window: top-level shell; keep it thin and delegate behavior to view models/services.",
+            "- UserControl: reusable screen section with a clear DataContext contract.",
+            "- ContentControl: swap one active view/region without hardwiring every child into the Window.",
+            "- ItemsControl/ListBox/ListView: repeated data; use DataTemplate and selected-item state when interaction matters.",
+            "- DataGrid: tabular edit/review screens; define columns deliberately and enable virtualization for large rows.",
+            "- TreeView: hierarchy; lazy-load children when the tree can grow large.",
+            "- TabControl: small bounded mode switching; do not hide unrelated workflows in many tabs.",
+            "- Menu/ToolBar/StatusBar: command surface and status, usually docked in the shell.",
+            "Advanced objects:",
+            "- DependencyProperty: use for reusable controls that need binding/styling support, not ordinary view-model state.",
+            "- RoutedCommand/RoutedEvent: useful for reusable control-level behavior; keep app workflows in ICommand view-model commands.",
+            "Next commands:",
+            $"- wpf layout guide {goal}",
+            $"- wpf styling guide {goal}",
+            $"- command binding check",
+            $"- build this for me {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF controls guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowWpfStylingGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current WPF styling");
+        var lines = new List<string>
+        {
+            "WPF styling and templates guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Resource and style choices:",
+            "- ResourceDictionary: collect colors, spacing, brushes, styles, and templates by ownership/theme.",
+            "- StaticResource: default for stable local resources; DynamicResource only when runtime theme/resource swaps matter.",
+            "- Style BasedOn: extend standard control styles without duplicating every setter.",
+            "- DataTemplate: define how a data object appears inside ItemsControl/ListView/TreeView/ContentControl.",
+            "- ControlTemplate: redefine a control's visual structure only when a Style cannot do the job.",
+            "- Triggers/VisualState: simple visual state changes; keep business decisions in the view model.",
+            "- Converters: small display conversions only; avoid burying domain logic in XAML converters.",
+            "Validation visuals:",
+            "- Use validation rules/error templates/status text so failed input is visible and owner-readable.",
+            "Next commands:",
+            $"- wpf layout guide {goal}",
+            $"- wpf controls guide {goal}",
+            $"- wpf complex window guide {goal}",
+            $"- build this for me {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF styling and templates guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowWpfComplexWindowGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current complex WPF window");
+        var lines = new List<string>
+        {
+            "WPF complex window guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Composition plan:",
+            "- Shell: Window with DockPanel/Grid root, menu/tool/status rows, and a main ContentControl region.",
+            "- Regions: split large screens into UserControls with explicit view-model contracts.",
+            "- Navigation: selected workspace/view state drives ContentControl or TabControl; avoid manual visibility toggles everywhere.",
+            "- Commands: ICommand for user actions, CanExecute for enabled state, async command wrappers for slow work.",
+            "- State: IsBusy/status/error/progress properties make background work visible without freezing the UI.",
+            "- Data-heavy screens: DataGrid/ListView virtualization, paging/filtering, and stable selected item behavior.",
+            "- Dialogs: isolate dialog service/result models so view models do not directly new up windows.",
+            "- Validation: input rules, visible errors, disabled unsafe commands, and post-action status receipts.",
+            "- Accessibility: labels, tab order, keyboard commands, focus behavior, and readable contrast.",
+            "Build order:",
+            "- First lay out the shell, then bind one workflow, then add styling/templates, then add secondary panes.",
+            "Next commands:",
+            $"- wpf layout guide {goal}",
+            $"- wpf controls guide {goal}",
+            $"- wpf styling guide {goal}",
+            $"- build this for me {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF complex window guide", Policy.WorkspaceRoot);
     }
 
     private async Task<CodingToolResult> ShowActiveWorkspaceProjectAsync(CancellationToken cancellationToken)

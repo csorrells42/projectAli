@@ -1465,6 +1465,88 @@ public static class CodingToolRequestParser
         "desktop ui guide"
     ];
 
+    private static readonly string[] WpfLayoutGuidePrefixes =
+    [
+        "wpf layout guide",
+        "advanced wpf layout guide",
+        "xaml layout guide",
+        "complex window layout guide",
+        "responsive wpf layout guide",
+        "wpf grid layout guide"
+    ];
+
+    private static readonly string[] WpfLayoutGuideRequests =
+    [
+        "wpf layout guide",
+        "advanced wpf layout guide",
+        "xaml layout guide",
+        "complex window layout guide",
+        "responsive wpf layout guide",
+        "wpf grid layout guide"
+    ];
+
+    private static readonly string[] WpfControlsGuidePrefixes =
+    [
+        "wpf controls guide",
+        "advanced wpf controls guide",
+        "wpf objects guide",
+        "wpf control objects guide",
+        "wpf datagrid guide",
+        "wpf treeview guide",
+        "wpf usercontrol guide"
+    ];
+
+    private static readonly string[] WpfControlsGuideRequests =
+    [
+        "wpf controls guide",
+        "advanced wpf controls guide",
+        "wpf objects guide",
+        "wpf control objects guide",
+        "wpf datagrid guide",
+        "wpf treeview guide",
+        "wpf usercontrol guide"
+    ];
+
+    private static readonly string[] WpfStylingGuidePrefixes =
+    [
+        "wpf styling guide",
+        "wpf styles guide",
+        "wpf templates guide",
+        "wpf resources guide",
+        "xaml resources guide",
+        "wpf theme guide"
+    ];
+
+    private static readonly string[] WpfStylingGuideRequests =
+    [
+        "wpf styling guide",
+        "wpf styles guide",
+        "wpf templates guide",
+        "wpf resources guide",
+        "xaml resources guide",
+        "wpf theme guide"
+    ];
+
+    private static readonly string[] WpfComplexWindowGuidePrefixes =
+    [
+        "wpf complex window guide",
+        "complex wpf window guide",
+        "advanced wpf window guide",
+        "wpf shell guide",
+        "wpf dashboard guide",
+        "wpf multi panel guide"
+    ];
+
+    private static readonly string[] WpfComplexWindowGuideRequests =
+    [
+        "wpf complex window guide",
+        "complex wpf window guide",
+        "advanced wpf window guide",
+        "wpf shell guide",
+        "wpf dashboard guide",
+        "wpf multi panel guide"
+    ];
+
     private static readonly string[] ActiveWorkspaceProjectPrefixes =
     [
         "active workspace project ",
@@ -4151,6 +4233,10 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, CacheQueueGuidePrefixes, CodingToolAction.ShowCacheQueueGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, DataSystemsGuidePrefixes, CodingToolAction.ShowDataSystemsGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ConsoleCodingGuidePrefixes, CodingToolAction.ShowConsoleCodingGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, WpfLayoutGuidePrefixes, CodingToolAction.ShowWpfLayoutGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, WpfControlsGuidePrefixes, CodingToolAction.ShowWpfControlsGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, WpfStylingGuidePrefixes, CodingToolAction.ShowWpfStylingGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, WpfComplexWindowGuidePrefixes, CodingToolAction.ShowWpfComplexWindowGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, WpfCodingGuidePrefixes, CodingToolAction.ShowWpfCodingGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ActiveWorkspaceProjectPrefixes, CodingToolAction.ShowActiveWorkspaceProject, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ProjectControlCenterPrefixes, CodingToolAction.ShowProjectControlCenter, userConfirmed, out request)
@@ -4235,6 +4321,30 @@ public static class CodingToolRequestParser
         if (IsConsoleCodingGuideRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowConsoleCodingGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsWpfLayoutGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWpfLayoutGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsWpfControlsGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWpfControlsGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsWpfStylingGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWpfStylingGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsWpfComplexWindowGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowWpfComplexWindowGuide, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -4646,6 +4756,18 @@ public static class CodingToolRequestParser
 
     private static bool IsWpfCodingGuideRequest(string text) =>
         WpfCodingGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWpfLayoutGuideRequest(string text) =>
+        WpfLayoutGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWpfControlsGuideRequest(string text) =>
+        WpfControlsGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWpfStylingGuideRequest(string text) =>
+        WpfStylingGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsWpfComplexWindowGuideRequest(string text) =>
+        WpfComplexWindowGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePrefixedQuery(
         string text,
