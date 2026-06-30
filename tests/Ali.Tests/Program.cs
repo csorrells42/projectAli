@@ -152,6 +152,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool synthesizes hello world console patch", TestLocalCodingToolSynthesizesHelloWorldConsolePatch),
     ("local coding tool creates hello world Program file", TestLocalCodingToolCreatesHelloWorldProgramFile),
     ("local coding tool synthesizes add two integers console patch", TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch),
+    ("local coding tool synthesizes escalating console starters", TestLocalCodingToolSynthesizesEscalatingConsoleStarters),
     ("local coding tool previews behavior test patch", TestLocalCodingToolPreviewsBehaviorTestPatch),
     ("local coding tool previews guided feature bundle", TestLocalCodingToolPreviewsGuidedFeatureBundle),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
@@ -5271,6 +5272,95 @@ static async Task TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch()
     Contains("Enter the second integer", content);
     Contains("var sum = firstNumber + secondNumber;", content);
     Contains("Console.ReadKey(intercept: true);", content);
+    Equal(false, content.Contains("Hello, World!", StringComparison.Ordinal));
+}
+
+static async Task TestLocalCodingToolSynthesizesEscalatingConsoleStarters()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    var programPath = Path.Combine(projectDirectory, "Program.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net10.0</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+
+    await AssertConsoleStarterAsync(
+        service,
+        programPath,
+        "Build a simple calculator console app with a menu that can add, subtract, multiply, and divide two numbers and wait for a keypress before closing.",
+        ["Enter an operator", "Cannot divide by zero", "Console.ReadKey(intercept: true);"]);
+    await AssertConsoleStarterAsync(
+        service,
+        programPath,
+        "Build a C# console number guessing game that picks a random number and tells the user too high or too low until they guess it.",
+        ["Random.Shared.Next", "Too low", "Too high"]);
+    await AssertConsoleStarterAsync(
+        service,
+        programPath,
+        "Build a menu-driven C# console todo list app that can add tasks, list tasks, remove tasks, and quit.",
+        ["Todo List", "tasks.Add", "tasks.RemoveAt"]);
+    await AssertConsoleStarterAsync(
+        service,
+        programPath,
+        "Build a C# console notes app that saves notes to a file, lists saved notes, clears notes, and quits.",
+        ["notes.txt", "File.AppendAllText", "File.ReadAllLines"]);
+    await AssertConsoleStarterAsync(
+        service,
+        programPath,
+        "Build a C# console shopping list app with a menu to add items, list items, remove items, and quit.",
+        ["Shopping List", "items.Add", "items.RemoveAt"]);
+    await AssertConsoleStarterAsync(
+        service,
+        programPath,
+        "Build a C# console contact manager that saves contacts to a file, lists contacts, deletes contacts, and quits.",
+        ["contacts.txt", "File.AppendAllText", "File.ReadAllLines"]);
+}
+
+static async Task AssertConsoleStarterAsync(
+    LocalCodingToolService service,
+    string programPath,
+    string goal,
+    IReadOnlyList<string> expectedSnippets)
+{
+    await File.WriteAllTextAsync(
+        programPath,
+        """
+        Console.WriteLine("Hello, World!");
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey(intercept: true);
+        """);
+
+    var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Next command: confirm apply last patch preview", preview.Message);
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    var content = await File.ReadAllTextAsync(programPath);
+    foreach (var expected in expectedSnippets)
+    {
+        Contains(expected, content);
+    }
+
     Equal(false, content.Contains("Hello, World!", StringComparison.Ordinal));
 }
 

@@ -12918,11 +12918,21 @@ public sealed class LocalCodingToolService(
 
     private static IReadOnlyList<string> BuildSimpleConsoleProgramLines(string goal, bool waitsForKey)
     {
-        var lines = IsConsoleAddTwoIntegersGoal(goal)
-            ? BuildAddTwoIntegersConsoleProgramLines()
-            : IsConsoleFactorialGoal(goal)
-                ? BuildFactorialConsoleProgramLines()
-                : BuildHelloWorldConsoleProgramLines();
+        var lines = IsConsoleGuessingGameGoal(goal)
+            ? BuildGuessingGameConsoleProgramLines()
+            : IsConsoleTodoListGoal(goal)
+                ? BuildTodoListConsoleProgramLines()
+                : IsConsoleNotesAppGoal(goal)
+                    ? BuildNotesAppConsoleProgramLines()
+                    : TryBuildGenericConsoleListProgramLines(goal, out var genericListLines)
+                        ? genericListLines
+                        : IsConsoleCalculatorGoal(goal)
+                            ? BuildCalculatorConsoleProgramLines()
+                            : IsConsoleAddTwoIntegersGoal(goal)
+                                ? BuildAddTwoIntegersConsoleProgramLines()
+                                : IsConsoleFactorialGoal(goal)
+                                    ? BuildFactorialConsoleProgramLines()
+                                    : BuildHelloWorldConsoleProgramLines();
         return waitsForKey
             ? lines.Concat(
                 [
@@ -12932,6 +12942,234 @@ public sealed class LocalCodingToolService(
                 ]).ToList()
             : lines;
     }
+
+    private static bool TryBuildGenericConsoleListProgramLines(string goal, out IReadOnlyList<string> lines)
+    {
+        lines = [];
+        if (!IsGenericConsoleListManagerGoal(goal))
+        {
+            return false;
+        }
+
+        var itemName = InferConsoleListItemName(goal);
+        var recipe = new ConsoleListRecipe(
+            BuildConsoleListTitle(goal, itemName),
+            itemName,
+            PluralizeIdentifier(itemName),
+            MentionsAny(goal, "file", "save", "saved", "persist", "load", "storage"));
+        lines = recipe.FileBacked
+            ? BuildFileBackedConsoleListProgramLines(recipe)
+            : BuildInMemoryConsoleListProgramLines(recipe);
+        return true;
+    }
+
+    private static IReadOnlyList<string> BuildInMemoryConsoleListProgramLines(ConsoleListRecipe recipe)
+    {
+        var itemTitle = CapitalizeInvariant(recipe.ItemName);
+        return
+        [
+            $"var {recipe.VariableName} = new List<string>();",
+            string.Empty,
+            "while (true)",
+            "{",
+            "    Console.WriteLine();",
+            $"    Console.WriteLine(\"{recipe.Title}\");",
+            $"    Console.WriteLine(\"1. Add {recipe.ItemName}\");",
+            $"    Console.WriteLine(\"2. List {recipe.VariableName}\");",
+            $"    Console.WriteLine(\"3. Remove {recipe.ItemName}\");",
+            "    Console.WriteLine(\"4. Quit\");",
+            "    Console.Write(\"Choose an option: \");",
+            "    var choice = Console.ReadLine();",
+            string.Empty,
+            "    if (choice == \"1\")",
+            "    {",
+            $"        Console.Write(\"{itemTitle}: \");",
+            $"        var {recipe.ItemName} = Console.ReadLine();",
+            $"        if (!string.IsNullOrWhiteSpace({recipe.ItemName}))",
+            "        {",
+            $"            {recipe.VariableName}.Add({recipe.ItemName}.Trim());",
+            $"            Console.WriteLine(\"{itemTitle} added.\");",
+            "        }",
+            "    }",
+            "    else if (choice == \"2\")",
+            "    {",
+            $"        if ({recipe.VariableName}.Count == 0)",
+            "        {",
+            $"            Console.WriteLine(\"No {recipe.VariableName} yet.\");",
+            "        }",
+            "        else",
+            "        {",
+            $"            for (var index = 0; index < {recipe.VariableName}.Count; index++)",
+            "            {",
+            $"                Console.WriteLine($\"{{index + 1}}. {{{recipe.VariableName}[index]}}\");",
+            "            }",
+            "        }",
+            "    }",
+            "    else if (choice == \"3\")",
+            "    {",
+            $"        Console.Write(\"{itemTitle} number to remove: \");",
+            $"        if (int.TryParse(Console.ReadLine(), out var itemNumber) && itemNumber >= 1 && itemNumber <= {recipe.VariableName}.Count)",
+            "        {",
+            $"            {recipe.VariableName}.RemoveAt(itemNumber - 1);",
+            $"            Console.WriteLine(\"{itemTitle} removed.\");",
+            "        }",
+            "        else",
+            "        {",
+            $"            Console.WriteLine(\"That {recipe.ItemName} number was not found.\");",
+            "        }",
+            "    }",
+            "    else if (choice == \"4\")",
+            "    {",
+            "        break;",
+            "    }",
+            "    else",
+            "    {",
+            "        Console.WriteLine(\"Please choose 1, 2, 3, or 4.\");",
+            "    }",
+            "}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFileBackedConsoleListProgramLines(ConsoleListRecipe recipe)
+    {
+        var itemTitle = CapitalizeInvariant(recipe.ItemName);
+        var fileName = $"{recipe.VariableName}.txt";
+        return
+        [
+            $"const string storagePath = \"{fileName}\";",
+            $"var {recipe.VariableName} = System.IO.File.Exists(storagePath) ? new List<string>(System.IO.File.ReadAllLines(storagePath)) : new List<string>();",
+            string.Empty,
+            "while (true)",
+            "{",
+            "    Console.WriteLine();",
+            $"    Console.WriteLine(\"{recipe.Title}\");",
+            $"    Console.WriteLine(\"1. Add {recipe.ItemName}\");",
+            $"    Console.WriteLine(\"2. List {recipe.VariableName}\");",
+            $"    Console.WriteLine(\"3. Remove {recipe.ItemName}\");",
+            "    Console.WriteLine(\"4. Quit\");",
+            "    Console.Write(\"Choose an option: \");",
+            "    var choice = Console.ReadLine();",
+            string.Empty,
+            "    if (choice == \"1\")",
+            "    {",
+            $"        Console.Write(\"{itemTitle}: \");",
+            $"        var {recipe.ItemName} = Console.ReadLine();",
+            $"        if (!string.IsNullOrWhiteSpace({recipe.ItemName}))",
+            "        {",
+            $"            {recipe.VariableName}.Add({recipe.ItemName}.Trim());",
+            $"            System.IO.File.AppendAllText(storagePath, {recipe.ItemName}.Trim() + Environment.NewLine);",
+            $"            Console.WriteLine(\"{itemTitle} saved.\");",
+            "        }",
+            "    }",
+            "    else if (choice == \"2\")",
+            "    {",
+            $"        {recipe.VariableName} = System.IO.File.Exists(storagePath) ? new List<string>(System.IO.File.ReadAllLines(storagePath)) : new List<string>();",
+            $"        if ({recipe.VariableName}.Count == 0)",
+            "        {",
+            $"            Console.WriteLine(\"No {recipe.VariableName} saved yet.\");",
+            "        }",
+            "        else",
+            "        {",
+            $"            for (var index = 0; index < {recipe.VariableName}.Count; index++)",
+            "            {",
+            $"                Console.WriteLine($\"{{index + 1}}. {{{recipe.VariableName}[index]}}\");",
+            "            }",
+            "        }",
+            "    }",
+            "    else if (choice == \"3\")",
+            "    {",
+            $"        Console.Write(\"{itemTitle} number to remove: \");",
+            $"        if (int.TryParse(Console.ReadLine(), out var itemNumber) && itemNumber >= 1 && itemNumber <= {recipe.VariableName}.Count)",
+            "        {",
+            $"            {recipe.VariableName}.RemoveAt(itemNumber - 1);",
+            $"            System.IO.File.WriteAllLines(storagePath, {recipe.VariableName});",
+            $"            Console.WriteLine(\"{itemTitle} removed.\");",
+            "        }",
+            "        else",
+            "        {",
+            $"            Console.WriteLine(\"That {recipe.ItemName} number was not found.\");",
+            "        }",
+            "    }",
+            "    else if (choice == \"4\")",
+            "    {",
+            "        break;",
+            "    }",
+            "    else",
+            "    {",
+            "        Console.WriteLine(\"Please choose 1, 2, 3, or 4.\");",
+            "    }",
+            "}"
+        ];
+    }
+
+    private static string InferConsoleListItemName(string goal)
+    {
+        if (MentionsAny(goal, "contact", "contacts", "address book"))
+        {
+            return "contact";
+        }
+
+        if (MentionsAny(goal, "book", "books", "library"))
+        {
+            return "book";
+        }
+
+        if (MentionsAny(goal, "recipe", "recipes"))
+        {
+            return "recipe";
+        }
+
+        if (MentionsAny(goal, "movie", "movies", "watch list"))
+        {
+            return "movie";
+        }
+
+        if (MentionsAny(goal, "task", "tasks", "todo", "to-do"))
+        {
+            return "task";
+        }
+
+        return "item";
+    }
+
+    private static string BuildConsoleListTitle(string goal, string itemName)
+    {
+        if (MentionsAny(goal, "shopping", "grocery"))
+        {
+            return "Shopping List";
+        }
+
+        if (MentionsAny(goal, "inventory"))
+        {
+            return "Inventory";
+        }
+
+        if (MentionsAny(goal, "address book", "contact", "contacts"))
+        {
+            return "Contact Manager";
+        }
+
+        if (MentionsAny(goal, "library"))
+        {
+            return "Library";
+        }
+
+        return $"{CapitalizeInvariant(itemName)} Manager";
+    }
+
+    private static string PluralizeIdentifier(string itemName) =>
+        itemName.EndsWith("y", StringComparison.OrdinalIgnoreCase)
+            ? itemName[..^1] + "ies"
+            : itemName.EndsWith("s", StringComparison.OrdinalIgnoreCase)
+                ? itemName
+                : itemName + "s";
+
+    private static string CapitalizeInvariant(string value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? "Item"
+            : char.ToUpperInvariant(value[0]) + value[1..];
+
+    private sealed record ConsoleListRecipe(string Title, string ItemName, string VariableName, bool FileBacked);
 
     private static IReadOnlyList<string> BuildHelloWorldConsoleProgramLines() =>
         ["Console.WriteLine(\"Hello, World!\");"];
@@ -12952,6 +13190,190 @@ public sealed class LocalCodingToolService(
         "{",
         "    var sum = firstNumber + secondNumber;",
         "    Console.WriteLine($\"{firstNumber} + {secondNumber} = {sum}\");",
+        "}"
+    ];
+
+    private static IReadOnlyList<string> BuildCalculatorConsoleProgramLines() =>
+    [
+        "Console.Write(\"Enter the first number: \");",
+        "var firstInput = Console.ReadLine();",
+        string.Empty,
+        "Console.Write(\"Enter an operator (+, -, *, /): \");",
+        "var operation = Console.ReadLine()?.Trim();",
+        string.Empty,
+        "Console.Write(\"Enter the second number: \");",
+        "var secondInput = Console.ReadLine();",
+        string.Empty,
+        "if (!double.TryParse(firstInput, out var firstNumber) || !double.TryParse(secondInput, out var secondNumber))",
+        "{",
+        "    Console.WriteLine(\"Please enter valid numbers.\");",
+        "}",
+        "else",
+        "{",
+        "    var resultText = operation switch",
+        "    {",
+        "        \"+\" => $\"{firstNumber} + {secondNumber} = {firstNumber + secondNumber}\",",
+        "        \"-\" => $\"{firstNumber} - {secondNumber} = {firstNumber - secondNumber}\",",
+        "        \"*\" => $\"{firstNumber} * {secondNumber} = {firstNumber * secondNumber}\",",
+        "        \"/\" when secondNumber != 0 => $\"{firstNumber} / {secondNumber} = {firstNumber / secondNumber}\",",
+        "        \"/\" => \"Cannot divide by zero.\",",
+        "        _ => \"Unknown operator. Please use +, -, *, or /.\"",
+        "    };",
+        string.Empty,
+        "    Console.WriteLine(resultText);",
+        "}"
+    ];
+
+    private static IReadOnlyList<string> BuildGuessingGameConsoleProgramLines() =>
+    [
+        "var targetNumber = Random.Shared.Next(1, 101);",
+        "var attempts = 0;",
+        string.Empty,
+        "Console.WriteLine(\"I picked a number between 1 and 100.\");",
+        string.Empty,
+        "while (true)",
+        "{",
+        "    Console.Write(\"Enter your guess: \");",
+        "    var input = Console.ReadLine();",
+        "    if (!int.TryParse(input, out var guess))",
+        "    {",
+        "        Console.WriteLine(\"Please enter a whole number.\");",
+        "        continue;",
+        "    }",
+        string.Empty,
+        "    attempts++;",
+        "    if (guess < targetNumber)",
+        "    {",
+        "        Console.WriteLine(\"Too low.\");",
+        "    }",
+        "    else if (guess > targetNumber)",
+        "    {",
+        "        Console.WriteLine(\"Too high.\");",
+        "    }",
+        "    else",
+        "    {",
+        "        Console.WriteLine($\"Correct! You guessed it in {attempts} attempt(s).\");",
+        "        break;",
+        "    }",
+        "}"
+    ];
+
+    private static IReadOnlyList<string> BuildTodoListConsoleProgramLines() =>
+    [
+        "var tasks = new List<string>();",
+        string.Empty,
+        "while (true)",
+        "{",
+        "    Console.WriteLine();",
+        "    Console.WriteLine(\"Todo List\");",
+        "    Console.WriteLine(\"1. Add task\");",
+        "    Console.WriteLine(\"2. List tasks\");",
+        "    Console.WriteLine(\"3. Remove task\");",
+        "    Console.WriteLine(\"4. Quit\");",
+        "    Console.Write(\"Choose an option: \");",
+        "    var choice = Console.ReadLine();",
+        string.Empty,
+        "    if (choice == \"1\")",
+        "    {",
+        "        Console.Write(\"Task: \");",
+        "        var task = Console.ReadLine();",
+        "        if (!string.IsNullOrWhiteSpace(task))",
+        "        {",
+        "            tasks.Add(task.Trim());",
+        "            Console.WriteLine(\"Task added.\");",
+        "        }",
+        "    }",
+        "    else if (choice == \"2\")",
+        "    {",
+        "        if (tasks.Count == 0)",
+        "        {",
+        "            Console.WriteLine(\"No tasks yet.\");",
+        "        }",
+        "        else",
+        "        {",
+        "            for (var index = 0; index < tasks.Count; index++)",
+        "            {",
+        "                Console.WriteLine($\"{index + 1}. {tasks[index]}\");",
+        "            }",
+        "        }",
+        "    }",
+        "    else if (choice == \"3\")",
+        "    {",
+        "        Console.Write(\"Task number to remove: \");",
+        "        if (int.TryParse(Console.ReadLine(), out var taskNumber) && taskNumber >= 1 && taskNumber <= tasks.Count)",
+        "        {",
+        "            tasks.RemoveAt(taskNumber - 1);",
+        "            Console.WriteLine(\"Task removed.\");",
+        "        }",
+        "        else",
+        "        {",
+        "            Console.WriteLine(\"That task number was not found.\");",
+        "        }",
+        "    }",
+        "    else if (choice == \"4\")",
+        "    {",
+        "        break;",
+        "    }",
+        "    else",
+        "    {",
+        "        Console.WriteLine(\"Please choose 1, 2, 3, or 4.\");",
+        "    }",
+        "}"
+    ];
+
+    private static IReadOnlyList<string> BuildNotesAppConsoleProgramLines() =>
+    [
+        "const string notesPath = \"notes.txt\";",
+        string.Empty,
+        "while (true)",
+        "{",
+        "    Console.WriteLine();",
+        "    Console.WriteLine(\"Notes\");",
+        "    Console.WriteLine(\"1. Add note\");",
+        "    Console.WriteLine(\"2. List notes\");",
+        "    Console.WriteLine(\"3. Clear notes\");",
+        "    Console.WriteLine(\"4. Quit\");",
+        "    Console.Write(\"Choose an option: \");",
+        "    var choice = Console.ReadLine();",
+        string.Empty,
+        "    if (choice == \"1\")",
+        "    {",
+        "        Console.Write(\"Note: \");",
+        "        var note = Console.ReadLine();",
+        "        if (!string.IsNullOrWhiteSpace(note))",
+        "        {",
+        "            System.IO.File.AppendAllText(notesPath, note.Trim() + Environment.NewLine);",
+        "            Console.WriteLine(\"Note saved.\");",
+        "        }",
+        "    }",
+        "    else if (choice == \"2\")",
+        "    {",
+        "        if (!System.IO.File.Exists(notesPath) || new System.IO.FileInfo(notesPath).Length == 0)",
+        "        {",
+        "            Console.WriteLine(\"No notes saved yet.\");",
+        "        }",
+        "        else",
+        "        {",
+        "            var notes = System.IO.File.ReadAllLines(notesPath);",
+        "            for (var index = 0; index < notes.Length; index++)",
+        "            {",
+        "                Console.WriteLine($\"{index + 1}. {notes[index]}\");",
+        "            }",
+        "        }",
+        "    }",
+        "    else if (choice == \"3\")",
+        "    {",
+        "        System.IO.File.WriteAllText(notesPath, string.Empty);",
+        "        Console.WriteLine(\"Notes cleared.\");",
+        "    }",
+        "    else if (choice == \"4\")",
+        "    {",
+        "        break;",
+        "    }",
+        "    else",
+        "    {",
+        "        Console.WriteLine(\"Please choose 1, 2, 3, or 4.\");",
+        "    }",
         "}"
     ];
 
@@ -12978,11 +13400,21 @@ public sealed class LocalCodingToolService(
 
     private static string ClassifySimpleConsoleProgramNote(string goal, bool waitsForKey)
     {
-        var shape = IsConsoleAddTwoIntegersGoal(goal)
-            ? "Console add-two-integers starter recipe"
-            : IsConsoleFactorialGoal(goal)
-                ? "Console factorial starter recipe"
-                : "Console hello-world starter recipe";
+        var shape = IsConsoleGuessingGameGoal(goal)
+            ? "Console guessing-game starter recipe"
+            : IsConsoleTodoListGoal(goal)
+                ? "Console todo-list starter recipe"
+                : IsConsoleNotesAppGoal(goal)
+                    ? "Console notes-app starter recipe"
+                    : IsGenericConsoleListManagerGoal(goal)
+                        ? "Console list-manager starter recipe"
+                        : IsConsoleCalculatorGoal(goal)
+                            ? "Console calculator starter recipe"
+                            : IsConsoleAddTwoIntegersGoal(goal)
+                                ? "Console add-two-integers starter recipe"
+                                : IsConsoleFactorialGoal(goal)
+                                    ? "Console factorial starter recipe"
+                                    : "Console hello-world starter recipe";
         return waitsForKey ? $"{shape} with a keypress hold before exit." : $"{shape}.";
     }
 
@@ -13011,6 +13443,11 @@ public sealed class LocalCodingToolService(
             "write");
         return isConsoleish
                && (IsConsoleHelloWorldGoal(goal)
+                   || IsConsoleGuessingGameGoal(goal)
+                   || IsConsoleTodoListGoal(goal)
+                   || IsConsoleNotesAppGoal(goal)
+                   || IsGenericConsoleListManagerGoal(goal)
+                   || IsConsoleCalculatorGoal(goal)
                    || IsConsoleAddTwoIntegersGoal(goal)
                    || IsConsoleFactorialGoal(goal));
     }
@@ -13026,6 +13463,39 @@ public sealed class LocalCodingToolService(
 
     private static bool IsConsoleFactorialGoal(string goal) =>
         goal.Contains("factorial", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsConsoleCalculatorGoal(string goal)
+    {
+        if (MentionsAny(goal, "calculator", "calculate", "arithmetic"))
+        {
+            return true;
+        }
+
+        var operationCount = 0;
+        operationCount += MentionsAny(goal, "add", "sum", "plus") ? 1 : 0;
+        operationCount += MentionsAny(goal, "subtract", "subtraction", "minus") ? 1 : 0;
+        operationCount += MentionsAny(goal, "multiply", "multiplication", "times") ? 1 : 0;
+        operationCount += MentionsAny(goal, "divide", "division") ? 1 : 0;
+
+        return operationCount >= 2
+               && MentionsAny(goal, "number", "numbers", "operator", "operation", "math");
+    }
+
+    private static bool IsConsoleGuessingGameGoal(string goal) =>
+        MentionsAny(goal, "guessing game", "guess a number", "number guessing", "random number")
+        || (MentionsAny(goal, "guess", "guesses") && MentionsAny(goal, "random", "too high", "too low"));
+
+    private static bool IsConsoleTodoListGoal(string goal) =>
+        MentionsAny(goal, "todo", "to-do", "task list", "tasks", "checklist")
+        && MentionsAny(goal, "add", "list", "remove", "menu", "quit");
+
+    private static bool IsConsoleNotesAppGoal(string goal) =>
+        MentionsAny(goal, "notes app", "note taking", "take notes", "save notes", "notes")
+        && MentionsAny(goal, "file", "save", "saved", "persist", "load", "list");
+
+    private static bool IsGenericConsoleListManagerGoal(string goal) =>
+        MentionsAny(goal, "list", "manager", "tracker", "address book", "inventory", "shopping", "grocery", "contacts", "contact", "books", "library", "recipes", "movies")
+        && MentionsAny(goal, "add", "create", "list", "show", "remove", "delete", "clear", "save", "quit", "menu");
 
     private static bool IsBuildArtifactPath(string path)
     {
