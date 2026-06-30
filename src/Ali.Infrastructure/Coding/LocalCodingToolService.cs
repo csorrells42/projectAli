@@ -8403,6 +8403,8 @@ public sealed class LocalCodingToolService(
         lines.AddRange(BuildFeatureBeforeAfterRequirementRows(context).Select(row => $"- {row}"));
         lines.Add("Validation handshake:");
         lines.AddRange(BuildFeaturePatchValidationHandshakeRows(context, latestValidation).Select(row => $"- {row}"));
+        lines.Add("Failure repair packet:");
+        lines.AddRange(BuildFeatureFailureRepairPacketRows(context).Select(row => $"- {row}"));
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature patch draft plan", Policy.WorkspaceRoot);
     }
 
@@ -8479,7 +8481,11 @@ public sealed class LocalCodingToolService(
         lines.AddRange(BuildPatchPreviewGateRows(context).Take(5).Select(row => $"- {row}"));
         lines.Add("Validation and repair:");
         lines.AddRange(BuildFeatureBuilderValidationRows(context, latestValidation, gitStatus).Select(row => $"- {row}"));
-        lines.Add("Next action: review the target map, then use Patch Intelligence before any preview/apply step.");
+        lines.Add("Builder runbook:");
+        lines.AddRange(BuildFeatureBuilderRunbookRows(context).Select(row => $"- {row}"));
+        lines.Add("Failure repair packet:");
+        lines.AddRange(BuildFeatureFailureRepairPacketRows(context).Select(row => $"- {row}"));
+        lines.Add($"Next command: feature patch draft {context.Goal}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Plain-English feature builder", Policy.WorkspaceRoot);
     }
 
@@ -8725,6 +8731,61 @@ public sealed class LocalCodingToolService(
         };
         rows.AddRange(BuildPostPatchValidationRows(context).Take(3));
         return rows;
+    }
+
+    private static IReadOnlyList<string> BuildFeatureBuilderRunbookRows(FeatureWorkContext context)
+    {
+        var goal = context.Goal;
+        var validation = string.IsNullOrWhiteSpace(context.TestTarget.Command)
+            ? "resolve test target " + goal
+            : context.TestTarget.Command;
+        return
+        [
+            $"1. Brief: feature builder {goal}",
+            $"2. Draft: feature patch draft {goal}",
+            $"3. Preview gate: patch intelligence {goal}",
+            "4. Preview bundle: create the visible diff with exact before/after text.",
+            $"5. Validate: {validation}",
+            "6. Repair: if validation fails, map the first diagnostic back to the active patch slice.",
+            "7. Closeout: review current changes, then can i safely commit."
+        ];
+    }
+
+    private IReadOnlyList<string> BuildFeatureFailureRepairPacketRows(FeatureWorkContext context)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault()?.RelativePath ?? "unresolved target";
+        if (_lastDotNetRequest is null || _lastDotNetResult is null)
+        {
+            return
+            [
+                "State: Waiting - no build/test result is loaded.",
+                $"Active slice: {topTarget}.",
+                "Repair route: run targeted validation after preview, then map any failure to the active slice before drafting another edit."
+            ];
+        }
+
+        if (_lastDotNetResult.Succeeded)
+        {
+            return
+            [
+                $"State: Good - {_lastDotNetRequest.Action} passed.",
+                $"Active slice: {topTarget}.",
+                "Repair route: no active validation failure."
+            ];
+        }
+
+        var diagnostic = _lastDotNetResult.Message
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.Contains("error", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("failed", StringComparison.OrdinalIgnoreCase))
+            ?? "failure details need inspection";
+        return
+        [
+            $"State: Bad - {_lastDotNetRequest.Action} failed.",
+            $"Active slice: {topTarget}.",
+            $"First diagnostic: {TrimForChat(diagnostic, 180)}",
+            "Repair route: inspect impacted symbol or binding, patch the smallest slice, then rerun the same validation command."
+        ];
     }
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)

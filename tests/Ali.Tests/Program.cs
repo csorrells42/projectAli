@@ -3237,6 +3237,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Edit recipes:", featurePatchDraft.Message);
     Contains("Preview bundle candidates:", featurePatchDraft.Message);
     Contains("Before/after requirements:", featurePatchDraft.Message);
+    Contains("Failure repair packet:", featurePatchDraft.Message);
     Contains("Post-patch validation router", validationRouter.Message);
     Contains("Patch preview intelligence v1", patchIntelligence.Message);
     Contains("Slice approval packet:", patchIntelligence.Message);
@@ -3247,6 +3248,9 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Target map:", featureBuilder.Message);
     Contains("Patch draft path:", featureBuilder.Message);
     Contains("Validation and repair:", featureBuilder.Message);
+    Contains("Builder runbook:", featureBuilder.Message);
+    Contains("Failure repair packet:", featureBuilder.Message);
+    Contains("Next command:", featureBuilder.Message);
     Contains("Build Feature lane", buildFeatureLane.Message);
 }
 
