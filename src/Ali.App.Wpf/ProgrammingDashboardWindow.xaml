@@ -124,10 +124,12 @@
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Build Feature Lane"
-                                        Command="{Binding RunCodingBuildFeatureLaneCommand}"
+                                <Button Content="Feature Builder"
+                                        Command="{Binding RunCodingFeatureBuilderCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Build Feature Lane"
+                                        Command="{Binding RunCodingBuildFeatureLaneCommand}" />
                                 <Button Content="Work Context"
                                         Command="{Binding RunCodingFeatureWorkContextCommand}" />
                                 <Button Content="Feature Intent"

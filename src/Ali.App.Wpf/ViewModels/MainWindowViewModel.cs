@@ -275,6 +275,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingPatchBatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch batch", "show owner safe patch batch", "Coding.PatchBatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolDiffAuditCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol diff audit", "show mandatory symbol diff audit", "Coding.SymbolDiffAudit"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGeneratedFileGuardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Generated file guard", "show generated file guard", "Coding.GeneratedFileGuard"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureBuilderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature builder", "feature builder current feature", "Coding.FeatureBuilder"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -733,6 +734,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingSymbolDiffAuditCommand { get; }
 
     public ICommand RunCodingGeneratedFileGuardCommand { get; }
+
+    public ICommand RunCodingFeatureBuilderCommand { get; }
 
     public ICommand RunCodingBuildFeatureLaneCommand { get; }
 
@@ -3558,10 +3561,23 @@ public sealed class MainWindowViewModel : ObservableObject
             "Risk-aware test depth:",
             "Scores:",
             "Closeout checklist:",
+            "Feature brief:",
+            "Target map:",
+            "Patch draft path:",
+            "Preview/apply readiness:",
+            "Validation and repair:",
+            "Builder status:",
             "Patch intelligence:",
             "Slice approval packet:",
             "Patch preview gate v3:",
             "Mini-Codex score audit:",
+            "- Feature type:",
+            "- User result:",
+            "- Acceptance check:",
+            "- Primary file:",
+            "- Candidate files:",
+            "- Test path:",
+            "- Latest validation:",
             "- Input:",
             "- Expected result:",
             "- Failure behavior:",
@@ -6842,6 +6858,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingGeneratedFileGuardCommand is AsyncRelayCommand runCodingGeneratedFileGuard)
         {
             runCodingGeneratedFileGuard.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFeatureBuilderCommand is AsyncRelayCommand runCodingFeatureBuilder)
+        {
+            runCodingFeatureBuilder.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildFeatureLaneCommand is AsyncRelayCommand runCodingBuildFeatureLane)

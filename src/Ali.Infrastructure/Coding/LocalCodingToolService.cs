@@ -289,6 +289,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowApplyGate => await ShowApplyGateAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowPlainEnglishFeatureBuilder => await ShowPlainEnglishFeatureBuilderAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowBuildFeatureLane => await ShowBuildFeatureLaneAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
             CodingToolAction.ShowOwnershipMap => await ShowOwnershipMapAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8430,6 +8431,33 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Patch preview intelligence", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowPlainEnglishFeatureBuilderAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Plain-English feature builder v1:",
+            "No files were changed.",
+            $"Request: {context.Goal}",
+            $"Builder status: {BuildFeatureBuilderStatus(context, latestValidation, gitStatus)}",
+            "Feature brief:"
+        };
+        lines.AddRange(BuildPlainEnglishFeatureBriefRows(context).Select(row => $"- {row}"));
+        lines.Add("Target map:");
+        lines.AddRange(BuildFeatureTargetMapRows(context).Select(row => $"- {row}"));
+        lines.Add("Patch draft path:");
+        lines.AddRange(BuildFeaturePatchDraftPathRows(context).Select(row => $"- {row}"));
+        lines.Add("Preview/apply readiness:");
+        lines.AddRange(BuildPatchPreviewGateRows(context).Take(5).Select(row => $"- {row}"));
+        lines.Add("Validation and repair:");
+        lines.AddRange(BuildFeatureBuilderValidationRows(context, latestValidation, gitStatus).Select(row => $"- {row}"));
+        lines.Add("Next action: review the target map, then use Patch Intelligence before any preview/apply step.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Plain-English feature builder", Policy.WorkspaceRoot);
+    }
+
     private static IReadOnlyList<string> BuildBehaviorContractRows(FeatureWorkContext context)
     {
         var topTarget = context.RankedTargets.FirstOrDefault();
@@ -8443,6 +8471,138 @@ public sealed class LocalCodingToolService(
             string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "Test proof: needs a target before patch apply." : $"Test proof: {context.TestTarget.Command}.",
             "Permission boundary: no file writes, build/test runs, package actions, or Git writes without the normal confirmation gates."
         ];
+    }
+
+    private static string BuildFeatureBuilderStatus(
+        FeatureWorkContext context,
+        CodingReceipt? latestValidation,
+        GitWorkingTreeStatus gitStatus)
+    {
+        if (context.RankedTargets.Count == 0)
+        {
+            return "Hold - no likely file target yet.";
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            return "Plan ready - resolve targeted validation before applying changes.";
+        }
+
+        if (gitStatus.HasUncommittedChanges && latestValidation?.Succeeded != true)
+        {
+            return "Plan ready - working tree has changes and still needs validation.";
+        }
+
+        return "Ready for patch intelligence review.";
+    }
+
+    private static IReadOnlyList<string> BuildPlainEnglishFeatureBriefRows(FeatureWorkContext context)
+    {
+        var featureType = ClassifyPlainEnglishFeatureType(context);
+        return
+        [
+            $"Feature type: {featureType}.",
+            $"User result: {BuildPlainEnglishUserResult(context.Goal, featureType)}",
+            $"Acceptance check: user can trigger the workflow and see the requested result.",
+            $"Failure check: Ali explains any blocked file, missing test, or failed validation in plain terms.",
+            $"Safety check: no writes, commands, packages, or Git actions happen without the normal confirmation gates."
+        ];
+    }
+
+    private static string ClassifyPlainEnglishFeatureType(FeatureWorkContext context)
+    {
+        var goal = context.Goal;
+        if (context.RelativeCandidateFiles.Any(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || file.Contains("Wpf", StringComparison.OrdinalIgnoreCase)
+            || file.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+            || goal.Contains("button", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("screen", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("dashboard", StringComparison.OrdinalIgnoreCase))
+        {
+            return "UI workflow";
+        }
+
+        if (context.RelativeCandidateFiles.Any(file => file.Contains("Coding", StringComparison.OrdinalIgnoreCase))
+            || goal.Contains("command", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("parser", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("coding", StringComparison.OrdinalIgnoreCase))
+        {
+            return "coding command";
+        }
+
+        if (goal.Contains("install", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("setup", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("repair", StringComparison.OrdinalIgnoreCase))
+        {
+            return "installer or maintenance workflow";
+        }
+
+        if (goal.Contains("source", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("weather", StringComparison.OrdinalIgnoreCase)
+            || goal.Contains("news", StringComparison.OrdinalIgnoreCase))
+        {
+            return "source-backed answer workflow";
+        }
+
+        return "application feature";
+    }
+
+    private static string BuildPlainEnglishUserResult(string goal, string featureType)
+    {
+        if (featureType.Equals("UI workflow", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"a visible control or screen supports {goal}";
+        }
+
+        if (featureType.Equals("coding command", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"a deterministic command or diagnostic supports {goal}";
+        }
+
+        return $"the application behavior supports {goal}";
+    }
+
+    private static IReadOnlyList<string> BuildFeatureTargetMapRows(FeatureWorkContext context)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault();
+        var targetRows = context.RankedTargets.Take(3).Select(target => $"{target.RelativePath} ({target.Confidence}, {target.Risk})").ToList();
+        return
+        [
+            topTarget is null ? "Primary file: none resolved yet." : $"Primary file: {topTarget.RelativePath} ({topTarget.Confidence}).",
+            $"Candidate files: {FormatInlineList(context.RelativeCandidateFiles.Take(8))}",
+            $"Target reasons: {FormatInlineList(topTarget?.Reasons ?? [])}",
+            $"Ranked targets: {FormatInlineList(targetRows)}",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "Test path: none resolved yet." : $"Test path: {context.TestTarget.Command}.",
+            $"Risk labels: {FormatInlineList(context.RiskLabels)}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeaturePatchDraftPathRows(FeatureWorkContext context)
+    {
+        var rows = new List<string>
+        {
+            "1. Behavior contract: lock the request, expected result, failure behavior, and confirmation boundary.",
+            "2. File slice: edit the primary file first, then only touch related files if the contract requires it."
+        };
+        rows.AddRange(BuildDeterministicPatchDraftRows(context).Take(4).Select((row, index) => $"{index + 3}. {row}"));
+        rows.Add("Final. Preview bundle: produce a visible diff before any apply step.");
+        return rows;
+    }
+
+    private static IReadOnlyList<string> BuildFeatureBuilderValidationRows(
+        FeatureWorkContext context,
+        CodingReceipt? latestValidation,
+        GitWorkingTreeStatus gitStatus)
+    {
+        var rows = new List<string>
+        {
+            latestValidation is null ? "Latest validation: none." : FormatReceiptSummary("Latest validation", latestValidation),
+            $"Git: {gitStatus.Summary}",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "Targeted test: resolve before applying code." : $"Targeted test: {context.TestTarget.Command}.",
+            "Repair loop: if validation fails, map the first diagnostic to the active patch slice before editing again."
+        };
+        rows.AddRange(BuildPostPatchValidationRows(context).Take(3));
+        return rows;
     }
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)

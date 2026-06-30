@@ -804,6 +804,12 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal("Save button", patchIntelligenceRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("patch preview intelligence", out var barePatchIntelligenceRequest));
     Equal(CodingToolAction.ShowPatchPreviewIntelligence, barePatchIntelligenceRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature builder Save button", out var featureBuilderRequest));
+    Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, featureBuilderRequest.Action);
+    Equal("Save button", featureBuilderRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("help me build a settings button in the app", out var naturalFeatureBuilderRequest));
+    Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, naturalFeatureBuilderRequest.Action);
+    Equal("a settings button in the app", naturalFeatureBuilderRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("show build feature lane", out var buildFeatureLaneRequest));
     Equal(CodingToolAction.ShowBuildFeatureLane, buildFeatureLaneRequest.Action);
 
@@ -3181,6 +3187,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var applyGate = await service.TryHandleAsync("apply gate", CancellationToken.None);
     var validationRouter = await service.TryHandleAsync("post patch validation Save button", CancellationToken.None);
     var patchIntelligence = await service.TryHandleAsync("patch intelligence Save button", CancellationToken.None);
+    var featureBuilder = await service.TryHandleAsync("feature builder Save button", CancellationToken.None);
     var buildFeatureLane = await service.TryHandleAsync("show build feature lane", CancellationToken.None);
 
     Contains("Workspace health score", health.Message);
@@ -3227,6 +3234,11 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Slice approval packet:", patchIntelligence.Message);
     Contains("Patch preview gate v3:", patchIntelligence.Message);
     Contains("Mini-Codex score audit:", patchIntelligence.Message);
+    Contains("Plain-English feature builder v1", featureBuilder.Message);
+    Contains("Feature brief:", featureBuilder.Message);
+    Contains("Target map:", featureBuilder.Message);
+    Contains("Patch draft path:", featureBuilder.Message);
+    Contains("Validation and repair:", featureBuilder.Message);
     Contains("Build Feature lane", buildFeatureLane.Message);
 }
 
@@ -3530,6 +3542,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSymbolDiffAuditCommand", dashboard);
     Contains("RunCodingGeneratedFileGuardCommand", dashboard);
     Contains("Build Feature", dashboard);
+    Contains("RunCodingFeatureBuilderCommand", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
     Contains("RunCodingFeatureWorkContextCommand", dashboard);
     Contains("RunCodingFeatureIntentCommand", dashboard);
@@ -3548,6 +3561,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingPatchBatchCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingSymbolDiffAuditCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureBuilderCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);

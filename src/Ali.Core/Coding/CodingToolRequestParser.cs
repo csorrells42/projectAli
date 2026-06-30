@@ -702,6 +702,67 @@ public static class CodingToolRequestParser
         "feature patch intelligence"
     ];
 
+    private static readonly string[] PlainEnglishFeatureBuilderPrefixes =
+    [
+        "feature builder ",
+        "show feature builder ",
+        "plain english feature builder ",
+        "guided feature builder ",
+        "coding feature builder ",
+        "build request packet ",
+        "feature build packet "
+    ];
+
+    private static readonly string[] PlainEnglishFeatureBuilderRequests =
+    [
+        "feature builder",
+        "show feature builder",
+        "plain english feature builder",
+        "guided feature builder",
+        "coding feature builder",
+        "build request packet",
+        "feature build packet"
+    ];
+
+    private static readonly string[] PlainEnglishBuildRequestPrefixes =
+    [
+        "help me build ",
+        "i want to build ",
+        "i need to build ",
+        "build me ",
+        "implement ",
+        "add feature ",
+        "add a feature ",
+        "code up "
+    ];
+
+    private static readonly string[] CodingBuildTerms =
+    [
+        "app",
+        "program",
+        "code",
+        "feature",
+        "button",
+        "dashboard",
+        "setting",
+        "settings",
+        "toggle",
+        "command",
+        "screen",
+        "window",
+        "page",
+        "workflow",
+        "tool",
+        "api",
+        "service",
+        "class",
+        "test",
+        "parser",
+        "installer",
+        "voice",
+        "source"
+    ];
+
     private static readonly string[] BuildFeatureLaneRequests =
     [
         "show build feature lane",
@@ -2605,6 +2666,9 @@ public static class CodingToolRequestParser
     private static bool IsPatchPreviewIntelligenceRequest(string text) =>
         PatchPreviewIntelligenceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsPlainEnglishFeatureBuilderRequest(string text) =>
+        PlainEnglishFeatureBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsBuildFeatureLaneRequest(string text) =>
         BuildFeatureLaneRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
     private static bool IsShowLastPatchPreviewRequest(string text) =>
@@ -2759,7 +2823,9 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, PatchSlicePlanPrefixes, CodingToolAction.ShowPatchSlicePlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ApplyGatePrefixes, CodingToolAction.ShowApplyGate, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
-            || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request))
+            || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
+            || TryParsePlainEnglishBuildRequest(text, userConfirmed, out request))
         {
             return true;
         }
@@ -2836,6 +2902,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsPlainEnglishFeatureBuilderRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPlainEnglishFeatureBuilder, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsBuildFeatureLaneRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowBuildFeatureLane, null, UserConfirmed: userConfirmed);
@@ -2844,6 +2916,34 @@ public static class CodingToolRequestParser
 
         return false;
     }
+
+    private static bool TryParsePlainEnglishBuildRequest(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        request = new CodingToolRequest(CodingToolAction.OpenFile, null);
+        var prefix = PlainEnglishBuildRequestPrefixes
+            .OrderByDescending(prefix => prefix.Length)
+            .FirstOrDefault(prefix => text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (prefix is null)
+        {
+            return false;
+        }
+
+        var query = text[prefix.Length..].Trim().Trim(':', '-', ' ', '"');
+        if (string.IsNullOrWhiteSpace(query) || !LooksLikeCodingBuildRequest(query))
+        {
+            return false;
+        }
+
+        request = new CodingToolRequest(
+            CodingToolAction.ShowPlainEnglishFeatureBuilder,
+            null,
+            UserConfirmed: userConfirmed,
+            Query: query);
+        return true;
+    }
+
+    private static bool LooksLikeCodingBuildRequest(string text) =>
+        CodingBuildTerms.Any(term => text.Contains(term, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParseBuilderPlanningCommand(string text, bool userConfirmed, out CodingToolRequest request)
     {
