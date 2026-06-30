@@ -14307,7 +14307,7 @@ public sealed class LocalCodingToolService(
                             <ItemsControl ItemsSource="{Binding Metrics}" Margin="0,0,0,10">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
-                                        <UniformGrid Columns="3" />
+                                        <local:DashboardAdaptiveWrapPanel MinItemWidth="180" />
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
@@ -16213,6 +16213,96 @@ public sealed class LocalCodingToolService(
                     {
                         element.Focus();
                     }
+                }
+            }
+
+            public sealed class DashboardAdaptiveWrapPanel : Panel
+            {
+                public static readonly DependencyProperty MinItemWidthProperty =
+                    DependencyProperty.Register(
+                        nameof(MinItemWidth),
+                        typeof(double),
+                        typeof(DashboardAdaptiveWrapPanel),
+                        new FrameworkPropertyMetadata(180d, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange));
+
+                public double MinItemWidth
+                {
+                    get => (double)GetValue(MinItemWidthProperty);
+                    set => SetValue(MinItemWidthProperty, value);
+                }
+
+                protected override Size MeasureOverride(Size availableSize)
+                {
+                    var width = double.IsInfinity(availableSize.Width)
+                        ? Math.Max(MinItemWidth, MinItemWidth * Math.Max(1, InternalChildren.Count))
+                        : availableSize.Width;
+                    var columnWidth = CalculateColumnWidth(width);
+                    var columns = Math.Max(1, (int)Math.Floor(width / columnWidth));
+                    var rowHeight = 0d;
+                    var totalHeight = 0d;
+                    var columnIndex = 0;
+
+                    foreach (UIElement child in InternalChildren)
+                    {
+                        child.Measure(new Size(columnWidth, availableSize.Height));
+                        rowHeight = Math.Max(rowHeight, child.DesiredSize.Height);
+                        columnIndex++;
+                        if (columnIndex == columns)
+                        {
+                            totalHeight += rowHeight;
+                            rowHeight = 0d;
+                            columnIndex = 0;
+                        }
+                    }
+
+                    if (columnIndex > 0)
+                    {
+                        totalHeight += rowHeight;
+                    }
+
+                    return new Size(width, totalHeight);
+                }
+
+                protected override Size ArrangeOverride(Size finalSize)
+                {
+                    var columnWidth = CalculateColumnWidth(finalSize.Width);
+                    var columns = Math.Max(1, (int)Math.Floor(finalSize.Width / columnWidth));
+                    var x = 0d;
+                    var y = 0d;
+                    var rowHeight = 0d;
+                    var columnIndex = 0;
+
+                    foreach (UIElement child in InternalChildren)
+                    {
+                        rowHeight = Math.Max(rowHeight, child.DesiredSize.Height);
+                        child.Arrange(new Rect(x, y, columnWidth, child.DesiredSize.Height));
+                        columnIndex++;
+                        if (columnIndex == columns)
+                        {
+                            x = 0d;
+                            y += rowHeight;
+                            rowHeight = 0d;
+                            columnIndex = 0;
+                        }
+                        else
+                        {
+                            x += columnWidth;
+                        }
+                    }
+
+                    return finalSize;
+                }
+
+                private double CalculateColumnWidth(double availableWidth)
+                {
+                    var safeMin = Math.Max(1d, MinItemWidth);
+                    if (double.IsInfinity(availableWidth) || availableWidth <= safeMin)
+                    {
+                        return safeMin;
+                    }
+
+                    var columns = Math.Max(1, (int)Math.Floor(availableWidth / safeMin));
+                    return availableWidth / columns;
                 }
             }
 
