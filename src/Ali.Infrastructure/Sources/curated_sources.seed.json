@@ -35673,6 +35673,26 @@
     "enabled": true
   },
   {
+    "id": "sql-server-docs",
+    "topic": "software",
+    "name": "SQL Server Documentation",
+    "url": "https://learn.microsoft.com/sql/sql-server/",
+    "type": "web",
+    "trustLevel": "primary",
+    "keywords": [
+      "sql server",
+      "mssql",
+      "database",
+      "sql",
+      "microsoft",
+      "performance",
+      "indexes"
+    ],
+    "topics": null,
+    "notes": "Official Microsoft SQL Server documentation source.",
+    "enabled": true
+  },
+  {
     "id": "powershell-docs",
     "topic": "software",
     "name": "PowerShell Documentation",

@@ -68,6 +68,7 @@ public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodin
             "Generate a guarded patch preview only when the provided context contains enough exact file text to make a safe edit.",
             "For an existing file, oldText must be copied exactly from an editable file excerpt below. Preserve line endings exactly when possible.",
             "For a new file, oldText must be an empty string and path must be a concrete file path inside the selected workspace.",
+            "For data structures, SQL/database access, services, caches, queues, and APIs, prefer small seams: keep pure data-structure logic testable, keep SQL parameterized, preserve transactions and connection lifetimes, avoid hidden global state, and do not add packages or external services unless context or owner approval supports it.",
             "Do not invent tool results, builds, tests, files, or hidden project facts.",
             "If the request cannot be patched safely from the provided excerpts, return has_patch false with a short stop_reason.",
             "JSON shape:",

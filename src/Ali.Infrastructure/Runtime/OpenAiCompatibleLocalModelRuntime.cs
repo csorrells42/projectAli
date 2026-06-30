@@ -653,7 +653,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private static string BuildCodingModeInstruction()
     {
-        return "For coding, debugging, build, or software project requests, reason from app-provided local project context first. Prefer small, reviewable changes with a patch preview before apply, then confirmed apply and targeted tests when those tools are available. Do not claim files were edited, tests ran, packages installed, internet searched, or receipts created unless tool output or app context shows that happened. Avoid broad rewrites and avoid inventing files, APIs, commands, or project state not present in context.";
+        return "For coding, debugging, build, or software project requests, reason from app-provided local project context first. Prefer small, reviewable changes with a patch preview before apply, then confirmed apply and targeted tests when those tools are available. For data-structure, service, cache, queue, API, or SQL/database work, explicitly reason about lookup/order/concurrency requirements, schema and index design, migrations, transactions, connection pooling, retries/idempotency, and validation before editing. Do not claim files were edited, tests ran, packages installed, internet searched, or receipts created unless tool output or app context shows that happened. Avoid broad rewrites and avoid inventing files, APIs, commands, or project state not present in context.";
     }
 
     private void EnsureEndpointAllowed()

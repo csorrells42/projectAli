@@ -8591,8 +8591,8 @@ public sealed class LocalCodingToolService(
         var commandSurface = ShowCommandSurfaceDoctor();
         var scores = new (string Name, int Score, string Note)[]
         {
-            ("Codebase awareness", 98, "per-symbol stale detection, durable symbol ownership ledger, project index v4, intent detection, compressed repo map, cross-language routes, Roslyn edit planner, dependency/build order, public API, generated-code guardrails"),
-            ("Edit planning", 97, "active workspace/project context, build-this front door, feature intake, pattern-copy planning, implementation planner, Roslyn insertion planner, concrete patch authoring, edit impact scoring, semantic edit targets, reference graph, impact radius, refactor safety hints"),
+            ("Codebase awareness", 98, "per-symbol stale detection, durable symbol ownership ledger, project index v4, intent detection, compressed repo map, cross-language routes, Roslyn edit planner, dependency/build order, public API, data systems guide, generated-code guardrails"),
+            ("Edit planning", 97, "active workspace/project context, build-this front door, feature intake, data-structure/service/database planning, pattern-copy planning, implementation planner, Roslyn insertion planner, concrete patch authoring, edit impact scoring, semantic edit targets, reference graph, impact radius, refactor safety hints"),
             ("Patch safety", 97, "owner-approved apply packet, patch outcome classifier, paired previews, patch synthesis v2, intent diff composer, patch body generator, confidence scoring, semantic diff summaries, symbol rollback hints, route repair packets, exact patch preview, call-chain guards"),
             ("Validation/release", 97, "validation minimizer, validation chain planner, queued validation command packets, risk-aware test depth, evidence pack, post-apply repair loop v2, release readiness score, session journal, prioritized test recommendation, build order, safe commit and release notes"),
             ("Autonomous workflow", 99, "model-led programming action planner, programming-mode router, authoring sequence flow, active task follow-ups, current-task context memory, build-this front door, feature orchestrator, slice preview, repeat failure memory, first diagnostic repair route, failure-to-patch v3, repair routing, project-index refresh automation, queued command rows, packet self-score, prerequisite gates"),
@@ -11308,8 +11308,8 @@ public sealed class LocalCodingToolService(
         var dashboard = 99;
         return
         [
-            ("Codebase awareness", awareness, indexStatus.Available ? "project index and Roslyn routes available" : "refresh project index"),
-            ("Edit planning", editPlanning, "active workspace context, intake, Roslyn planner, insertion planner, pattern copy, implementation planner, and concrete patch authoring are wired"),
+            ("Codebase awareness", awareness, indexStatus.Available ? "project index, Roslyn routes, and data systems guide available" : "refresh project index"),
+            ("Edit planning", editPlanning, "active workspace context, intake, data-structure/service/database planning, Roslyn planner, insertion planner, pattern copy, implementation planner, and concrete patch authoring are wired"),
             ("Patch safety", patchSafety, "owner apply packet, paired previews, intent diff composer, patch body generator, confidence scoring, exact checks, and semantic diff summary are wired"),
             ("Validation/release", validation, "validation minimizer, validation chain planner, router, repair loop, evidence pack, and receipts are wired"),
             ("Autonomous workflow", autonomous, "programming action planner, programming-mode router, authoring flow, build-this front door, orchestrator, slice preview, repeat failure memory, first diagnostic route, failure-to-patch v3, and repair routing are wired"),

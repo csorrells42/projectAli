@@ -82,6 +82,8 @@ public sealed class ModelCodingActionPlanner(ILocalModelRuntime runtime) : ICodi
             "- Clarify target/project: active workspace project, feature work context <goal>, or feature intake <goal>.",
             "- Plan and target edits: autonomous feature orchestrator <goal>, roslyn edit planner <goal>, multi-file patch synthesis <goal>.",
             "- Starter app requests: for simple console or WPF apps, use build this for me <goal>; the patch lane can preview starter code for console calculators, guessing games, todo/list/file-backed apps, and WPF hello/counter/calculator/greeting/todo windows before owner apply.",
+            "- Data structures/services: for collections, algorithms, caches, queues, APIs, databases, SQL Server/PostgreSQL/MySQL/SQLite, or fast SQL design, prefer architecture/options, feature implementation planner, package lookup, dependency install packet, and validation chain before editing.",
+            "- Data design checklist: choose the simplest collection/store that meets lookup/order/concurrency needs; for SQL, plan schema, keys, indexes, migrations, parameterized queries, transactions, connection pooling, and measured validation.",
             "- Draft/preview patch: feature patch draft <goal>, exact patch synthesis <goal>, preview synthesized feature patch <goal>, preview guided feature bundle <goal>.",
             "- Apply only after owner confirmation: confirm apply last patch preview.",
             "- Validate after edits: post patch validation <goal>, validation command minimizer <goal>, validation chain planner <goal>.",

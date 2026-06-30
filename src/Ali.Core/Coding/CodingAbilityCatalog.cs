@@ -58,6 +58,17 @@ public static class CodingAbilityCatalog
         "validation plan"
     ];
 
+    public static IReadOnlyList<string> DataSystemsKnowledge { get; } =
+    [
+        "Data structures: arrays/lists, stacks, queues/deques, dictionaries/hash maps, sets, sorted maps/sets, heaps/priority queues, trees/tries, graphs, LRU caches, Bloom filters, and when each fits lookup, ordering, memory, and concurrency needs.",
+        "C# collections: List<T>, Dictionary<TKey,TValue>, HashSet<T>, SortedDictionary<TKey,TValue>, SortedSet<T>, Queue<T>, Stack<T>, PriorityQueue<TElement,TPriority>, ConcurrentDictionary, Channel<T>, Immutable collections, and Span/Memory for hot paths.",
+        "SQL data stores: SQL Server, PostgreSQL, MySQL/MariaDB, and SQLite; choose by deployment shape, transactions, concurrency, indexing, full-text/search needs, operations burden, and local/offline requirements.",
+        "Fast SQL design: schema normalization where useful, correct keys and constraints, covering/composite indexes, query plans, pagination, batching, parameterized queries, transactions, connection pooling, migrations, and measured performance baselines.",
+        "Service patterns: repository/unit-of-work only when it reduces coupling, background workers, hosted services, HTTP APIs, message queues, retry/idempotency, caching boundaries, health checks, structured logging, and configuration/secrets separation.",
+        "Caching and queues: Redis/in-memory caches, cache invalidation rules, TTLs, pub/sub, durable queues, outbox pattern, backpressure, and dead-letter handling.",
+        "Validation approach: unit-test pure data-structure logic, integration-test database mappings and migrations, load-test hot queries/services, and prove failure behavior for retries, timeouts, and duplicate messages."
+    ];
+
     public static IReadOnlyList<CodingAbilityGroup> BuilderGroups { get; } =
     [
         new(
@@ -126,6 +137,17 @@ public static class CodingAbilityCatalog
                 new("Codebase patterns", "detect codebase patterns"),
                 new("Feature files", "plan feature files <goal>"),
                 new("Refactor safety", "show refactor safety checklist <goal>")
+            ]),
+        new(
+            "Data systems and services",
+            "Plan data structures, persistence, caches, queues, APIs, and SQL-backed services before implementation.",
+            [
+                new("Data structure choice", "show architecture options <goal>"),
+                new("Storage model", "coding context packet <goal>"),
+                new("SQL/service plan", "feature implementation planner <goal>"),
+                new("Package lookup", "plan package lookup <goal>"),
+                new("Dependency install packet", "plan dependency install packet <goal>"),
+                new("Validation chain", "validation chain planner <goal>")
             ]),
         new(
             "Execute through gates",
@@ -441,6 +463,8 @@ public static class CodingAbilityCatalog
         builder.AppendLine("Fast builder path:");
         AppendNumbered(builder, FastBuilderPath);
         AppendGroups(builder, BuilderGroups);
+        builder.AppendLine("Data systems knowledge:");
+        AppendBullets(builder, DataSystemsKnowledge);
         builder.AppendLine("Ability-index maintenance rule:");
         builder.AppendLine("- Each new feature should be surfaced in this shared catalog, in the helper/VS command buttons when useful, and in the user/engineering docs.");
         builder.AppendLine("Prototype/future lane:");
@@ -456,7 +480,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, create simple console and WPF starter apps, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, create simple console and WPF starter apps, reason about common data structures and service/database choices, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");
@@ -562,6 +586,14 @@ public static class CodingAbilityCatalog
         for (var index = 0; index < commands.Count; index++)
         {
             builder.AppendLine($"{index + 1}. {commands[index]}");
+        }
+    }
+
+    private static void AppendBullets(StringBuilder builder, IEnumerable<string> rows)
+    {
+        foreach (var row in rows)
+        {
+            builder.AppendLine($"- {row}");
         }
     }
 }

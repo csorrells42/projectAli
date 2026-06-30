@@ -628,6 +628,11 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("semantic diff summary <goal>", builderIndex);
     Contains("mini codex score v3 <goal>", builderIndex);
     Contains("confirm run packet item N", builderIndex);
+    Contains("Data systems and services", builderIndex);
+    Contains("Data structures: arrays/lists", builderIndex);
+    Contains("Fast SQL design", builderIndex);
+    Contains("SQL Server, PostgreSQL, MySQL/MariaDB, and SQLite", builderIndex);
+    Contains("Caching and queues", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
     Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
@@ -641,6 +646,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("owner apply packets", userGuide);
     Contains("concrete patch authoring", userGuide);
     Contains("confidence scoring", userGuide);
+    Contains("common data structures and service/database choices", userGuide);
     Contains("Context packet", userGuide);
     Contains("coding context packet", userGuide);
     Contains("PDF", userGuide);
@@ -8063,6 +8069,10 @@ static async Task TestCuratedSourceCatalogMergesMissingStarterSources()
     Equal(true, catalog.Any(source => source.Id == "nasa-main"));
     Equal(true, catalog.Any(source => source.Id == "medlineplus"));
     Equal(true, catalog.Any(source => source.Id == "alabama-gov"));
+    Equal(true, catalog.Any(source => source.Id == "sql-server-docs"));
+    Equal(true, catalog.Any(source => source.Id == "postgres-docs"));
+    Equal(true, catalog.Any(source => source.Id == "redis-docs"));
+    Equal(true, catalog.Any(source => source.Id == "sqlite-docs"));
     Equal(true, catalog.Count >= 2_000);
     Equal(true, catalog.Count(source => source.Topic == "weather") >= 100);
     Equal(true, catalog.Count(source => source.Topic == "sports") >= 100);
@@ -8622,6 +8632,9 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("confirm apply last patch preview", instruction);
     Contains("post patch validation <goal>", instruction);
     Contains("semantic change receipt <goal>", instruction);
+    Contains("Data structures/services", instruction);
+    Contains("SQL Server/PostgreSQL/MySQL/SQLite", instruction);
+    Contains("schema, keys, indexes, migrations", instruction);
     Contains("Assistant: Next: feature patch draft add export button", instruction);
 }
 
