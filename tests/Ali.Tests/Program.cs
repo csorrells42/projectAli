@@ -625,6 +625,10 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("authoring sequence flow <goal>", builderIndex);
     Contains("validation chain planner <goal>", builderIndex);
     Contains("data systems guide <goal>", builderIndex);
+    Contains("data structure chooser <goal>", builderIndex);
+    Contains("sql performance guide <goal>", builderIndex);
+    Contains("service architecture guide <goal>", builderIndex);
+    Contains("cache queue guide <goal>", builderIndex);
     Contains("console app guide <goal>", builderIndex);
     Contains("wpf app guide <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
@@ -806,6 +810,18 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("data systems guide fast SQL order service", out var dataSystemsRequest));
     Equal(CodingToolAction.ShowDataSystemsGuide, dataSystemsRequest.Action);
     Equal("fast SQL order service", dataSystemsRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("data structure chooser user lookup", out var structureGuideRequest));
+    Equal(CodingToolAction.ShowDataStructureChooser, structureGuideRequest.Action);
+    Equal("user lookup", structureGuideRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("fast sql guide order search", out var sqlGuideRequest));
+    Equal(CodingToolAction.ShowSqlPerformanceGuide, sqlGuideRequest.Action);
+    Equal("order search", sqlGuideRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("service design guide ingestion api", out var serviceGuideRequest));
+    Equal(CodingToolAction.ShowServiceArchitectureGuide, serviceGuideRequest.Action);
+    Equal("ingestion api", serviceGuideRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("cache queue guide email worker", out var cacheQueueGuideRequest));
+    Equal(CodingToolAction.ShowCacheQueueGuide, cacheQueueGuideRequest.Action);
+    Equal("email worker", cacheQueueGuideRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("console app guide calculator", out var consoleGuideRequest));
     Equal(CodingToolAction.ShowConsoleCodingGuide, consoleGuideRequest.Action);
     Equal("calculator", consoleGuideRequest.Query);
@@ -3536,6 +3552,10 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     var known = await service.TryHandleAsync("known error CS0103", CancellationToken.None);
     var rollback = await service.TryHandleAsync("preview rollback patch", CancellationToken.None);
     var dataSystems = await service.TryHandleAsync("data systems guide fast SQL order service", CancellationToken.None);
+    var structureGuide = await service.TryHandleAsync("data structure chooser user lookup", CancellationToken.None);
+    var sqlGuide = await service.TryHandleAsync("sql performance guide order search", CancellationToken.None);
+    var serviceGuide = await service.TryHandleAsync("service architecture guide ingestion api", CancellationToken.None);
+    var cacheQueueGuide = await service.TryHandleAsync("cache queue guide email worker", CancellationToken.None);
     var consoleGuide = await service.TryHandleAsync("console app guide calculator", CancellationToken.None);
     var wpfGuide = await service.TryHandleAsync("wpf app guide todo list", CancellationToken.None);
 
@@ -3563,6 +3583,20 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("Dictionary<TKey,TValue>", dataSystems.Message);
     Contains("SQL Server/PostgreSQL/MySQL/MariaDB", dataSystems.Message);
     Contains("connection pooling", dataSystems.Message);
+    Contains("Data structure chooser", structureGuide.Message);
+    Contains("Dictionary<TKey,TValue>", structureGuide.Message);
+    Contains("Channel<T>", structureGuide.Message);
+    Contains("SQL performance guide", sqlGuide.Message);
+    Contains("SQL Server", sqlGuide.Message);
+    Contains("parameterized SQL", sqlGuide.Message);
+    Contains("Connection pooling", sqlGuide.Message);
+    Contains("Service architecture guide", serviceGuide.Message);
+    Contains("idempotent", serviceGuide.Message);
+    Contains("health checks", serviceGuide.Message);
+    Contains("Cache and queue guide", cacheQueueGuide.Message);
+    Contains("Redis", cacheQueueGuide.Message);
+    Contains("Outbox pattern", cacheQueueGuide.Message);
+    Contains("Dead letters", cacheQueueGuide.Message);
     Contains("Console app guide", consoleGuide.Message);
     Contains("TryParse", consoleGuide.Message);
     Contains("preview synthesized feature patch calculator", consoleGuide.Message);
@@ -8674,8 +8708,11 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("post patch validation <goal>", instruction);
     Contains("semantic change receipt <goal>", instruction);
     Contains("Data structures/services", instruction);
+    Contains("data structure chooser <goal>", instruction);
+    Contains("sql performance guide <goal>", instruction);
+    Contains("service architecture guide <goal>", instruction);
+    Contains("cache queue guide <goal>", instruction);
     Contains("data systems guide <goal>", instruction);
-    Contains("SQL Server/PostgreSQL/MySQL/SQLite", instruction);
     Contains("schema, keys, indexes, migrations", instruction);
     Contains("Assistant: Next: feature patch draft add export button", instruction);
 }

@@ -70,7 +70,7 @@ public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodin
             "For a new file, oldText must be an empty string and path must be a concrete file path inside the selected workspace.",
             "For console apps, prefer a complete Program.cs with clear prompts, input validation, visible output, and an optional Console.ReadKey when the user asks the app to wait before closing.",
             "For WPF apps, prefer small MVVM-friendly slices: XAML binds to public view-model properties/commands, code-behind stays minimal, property changes raise notifications, ObservableCollection backs list UIs, async work reports state, and commands keep UI work on the dispatcher-safe path.",
-            "For data structures, SQL/database access, services, caches, queues, and APIs, prefer small seams: keep pure data-structure logic testable, keep SQL parameterized, preserve transactions and connection lifetimes, avoid hidden global state, and do not add packages or external services unless context or owner approval supports it.",
+            "For data structures, SQL/database access, services, caches, queues, and APIs, prefer small seams: keep pure data-structure logic testable, keep SQL parameterized, preserve transactions and connection lifetimes, avoid hidden global state, separate service boundaries, keep retries idempotent, and do not add packages or external services unless context or owner approval supports it.",
             "Do not invent tool results, builds, tests, files, or hidden project facts.",
             "If the request cannot be patched safely from the provided excerpts, return has_patch false with a short stop_reason.",
             "JSON shape:",

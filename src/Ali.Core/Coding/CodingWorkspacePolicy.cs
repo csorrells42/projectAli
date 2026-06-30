@@ -210,6 +210,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowSemanticChangeReceipt
             or CodingToolAction.ShowValidationChainPlanner
             or CodingToolAction.ShowDataSystemsGuide
+            or CodingToolAction.ShowDataStructureChooser
+            or CodingToolAction.ShowSqlPerformanceGuide
+            or CodingToolAction.ShowServiceArchitectureGuide
+            or CodingToolAction.ShowCacheQueueGuide
             or CodingToolAction.ShowConsoleCodingGuide
             or CodingToolAction.ShowWpfCodingGuide
             or CodingToolAction.ShowActiveWorkspaceProject

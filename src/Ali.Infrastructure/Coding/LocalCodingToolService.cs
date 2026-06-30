@@ -343,6 +343,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowSemanticChangeReceipt => await ShowSemanticChangeReceiptAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationChainPlanner => await ShowValidationChainPlannerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowDataSystemsGuide => ShowDataSystemsGuide(request),
+            CodingToolAction.ShowDataStructureChooser => ShowDataStructureChooser(request),
+            CodingToolAction.ShowSqlPerformanceGuide => ShowSqlPerformanceGuide(request),
+            CodingToolAction.ShowServiceArchitectureGuide => ShowServiceArchitectureGuide(request),
+            CodingToolAction.ShowCacheQueueGuide => ShowCacheQueueGuide(request),
             CodingToolAction.ShowConsoleCodingGuide => ShowConsoleCodingGuide(request),
             CodingToolAction.ShowWpfCodingGuide => ShowWpfCodingGuide(request),
             CodingToolAction.ShowActiveWorkspaceProject => await ShowActiveWorkspaceProjectAsync(cancellationToken).ConfigureAwait(false),
@@ -10299,12 +10303,135 @@ public sealed class LocalCodingToolService(
             "Fast SQL checklist:",
             "- Model keys, constraints, indexes, query shape, pagination, batching, parameterized SQL, transactions, connection pooling, and migration rollback before editing.",
             "Next commands:",
+            $"- data structure chooser {goal}",
+            $"- sql performance guide {goal}",
+            $"- service architecture guide {goal}",
+            $"- cache queue guide {goal}",
             $"- show architecture options {goal}",
             $"- feature implementation planner {goal}",
             $"- plan package lookup {goal}",
             $"- validation chain planner {goal}"
         };
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Data systems guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowDataStructureChooser(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current data feature");
+        var lines = new List<string>
+        {
+            "Data structure chooser v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Decision rows:",
+            "- Ordered small/medium collection: List<T>; prefer simple scans until profiling proves lookup is hot.",
+            "- Exact lookup by stable key: Dictionary<TKey,TValue>; choose key normalization and collision behavior deliberately.",
+            "- Unique membership: HashSet<T>; use when duplicate prevention or contains checks dominate.",
+            "- Sorted traversal/range queries in memory: SortedDictionary<TKey,TValue> or SortedSet<T>.",
+            "- FIFO/LIFO work: Queue<T> or Stack<T>; priority work: PriorityQueue<TElement,TPriority>.",
+            "- Prefix/search tree: trie only when prefix lookup is central and data size justifies it.",
+            "- Relationship traversal: graph adjacency list with visited set; avoid recursive depth risk for large graphs.",
+            "- Concurrent producer/consumer: Channel<T>; shared map: ConcurrentDictionary<TKey,TValue>.",
+            "- Immutable snapshots: ImmutableArray/ImmutableDictionary when readers need stable versions.",
+            "Implementation habits:",
+            "- Name the access pattern first: lookup, ordering, range, dedupe, concurrency, memory, or persistence.",
+            "- Keep pure logic testable before wiring UI, files, network, or database calls.",
+            "- Measure before replacing a simple structure with a specialized one.",
+            "Next commands:",
+            $"- feature implementation planner {goal}",
+            $"- behavior test plan {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Data structure chooser", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowSqlPerformanceGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current SQL feature");
+        var lines = new List<string>
+        {
+            "SQL performance guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Fast SQL checklist:",
+            "- Schema: model keys, foreign keys, constraints, nullability, and data types before query tuning.",
+            "- Query shape: select only needed columns, filter early, avoid N+1 loops, and page with stable ordering.",
+            "- Indexes: align composite index order with equality filters, range filters, joins, and ORDER BY.",
+            "- Covering indexes: include read columns only when they remove meaningful lookups and write cost is acceptable.",
+            "- Plans: inspect actual execution plans for scans, key lookups, bad estimates, spills, and missing statistics.",
+            "- Parameters: use parameterized SQL or ORM parameters; never concatenate user input into SQL.",
+            "- Transactions: keep scopes short, choose isolation deliberately, and avoid holding locks during slow work.",
+            "- Connection pooling: reuse DbContext/connection patterns correctly; do not create hidden long-lived open connections.",
+            "- Batching: batch writes and reads when round trips dominate; keep batch sizes bounded.",
+            "- Migrations: every schema/index change needs rollback thinking and deployment order.",
+            "Store fit:",
+            "- SQL Server: strong Windows/.NET tooling, mature plans/indexing, reporting, and enterprise ops.",
+            "- PostgreSQL/MySQL/MariaDB: strong multi-user service stores with different operational tradeoffs.",
+            "- SQLite: local embedded storage, not a high-concurrency server.",
+            "Next commands:",
+            $"- data systems guide {goal}",
+            $"- plan package lookup {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "SQL performance guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowServiceArchitectureGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current service feature");
+        var lines = new List<string>
+        {
+            "Service architecture guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Boundary choices:",
+            "- In-process service class: first choice for local app logic that needs tests and clear ownership.",
+            "- HTTP API: use when another process/device/user needs network access to the behavior.",
+            "- Background/hosted service: use for polling, scheduled work, queues, and long-running tasks.",
+            "- Repository/unit-of-work: use only when it reduces coupling or coordinates transactions.",
+            "Service rules:",
+            "- Define request/response models, validation, errors, cancellation, timeout, and logging before implementation.",
+            "- Make retries idempotent; add request ids or natural keys when duplicate messages are possible.",
+            "- Keep secrets/config out of code; use typed options and explicit health checks.",
+            "- Separate domain logic from transport, database, cache, and UI code.",
+            "- Prefer structured logs and owner-readable failure messages.",
+            "Validation:",
+            "- Unit-test pure service decisions, integration-test storage/API boundaries, and prove timeout/retry behavior.",
+            "Next commands:",
+            $"- feature implementation planner {goal}",
+            $"- behavior spec test scaffold {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Service architecture guide", Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowCacheQueueGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current cache or queue feature");
+        var lines = new List<string>
+        {
+            "Cache and queue guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Cache choices:",
+            "- In-memory cache: single-process speedup, small state, clear invalidation, and acceptable restart loss.",
+            "- Redis/distributed cache: shared hot reads, TTLs, counters, rate limits, and cross-process coordination.",
+            "- Cache key design: include tenant/user/scope/version; avoid leaking private data through shared keys.",
+            "- Invalidation: write the rule before the cache code; stale data policy must be explicit.",
+            "Queue choices:",
+            "- Channel<T>: in-process producer/consumer work with bounded capacity and cancellation.",
+            "- Durable queue: cross-process/background work that must survive crashes.",
+            "- Outbox pattern: use when a database write and message publish must not drift apart.",
+            "- Dead letters: capture poison messages and repeated failures for owner review.",
+            "- Backpressure: bound queue size and define what happens when producers outpace consumers.",
+            "Retry/idempotency:",
+            "- Retry only transient failures, use jittered backoff, and make handlers safe to run more than once.",
+            "Next commands:",
+            $"- service architecture guide {goal}",
+            $"- data systems guide {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Cache and queue guide", Policy.WorkspaceRoot);
     }
 
     private CodingToolResult ShowConsoleCodingGuide(CodingToolRequest request)

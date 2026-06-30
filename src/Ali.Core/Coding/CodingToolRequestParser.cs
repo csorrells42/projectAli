@@ -1326,9 +1326,7 @@ public static class CodingToolRequestParser
         "data structure guide",
         "data structures guide",
         "database design guide",
-        "sql design guide",
-        "fast sql guide",
-        "service design guide"
+        "sql design guide"
     ];
 
     private static readonly string[] DataSystemsGuideRequests =
@@ -1338,9 +1336,93 @@ public static class CodingToolRequestParser
         "data structure guide",
         "data structures guide",
         "database design guide",
-        "sql design guide",
+        "sql design guide"
+    ];
+
+    private static readonly string[] DataStructureChooserPrefixes =
+    [
+        "data structure chooser",
+        "data structure guide",
+        "data structures guide",
+        "choose data structure",
+        "data structure decision",
+        "collection chooser",
+        "collections guide",
+        "algorithm data structure guide"
+    ];
+
+    private static readonly string[] DataStructureChooserRequests =
+    [
+        "data structure chooser",
+        "data structure guide",
+        "data structures guide",
+        "choose data structure",
+        "data structure decision",
+        "collection chooser",
+        "collections guide",
+        "algorithm data structure guide"
+    ];
+
+    private static readonly string[] SqlPerformanceGuidePrefixes =
+    [
+        "sql performance guide",
         "fast sql guide",
-        "service design guide"
+        "database performance guide",
+        "query performance guide",
+        "sql indexing guide",
+        "fast database guide",
+        "sql server performance guide"
+    ];
+
+    private static readonly string[] SqlPerformanceGuideRequests =
+    [
+        "sql performance guide",
+        "fast sql guide",
+        "database performance guide",
+        "query performance guide",
+        "sql indexing guide",
+        "fast database guide",
+        "sql server performance guide"
+    ];
+
+    private static readonly string[] ServiceArchitectureGuidePrefixes =
+    [
+        "service architecture guide",
+        "api service guide",
+        "service design guide",
+        "backend service guide",
+        "background service guide",
+        "hosted service guide"
+    ];
+
+    private static readonly string[] ServiceArchitectureGuideRequests =
+    [
+        "service architecture guide",
+        "api service guide",
+        "service design guide",
+        "backend service guide",
+        "background service guide",
+        "hosted service guide"
+    ];
+
+    private static readonly string[] CacheQueueGuidePrefixes =
+    [
+        "cache queue guide",
+        "cache and queue guide",
+        "caching guide",
+        "queue guide",
+        "redis guide",
+        "outbox guide"
+    ];
+
+    private static readonly string[] CacheQueueGuideRequests =
+    [
+        "cache queue guide",
+        "cache and queue guide",
+        "caching guide",
+        "queue guide",
+        "redis guide",
+        "outbox guide"
     ];
 
     private static readonly string[] ConsoleCodingGuidePrefixes =
@@ -4063,6 +4145,10 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, FailureToPatchV3Prefixes, CodingToolAction.ShowFailureToPatchV3, userConfirmed, out request)
             || TryParsePrefixedQuery(text, SemanticChangeReceiptPrefixes, CodingToolAction.ShowSemanticChangeReceipt, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ValidationChainPlannerPrefixes, CodingToolAction.ShowValidationChainPlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, DataStructureChooserPrefixes, CodingToolAction.ShowDataStructureChooser, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, SqlPerformanceGuidePrefixes, CodingToolAction.ShowSqlPerformanceGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ServiceArchitectureGuidePrefixes, CodingToolAction.ShowServiceArchitectureGuide, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, CacheQueueGuidePrefixes, CodingToolAction.ShowCacheQueueGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, DataSystemsGuidePrefixes, CodingToolAction.ShowDataSystemsGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ConsoleCodingGuidePrefixes, CodingToolAction.ShowConsoleCodingGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, WpfCodingGuidePrefixes, CodingToolAction.ShowWpfCodingGuide, userConfirmed, out request)
@@ -4113,6 +4199,30 @@ public static class CodingToolRequestParser
         if (IsFeatureCompletionReceiptRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFeatureCompletionReceipt, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDataStructureChooserRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowDataStructureChooser, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsSqlPerformanceGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowSqlPerformanceGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsServiceArchitectureGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowServiceArchitectureGuide, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCacheQueueGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCacheQueueGuide, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -4518,6 +4628,18 @@ public static class CodingToolRequestParser
 
     private static bool IsDataSystemsGuideRequest(string text) =>
         DataSystemsGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsDataStructureChooserRequest(string text) =>
+        DataStructureChooserRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSqlPerformanceGuideRequest(string text) =>
+        SqlPerformanceGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsServiceArchitectureGuideRequest(string text) =>
+        ServiceArchitectureGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCacheQueueGuideRequest(string text) =>
+        CacheQueueGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsConsoleCodingGuideRequest(string text) =>
         ConsoleCodingGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
