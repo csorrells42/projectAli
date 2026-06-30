@@ -160,6 +160,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
+    ("orchestrator injects active coding task followup context", TestOrchestratorInjectsActiveCodingTaskFollowupContext),
     ("orchestrator injects last build failure context", TestOrchestratorInjectsLastBuildFailureContext),
     ("correction queue preserves exact question and answer", TestCorrectionQueuePreservesExactQuestionAndAnswer),
     ("endpoint policy allows loopback runtime", TestEndpointPolicyAllowsLoopback),
@@ -5752,6 +5753,69 @@ static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
     Contains("Targeted validation", context);
     Contains("confirm dotnet test", context);
     Contains("WidgetFactory.cs", context);
+}
+
+static async Task TestOrchestratorInjectsActiveCodingTaskFollowupContext()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(projectDirectory, "ExportService.cs"), "public sealed class ExportService { }");
+
+    var contextRunner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, $"## main{Environment.NewLine}", string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false));
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        contextRunner,
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var start = await codingTool.TryHandleAsync("start coding session add export button", CancellationToken.None);
+    Equal(true, start.Handled);
+    Equal(true, start.Succeeded);
+
+    var runtime = new FixedTextRuntime("I will continue the selected coding task.");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    await foreach (var _ in orchestrator.StreamAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "keep going",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+    }
+
+    var context = string.Join(Environment.NewLine, runtime.LastRequest!.History.Select(message => message.Text));
+    Contains("Ali coding context pack", context);
+    Contains("Current user request: keep going", context);
+    Contains("Current coding task goal: add export button", context);
+    Contains("Current coding task:", context);
+    Contains("Goal: add export button", context);
+    Contains("Coding task plan", context);
+    Contains("Active task follow-up: keep going", context);
 }
 
 static async Task TestOrchestratorInjectsLastBuildFailureContext()
