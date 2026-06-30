@@ -14507,6 +14507,24 @@ public sealed class LocalCodingToolService(
                                 </StackPanel>
                             </ScrollViewer>
                         </GroupBox>
+
+                        <Border Grid.ColumnSpan="5"
+                                Panel.ZIndex="10"
+                                Background="#CCFFFFFF"
+                                IsHitTestVisible="{Binding IsBusy}">
+                            <Border.Visibility>
+                                <Binding Path="IsBusy" Converter="{StaticResource BooleanToVisibilityConverter}" />
+                            </Border.Visibility>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <ProgressBar Width="220"
+                                             Height="18"
+                                             IsIndeterminate="True" />
+                                <TextBlock Text="{Binding ProgressText}"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,10,0,0" />
+                            </StackPanel>
+                        </Border>
                     </Grid>
                 </Grid>
             </DockPanel>
