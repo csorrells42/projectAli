@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Programming"
         Height="620"
-        MinHeight="560"
+        MinHeight="520"
         Width="980"
         MinWidth="860"
         Background="#0B0B0D"
@@ -17,70 +17,134 @@
         <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
         <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
         <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,8" />
-            <Setter Property="Margin" Value="0,8,8,0" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Margin" Value="0,6,6,0" />
+            <Setter Property="MinWidth" Value="96" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="#2A2A2E" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="#46464D" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Background" Value="#101114" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
         </Style>
         <Style x:Key="PanelCard" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource PanelBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="14" />
-            <Setter Property="Margin" Value="0,0,12,12" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="0,0,12,10" />
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,10,0" />
+        </Style>
+        <Style x:Key="SectionHeading" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
     </Window.Resources>
 
-    <Grid Background="{StaticResource AppBackgroundBrush}" Margin="18">
+    <Grid Background="{StaticResource AppBackgroundBrush}" Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" Margin="0,0,0,14">
+        <DockPanel Grid.Row="0" Margin="0,0,0,12">
             <Button DockPanel.Dock="Right"
                     Content="Close"
                     Click="CloseButtonClick"
                     MinWidth="82"
                     Margin="12,0,0,0" />
-            <StackPanel>
-                <TextBlock Text="Programming"
-                           Foreground="{StaticResource TextBrush}"
-                           FontSize="24"
-                           FontWeight="SemiBold" />
-                <TextBlock Text="Workspace review, validation, builds, tests, failure diagnosis, and safe patch previews."
-                           Foreground="{StaticResource MutedTextBrush}"
-                           TextWrapping="Wrap"
-                           Margin="0,3,0,0" />
-                <TextBlock Text="{Binding CodingDashboardCurrentTargetText}"
-                           Foreground="{StaticResource SubtleTextBrush}"
-                           TextWrapping="Wrap"
-                           Margin="0,8,0,0" />
-                <TextBlock Text="{Binding CodingDashboardCurrentTaskText}"
-                           Foreground="{StaticResource SubtleTextBrush}"
-                           TextWrapping="Wrap"
-                           Margin="0,2,0,0" />
-            </StackPanel>
+            <TextBlock Text="Programming"
+                       Foreground="{StaticResource TextBrush}"
+                       FontSize="24"
+                       FontWeight="SemiBold" />
         </DockPanel>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="0.92*" />
-                <ColumnDefinition Width="1.08*" />
+                <ColumnDefinition Width="0.94*" />
+                <ColumnDefinition Width="1.06*" />
             </Grid.ColumnDefinitions>
 
             <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
-                <UniformGrid Columns="1">
+                <StackPanel>
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Coding Cockpit"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <UniformGrid Columns="5" Margin="0,8,0,2">
+                            <TextBlock Text="Project Target" Style="{StaticResource SectionHeading}" />
+                            <TextBlock Text="{Binding CodingDashboardCurrentTargetText}"
+                                       Foreground="{StaticResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,5,0,0" />
+                            <TextBlock Text="{Binding CodingDashboardCurrentTaskText}"
+                                       Foreground="{StaticResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,2,0,8" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="82" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="108" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="92" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Current" Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding CodingCurrentSolutionOrProjectPathText, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Current .sln, .slnx, or .csproj" />
+                                <Button Grid.Column="3"
+                                        Content="Choose File"
+                                        Command="{Binding BrowseCodingCurrentSolutionOrProjectCommand}"
+                                        Margin="0"
+                                        Padding="8,5" />
+                                <Button Grid.Column="5"
+                                        Content="Save Path"
+                                        Command="{Binding SaveCodingPermissionsCommand}"
+                                        Margin="0"
+                                        Padding="8,5" />
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="82" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="118" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="96" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="New folder" Style="{StaticResource FieldLabel}" />
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding CodingWorkspaceRootText, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Folder for new projects" />
+                                <Button Grid.Column="3"
+                                        Content="Choose Folder"
+                                        Command="{Binding BrowseCodingWorkspaceRootCommand}"
+                                        Margin="0"
+                                        Padding="8,5" />
+                                <Button Grid.Column="5"
+                                        Content="New Project"
+                                        Command="{Binding CreateCodingProjectCommand}"
+                                        Margin="0"
+                                        Padding="8,5" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Coding Cockpit" Style="{StaticResource SectionHeading}" />
+                            <UniformGrid Columns="5" Margin="0,8,0,0">
                                 <StackPanel Margin="0,0,8,0">
                                     <TextBlock Text="Next" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
                                     <TextBlock Text="Action" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
@@ -102,96 +166,7 @@
                                     <TextBlock Text="Checked" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
                                 </StackPanel>
                             </UniformGrid>
-                            <WrapPanel Margin="0,6,0,0">
-                                <Button Content="Mini-Codex Readiness"
-                                        Command="{Binding RunCodingReadinessReportCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Next Best Coding Action"
-                                        Command="{Binding RunCodingNextBestActionCommand}" />
-                                <Button Content="Validation Queue"
-                                        Command="{Binding RunCodingValidationQueueCommand}" />
-                                <Button Content="Patch Batch"
-                                        Command="{Binding RunCodingPatchBatchCommand}" />
-                                <Button Content="Symbol Diff Audit"
-                                        Command="{Binding RunCodingSymbolDiffAuditCommand}" />
-                                <Button Content="Generated File Guard"
-                                        Command="{Binding RunCodingGeneratedFileGuardCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Build Feature"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="Intent, tests, slices, and closeout before code changes."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,6" />
-                            <WrapPanel>
-                                <Button Content="Build This"
-                                        Command="{Binding RunCodingBuildThisCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Guided Build"
-                                        Command="{Binding RunCodingFeatureBuilderCommand}" />
-                                <Button Content="Paired Preview"
-                                        Command="{Binding RunCodingGuidedBundlePreviewCommand}" />
-                                <Button Content="Impl Planner"
-                                        Command="{Binding RunCodingImplementationPlannerCommand}" />
-                                <Button Content="Intake"
-                                        Command="{Binding RunCodingFeatureIntakeCommand}" />
-                                <Button Content="Orchestrator"
-                                        Command="{Binding RunCodingFeatureOrchestratorCommand}" />
-                                <Button Content="Evidence Pack"
-                                        Command="{Binding RunCodingEvidencePackCommand}" />
-                                <Button Content="Roslyn Plan"
-                                        Command="{Binding RunCodingRoslynPlannerCommand}" />
-                                <Button Content="Patch Synth v2"
-                                        Command="{Binding RunCodingPatchSynthesisV2Command}" />
-                                <Button Content="Pattern Copy"
-                                        Command="{Binding RunCodingPatternCopyCommand}" />
-                                <Button Content="Test Gen v2"
-                                        Command="{Binding RunCodingTestGeneratorV2Command}" />
-                                <Button Content="Slice State"
-                                        Command="{Binding RunCodingSliceStateCommand}" />
-                                <Button Content="Semantic Diff"
-                                        Command="{Binding RunCodingSemanticDiffCommand}" />
-                                <Button Content="Score v3"
-                                        Command="{Binding RunCodingScoreV3Command}" />
-                                <Button Content="Patch Author"
-                                        Command="{Binding RunCodingPatchAuthorCommand}" />
-                                <Button Content="Patch Body"
-                                        Command="{Binding RunCodingPatchBodyCommand}" />
-                                <Button Content="Scaffold"
-                                        Command="{Binding RunCodingScaffolderCommand}" />
-                                <Button Content="UI Bundle"
-                                        Command="{Binding RunCodingUiBundleCommand}" />
-                                <Button Content="Confidence"
-                                        Command="{Binding RunCodingConfidenceCommand}" />
-                                <Button Content="Slice Preview"
-                                        Command="{Binding RunCodingSlicePreviewCommand}" />
-                                <Button Content="Failure Patch"
-                                        Command="{Binding RunCodingFailurePatchCommand}" />
-                                <Button Content="Change Receipt"
-                                        Command="{Binding RunCodingChangeReceiptCommand}" />
-                                <Button Content="Validation Chain"
-                                        Command="{Binding RunCodingValidationChainCommand}" />
-                                <Button Content="Active Workspace"
-                                        Command="{Binding RunCodingActiveWorkspaceCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Project Center"
-                                        Command="{Binding RunCodingProjectControlCenterCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Project Memory"
-                                        Command="{Binding RunCodingProjectMemoryCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
+                            <WrapPanel Margin="0,4,0,0">
                                 <Button Content="Start Session"
                                         Command="{Binding StartCodingSessionCommand}"
                                         BorderBrush="#1E6B49"
@@ -201,33 +176,37 @@
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
                                 <Button Content="Current Task"
-                                        Command="{Binding ShowCodingCurrentTaskCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Clear Task"
-                                        Command="{Binding ClearCodingCurrentTaskCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Task History"
-                                        Command="{Binding RunCodingSessionHistoryCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Defaults"
-                                        Command="{Binding RunCodingProjectDefaultsCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Save Defaults"
-                                        Command="{Binding SaveCodingProjectDefaultsCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Pick Solution"
-                                        Command="{Binding PickCodingSolutionCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="New Project"
-                                        Command="{Binding StartNewCodingProjectCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
+                                        Command="{Binding ShowCodingCurrentTaskCommand}" />
+                                <Button Content="Next Action"
+                                        Command="{Binding RunCodingNextBestActionCommand}" />
+                                <Button Content="Mini-Codex"
+                                        Command="{Binding RunCodingMiniCodexStatusCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Project" Style="{StaticResource SectionHeading}" />
+                            <WrapPanel Margin="0,4,0,0">
+                                <Button Content="Project Center"
+                                        Command="{Binding RunCodingProjectControlCenterCommand}" />
+                                <Button Content="Project Memory"
+                                        Command="{Binding RunCodingProjectMemoryCommand}" />
+                                <Button Content="Workspace"
+                                        Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
+                                <Button Content="Project Index"
+                                        Command="{Binding RunCodingProjectIndexCommand}" />
+                                <Button Content="Open Folder"
+                                        Command="{Binding OpenCodingCurrentProjectFolderCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
+                            <TextBlock Text="Build Loop" Style="{StaticResource SectionHeading}" />
+                            <WrapPanel Margin="0,4,0,0">
                                 <Button Content="Build Current"
                                         Command="{Binding RunCodingBuildCurrentCommand}"
                                         BorderBrush="#1E6B49"
@@ -237,192 +216,9 @@
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
                                 <Button Content="Run Current"
-                                        Command="{Binding RunCodingRunCurrentCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Open VS"
-                                        Command="{Binding OpenCodingCurrentProjectInVisualStudioCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Open Folder"
-                                        Command="{Binding OpenCodingCurrentProjectFolderCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Apply Packet"
-                                        Command="{Binding RunCodingApplyPacketCommand}" />
-                                <Button Content="Insert Plan"
-                                        Command="{Binding RunCodingInsertionPlannerCommand}" />
-                                <Button Content="Intent Diff"
-                                        Command="{Binding RunCodingIntentDiffCommand}" />
-                                <Button Content="Spec Scaffold"
-                                        Command="{Binding RunCodingSpecScaffoldCommand}" />
-                                <Button Content="Failure Memory"
-                                        Command="{Binding RunCodingFailureMemoryCommand}" />
-                                <Button Content="Diagnostic Route"
-                                        Command="{Binding RunCodingDiagnosticRouteCommand}" />
-                                <Button Content="Min Validation"
-                                        Command="{Binding RunCodingValidationMinimizerCommand}" />
-                                <Button Content="Binding Repair"
-                                        Command="{Binding RunCodingBindingRepairCommand}" />
-                                <Button Content="Author Flow"
-                                        Command="{Binding RunCodingAuthoringFlowCommand}" />
-                                <Button Content="Capability Card"
-                                        Command="{Binding RunCodingCapabilityCardCommand}" />
-                                <Button Content="Build Feature Lane"
-                                        Command="{Binding RunCodingBuildFeatureLaneCommand}" />
-                                <Button Content="Work Context"
-                                        Command="{Binding RunCodingFeatureWorkContextCommand}" />
-                                <Button Content="Feature Intent"
-                                        Command="{Binding RunCodingFeatureIntentCommand}" />
-                                <Button Content="Contract"
-                                        Command="{Binding RunCodingBehaviorContractCommand}" />
-                                <Button Content="Behavior Tests"
-                                        Command="{Binding RunCodingBehaviorTestsCommand}" />
-                                <Button Content="Test Preview"
-                                        Command="{Binding RunCodingBehaviorTestPreviewCommand}" />
-                                <Button Content="Implementation Slices"
-                                        Command="{Binding RunCodingImplementationSlicesCommand}" />
-                                <Button Content="Patch Slices"
-                                        Command="{Binding RunCodingPatchSlicesCommand}" />
-                                <Button Content="Exact Patch"
-                                        Command="{Binding RunCodingExactPatchCommand}" />
-                                <Button Content="Patch Intelligence"
-                                        Command="{Binding RunCodingPatchIntelligenceCommand}" />
-                                <Button Content="Patch Loop"
-                                        Command="{Binding RunCodingPatchLoopCommand}" />
-                                <Button Content="Session Ledger"
-                                        Command="{Binding RunCodingFeatureSessionLedgerCommand}" />
-                                <Button Content="Run Controller"
-                                        Command="{Binding RunCodingFeatureRunControllerCommand}" />
-                                <Button Content="Execution Packet"
-                                        Command="{Binding RunCodingFeatureExecutionPacketCommand}" />
-                                <Button Content="Apply Gate"
-                                        Command="{Binding RunCodingApplyGateCommand}" />
-                                <Button Content="Validation Router"
-                                        Command="{Binding RunCodingPostPatchValidationCommand}" />
-                                <Button Content="Completion Receipt"
-                                        Command="{Binding RunCodingFeatureCompletionReceiptCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Workspace"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="Read-only checks before changing code."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,6" />
-                            <WrapPanel>
-                                <Button Content="Workspace"
-                                        Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
-                                <Button Content="Project Index"
-                                        Command="{Binding RunCodingProjectIndexCommand}" />
-                                <Button Content="Understand Repo"
-                                        Command="{Binding RunCodingRepoUnderstandingCommand}" />
-                                <Button Content="Context"
-                                        Command="{Binding RunCodingContextPacketCommand}" />
-                                <Button Content="Full Readiness"
-                                        Command="{Binding RunCodingFullReadinessCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Mini-Codex"
-                                        Command="{Binding RunCodingMiniCodexStatusCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Code Intelligence"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="Roslyn-backed symbol, call, binding, and test-impact checks."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,6" />
-                            <WrapPanel>
-                                <Button Content="Symbols"
-                                        Command="{Binding RunCodingSymbolIndexCommand}" />
-                                <Button Content="Call Graph"
-                                        Command="{Binding RunCodingCallGraphCommand}" />
-                                <Button Content="Ownership"
-                                        Command="{Binding RunCodingOwnershipMapCommand}" />
-                                <Button Content="Bindings"
-                                        Command="{Binding RunCodingBindingCheckCommand}" />
-                                <Button Content="Impacted Tests"
-                                        Command="{Binding RunCodingImpactedTestsCommand}" />
-                                <Button Content="Test Target"
-                                        Command="{Binding RunCodingTestTargetCommand}" />
-                                <Button Content="Safe Edit"
-                                        Command="{Binding RunCodingSafeEditWorkflowCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Execution Packet"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="Prepare, approve, inspect, and track one self-scored coding packet."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,6" />
-                            <WrapPanel>
-                                <Button Content="Prepare"
-                                        Command="{Binding RunCodingExecutionPacketCommand}" />
-                                <Button Content="Approve"
-                                        Command="{Binding RunCodingApprovePacketCommand}"
-                                        BorderBrush="#8A6A18"
-                                        Background="#2A2415" />
-                                <Button Content="Show Packet"
-                                        Command="{Binding RunCodingShowApprovedPacketCommand}" />
-                                <Button Content="Progress"
-                                        Command="{Binding RunCodingPacketProgressCommand}" />
-                                <Button Content="Commands"
-                                        Command="{Binding RunCodingPacketCommandsCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Build Loop"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="Run confirmed validation, inspect failures, and preview simple fixes."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,6" />
-                            <WrapPanel>
-                                <Button Content="Review"
-                                        Command="{Binding RunCodingReviewChangesCommand}" />
-                                <Button Content="Build"
-                                        Command="{Binding RunCodingBuildCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Tests"
-                                        Command="{Binding RunCodingTestCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
+                                        Command="{Binding RunCodingRunCurrentCommand}" />
                                 <Button Content="Last Failure"
                                         Command="{Binding RunCodingLastFailureCommand}" />
-                                <Button Content="Repair Runner"
-                                        Command="{Binding RunCodingRepairRunnerCommand}" />
-                                <Button Content="Suggest Fix"
-                                        Command="{Binding RunCodingSuggestFixCommand}" />
-                                <Button Content="Patch Preview"
-                                        Command="{Binding RunCodingShowPatchPreviewCommand}" />
-                                <Button Content="Apply Preview"
-                                        Command="{Binding RunCodingApplyPreviewCommand}"
-                                        BorderBrush="#8A6A18"
-                                        Background="#2A2415" />
                                 <Button Content="Safe Commit"
                                         Command="{Binding RunCodingSafeCommitCommand}" />
                             </WrapPanel>
@@ -431,31 +227,24 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Receipts"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="17"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="Review the coding receipts that support a commit or handoff."
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,6" />
-                            <WrapPanel>
-                                <Button Content="Coding Receipts"
+                            <TextBlock Text="Patch And Handoff" Style="{StaticResource SectionHeading}" />
+                            <WrapPanel Margin="0,4,0,0">
+                                <Button Content="Exact Patch"
+                                        Command="{Binding RunCodingExactPatchCommand}" />
+                                <Button Content="Patch Preview"
+                                        Command="{Binding RunCodingShowPatchPreviewCommand}" />
+                                <Button Content="Apply Preview"
+                                        Command="{Binding RunCodingApplyPreviewCommand}"
+                                        BorderBrush="#8A6A18"
+                                        Background="#2A2415" />
+                                <Button Content="Validation Queue"
+                                        Command="{Binding RunCodingValidationQueueCommand}" />
+                                <Button Content="Receipts"
                                         Command="{Binding RunCodingReceiptsCommand}" />
-                                <Button Content="Timeline"
-                                        Command="{Binding RunCodingTimelineCommand}" />
-                                <Button Content="Commit Msg"
-                                        Command="{Binding RunCodingCommitMessageCommand}" />
-                                <Button Content="Release Notes"
-                                        Command="{Binding RunCodingReleaseNotesCommand}" />
-                                <Button Content="Rollback Plan"
-                                        Command="{Binding RunCodingRollbackPlanCommand}" />
-                                <Button Content="Open Receipt Folder"
-                                        Command="{Binding OpenMaintenanceReceiptFolderCommand}" />
                             </WrapPanel>
                         </StackPanel>
                     </Border>
-                </UniformGrid>
+                </StackPanel>
             </ScrollViewer>
 
             <Border Grid.Column="1"
@@ -463,11 +252,13 @@
                     BorderBrush="{StaticResource BorderBrushDark}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="14">
+                    Padding="14"
+                    VerticalAlignment="Top"
+                    MaxHeight="410">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0"
@@ -476,7 +267,7 @@
                                FontSize="18"
                                FontWeight="SemiBold"
                                Margin="0,0,0,8" />
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="320">
                         <TextBlock Text="{Binding MaintenanceStatusText}"
                                    Foreground="{StaticResource TextBrush}"
                                    TextWrapping="Wrap" />

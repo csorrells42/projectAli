@@ -8230,7 +8230,7 @@ public sealed class LocalCodingToolService(
             ("Patch safety", 97, "owner-approved apply packet, patch outcome classifier, paired previews, patch synthesis v2, intent diff composer, patch body generator, confidence scoring, semantic diff summaries, symbol rollback hints, route repair packets, exact patch preview, call-chain guards"),
             ("Validation/release", 97, "validation minimizer, validation chain planner, queued validation command packets, risk-aware test depth, evidence pack, post-apply repair loop v2, release readiness score, session journal, prioritized test recommendation, build order, safe commit and release notes"),
             ("Autonomous workflow", 98, "authoring sequence flow, active task follow-ups, current-task context memory, build-this front door, feature orchestrator, slice preview, repeat failure memory, first diagnostic repair route, failure-to-patch v3, repair routing, project-index refresh automation, queued command rows, packet self-score, prerequisite gates"),
-            ("Dashboard usability", 96, "active workspace button, apply-packet buttons, coding cockpit lane, build-this path, patch-author controls, v2 planner buttons, report-card buttons, command queue dashboard rows, status-only command rows, route diff repair packets, and one-click score v3")
+            ("Dashboard usability", 97, "compact programming dashboard, current project path picker, new-project location chooser, active workspace button, apply-packet buttons, coding cockpit lane, command queue dashboard rows, status-only command rows, route diff repair packets, and one-click score v3")
         };
         var overall = 99;
         var lines = new List<string>
