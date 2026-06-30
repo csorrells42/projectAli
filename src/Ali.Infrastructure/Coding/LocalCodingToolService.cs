@@ -14521,38 +14521,72 @@ public sealed class LocalCodingToolService(
                                   Focusable="True"
                                   Style="{StaticResource DashboardPaneGroupBoxStyle}">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <StackPanel>
-                                    <ContentControl Content="{Binding SelectedItem}"
-                                                    ContentTemplate="{StaticResource DashboardDetailTemplate}"
-                                                    Margin="0,0,0,16" />
-                                    <TextBlock Text="Edit selected" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                    <TextBlock Text="Name" Style="{StaticResource DashboardFormLabelStyle}" />
-                                    <TextBox Text="{Binding SelectedItemName, UpdateSourceTrigger=PropertyChanged}"
-                                             Style="{StaticResource DashboardInputTextBoxStyle}" />
-                                    <TextBlock Text="Owner" Style="{StaticResource DashboardFormLabelStyle}" />
-                                    <TextBox Text="{Binding SelectedItemOwner, UpdateSourceTrigger=PropertyChanged}"
-                                             Style="{StaticResource DashboardInputTextBoxStyle}" />
-                                    <TextBlock Text="Status" Style="{StaticResource DashboardFormLabelStyle}" />
-                                    <ComboBox ItemsSource="{Binding StatusOptions}"
-                                              SelectedItem="{Binding SelectedItemStatus, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                              Style="{StaticResource DashboardInputComboBoxStyle}" />
-                                    <ItemsControl ItemsSource="{Binding ValidationSummary}" Margin="0,0,0,8">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,4" />
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <Button Content="Apply Selected" Command="{Binding ApplySelectedItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
-                                    <Separator Margin="0,16" />
-                                    <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                    <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True}"
-                                             Style="{StaticResource DashboardInputTextBoxStyle}" />
-                                    <TextBlock Text="{Binding NewItemError}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,8" />
-                                    <Button Content="Add Item" Command="{Binding AddItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
-                                    <Button Content="Remove Selected" Command="{Binding RemoveSelectedItemCommand}" Margin="0,8,0,0" />
-                                    <Separator Margin="0,16" />
-                                    <TextBlock Text="Use the splitters to resize panes. The center grid virtualizes rows for larger data sets." TextWrapping="Wrap" />
+                                <StackPanel Grid.IsSharedSizeScope="True">
+                                    <Expander Header="Selected item" IsExpanded="True" Margin="0,0,0,10">
+                                        <StackPanel>
+                                            <ContentControl Content="{Binding SelectedItem}"
+                                                            ContentTemplate="{StaticResource DashboardDetailTemplate}"
+                                                            Margin="0,0,0,16" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" SharedSizeGroup="DashboardFormLabels" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Style="{StaticResource DashboardFormLabelStyle}" />
+                                                <TextBox Grid.Row="0" Grid.Column="1"
+                                                         Text="{Binding SelectedItemName, UpdateSourceTrigger=PropertyChanged}"
+                                                         Style="{StaticResource DashboardInputTextBoxStyle}" />
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Owner" Style="{StaticResource DashboardFormLabelStyle}" />
+                                                <TextBox Grid.Row="1" Grid.Column="1"
+                                                         Text="{Binding SelectedItemOwner, UpdateSourceTrigger=PropertyChanged}"
+                                                         Style="{StaticResource DashboardInputTextBoxStyle}" />
+                                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Status" Style="{StaticResource DashboardFormLabelStyle}" />
+                                                <ComboBox Grid.Row="2" Grid.Column="1"
+                                                          ItemsSource="{Binding StatusOptions}"
+                                                          SelectedItem="{Binding SelectedItemStatus, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          Style="{StaticResource DashboardInputComboBoxStyle}" />
+                                            </Grid>
+                                            <ItemsControl ItemsSource="{Binding ValidationSummary}" Margin="0,0,0,8">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <Button Content="Apply Selected" Command="{Binding ApplySelectedItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
+                                            <Button Content="Remove Selected" Command="{Binding RemoveSelectedItemCommand}" Margin="0,8,0,0" />
+                                        </StackPanel>
+                                    </Expander>
+
+                                    <Expander Header="Add item" IsExpanded="True" Margin="0,0,0,10">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" SharedSizeGroup="DashboardFormLabels" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Style="{StaticResource DashboardFormLabelStyle}" />
+                                                <TextBox Grid.Row="0" Grid.Column="1"
+                                                         Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True}"
+                                                         Style="{StaticResource DashboardInputTextBoxStyle}" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding NewItemError}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,8" />
+                                            <Button Content="Add Item" Command="{Binding AddItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
+                                        </StackPanel>
+                                    </Expander>
+
+                                    <Expander Header="Layout notes" IsExpanded="False">
+                                        <TextBlock Text="Use splitters to resize panes. Shared-size form columns keep labels aligned across collapsible sections."
+                                                   TextWrapping="Wrap" />
+                                    </Expander>
                                 </StackPanel>
                             </ScrollViewer>
                         </GroupBox>
