@@ -5561,8 +5561,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         xamlPath,
         codeBehindPath,
         "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
-        ["NavigationTreeView", "ItemsDataGrid", "GridSplitter", "StatusBar", "TabControl", "AddItemButton_Click"],
-        ["ObservableCollection<DashboardItem>", "RefreshButton_Click", "AddItemButton_Click", "DashboardItem", "StatusTextBlock.Text"]);
+        ["NavigationTreeView", "ItemsSource=\"{Binding Items}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
+        ["DataContext = new MainWindowViewModel();"],
+        "MainWindowViewModel.cs",
+        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICommand RefreshCommand", "RelayCommand", "CanExecuteChanged"]);
 }
 
 static async Task AssertWpfStarterAsync(
@@ -5571,8 +5573,18 @@ static async Task AssertWpfStarterAsync(
     string codeBehindPath,
     string goal,
     IReadOnlyList<string> expectedXamlSnippets,
-    IReadOnlyList<string> expectedCodeBehindSnippets)
+    IReadOnlyList<string> expectedCodeBehindSnippets,
+    string? expectedCreatedFileName = null,
+    IReadOnlyList<string>? expectedCreatedFileSnippets = null)
 {
+    var expectedCreatedPath = expectedCreatedFileName is null
+        ? null
+        : Path.Combine(Path.GetDirectoryName(codeBehindPath)!, expectedCreatedFileName);
+    if (expectedCreatedPath is not null && File.Exists(expectedCreatedPath))
+    {
+        File.Delete(expectedCreatedPath);
+    }
+
     await File.WriteAllTextAsync(
         xamlPath,
         """
@@ -5617,6 +5629,16 @@ static async Task AssertWpfStarterAsync(
     foreach (var expected in expectedCodeBehindSnippets)
     {
         Contains(expected, codeBehind);
+    }
+
+    if (expectedCreatedPath is not null)
+    {
+        Equal(true, File.Exists(expectedCreatedPath));
+        var created = await File.ReadAllTextAsync(expectedCreatedPath);
+        foreach (var expected in expectedCreatedFileSnippets ?? [])
+        {
+            Contains(expected, created);
+        }
     }
 }
 

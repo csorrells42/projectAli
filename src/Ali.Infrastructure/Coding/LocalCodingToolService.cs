@@ -12853,6 +12853,20 @@ public sealed class LocalCodingToolService(
                     continue;
                 }
 
+                if (!hasTransform
+                    && TryBuildNewWpfViewModelPatchBlock(context.Goal, fullPath, out var newWpfViewModelText, out var newWpfViewModelNote))
+                {
+                    candidates.Add(new FeaturePatchSynthesisCandidate(
+                        RelativeToWorkspace(fullPath),
+                        fullPath,
+                        "deterministic WPF MVVM view-model recipe",
+                        string.Empty,
+                        newWpfViewModelText,
+                        true,
+                        newWpfViewModelNote));
+                    continue;
+                }
+
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
                     fullPath,
@@ -13054,6 +13068,10 @@ public sealed class LocalCodingToolService(
             {
                 AddIfEditableWpfSurface(targets, Path.Combine(primaryDirectory, "MainWindow.xaml"));
                 AddIfEditableWpfSurface(targets, Path.Combine(primaryDirectory, "MainWindow.xaml.cs"));
+                if (IsWpfComplexWindowGoal(context.Goal))
+                {
+                    AddIfSafeNewWpfViewModelTarget(targets, Path.Combine(primaryDirectory, "MainWindowViewModel.cs"));
+                }
             }
         }
 
@@ -13085,6 +13103,14 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private void AddIfSafeNewWpfViewModelTarget(List<string> targets, string path)
+    {
+        if (IsSafeNewWpfViewModelPath(path))
+        {
+            targets.Add(path);
+        }
+    }
+
     private bool IsEditableWpfSurfaceFile(string path) =>
         File.Exists(path)
         && IsSafeWpfSurfacePath(path);
@@ -13098,6 +13124,12 @@ public sealed class LocalCodingToolService(
                && !IsBuildArtifactPath(path)
                && !IsGeneratedOrDesignerFile(path);
     }
+
+    private bool IsSafeNewWpfViewModelPath(string path) =>
+        Path.GetFileName(path).Equals("MainWindowViewModel.cs", StringComparison.OrdinalIgnoreCase)
+        && Policy.IsInsideWorkspace(path)
+        && !IsBuildArtifactPath(path)
+        && !IsGeneratedOrDesignerFile(path);
 
     private bool IsEditableProgramFile(string path) =>
         File.Exists(path)
@@ -14131,7 +14163,7 @@ public sealed class LocalCodingToolService(
             <DockPanel>
                 <Menu DockPanel.Dock="Top">
                     <MenuItem Header="_File">
-                        <MenuItem Header="_Refresh" Click="RefreshButton_Click" />
+                        <MenuItem Header="_Refresh" Command="{Binding RefreshCommand}" />
                         <Separator />
                         <MenuItem Header="E_xit" />
                     </MenuItem>
@@ -14142,7 +14174,7 @@ public sealed class LocalCodingToolService(
                 </Menu>
 
                 <StatusBar DockPanel.Dock="Bottom">
-                    <TextBlock x:Name="StatusTextBlock" Text="Ready" />
+                    <TextBlock Text="{Binding StatusText}" />
                 </StatusBar>
 
                 <Grid Margin="12">
@@ -14153,7 +14185,7 @@ public sealed class LocalCodingToolService(
 
                     <Border Padding="14" Margin="0,0,0,12" Background="#202A36" CornerRadius="4">
                         <DockPanel>
-                            <Button Content="Refresh" Width="92" DockPanel.Dock="Right" Click="RefreshButton_Click" />
+                            <Button Content="Refresh" Width="92" DockPanel.Dock="Right" Command="{Binding RefreshCommand}" />
                             <StackPanel>
                                 <TextBlock Text="Project Dashboard" FontSize="24" FontWeight="SemiBold" Foreground="White" />
                                 <TextBlock Text="Navigation, tabs, data, details, and status in one resizable WPF shell." Foreground="#C8D2DF" />
@@ -14185,6 +14217,7 @@ public sealed class LocalCodingToolService(
                         <TabControl Grid.Column="2" Margin="10,0">
                             <TabItem Header="Overview">
                                 <DataGrid x:Name="ItemsDataGrid"
+                                          ItemsSource="{Binding Items}"
                                           AutoGenerateColumns="False"
                                           IsReadOnly="True"
                                           EnableRowVirtualization="True"
@@ -14197,7 +14230,7 @@ public sealed class LocalCodingToolService(
                                 </DataGrid>
                             </TabItem>
                             <TabItem Header="Activity">
-                                <ListBox x:Name="ActivityListBox" />
+                                <ListBox ItemsSource="{Binding Activity}" />
                             </TabItem>
                         </TabControl>
 
@@ -14207,8 +14240,8 @@ public sealed class LocalCodingToolService(
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel>
                                     <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                    <TextBox x:Name="NewItemTextBox" Height="32" Margin="0,0,0,8" VerticalContentAlignment="Center" />
-                                    <Button Content="Add Item" Height="34" Click="AddItemButton_Click" />
+                                    <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged}" Height="32" Margin="0,0,0,8" VerticalContentAlignment="Center" />
+                                    <Button Content="Add Item" Height="34" Command="{Binding AddItemCommand}" />
                                     <Separator Margin="0,16" />
                                     <TextBlock Text="Use the splitters to resize panes. The center grid virtualizes rows for larger data sets." TextWrapping="Wrap" />
                                 </StackPanel>
@@ -14358,58 +14391,15 @@ public sealed class LocalCodingToolService(
             : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
         return
             $$"""
-            using System;
-            using System.Collections.ObjectModel;
             using System.Windows;
 
             {{namespaceLine}}public partial class MainWindow : Window
             {
-                private readonly ObservableCollection<DashboardItem> _items = new();
-                private readonly ObservableCollection<string> _activity = new();
-
                 public MainWindow()
                 {
                     InitializeComponent();
-                    ItemsDataGrid.ItemsSource = _items;
-                    ActivityListBox.ItemsSource = _activity;
-                    SeedDashboard();
+                    DataContext = new MainWindowViewModel();
                 }
-
-                private void SeedDashboard()
-                {
-                    _items.Clear();
-                    _items.Add(new DashboardItem("Intake workflow", "Ali", "Ready"));
-                    _items.Add(new DashboardItem("Validation queue", "Owner", "Review"));
-                    _items.Add(new DashboardItem("Release packet", "Ali", "Draft"));
-
-                    _activity.Clear();
-                    _activity.Add("Dashboard loaded.");
-                    _activity.Add("Three sample work items are ready for review.");
-                    StatusTextBlock.Text = "Ready - 3 items loaded";
-                }
-
-                private void RefreshButton_Click(object sender, RoutedEventArgs e)
-                {
-                    _activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
-                    StatusTextBlock.Text = "Dashboard refreshed";
-                }
-
-                private void AddItemButton_Click(object sender, RoutedEventArgs e)
-                {
-                    var name = NewItemTextBox.Text.Trim();
-                    if (name.Length == 0)
-                    {
-                        StatusTextBlock.Text = "Enter an item name first.";
-                        return;
-                    }
-
-                    _items.Add(new DashboardItem(name, "Owner", "New"));
-                    _activity.Insert(0, $"Added {name}.");
-                    NewItemTextBox.Clear();
-                    StatusTextBlock.Text = $"Added {name}";
-                }
-
-                private sealed record DashboardItem(string Name, string Owner, string Status);
             }
             """;
     }
@@ -14452,6 +14442,155 @@ public sealed class LocalCodingToolService(
                     {
                         _tasks.Remove(selectedTask);
                     }
+                }
+            }
+            """;
+    }
+
+    private static bool TryBuildNewWpfViewModelPatchBlock(
+        string goal,
+        string fullPath,
+        out string newText,
+        out string note)
+    {
+        newText = string.Empty;
+        note = string.Empty;
+        if (!IsWpfComplexWindowGoal(goal)
+            || !Path.GetFileName(fullPath).Equals("MainWindowViewModel.cs", StringComparison.OrdinalIgnoreCase)
+            || File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(fullPath);
+        var codeBehindPath = string.IsNullOrWhiteSpace(directory) ? null : Path.Combine(directory, "MainWindow.xaml.cs");
+        var namespaceName = codeBehindPath is null ? null : ExtractCSharpNamespaceName(SafeReadText(codeBehindPath));
+        newText = BuildWpfComplexDashboardViewModel(namespaceName);
+        note = "WPF complex-dashboard MainWindowViewModel.cs starter recipe.";
+        return true;
+    }
+
+    private static string BuildWpfComplexDashboardViewModel(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System;
+            using System.Collections.ObjectModel;
+            using System.ComponentModel;
+            using System.Runtime.CompilerServices;
+            using System.Windows.Input;
+
+            {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged
+            {
+                private string _newItemName = string.Empty;
+                private string _statusText = "Ready";
+
+                public MainWindowViewModel()
+                {
+                    RefreshCommand = new RelayCommand(_ => Refresh());
+                    AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
+                    SeedDashboard();
+                }
+
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                public ObservableCollection<DashboardItem> Items { get; } = new();
+
+                public ObservableCollection<string> Activity { get; } = new();
+
+                public ICommand RefreshCommand { get; }
+
+                public ICommand AddItemCommand { get; }
+
+                public string NewItemName
+                {
+                    get => _newItemName;
+                    set
+                    {
+                        if (SetField(ref _newItemName, value))
+                        {
+                            ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                        }
+                    }
+                }
+
+                public string StatusText
+                {
+                    get => _statusText;
+                    private set => SetField(ref _statusText, value);
+                }
+
+                private void SeedDashboard()
+                {
+                    Items.Clear();
+                    Items.Add(new DashboardItem("Intake workflow", "Ali", "Ready"));
+                    Items.Add(new DashboardItem("Validation queue", "Owner", "Review"));
+                    Items.Add(new DashboardItem("Release packet", "Ali", "Draft"));
+
+                    Activity.Clear();
+                    Activity.Add("Dashboard loaded.");
+                    Activity.Add("Three sample work items are ready for review.");
+                    StatusText = "Ready - 3 items loaded";
+                }
+
+                private void Refresh()
+                {
+                    Activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
+                    StatusText = "Dashboard refreshed";
+                }
+
+                private bool CanAddItem() => !string.IsNullOrWhiteSpace(NewItemName);
+
+                private void AddItem()
+                {
+                    var name = NewItemName.Trim();
+                    if (name.Length == 0)
+                    {
+                        StatusText = "Enter an item name first.";
+                        return;
+                    }
+
+                    Items.Add(new DashboardItem(name, "Owner", "New"));
+                    Activity.Insert(0, $"Added {name}.");
+                    NewItemName = string.Empty;
+                    StatusText = $"Added {name}";
+                }
+
+                private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+                {
+                    if (Equals(field, value))
+                    {
+                        return false;
+                    }
+
+                    field = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+                    return true;
+                }
+
+                public sealed record DashboardItem(string Name, string Owner, string Status);
+
+                private sealed class RelayCommand : ICommand
+                {
+                    private readonly Action<object?> _execute;
+                    private readonly Predicate<object?>? _canExecute;
+
+                    public RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null)
+                    {
+                        _execute = execute;
+                        _canExecute = canExecute;
+                    }
+
+                    public event EventHandler? CanExecuteChanged;
+
+                    public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
+
+                    public void Execute(object? parameter) => _execute(parameter);
+
+                    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
                 }
             }
             """;
