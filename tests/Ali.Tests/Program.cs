@@ -5583,6 +5583,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("Header=\"_Toggle theme\"", generatedDashboardXaml);
     Contains("Content=\"{Binding ThemeButtonText}\"", generatedDashboardXaml);
     Contains("Command=\"{Binding ToggleThemeCommand}\"", generatedDashboardXaml);
+    Contains("xmlns:d=\"http://schemas.microsoft.com/expression/blend/2008\"", generatedDashboardXaml);
+    Contains("xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"", generatedDashboardXaml);
+    Contains("mc:Ignorable=\"d\"", generatedDashboardXaml);
+    Contains("d:DataContext=\"{x:Static local:DashboardDesignData.DesignViewModel}\"", generatedDashboardXaml);
     Contains("DashboardSecondaryButtonStyle", generatedDashboardXaml);
     Contains("DashboardAdaptiveWrapPanel", generatedDashboardXaml);
     Contains("local:DashboardSelectionBehavior.ScrollSelectedItemIntoView=\"True\"", generatedDashboardXaml);
@@ -5642,6 +5646,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("DashboardBindingProxy : Freezable", generatedDashboardViewModel);
     Contains("DataProperty", generatedDashboardViewModel);
     Contains("CreateInstanceCore", generatedDashboardViewModel);
+    Contains("DashboardDesignData", generatedDashboardViewModel);
+    Contains("DesignViewModel => new()", generatedDashboardViewModel);
+    Contains("DesignItem", generatedDashboardViewModel);
+    Contains("Design preview item", generatedDashboardViewModel);
     Contains("public ICommand MarkItemReadyCommand => _owner.MarkItemReadyCommand", generatedDashboardViewModel);
     Contains("public ICommand MarkItemForReviewCommand => _owner.MarkItemForReviewCommand", generatedDashboardViewModel);
     var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
@@ -5680,6 +5688,12 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("Style.Triggers", dashboardStyles);
     Contains("UserControl", detailCard);
     Contains("x:Name=\"Root\"", detailCard);
+    Contains("xmlns:d=\"http://schemas.microsoft.com/expression/blend/2008\"", detailCard);
+    Contains("xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"", detailCard);
+    Contains("mc:Ignorable=\"d\"", detailCard);
+    Contains("d:DesignHeight=\"180\"", detailCard);
+    Contains("d:DesignWidth=\"320\"", detailCard);
+    Contains("d:Item=\"{x:Static local:DashboardDesignData.DesignItem}\"", detailCard);
     Contains("VisualStateManager.VisualStateGroups", detailCard);
     Contains("VisualStateGroup x:Name=\"StatusStates\"", detailCard);
     Contains("VisualState x:Name=\"ReadyState\"", detailCard);

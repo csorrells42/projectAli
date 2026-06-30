@@ -14256,8 +14256,12 @@ public sealed class LocalCodingToolService(
         <Window x:Class="{{xamlClass}}"
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
                 xmlns:local="{{BuildWpfLocalXmlNamespace(xamlClass)}}"
-                Title="Project Dashboard" Height="620" Width="980" MinHeight="520" MinWidth="760">
+                xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                Title="Project Dashboard" Height="620" Width="980" MinHeight="520" MinWidth="760"
+                mc:Ignorable="d"
+                d:DataContext="{x:Static local:DashboardDesignData.DesignViewModel}">
             <Window.Resources>
                 <ResourceDictionary>
                     <ResourceDictionary.MergedDictionaries>
@@ -15069,13 +15073,23 @@ public sealed class LocalCodingToolService(
         var controlClass = string.IsNullOrWhiteSpace(namespaceName)
             ? "DashboardDetailCard"
             : namespaceName + ".DashboardDetailCard";
+        var localNamespace = string.IsNullOrWhiteSpace(namespaceName)
+            ? "clr-namespace:"
+            : "clr-namespace:" + namespaceName;
         return
             $$"""
             <UserControl x:Class="{{controlClass}}"
                          x:Name="Root"
                          xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                         MinHeight="130">
+                         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                         xmlns:local="{{localNamespace}}"
+                         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                         MinHeight="130"
+                         mc:Ignorable="d"
+                         d:DesignHeight="180"
+                         d:DesignWidth="320"
+                         d:Item="{x:Static local:DashboardDesignData.DesignItem}">
                 <UserControl.Resources>
                     <ResourceDictionary>
                         <ResourceDictionary.MergedDictionaries>
@@ -16612,6 +16626,14 @@ public sealed class LocalCodingToolService(
                 public string Description { get; } = "This composed settings view is a placeholder for real application configuration.";
 
                 public ObservableCollection<string> SettingsNotes { get; } = new();
+            }
+
+            public static class DashboardDesignData
+            {
+                public static MainWindowViewModel DesignViewModel => new();
+
+                public static MainWindowViewModel.DashboardItem DesignItem { get; } =
+                    new("Design preview item", "Designer", "Review");
             }
 
             public interface IDashboardDialogService
