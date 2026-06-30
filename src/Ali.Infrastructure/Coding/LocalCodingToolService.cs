@@ -16206,8 +16206,8 @@ public sealed class LocalCodingToolService(
                 public OverviewDashboardViewModel(MainWindowViewModel owner)
                 {
                     _owner = owner;
-                    _owner.PropertyChanged += (_, args) => PropertyChanged?.Invoke(this, args);
-                    _owner.ErrorsChanged += (_, args) => ErrorsChanged?.Invoke(this, args);
+                    PropertyChangedEventManager.AddHandler(_owner, OnOwnerPropertyChanged, string.Empty);
+                    WeakEventManager<INotifyDataErrorInfo, DataErrorsChangedEventArgs>.AddHandler(_owner, nameof(_owner.ErrorsChanged), OnOwnerErrorsChanged);
                 }
 
                 public event PropertyChangedEventHandler? PropertyChanged;
@@ -16245,6 +16245,12 @@ public sealed class LocalCodingToolService(
                 public bool HasErrors => _owner.HasErrors;
 
                 public IEnumerable GetErrors(string? propertyName) => _owner.GetErrors(propertyName);
+
+                private void OnOwnerPropertyChanged(object? sender, PropertyChangedEventArgs args) =>
+                    PropertyChanged?.Invoke(this, args);
+
+                private void OnOwnerErrorsChanged(object? sender, DataErrorsChangedEventArgs args) =>
+                    ErrorsChanged?.Invoke(this, args);
             }
 
             public sealed class ActivityDashboardViewModel

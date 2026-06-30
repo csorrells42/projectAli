@@ -5590,6 +5590,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("DashboardThemePalette", generatedDashboardViewModel);
     Contains("Color.FromRgb", generatedDashboardViewModel);
     Contains("_themeService.ApplyTheme", generatedDashboardViewModel);
+    Contains("PropertyChangedEventManager.AddHandler", generatedDashboardViewModel);
+    Contains("WeakEventManager<INotifyDataErrorInfo, DataErrorsChangedEventArgs>.AddHandler", generatedDashboardViewModel);
+    Contains("OnOwnerPropertyChanged", generatedDashboardViewModel);
+    Contains("OnOwnerErrorsChanged", generatedDashboardViewModel);
     var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
     var detailCardPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml");
     var detailCardCodeBehindPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml.cs");
