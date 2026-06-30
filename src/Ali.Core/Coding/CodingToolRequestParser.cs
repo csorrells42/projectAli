@@ -588,6 +588,15 @@ public static class CodingToolRequestParser
         "show completion receipt"
     ];
 
+    private static readonly string[] FeatureExecutionPacketPrefixes =
+    [
+        "feature execution packet ",
+        "show feature execution packet ",
+        "build feature execution packet ",
+        "feature safe execution packet ",
+        "plain request execution packet "
+    ];
+
     private static readonly string[] BuildFeatureLaneRequests =
     [
         "show build feature lane",
@@ -2617,7 +2626,8 @@ public static class CodingToolRequestParser
         if (TryParsePrefixedQuery(text, FeatureIntentPacketPrefixes, CodingToolAction.BuildFeatureIntentPacket, userConfirmed, out request)
             || TryParsePrefixedQuery(text, BehaviorTestPlanPrefixes, CodingToolAction.PlanBehaviorTests, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ImplementationSlicePlanPrefixes, CodingToolAction.PlanImplementationSlices, userConfirmed, out request)
-            || TryParsePrefixedQuery(text, TestStubGeneratorPlanPrefixes, CodingToolAction.ShowTestStubGeneratorPlan, userConfirmed, out request))
+            || TryParsePrefixedQuery(text, TestStubGeneratorPlanPrefixes, CodingToolAction.ShowTestStubGeneratorPlan, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureExecutionPacketPrefixes, CodingToolAction.ShowFeatureExecutionPacket, userConfirmed, out request))
         {
             return true;
         }

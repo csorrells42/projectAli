@@ -784,6 +784,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowSliceRiskScoring, riskScoringRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("feature completion receipt", out var completionReceiptRequest));
     Equal(CodingToolAction.ShowFeatureCompletionReceipt, completionReceiptRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature execution packet Save button", out var executionPacketRequest));
+    Equal(CodingToolAction.ShowFeatureExecutionPacket, executionPacketRequest.Action);
+    Equal("Save button", executionPacketRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("show build feature lane", out var buildFeatureLaneRequest));
     Equal(CodingToolAction.ShowBuildFeatureLane, buildFeatureLaneRequest.Action);
 
@@ -3154,6 +3157,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var stopCondition = await service.TryHandleAsync("show stop condition detector", CancellationToken.None);
     var riskScoring = await service.TryHandleAsync("show slice risk scoring", CancellationToken.None);
     var completionReceipt = await service.TryHandleAsync("feature completion receipt", CancellationToken.None);
+    var executionPacket = await service.TryHandleAsync("feature execution packet Save button", CancellationToken.None);
     var buildFeatureLane = await service.TryHandleAsync("show build feature lane", CancellationToken.None);
 
     Contains("Workspace health score", health.Message);
@@ -3187,6 +3191,10 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Stop condition detector", stopCondition.Message);
     Contains("Confidence/risk scoring per slice", riskScoring.Message);
     Contains("Feature completion receipt", completionReceipt.Message);
+    Contains("Feature execution packet v1", executionPacket.Message);
+    Contains("Plan confidence:", executionPacket.Message);
+    Contains("Top edit targets:", executionPacket.Message);
+    Contains("Prioritized tests:", executionPacket.Message);
     Contains("Build Feature lane", buildFeatureLane.Message);
 }
 
@@ -3494,6 +3502,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFeatureIntentCommand", dashboard);
     Contains("RunCodingBehaviorTestsCommand", dashboard);
     Contains("RunCodingImplementationSlicesCommand", dashboard);
+    Contains("RunCodingFeatureExecutionPacketCommand", dashboard);
     Contains("RunCodingFeatureCompletionReceiptCommand", dashboard);
     Contains("RunCodingReadinessReportCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingNextBestActionCommand = CreateAsyncCommand", viewModel);
@@ -3505,6 +3514,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBehaviorTestsCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingImplementationSlicesCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureCompletionReceiptCommand = CreateAsyncCommand", viewModel);
     Contains("CompactCodingCockpitLines", viewModel);
     Contains("Use the cockpit row", viewModel);

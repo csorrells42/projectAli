@@ -282,6 +282,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowStopConditionDetector => await ShowStopConditionDetectorAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowSliceRiskScoring => await ShowSliceRiskScoringAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowFeatureCompletionReceipt => await ShowFeatureCompletionReceiptAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFeatureExecutionPacket => await ShowFeatureExecutionPacketAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowBuildFeatureLane => await ShowBuildFeatureLaneAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
             CodingToolAction.ShowOwnershipMap => await ShowOwnershipMapAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8164,6 +8165,7 @@ public sealed class LocalCodingToolService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(6)
             .ToList();
+        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
         {
             "Behavior-to-test plan v1:",
@@ -8177,6 +8179,8 @@ public sealed class LocalCodingToolService(
             "Likely test files:"
         };
         lines.AddRange(likelyTests.Count == 0 ? ["- tests/Ali.Tests/Program.cs"] : likelyTests.Select(file => $"- {file}"));
+        lines.Add("Prioritized test rows:");
+        lines.AddRange(testTarget.PrioritizedTests.Count == 0 ? ["- none resolved yet"] : testTarget.PrioritizedTests.Take(6).Select(row => $"- {row}"));
         lines.Add("Validation commands:");
         lines.Add("- dotnet build Ali.sln --no-restore");
         lines.Add("- dotnet run --project tests/Ali.Tests/Ali.Tests.csproj --no-build");
@@ -8199,7 +8203,8 @@ public sealed class LocalCodingToolService(
         lines.Add("- 2. Policy/service - add read-only handling and compact result rows; confidence high; risk medium.");
         lines.Add("- 3. Dashboard - add a visible button only where it naturally belongs; confidence medium; risk medium.");
         lines.Add("- 4. Tests - prove routes, service output, and button binding; confidence high; risk low.");
-        lines.Add("- 5. Validation - build, run harness, review diff, then commit; confidence high; risk low.");
+        lines.Add("- 5. Execution packet - resolve ranked targets, prioritized tests, and stop gates; confidence high; risk medium.");
+        lines.Add("- 6. Validation - build, run harness, review diff, then commit; confidence high; risk low.");
         lines.Add("Candidate files:");
         lines.AddRange(files.Count == 0 ? ["- none detected yet"] : files.Select(file => $"- {file}: {ClassifyFileRisk(file)}"));
         lines.Add($"Risk-aware test depth: {ClassifyRiskAwareTestDepth(files)}");
@@ -8339,12 +8344,72 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature completion receipt", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowFeatureExecutionPacketAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query, "current feature");
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
+        var graph = BuildSemanticReferenceGraph(goal, workspace, 100);
+        var hits = graph.Declarations
+            .Concat(graph.References)
+            .DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
+            .Take(20)
+            .ToList();
+        var candidateFiles = hits.Select(hit => hit.Path)
+            .Concat(graph.ReferenceFiles.Select(ToAbsoluteWorkspacePath).Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!))
+            .Concat(changedFiles.Select(ToAbsoluteWorkspacePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        if (candidateFiles.Count == 0)
+        {
+            candidateFiles = SuggestLikelyFilesForGoal(goal)
+                .Select(ToAbsoluteWorkspacePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(10)
+                .ToList();
+        }
+
+        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
+        var rankedTargets = RankEditTargetCandidates(goalTerms, hits, candidateFiles, changedFiles);
+        var impactScore = BuildEditImpactScore(rankedTargets, hits, candidateFiles, testTarget);
+        var relativeCandidates = candidateFiles.Select(RelativeToWorkspace).ToList();
+        var lines = new List<string>
+        {
+            "Feature execution packet v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            $"Plan confidence: {impactScore.Score}/100 ({impactScore.Confidence})",
+            $"Plan reasons: {FormatInlineList(impactScore.Reasons)}",
+            "Top edit targets:"
+        };
+        lines.AddRange(rankedTargets.Count == 0 ? ["- none resolved yet"] : rankedTargets.Take(6).Select(FormatEditTargetCandidate));
+        lines.Add("Prioritized tests:");
+        lines.AddRange(testTarget.PrioritizedTests.Count == 0 ? ["- none resolved yet"] : testTarget.PrioritizedTests.Take(6).Select(row => $"- {row}"));
+        lines.Add("Validation queue:");
+        lines.AddRange(BuildValidationQueueRows(goal, changedFiles, testTarget).Take(6).Select(row => $"- {row}"));
+        AddReferenceGraphLines(lines, graph, includeSymbols: true);
+        AddAutonomousPreflightLines(lines, relativeCandidates, graph, testTarget, _lastPatchPreviewRequest is not null);
+        lines.Add("Stop gates:");
+        lines.Add("- Stop if top edit target confidence is Low and no semantic evidence exists.");
+        lines.Add("- Stop if protected/generated files appear without explicit owner approval.");
+        lines.Add("- Stop if no targeted test command is available for behavior-changing work.");
+        lines.Add("Owner apply boundary: preview the patch bundle first; apply only after the visible diff matches this packet.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature execution packet", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowBuildFeatureLaneAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query, "current feature");
         var intent = BuildFeatureIntentPacket(new CodingToolRequest(CodingToolAction.BuildFeatureIntentPacket, null, Query: goal));
         var tests = await PlanBehaviorTestsAsync(new CodingToolRequest(CodingToolAction.PlanBehaviorTests, null, Query: goal), cancellationToken).ConfigureAwait(false);
         var slices = await PlanImplementationSlicesAsync(new CodingToolRequest(CodingToolAction.PlanImplementationSlices, null, Query: goal), cancellationToken).ConfigureAwait(false);
+        var execution = await ShowFeatureExecutionPacketAsync(new CodingToolRequest(CodingToolAction.ShowFeatureExecutionPacket, null, Query: goal), cancellationToken).ConfigureAwait(false);
         var stop = await ShowStopConditionDetectorAsync(cancellationToken).ConfigureAwait(false);
         var receipt = await ShowFeatureCompletionReceiptAsync(cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
@@ -8356,10 +8421,11 @@ public sealed class LocalCodingToolService(
         };
         AddSelectedLines(lines, intent.Message, 4, "User-facing behavior:", "Affected area:", "Validation depth:");
         AddSelectedLines(lines, tests.Message, 3, "- Owner phrase", "- Service result", "- Dashboard binding");
-        AddSelectedLines(lines, slices.Message, 5, "- 1.", "- 2.", "- 3.", "- 4.", "Risk-aware test depth:");
+        AddSelectedLines(lines, slices.Message, 6, "- 1.", "- 2.", "- 3.", "- 4.", "- 5.", "Risk-aware test depth:");
+        AddSelectedLines(lines, execution.Message, 6, "Plan confidence:", "Plan reasons:", "- High", "- Medium", "- Low", "- Test target:");
         AddSelectedLines(lines, stop.Message, 4, "Changed files:", "Latest validation:", "- Validation", "- File count", "- No generated");
         AddSelectedLines(lines, receipt.Message, 3, "Git:", "Status:");
-        lines.Add("Next: start with Feature Intent, then Behavior Tests, then Implementation Slices before any patch preview.");
+        lines.Add("Next: start with Feature Intent, then Behavior Tests, Implementation Slices, and Feature Execution Packet before any patch preview.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Build Feature lane", Policy.WorkspaceRoot);
     }
 

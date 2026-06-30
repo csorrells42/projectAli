@@ -49,6 +49,7 @@ public enum CodingToolAction
     ShowStopConditionDetector,
     ShowSliceRiskScoring,
     ShowFeatureCompletionReceipt,
+    ShowFeatureExecutionPacket,
     ShowBuildFeatureLane,
     ShowCSharpSymbolIndex,
     ShowOwnershipMap,

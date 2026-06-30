@@ -149,6 +149,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowStopConditionDetector
             or CodingToolAction.ShowSliceRiskScoring
             or CodingToolAction.ShowFeatureCompletionReceipt
+            or CodingToolAction.ShowFeatureExecutionPacket
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowOwnershipMap

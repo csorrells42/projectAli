@@ -279,6 +279,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBehaviorTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior tests", "behavior test plan current feature", "Coding.BehaviorTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImplementationSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation slices", "implementation slice plan current feature", "Coding.ImplementationSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature execution packet", "feature execution packet current feature", "Coding.FeatureExecutionPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureCompletionReceiptCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Completion receipt", "feature completion receipt", "Coding.FeatureCompletionReceipt"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -734,6 +735,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingBehaviorTestsCommand { get; }
 
     public ICommand RunCodingImplementationSlicesCommand { get; }
+
+    public ICommand RunCodingFeatureExecutionPacketCommand { get; }
 
     public ICommand RunCodingFeatureCompletionReceiptCommand { get; }
 
@@ -3383,6 +3386,7 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior test plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation slice plan", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature execution packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature completion receipt", StringComparison.OrdinalIgnoreCase))
         {
             return CompactCodingCockpitLines(lines);
@@ -3479,6 +3483,7 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior test plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation slice plan", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature execution packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature completion receipt", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Work the feature lane top to bottom before previewing a patch.";
@@ -3511,6 +3516,8 @@ public sealed class MainWindowViewModel : ObservableObject
             "Patch:",
             "Git:",
             "Latest validation:",
+            "Plan confidence:",
+            "Plan reasons:",
             "Goal:",
             "User-facing behavior:",
             "Affected area:",
@@ -3527,7 +3534,12 @@ public sealed class MainWindowViewModel : ObservableObject
             "- 1.",
             "- 2.",
             "- 3.",
-            "- 4."
+            "- 4.",
+            "- 5.",
+            "- 6.",
+            "- High",
+            "- Medium",
+            "- Low"
         };
         var compact = lines
             .Where(line => prefixes.Any(prefix => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
@@ -6800,6 +6812,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingImplementationSlicesCommand is AsyncRelayCommand runCodingImplementationSlices)
         {
             runCodingImplementationSlices.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFeatureExecutionPacketCommand is AsyncRelayCommand runCodingFeatureExecutionPacket)
+        {
+            runCodingFeatureExecutionPacket.RaiseCanExecuteChanged();
         }
 
         if (RunCodingFeatureCompletionReceiptCommand is AsyncRelayCommand runCodingFeatureCompletionReceipt)

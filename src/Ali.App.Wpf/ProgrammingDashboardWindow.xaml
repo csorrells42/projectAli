@@ -134,6 +134,8 @@
                                         Command="{Binding RunCodingBehaviorTestsCommand}" />
                                 <Button Content="Implementation Slices"
                                         Command="{Binding RunCodingImplementationSlicesCommand}" />
+                                <Button Content="Execution Packet"
+                                        Command="{Binding RunCodingFeatureExecutionPacketCommand}" />
                                 <Button Content="Completion Receipt"
                                         Command="{Binding RunCodingFeatureCompletionReceiptCommand}" />
                             </WrapPanel>
