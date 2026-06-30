@@ -209,6 +209,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFailureToPatchV3
             or CodingToolAction.ShowSemanticChangeReceipt
             or CodingToolAction.ShowValidationChainPlanner
+            or CodingToolAction.ShowDataSystemsGuide
             or CodingToolAction.ShowActiveWorkspaceProject
             or CodingToolAction.ShowProjectControlCenter
             or CodingToolAction.ShowCurrentProjectMemory

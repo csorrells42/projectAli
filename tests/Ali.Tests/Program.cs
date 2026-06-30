@@ -624,6 +624,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("validation command minimizer <goal>", builderIndex);
     Contains("authoring sequence flow <goal>", builderIndex);
     Contains("validation chain planner <goal>", builderIndex);
+    Contains("data systems guide <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
     Contains("semantic diff summary <goal>", builderIndex);
     Contains("mini codex score v3 <goal>", builderIndex);
@@ -800,6 +801,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
 
     Equal(true, CodingToolRequestParser.TryParse("show validation ledger", out var ledgerRequest));
     Equal(CodingToolAction.ShowValidationLedger, ledgerRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("data systems guide fast SQL order service", out var dataSystemsRequest));
+    Equal(CodingToolAction.ShowDataSystemsGuide, dataSystemsRequest.Action);
+    Equal("fast SQL order service", dataSystemsRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("show validation queue runner", out var queueRunnerRequest));
     Equal(CodingToolAction.ShowValidationQueueRunner, queueRunnerRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("validation repair runner Save button", out var repairRunnerRequest));
@@ -3523,6 +3527,7 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     var gaps = await service.TryHandleAsync("test gap report", CancellationToken.None);
     var known = await service.TryHandleAsync("known error CS0103", CancellationToken.None);
     var rollback = await service.TryHandleAsync("preview rollback patch", CancellationToken.None);
+    var dataSystems = await service.TryHandleAsync("data systems guide fast SQL order service", CancellationToken.None);
 
     Contains("Typed patch composer", patch.Message);
     Contains("src/Demo/WidgetService.cs", patch.Message);
@@ -3544,6 +3549,10 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("name does not exist", known.Message);
     Contains("Rollback patch preview", rollback.Message);
     Contains("Diff stat", rollback.Message);
+    Contains("Data systems guide", dataSystems.Message);
+    Contains("Dictionary<TKey,TValue>", dataSystems.Message);
+    Contains("SQL Server/PostgreSQL/MySQL/MariaDB", dataSystems.Message);
+    Contains("connection pooling", dataSystems.Message);
 }
 
 static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
@@ -5138,8 +5147,15 @@ static async Task TestLocalCodingToolSynthesizesHelloWorldConsolePatch()
         configuredCurrentSolutionOrProjectPath: projectPath);
     const string goal = "a simple \"hello world\" program that waits for the user to press a button before closing";
 
+    var buildThis = await service.TryHandleAsync("build this for me " + goal, CancellationToken.None);
     var synthesis = await service.TryHandleAsync("exact patch synthesis " + goal, CancellationToken.None);
     var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+
+    Equal(true, buildThis.Handled);
+    Equal(true, buildThis.Succeeded);
+    Contains("Build this feature v1", buildThis.Message);
+    Contains("Next command: preview synthesized feature patch " + goal, buildThis.Message);
+    Equal("Console.WriteLine(\"Old\");\r\n", await File.ReadAllTextAsync(programPath));
 
     Equal(true, synthesis.Handled);
     Equal(true, synthesis.Succeeded);
@@ -5422,12 +5438,19 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: projectPath);
+    const string counterGoal = "Build a simple WPF counter app with a button that increases the count on screen.";
+
+    var buildThis = await service.TryHandleAsync("build this for me " + counterGoal, CancellationToken.None);
+    Equal(true, buildThis.Handled);
+    Equal(true, buildThis.Succeeded);
+    Contains("Build this feature v1", buildThis.Message);
+    Contains("Next command: preview synthesized feature patch " + counterGoal, buildThis.Message);
 
     await AssertWpfStarterAsync(
         service,
         xamlPath,
         codeBehindPath,
-        "Build a simple WPF counter app with a button that increases the count on screen.",
+        counterGoal,
         ["CounterTextBlock", "IncrementButton_Click"],
         ["private int _count;", "_count++;", "CounterTextBlock.Text"]);
     await AssertWpfStarterAsync(
@@ -8633,6 +8656,7 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("post patch validation <goal>", instruction);
     Contains("semantic change receipt <goal>", instruction);
     Contains("Data structures/services", instruction);
+    Contains("data systems guide <goal>", instruction);
     Contains("SQL Server/PostgreSQL/MySQL/SQLite", instruction);
     Contains("schema, keys, indexes, migrations", instruction);
     Contains("Assistant: Next: feature patch draft add export button", instruction);

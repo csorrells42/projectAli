@@ -1319,6 +1319,30 @@ public static class CodingToolRequestParser
         "validation order planner"
     ];
 
+    private static readonly string[] DataSystemsGuidePrefixes =
+    [
+        "data systems guide",
+        "show data systems guide",
+        "data structure guide",
+        "data structures guide",
+        "database design guide",
+        "sql design guide",
+        "fast sql guide",
+        "service design guide"
+    ];
+
+    private static readonly string[] DataSystemsGuideRequests =
+    [
+        "data systems guide",
+        "show data systems guide",
+        "data structure guide",
+        "data structures guide",
+        "database design guide",
+        "sql design guide",
+        "fast sql guide",
+        "service design guide"
+    ];
+
     private static readonly string[] ActiveWorkspaceProjectPrefixes =
     [
         "active workspace project ",
@@ -3999,6 +4023,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, FailureToPatchV3Prefixes, CodingToolAction.ShowFailureToPatchV3, userConfirmed, out request)
             || TryParsePrefixedQuery(text, SemanticChangeReceiptPrefixes, CodingToolAction.ShowSemanticChangeReceipt, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ValidationChainPlannerPrefixes, CodingToolAction.ShowValidationChainPlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, DataSystemsGuidePrefixes, CodingToolAction.ShowDataSystemsGuide, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ActiveWorkspaceProjectPrefixes, CodingToolAction.ShowActiveWorkspaceProject, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ProjectControlCenterPrefixes, CodingToolAction.ShowProjectControlCenter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, CurrentProjectMemoryPrefixes, CodingToolAction.ShowCurrentProjectMemory, userConfirmed, out request)
@@ -4046,6 +4071,12 @@ public static class CodingToolRequestParser
         if (IsFeatureCompletionReceiptRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFeatureCompletionReceipt, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsDataSystemsGuideRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowDataSystemsGuide, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -4430,6 +4461,9 @@ public static class CodingToolRequestParser
 
         return false;
     }
+
+    private static bool IsDataSystemsGuideRequest(string text) =>
+        DataSystemsGuideRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool TryParsePrefixedQuery(
         string text,

@@ -42,6 +42,7 @@ public static class CodingAbilityCatalog
         "validation command minimizer <goal>",
         "authoring sequence flow <goal>",
         "validation chain planner <goal>",
+        "data systems guide <goal>",
         "show architecture options <goal>",
         "write acceptance criteria <goal>",
         "suggest tests for <goal>",
@@ -142,6 +143,7 @@ public static class CodingAbilityCatalog
             "Data systems and services",
             "Plan data structures, persistence, caches, queues, APIs, and SQL-backed services before implementation.",
             [
+                new("Data systems guide", "data systems guide <goal>"),
                 new("Data structure choice", "show architecture options <goal>"),
                 new("Storage model", "coding context packet <goal>"),
                 new("SQL/service plan", "feature implementation planner <goal>"),

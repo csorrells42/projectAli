@@ -95,6 +95,7 @@ public enum CodingToolAction
     ShowFailureToPatchV3,
     ShowSemanticChangeReceipt,
     ShowValidationChainPlanner,
+    ShowDataSystemsGuide,
     ShowActiveWorkspaceProject,
     ShowProjectControlCenter,
     ShowCurrentProjectMemory,

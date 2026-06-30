@@ -342,6 +342,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowFailureToPatchV3 => await ShowFailureToPatchV3Async(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowSemanticChangeReceipt => await ShowSemanticChangeReceiptAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationChainPlanner => await ShowValidationChainPlannerAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowDataSystemsGuide => ShowDataSystemsGuide(request),
             CodingToolAction.ShowActiveWorkspaceProject => await ShowActiveWorkspaceProjectAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowProjectControlCenter => await ShowProjectControlCenterAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCurrentProjectMemory => ShowCurrentProjectMemory(),
@@ -10274,6 +10275,36 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation chain planner", Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult ShowDataSystemsGuide(CodingToolRequest request)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
+        var lines = new List<string>
+        {
+            "Data systems guide v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Choose the smallest reliable tool first:",
+            "- List<T>: ordered items, small scans, append-heavy workflows.",
+            "- Dictionary<TKey,TValue>: fast exact lookup by key.",
+            "- HashSet<T>: membership checks and duplicate prevention.",
+            "- Queue<T>/Stack<T>/PriorityQueue<TElement,TPriority>: FIFO, LIFO, or priority work ordering.",
+            "- ConcurrentDictionary/Channel<T>: shared state or producer/consumer work in concurrent code.",
+            "Database and service choices:",
+            "- SQLite: local/offline app storage, single-file deployments, simple transactional data.",
+            "- SQL Server/PostgreSQL/MySQL/MariaDB: multi-user services, reporting, indexing, migrations, and operational backups.",
+            "- Redis/in-memory cache: hot reads, short-lived state, TTLs, and explicit invalidation rules.",
+            "- Queue/outbox: durable background work, retries, idempotency, backpressure, and dead-letter handling.",
+            "Fast SQL checklist:",
+            "- Model keys, constraints, indexes, query shape, pagination, batching, parameterized SQL, transactions, connection pooling, and migration rollback before editing.",
+            "Next commands:",
+            $"- show architecture options {goal}",
+            $"- feature implementation planner {goal}",
+            $"- plan package lookup {goal}",
+            $"- validation chain planner {goal}"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Data systems guide", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowActiveWorkspaceProjectAsync(CancellationToken cancellationToken)
     {
         var summaries = GetWorkspaceProjectSummaries();
@@ -15275,6 +15306,16 @@ public sealed class LocalCodingToolService(
             return gitStatus.HasUncommittedChanges ? "can i safely commit" : "feature completion receipt";
         }
 
+        if (testPreview.Ready && synthesis.PreviewReady)
+        {
+            return "preview guided feature bundle " + goal;
+        }
+
+        if (synthesis.PreviewReady)
+        {
+            return "preview synthesized feature patch " + goal;
+        }
+
         if (context.RankedTargets.Count == 0)
         {
             return "feature work context " + goal;
@@ -15285,17 +15326,12 @@ public sealed class LocalCodingToolService(
             return "resolve test target " + goal;
         }
 
-        if (testPreview.Ready && synthesis.PreviewReady)
-        {
-            return "preview guided feature bundle " + goal;
-        }
-
         if (testPreview.Ready)
         {
             return testPreview.Command;
         }
 
-        return synthesis.PreviewReady ? "preview synthesized feature patch " + goal : "concrete patch authoring " + goal;
+        return "concrete patch authoring " + goal;
     }
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)
