@@ -14325,8 +14325,19 @@ public sealed class LocalCodingToolService(
 
                         <TabControl Grid.Column="2" Margin="10,0">
                             <TabItem Header="Overview">
-                                <DataGrid x:Name="ItemsDataGrid"
-                                          ItemsSource="{Binding Items}"
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <DockPanel Margin="0,0,0,8">
+                                        <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                                 VerticalContentAlignment="Center" />
+                                    </DockPanel>
+                                    <DataGrid x:Name="ItemsDataGrid"
+                                          Grid.Row="1"
+                                          ItemsSource="{Binding ItemsView}"
                                           SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                                           AutoGenerateColumns="False"
                                           IsReadOnly="True"
@@ -14337,7 +14348,8 @@ public sealed class LocalCodingToolService(
                                         <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
                                         <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
                                     </DataGrid.Columns>
-                                </DataGrid>
+                                    </DataGrid>
+                                </Grid>
                             </TabItem>
                             <TabItem Header="Activity">
                                 <ListBox ItemsSource="{Binding Activity}" />
@@ -14841,16 +14853,20 @@ public sealed class LocalCodingToolService(
             using System.Collections.ObjectModel;
             using System.ComponentModel;
             using System.Runtime.CompilerServices;
+            using System.Windows.Data;
             using System.Windows.Input;
 
             {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged
             {
                 private string _newItemName = string.Empty;
+                private string _searchText = string.Empty;
                 private DashboardItem? _selectedItem;
                 private string _statusText = "Ready";
 
                 public MainWindowViewModel()
                 {
+                    ItemsView = CollectionViewSource.GetDefaultView(Items);
+                    ItemsView.Filter = FilterItem;
                     RefreshCommand = new RelayCommand(_ => Refresh());
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
                     SeedDashboard();
@@ -14859,6 +14875,8 @@ public sealed class LocalCodingToolService(
                 public event PropertyChangedEventHandler? PropertyChanged;
 
                 public ObservableCollection<DashboardItem> Items { get; } = new();
+
+                public ICollectionView ItemsView { get; }
 
                 public ObservableCollection<string> Activity { get; } = new();
 
@@ -14874,6 +14892,23 @@ public sealed class LocalCodingToolService(
                         if (SetField(ref _newItemName, value))
                         {
                             ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                        }
+                    }
+                }
+
+                public string SearchText
+                {
+                    get => _searchText;
+                    set
+                    {
+                        var normalized = value ?? string.Empty;
+                        if (SetField(ref _searchText, normalized))
+                        {
+                            ItemsView.Refresh();
+                            SelectedItem = FirstVisibleItem();
+                            StatusText = string.IsNullOrWhiteSpace(SearchText)
+                                ? $"Ready - {Items.Count} items loaded"
+                                : $"Filtered by \"{SearchText}\"";
                         }
                     }
                 }
@@ -14900,13 +14935,15 @@ public sealed class LocalCodingToolService(
                     Activity.Clear();
                     Activity.Add("Dashboard loaded.");
                     Activity.Add("Three sample work items are ready for review.");
-                    SelectedItem = Items.Count > 0 ? Items[0] : null;
+                    ItemsView.Refresh();
+                    SelectedItem = FirstVisibleItem();
                     StatusText = "Ready - 3 items loaded";
                 }
 
                 private void Refresh()
                 {
                     Activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
+                    ItemsView.Refresh();
                     StatusText = "Dashboard refreshed";
                 }
 
@@ -14923,10 +14960,41 @@ public sealed class LocalCodingToolService(
 
                     var item = new DashboardItem(name, "Owner", "New");
                     Items.Add(item);
-                    SelectedItem = item;
+                    ItemsView.Refresh();
+                    SelectedItem = FilterItem(item) ? item : FirstVisibleItem();
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
                     StatusText = $"Added {name}";
+                }
+
+                private bool FilterItem(object item)
+                {
+                    if (item is not DashboardItem dashboardItem)
+                    {
+                        return false;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(SearchText))
+                    {
+                        return true;
+                    }
+
+                    return dashboardItem.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+                           || dashboardItem.Owner.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+                           || dashboardItem.Status.Contains(SearchText, StringComparison.OrdinalIgnoreCase);
+                }
+
+                private DashboardItem? FirstVisibleItem()
+                {
+                    foreach (var item in ItemsView)
+                    {
+                        if (item is DashboardItem dashboardItem)
+                        {
+                            return dashboardItem;
+                        }
+                    }
+
+                    return null;
                 }
 
                 private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

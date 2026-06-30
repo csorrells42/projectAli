@@ -5573,10 +5573,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         xamlPath,
         codeBehindPath,
         "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
-        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "ItemsSource=\"{Binding Items}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
+        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged}\"", "ItemsSource=\"{Binding ItemsView}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
         ["DataContext = new MainWindowViewModel();"],
         "MainWindowViewModel.cs",
-        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICommand RefreshCommand", "DashboardItem? SelectedItem", "RelayCommand", "CanExecuteChanged"]);
+        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICollectionView ItemsView", "CollectionViewSource.GetDefaultView", "SearchText", "FilterItem", "FirstVisibleItem", "ICommand RefreshCommand", "DashboardItem? SelectedItem", "RelayCommand", "CanExecuteChanged"]);
     var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
     var detailCardPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml");
     var detailCardCodeBehindPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml.cs");
@@ -5708,6 +5708,14 @@ static void AssertCSharpCompilesWithPlatformReferences(string source, string ass
         .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Select(path => MetadataReference.CreateFromFile(path))
         .ToList();
+    foreach (var referencePath in EnumerateWindowsDesktopReferencePaths())
+    {
+        if (references.All(reference => !string.Equals(reference.Display, referencePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            references.Add(MetadataReference.CreateFromFile(referencePath));
+        }
+    }
+
     var compilation = CSharpCompilation.Create(
         assemblyName,
         [CSharpSyntaxTree.ParseText(source)],
@@ -5719,6 +5727,106 @@ static void AssertCSharpCompilesWithPlatformReferences(string source, string ass
     if (diagnostics.Count > 0)
     {
         throw new InvalidOperationException("Generated C# must compile with platform references." + Environment.NewLine + string.Join(Environment.NewLine, diagnostics.Select(diagnostic => diagnostic.ToString())));
+    }
+}
+
+static IEnumerable<string> EnumerateWindowsDesktopReferencePaths()
+{
+    foreach (var dotnetRoot in EnumerateDotNetRoots().Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        foreach (var path in EnumerateLatestAssemblySet(
+                     Path.Combine(dotnetRoot, "packs", "Microsoft.NETCore.App.Ref"),
+                     ["WindowsBase.dll"],
+                     useRefFolder: true))
+        {
+            yield return path;
+        }
+
+        foreach (var path in EnumerateLatestAssemblySet(
+                     Path.Combine(dotnetRoot, "packs", "Microsoft.WindowsDesktop.App.Ref"),
+                     ["PresentationCore.dll", "PresentationFramework.dll", "System.Xaml.dll"],
+                     useRefFolder: true))
+        {
+            yield return path;
+        }
+
+        foreach (var path in EnumerateLatestAssemblySet(
+                     Path.Combine(dotnetRoot, "shared", "Microsoft.WindowsDesktop.App"),
+                     ["WindowsBase.dll", "PresentationCore.dll", "PresentationFramework.dll", "System.Xaml.dll"],
+                     useRefFolder: false))
+        {
+            yield return path;
+        }
+    }
+}
+
+static IEnumerable<string> EnumerateLatestAssemblySet(string root, IReadOnlyList<string> fileNames, bool useRefFolder)
+{
+    if (!Directory.Exists(root))
+    {
+        yield break;
+    }
+
+    var versionDirectory = Directory.EnumerateDirectories(root)
+        .Select(path => new { Path = path, Version = Version.TryParse(Path.GetFileName(path), out var version) ? version : new Version(0, 0) })
+        .OrderByDescending(item => item.Version)
+        .FirstOrDefault()
+        ?.Path;
+    if (versionDirectory is null)
+    {
+        yield break;
+    }
+
+    var assemblyDirectory = versionDirectory;
+    if (useRefFolder)
+    {
+        var refRoot = Path.Combine(versionDirectory, "ref");
+        assemblyDirectory = Directory.Exists(refRoot)
+            ? Directory.EnumerateDirectories(refRoot).OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase).FirstOrDefault() ?? versionDirectory
+            : versionDirectory;
+    }
+
+    foreach (var fileName in fileNames)
+    {
+        var path = Path.Combine(assemblyDirectory, fileName);
+        if (File.Exists(path))
+        {
+            yield return path;
+        }
+    }
+}
+
+static IEnumerable<string> EnumerateDotNetRoots()
+{
+    foreach (var variableName in new[] { "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT(x86)" })
+    {
+        var root = Environment.GetEnvironmentVariable(variableName);
+        if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+        {
+            yield return root;
+        }
+    }
+
+    var currentDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location);
+    while (!string.IsNullOrWhiteSpace(currentDirectory))
+    {
+        if (string.Equals(Path.GetFileName(currentDirectory), "dotnet", StringComparison.OrdinalIgnoreCase)
+            && Directory.Exists(Path.Combine(currentDirectory, "packs")))
+        {
+            yield return currentDirectory;
+            break;
+        }
+
+        currentDirectory = Directory.GetParent(currentDirectory)?.FullName;
+    }
+
+    foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) })
+    {
+        var dotnetRoot = string.IsNullOrWhiteSpace(root) ? null : Path.Combine(root, "dotnet");
+        if (!string.IsNullOrWhiteSpace(dotnetRoot) && Directory.Exists(dotnetRoot))
+        {
+            yield return dotnetRoot;
+        }
     }
 }
 
