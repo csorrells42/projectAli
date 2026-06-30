@@ -14268,6 +14268,34 @@ public sealed class LocalCodingToolService(
                     <DataTemplate x:Key="DashboardDetailTemplate">
                         <local:DashboardDetailCard Item="{Binding}" />
                     </DataTemplate>
+                    <DataTemplate x:Key="ReadyDashboardItemCardTemplate">
+                        <Border Padding="10" Background="#ECFDF3" BorderBrush="#17B26A" BorderThickness="1" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                <TextBlock Text="Ready for delivery" Foreground="#067647" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                    <DataTemplate x:Key="ReviewDashboardItemCardTemplate">
+                        <Border Padding="10" Background="#FFFAEB" BorderBrush="#F79009" BorderThickness="1" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                <TextBlock Text="Review before release" Foreground="#B54708" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                    <DataTemplate x:Key="DefaultDashboardItemCardTemplate">
+                        <Border Padding="10" Background="#F6F8FA" BorderBrush="#D0D7DE" BorderThickness="1" CornerRadius="4">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Status}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                    <local:DashboardItemCardTemplateSelector x:Key="DashboardItemCardTemplateSelector"
+                                                             ReadyTemplate="{StaticResource ReadyDashboardItemCardTemplate}"
+                                                             ReviewTemplate="{StaticResource ReviewDashboardItemCardTemplate}"
+                                                             DefaultTemplate="{StaticResource DefaultDashboardItemCardTemplate}" />
                     <DataTemplate DataType="{x:Type local:OverviewDashboardViewModel}">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -14305,6 +14333,7 @@ public sealed class LocalCodingToolService(
                                       AutoGenerateColumns="False"
                                       IsReadOnly="True"
                                       EnableRowVirtualization="True"
+                                      RowDetailsVisibilityMode="VisibleWhenSelected"
                                       CanUserAddRows="False">
                                 <DataGrid.GroupStyle>
                                     <GroupStyle>
@@ -14334,6 +14363,13 @@ public sealed class LocalCodingToolService(
                                         </Setter>
                                     </Style>
                                 </DataGrid.RowStyle>
+                                <DataGrid.RowDetailsTemplate>
+                                    <DataTemplate>
+                                        <ContentControl Margin="28,6,8,10"
+                                                        Content="{Binding}"
+                                                        ContentTemplateSelector="{StaticResource DashboardItemCardTemplateSelector}" />
+                                    </DataTemplate>
+                                </DataGrid.RowDetailsTemplate>
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
                                     <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
@@ -15073,6 +15109,8 @@ public sealed class LocalCodingToolService(
             using System.Runtime.CompilerServices;
             using System.Threading;
             using System.Threading.Tasks;
+            using System.Windows;
+            using System.Windows.Controls;
             using System.Windows.Data;
             using System.Windows.Input;
             using System.Windows.Media;
@@ -15886,6 +15924,33 @@ public sealed class LocalCodingToolService(
                     public void Execute(object? parameter) => _execute(parameter);
 
                     public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+
+            public sealed class DashboardItemCardTemplateSelector : DataTemplateSelector
+            {
+                public DataTemplate? ReadyTemplate { get; set; }
+
+                public DataTemplate? ReviewTemplate { get; set; }
+
+                public DataTemplate? DefaultTemplate { get; set; }
+
+                public override DataTemplate? SelectTemplate(object item, DependencyObject container)
+                {
+                    if (item is MainWindowViewModel.DashboardItem dashboardItem)
+                    {
+                        if (dashboardItem.Status.Equals("Ready", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return ReadyTemplate ?? DefaultTemplate;
+                        }
+
+                        if (dashboardItem.Status.Equals("Review", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return ReviewTemplate ?? DefaultTemplate;
+                        }
+                    }
+
+                    return DefaultTemplate ?? base.SelectTemplate(item, container);
                 }
             }
 
