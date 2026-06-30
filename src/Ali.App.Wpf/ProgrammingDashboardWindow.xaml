@@ -55,6 +55,14 @@
                            Foreground="{StaticResource MutedTextBrush}"
                            TextWrapping="Wrap"
                            Margin="0,3,0,0" />
+                <TextBlock Text="{Binding CodingDashboardCurrentTargetText}"
+                           Foreground="{StaticResource SubtleTextBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,8,0,0" />
+                <TextBlock Text="{Binding CodingDashboardCurrentTaskText}"
+                           Foreground="{StaticResource SubtleTextBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,2,0,0" />
             </StackPanel>
         </DockPanel>
 
@@ -188,12 +196,20 @@
                                         Command="{Binding StartCodingSessionCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Continue Task"
+                                        Command="{Binding ContinueCodingCurrentTaskCommand}"
+                                        BorderBrush="#1E6B49"
+                                        Background="#152A22" />
                                 <Button Content="Current Task"
                                         Command="{Binding ShowCodingCurrentTaskCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
                                 <Button Content="Clear Task"
                                         Command="{Binding ClearCodingCurrentTaskCommand}"
+                                        BorderBrush="#1E6B49"
+                                        Background="#152A22" />
+                                <Button Content="Task History"
+                                        Command="{Binding RunCodingSessionHistoryCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
                                 <Button Content="Defaults"

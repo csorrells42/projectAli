@@ -1998,12 +1998,33 @@ public static class CodingToolRequestParser
         "task panel"
     ];
 
+    private static readonly string[] ContinueCurrentCodingSessionRequests =
+    [
+        "continue current task",
+        "continue current coding task",
+        "continue coding task",
+        "continue coding session",
+        "continue current coding session",
+        "resume current coding task",
+        "resume coding session"
+    ];
+
     private static readonly string[] ClearCurrentCodingSessionRequests =
     [
         "clear current coding task",
         "clear current coding session",
         "finish current coding session",
         "discard current coding session"
+    ];
+
+    private static readonly string[] CodingSessionHistoryRequests =
+    [
+        "coding session history",
+        "show coding session history",
+        "current coding session history",
+        "show current coding session history",
+        "task history",
+        "show task history"
     ];
 
     private static readonly string[] ProjectCommandDefaultsRequests =
@@ -3340,6 +3361,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsContinueCurrentCodingSessionRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ContinueCurrentCodingSession, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsCurrentCodingSessionRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowCurrentCodingSession, null, UserConfirmed: userConfirmed);
@@ -3349,6 +3376,12 @@ public static class CodingToolRequestParser
         if (IsClearCurrentCodingSessionRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ClearCurrentCodingSession, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCodingSessionHistoryRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCodingSessionHistory, null, UserConfirmed: userConfirmed);
             return true;
         }
 
@@ -3844,8 +3877,14 @@ public static class CodingToolRequestParser
     private static bool IsCurrentCodingSessionRequest(string text) =>
         CurrentCodingSessionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsContinueCurrentCodingSessionRequest(string text) =>
+        ContinueCurrentCodingSessionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsClearCurrentCodingSessionRequest(string text) =>
         ClearCurrentCodingSessionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCodingSessionHistoryRequest(string text) =>
+        CodingSessionHistoryRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsProjectCommandDefaultsRequest(string text) =>
         ProjectCommandDefaultsRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

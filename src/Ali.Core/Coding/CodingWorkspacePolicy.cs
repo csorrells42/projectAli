@@ -134,8 +134,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.DraftReleaseNotes
             or CodingToolAction.ShowCodingSessionTimeline
             or CodingToolAction.StartCodingSession
+            or CodingToolAction.ContinueCurrentCodingSession
             or CodingToolAction.ShowCurrentCodingSession
             or CodingToolAction.ClearCurrentCodingSession
+            or CodingToolAction.ShowCodingSessionHistory
             or CodingToolAction.ShowCurrentProjectCommandDefaults
             or CodingToolAction.ShowRollbackPlan
             or CodingToolAction.ShowUiChangeChecklist

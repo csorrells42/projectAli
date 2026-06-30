@@ -870,10 +870,14 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("start coding session add export button", out var startSessionRequest));
     Equal(CodingToolAction.StartCodingSession, startSessionRequest.Action);
     Equal("add export button", startSessionRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("continue current task", out var continueTaskRequest));
+    Equal(CodingToolAction.ContinueCurrentCodingSession, continueTaskRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("current coding task", out var currentTaskRequest));
     Equal(CodingToolAction.ShowCurrentCodingSession, currentTaskRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("clear current coding task", out var clearTaskRequest));
     Equal(CodingToolAction.ClearCurrentCodingSession, clearTaskRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("coding session history", out var historyRequest));
+    Equal(CodingToolAction.ShowCodingSessionHistory, historyRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("project command defaults", out var defaultsRequest));
     Equal(CodingToolAction.ShowCurrentProjectCommandDefaults, defaultsRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("save project command defaults build=dotnet build; test=dotnet test; run=dotnet run", out var saveDefaultsRequest));
@@ -4195,8 +4199,10 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     var defaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
     var saveDefaults = await service.TryHandleAsync("save project command defaults build=custom build; test=custom test; run=custom run", CancellationToken.None);
     var savedDefaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
+    var continued = await service.TryHandleAsync("continue current task", CancellationToken.None);
     var clear = await service.TryHandleAsync("clear current coding task", CancellationToken.None);
     var empty = await service.TryHandleAsync("current coding task", CancellationToken.None);
+    var history = await service.TryHandleAsync("coding session history", CancellationToken.None);
 
     Equal(true, start.Handled);
     Equal(true, start.Succeeded);
@@ -4206,11 +4212,13 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     Contains("Default commands:", start.Message);
     Contains("Task-to-patch pipeline:", start.Message);
     Contains("Wrong-project confirmation:", start.Message);
-    Contains("Next command: feature work context add export button", start.Message);
+    Contains("Next command: continue current task", start.Message);
 
     Equal(true, current.Handled);
     Equal(true, current.Succeeded);
     Contains("Goal: add export button", current.Message);
+    Contains("Patch preview:", current.Message);
+    Contains("Latest receipt:", current.Message);
     Contains("Likely files:", current.Message);
 
     Equal(true, defaults.Handled);
@@ -4228,12 +4236,26 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     Contains("Test: custom test", savedDefaults.Message);
     Contains("Run: custom run", savedDefaults.Message);
 
+    Equal(true, continued.Handled);
+    Equal(true, continued.Succeeded);
+    Contains("Continue coding task v1", continued.Message);
+    Contains("Next action:", continued.Message);
+    Contains("Recommended commands:", continued.Message);
+    Contains("coding session history", continued.Message);
+
     Equal(true, clear.Handled);
     Equal(true, clear.Succeeded);
     Contains("Current coding task cleared.", clear.Message);
     Equal(true, empty.Handled);
     Equal(false, empty.Succeeded);
     Contains("Current coding task: none.", empty.Message);
+
+    Equal(true, history.Handled);
+    Equal(true, history.Succeeded);
+    Contains("Coding session history v1", history.Message);
+    Contains("started", history.Message);
+    Contains("continued", history.Message);
+    Contains("cleared", history.Message);
 }
 
 static Task TestProgrammingDashboardExposesCockpitCommands()
@@ -4253,6 +4275,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     var settings = File.ReadAllText(settingsPath);
 
     Contains("Coding Cockpit", dashboard);
+    Contains("CodingDashboardCurrentTargetText", dashboard);
+    Contains("CodingDashboardCurrentTaskText", dashboard);
     Contains("RunCodingReadinessReportCommand", dashboard);
     Contains("RunCodingNextBestActionCommand", dashboard);
     Contains("RunCodingValidationQueueCommand", dashboard);
@@ -4287,8 +4311,10 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Project Center", dashboard);
     Contains("Project Memory", dashboard);
     Contains("Start Session", dashboard);
+    Contains("Continue Task", dashboard);
     Contains("Current Task", dashboard);
     Contains("Clear Task", dashboard);
+    Contains("Task History", dashboard);
     Contains("Defaults", dashboard);
     Contains("Save Defaults", dashboard);
     Contains("Pick Solution", dashboard);
@@ -4335,8 +4361,10 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingProjectControlCenterCommand", dashboard);
     Contains("RunCodingProjectMemoryCommand", dashboard);
     Contains("StartCodingSessionCommand", dashboard);
+    Contains("ContinueCodingCurrentTaskCommand", dashboard);
     Contains("ShowCodingCurrentTaskCommand", dashboard);
     Contains("ClearCodingCurrentTaskCommand", dashboard);
+    Contains("RunCodingSessionHistoryCommand", dashboard);
     Contains("RunCodingProjectDefaultsCommand", dashboard);
     Contains("SaveCodingProjectDefaultsCommand", dashboard);
     Contains("PickCodingSolutionCommand", dashboard);
@@ -4421,8 +4449,10 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("show project memory", viewModel);
     Contains("StartCodingSessionCommand = CreateAsyncCommand", viewModel);
     Contains("StartCodingSessionFromPromptAsync", viewModel);
+    Contains("ContinueCodingCurrentTaskCommand = CreateAsyncCommand", viewModel);
     Contains("ShowCodingCurrentTaskCommand = CreateAsyncCommand", viewModel);
     Contains("ClearCodingCurrentTaskCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingSessionHistoryCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingProjectDefaultsCommand = CreateAsyncCommand", viewModel);
     Contains("SaveCodingProjectDefaultsCommand = CreateAsyncCommand", viewModel);
     Contains("PickCodingSolutionCommand = CreateCommand", viewModel);
@@ -4436,6 +4466,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand", viewModel);
     Contains("CreateCodingProjectCommand = CreateAsyncCommand", viewModel);
     Contains("CodingCurrentSolutionOrProjectPathText", viewModel);
+    Contains("CodingDashboardCurrentTargetText", viewModel);
+    Contains("CodingDashboardCurrentTaskText", viewModel);
     Contains("SelectedCodingRecentSolutionOrProjectPath", viewModel);
     Contains("CurrentSolutionOrProjectPath", viewModel);
     Contains("RecentSolutionOrProjectPaths", viewModel);

@@ -177,6 +177,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _codingWorkspaceRootText = string.Empty;
     private string _codingCurrentSolutionOrProjectPathText = string.Empty;
     private string _selectedCodingRecentSolutionOrProjectPath = string.Empty;
+    private string _codingDashboardCurrentTaskText = "Current task: none loaded.";
     private bool _codingAllowExplicitOutsideFileOpen = true;
     private string _codingWorkspaceAccessMode = CodingPermissionModes.Allowed;
     private string _codingExplicitOutsideFileOpenMode = CodingPermissionModes.Allowed;
@@ -307,8 +308,10 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingProjectControlCenterCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project control center", "project control center", "Coding.ProjectControlCenter"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectMemoryCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project memory", "show project memory", "Coding.ProjectMemory"), () => !IsBusy && !IsRecording && !IsTranscribing);
         StartCodingSessionCommand = CreateAsyncCommand(StartCodingSessionFromPromptAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        ContinueCodingCurrentTaskCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Continue coding task", "continue current task", "Coding.ContinueCurrentTask"), () => !IsBusy && !IsRecording && !IsTranscribing);
         ShowCodingCurrentTaskCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Current coding task", "current coding task", "Coding.CurrentTask"), () => !IsBusy && !IsRecording && !IsTranscribing);
         ClearCodingCurrentTaskCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Clear coding task", "clear current coding task", "Coding.ClearCurrentTask"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSessionHistoryCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Coding session history", "coding session history", "Coding.SessionHistory"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectDefaultsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project defaults", "project command defaults", "Coding.ProjectDefaults"), () => !IsBusy && !IsRecording && !IsTranscribing);
         SaveCodingProjectDefaultsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Save project defaults", "save project command defaults", "Coding.SaveProjectDefaults"), () => !IsBusy && !IsRecording && !IsTranscribing);
         PickCodingSolutionCommand = CreateCommand(_ => BrowseCodingCurrentSolutionOrProject());
@@ -868,9 +871,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand StartCodingSessionCommand { get; }
 
+    public ICommand ContinueCodingCurrentTaskCommand { get; }
+
     public ICommand ShowCodingCurrentTaskCommand { get; }
 
     public ICommand ClearCodingCurrentTaskCommand { get; }
+
+    public ICommand RunCodingSessionHistoryCommand { get; }
 
     public ICommand RunCodingProjectDefaultsCommand { get; }
 
@@ -1036,8 +1043,20 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _codingCurrentSolutionOrProjectPathText, value))
             {
                 OnPropertyChanged(nameof(CodingPermissionSummaryText));
+                OnPropertyChanged(nameof(CodingDashboardCurrentTargetText));
             }
         }
+    }
+
+    public string CodingDashboardCurrentTargetText =>
+        string.IsNullOrWhiteSpace(CodingCurrentSolutionOrProjectPathText)
+            ? "Current target: none selected"
+            : $"Current target: {Path.GetFileNameWithoutExtension(CodingCurrentSolutionOrProjectPathText)}";
+
+    public string CodingDashboardCurrentTaskText
+    {
+        get => _codingDashboardCurrentTaskText;
+        private set => SetProperty(ref _codingDashboardCurrentTaskText, value);
     }
 
     public string CodingPdfWorkspaceRootText
@@ -3150,6 +3169,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             var result = await _services.LocalCodingTool.TryHandleAsync(command, _lifetimeCancellation.Token).ConfigureAwait(true);
             var output = BuildCodingDiagnosticText(title, command, result);
+            UpdateCodingDashboardCurrentTask(result);
 
             var succeeded = result is { Handled: true, Succeeded: true };
             var receipt = WriteMaintenanceReceipt(actionType, succeeded, $"{title} completed.", startedAt, DateTimeOffset.Now, output);
@@ -3172,6 +3192,48 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    private void UpdateCodingDashboardCurrentTask(CodingToolResult result)
+    {
+        if (!result.Handled)
+        {
+            return;
+        }
+
+        if (result.Message.Contains("Current coding task: none", StringComparison.OrdinalIgnoreCase)
+            || result.Message.Contains("Current task: none", StringComparison.OrdinalIgnoreCase))
+        {
+            CodingDashboardCurrentTaskText = "Current task: none";
+            return;
+        }
+
+        if (result.Message.Contains("Current coding task cleared", StringComparison.OrdinalIgnoreCase))
+        {
+            CodingDashboardCurrentTaskText = "Current task: none";
+            return;
+        }
+
+        var goal = ExtractLineValue(result.Message, "Goal:");
+        if (string.IsNullOrWhiteSpace(goal))
+        {
+            return;
+        }
+
+        var status = ExtractLineValue(result.Message, "Status:");
+        CodingDashboardCurrentTaskText = string.IsNullOrWhiteSpace(status)
+            ? $"Current task: {goal}"
+            : $"Current task: {goal} ({status})";
+    }
+
+    private static string? ExtractLineValue(string text, string prefix)
+    {
+        return text
+            .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(line => line[prefix.Length..].Trim())
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     }
 
     private string BuildConfirmedDotNetCommand(string verb)
@@ -3986,10 +4048,18 @@ public sealed class MainWindowViewModel : ObservableObject
             "Targeted validation:",
             "Project command defaults:",
             "Project memory",
+            "Continue coding task",
+            "Recommended commands:",
+            "Coding session history",
+            "History rows:",
+            "Recent events:",
             "Current coding task",
             "Goal:",
             "Status:",
             "Started:",
+            "Updated:",
+            "Patch preview:",
+            "Latest receipt:",
             "Likely files:",
             "Likely tests:",
             "Default commands:",
@@ -4154,7 +4224,9 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Context Packet:",
             "- Project Memory:",
             "- Start Task:",
+            "- Continue Task:",
             "- Current Task:",
+            "- Task History:",
             "- Recent target:",
             "- Build:",
             "- Test:",
@@ -5001,6 +5073,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SetCurrentCodingSolutionOrProject(projectPath, save: true);
         StatusText = $"Created and selected {template} coding project: {safeName}.";
+        var goal = $"Build out {safeName}";
+        CodingDashboardCurrentTaskText = $"Current task: {goal}";
+        await RunCodingDiagnosticAsync(
+            "Start coding session",
+            $"start coding session {goal}",
+            "Coding.StartSession").ConfigureAwait(true);
     }
 
     private void SetCurrentCodingSolutionOrProject(string selectedPath, bool save)
@@ -8004,6 +8082,11 @@ public sealed class MainWindowViewModel : ObservableObject
             startCodingSession.RaiseCanExecuteChanged();
         }
 
+        if (ContinueCodingCurrentTaskCommand is AsyncRelayCommand continueCodingCurrentTask)
+        {
+            continueCodingCurrentTask.RaiseCanExecuteChanged();
+        }
+
         if (ShowCodingCurrentTaskCommand is AsyncRelayCommand showCodingCurrentTask)
         {
             showCodingCurrentTask.RaiseCanExecuteChanged();
@@ -8012,6 +8095,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (ClearCodingCurrentTaskCommand is AsyncRelayCommand clearCodingCurrentTask)
         {
             clearCodingCurrentTask.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSessionHistoryCommand is AsyncRelayCommand runCodingSessionHistory)
+        {
+            runCodingSessionHistory.RaiseCanExecuteChanged();
         }
 
         if (RunCodingProjectDefaultsCommand is AsyncRelayCommand runCodingProjectDefaults)

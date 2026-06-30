@@ -129,6 +129,7 @@ public sealed class LocalCodingToolService(
     private readonly string _codingSessionJournalPath = Path.Combine(dataRoot, "Coding", "coding-session-journal.json");
     private readonly string _currentProjectMemoryPath = Path.Combine(dataRoot, "Coding", "current-project-memory.json");
     private readonly string _currentCodingSessionPath = Path.Combine(dataRoot, "Coding", "current-coding-session.json");
+    private readonly string _currentCodingSessionHistoryPath = Path.Combine(dataRoot, "Coding", "current-coding-session-history.json");
     private readonly string _projectCommandDefaultsPath = Path.Combine(dataRoot, "Coding", "project-command-defaults.json");
     private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
         ? Path.Combine(dataRoot, "GeneratedDocuments")
@@ -265,8 +266,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.DraftReleaseNotes => await DraftReleaseNotesAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCodingSessionTimeline => ShowCodingSessionTimeline(),
             CodingToolAction.StartCodingSession => await StartCodingSessionAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ContinueCurrentCodingSession => await ContinueCurrentCodingSessionAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCurrentCodingSession => ShowCurrentCodingSession(),
             CodingToolAction.ClearCurrentCodingSession => ClearCurrentCodingSession(),
+            CodingToolAction.ShowCodingSessionHistory => ShowCodingSessionHistory(),
             CodingToolAction.ShowCurrentProjectCommandDefaults => ShowCurrentProjectCommandDefaults(),
             CodingToolAction.SaveCurrentProjectCommandDefaults => SaveCurrentProjectCommandDefaults(request),
             CodingToolAction.ShowRollbackPlan => await ShowRollbackPlanAsync(cancellationToken).ConfigureAwait(false),
@@ -2161,7 +2164,71 @@ public sealed class LocalCodingToolService(
             BuildTaskPipelineRows(goal, context, defaults),
             BuildWrongProjectGuardRows(currentTarget));
         WriteCurrentCodingSession(state);
+        AppendCurrentCodingSessionHistory("started", state, "New coding task selected.");
         return BuildCurrentCodingSessionResult(state, gitStatus.Summary);
+    }
+
+    private async Task<CodingToolResult> ContinueCurrentCodingSessionAsync(CancellationToken cancellationToken)
+    {
+        var state = ReadCurrentCodingSession();
+        if (state is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Current coding task: none. Start one with: start coding session <goal>.",
+                "Continue coding task",
+                Policy.WorkspaceRoot);
+        }
+
+        var currentTarget = GetPrimaryTarget();
+        var context = await BuildFeatureWorkContextAsync(
+            new CodingToolRequest(CodingToolAction.ShowFeatureWorkContext, null, Query: state.Goal),
+            cancellationToken).ConfigureAwait(false);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var defaults = BuildProjectCommandDefaults(currentTarget, context.TestTarget.Command);
+        var refreshed = state with
+        {
+            ProjectPath = currentTarget ?? state.ProjectPath,
+            UpdatedAt = DateTimeOffset.Now,
+            Status = "active",
+            LikelyFiles = context.RelativeCandidateFiles.Take(10).ToList(),
+            LikelyTests = context.TestTarget.TestFiles.Select(RelativeToWorkspace).Take(8).ToList(),
+            ChangedFiles = changedFiles.Take(12).ToList(),
+            BuildCommand = defaults.BuildCommand,
+            TestCommand = defaults.TestCommand,
+            RunCommand = defaults.RunCommand,
+            PipelineRows = BuildTaskPipelineRows(state.Goal, context, defaults),
+            WrongProjectGuardRows = BuildWrongProjectGuardRows(currentTarget)
+        };
+        WriteCurrentCodingSession(refreshed);
+        AppendCurrentCodingSessionHistory("continued", refreshed, BuildCurrentTaskNextAction(refreshed, context, gitStatus));
+
+        var lines = new List<string>
+        {
+            "Continue coding task v1:",
+            "No files were changed.",
+            $"Goal: {refreshed.Goal}",
+            string.IsNullOrWhiteSpace(refreshed.ProjectPath) ? "Current target: Review - pick a solution/project." : $"Current target: {FormatWorkspacePath(refreshed.ProjectPath)}",
+            $"Git: {gitStatus.Summary}",
+            $"Next action: {BuildCurrentTaskNextAction(refreshed, context, gitStatus)}",
+            "Recommended commands:"
+        };
+        lines.AddRange(BuildContinueCurrentTaskCommandRows(refreshed, context, gitStatus).Select(row => $"- {row}"));
+        lines.Add("Current task snapshot:");
+        lines.AddRange(BuildCurrentCodingSessionResult(refreshed, gitStatus.Summary).Message
+            .Split([Environment.NewLine], StringSplitOptions.None)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Take(18)
+            .Select(line => "- " + line));
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Continue coding task",
+            string.IsNullOrWhiteSpace(refreshed.ProjectPath) ? Policy.WorkspaceRoot : refreshed.ProjectPath);
     }
 
     private CodingToolResult ShowCurrentCodingSession()
@@ -2182,6 +2249,12 @@ public sealed class LocalCodingToolService(
 
     private CodingToolResult ClearCurrentCodingSession()
     {
+        var state = ReadCurrentCodingSession();
+        if (state is not null)
+        {
+            AppendCurrentCodingSessionHistory("cleared", state, "Current coding task cleared.");
+        }
+
         if (File.Exists(_currentCodingSessionPath))
         {
             File.Delete(_currentCodingSessionPath);
@@ -2195,8 +2268,35 @@ public sealed class LocalCodingToolService(
             Policy.WorkspaceRoot);
     }
 
+    private CodingToolResult ShowCodingSessionHistory()
+    {
+        var history = ReadCurrentCodingSessionHistory();
+        var current = ReadCurrentCodingSession();
+        var lines = new List<string>
+        {
+            "Coding session history v1:",
+            "No files were changed.",
+            current is null ? "Current task: none" : $"Current task: {current.Goal} ({current.Status})",
+            $"History rows: {history.Entries.Count}"
+        };
+        lines.Add("Recent events:");
+        lines.AddRange(history.Entries.Count == 0
+            ? ["- none yet"]
+            : history.Entries
+                .OrderByDescending(entry => entry.Timestamp)
+                .Take(12)
+                .Select(entry => $"- {entry.Timestamp.LocalDateTime:g} {entry.Event}: {entry.Goal} [{(string.IsNullOrWhiteSpace(entry.ProjectPath) ? "no target" : FormatWorkspacePath(entry.ProjectPath))}] {entry.Note}"));
+        lines.Add("Next command: continue current task");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session history", Policy.WorkspaceRoot);
+    }
+
     private CodingToolResult BuildCurrentCodingSessionResult(CurrentCodingSessionState state, string? gitSummary)
     {
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(IsFeatureEditReceipt);
         var target = string.IsNullOrWhiteSpace(state.ProjectPath)
             ? null
             : state.ProjectPath;
@@ -2208,7 +2308,12 @@ public sealed class LocalCodingToolService(
             string.IsNullOrWhiteSpace(target) ? "Current target: Review - pick a solution/project." : $"Current target: {FormatWorkspacePath(target)}",
             $"Status: {state.Status}",
             $"Started: {state.StartedAt.LocalDateTime:g}",
+            $"Updated: {state.UpdatedAt.LocalDateTime:g}",
             gitSummary is null ? "Git: not refreshed for this view." : $"Git: {gitSummary}",
+            $"Patch preview: {DescribePendingPatchPreview()}",
+            latestReceipt is null ? "Latest receipt: none" : FormatReceiptSummary("Latest receipt", latestReceipt),
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            latestEdit is null ? "Latest edit: none" : FormatReceiptSummary("Latest edit", latestEdit),
             "Likely files:"
         };
         lines.AddRange(FormatPanelRows(state.LikelyFiles, "- none yet"));
@@ -2224,7 +2329,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(state.WrongProjectGuardRows.Select(row => $"- {row}"));
         lines.Add("Task-to-patch pipeline:");
         lines.AddRange(state.PipelineRows.Select(row => $"- {row}"));
-        lines.Add("Next command: feature work context " + state.Goal);
+        lines.Add("Next command: continue current task");
         return new CodingToolResult(
             true,
             true,
@@ -9817,7 +9922,9 @@ public sealed class LocalCodingToolService(
             lines.Add("- Context Packet: coding context packet current project");
             lines.Add("- Project Memory: show project memory");
             lines.Add("- Start Task: start coding session <goal>");
+            lines.Add("- Continue Task: continue current task");
             lines.Add("- Current Task: current coding task");
+            lines.Add("- Task History: coding session history");
         }
 
         lines.Add("Project command defaults:");
@@ -11196,6 +11303,145 @@ public sealed class LocalCodingToolService(
         Directory.CreateDirectory(Path.GetDirectoryName(_currentCodingSessionPath)!);
         using var stream = File.Create(_currentCodingSessionPath);
         JsonSerializer.Serialize(stream, state, RoadmapJsonOptions);
+    }
+
+    private CurrentCodingSessionHistory ReadCurrentCodingSessionHistory()
+    {
+        if (!File.Exists(_currentCodingSessionHistoryPath))
+        {
+            return new CurrentCodingSessionHistory([]);
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_currentCodingSessionHistoryPath);
+            return JsonSerializer.Deserialize<CurrentCodingSessionHistory>(stream, RoadmapJsonOptions)
+                   ?? new CurrentCodingSessionHistory([]);
+        }
+        catch (IOException)
+        {
+            return new CurrentCodingSessionHistory([]);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CurrentCodingSessionHistory([]);
+        }
+        catch (JsonException)
+        {
+            return new CurrentCodingSessionHistory([]);
+        }
+    }
+
+    private void WriteCurrentCodingSessionHistory(CurrentCodingSessionHistory history)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_currentCodingSessionHistoryPath)!);
+        using var stream = File.Create(_currentCodingSessionHistoryPath);
+        JsonSerializer.Serialize(stream, history, RoadmapJsonOptions);
+    }
+
+    private void AppendCurrentCodingSessionHistory(string eventName, CurrentCodingSessionState state, string note)
+    {
+        var history = ReadCurrentCodingSessionHistory();
+        history.Entries.Add(new CurrentCodingSessionHistoryEntry(
+            DateTimeOffset.Now,
+            eventName,
+            state.Goal,
+            state.ProjectPath,
+            state.Status,
+            note));
+        WriteCurrentCodingSessionHistory(new CurrentCodingSessionHistory(history.Entries.TakeLast(100).ToList()));
+    }
+
+    private string DescribePendingPatchPreview()
+    {
+        LoadPendingPatchPreviewIfNeeded();
+        if (_lastPatchPreviewRequest is null)
+        {
+            return "none";
+        }
+
+        var request = _lastPatchPreviewRequest;
+        if (request.Action == CodingToolAction.PreviewPatchBundle)
+        {
+            return $"Waiting - patch bundle with {request.PatchEdits?.Count ?? 0} edit(s).";
+        }
+
+        return string.IsNullOrWhiteSpace(request.Path)
+            ? "Waiting - single-file patch preview."
+            : $"Waiting - {FormatWorkspacePath(request.Path)}.";
+    }
+
+    private string BuildCurrentTaskNextAction(
+        CurrentCodingSessionState state,
+        FeatureWorkContext context,
+        GitWorkingTreeStatus gitStatus)
+    {
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "show pending patch preview";
+        }
+
+        if (latestValidation is { Succeeded: false })
+        {
+            return "diagnose last failure";
+        }
+
+        if (gitStatus.HasUncommittedChanges && latestValidation?.Succeeded != true)
+        {
+            return "validation chain planner " + state.Goal;
+        }
+
+        if (context.RankedTargets.Count == 0)
+        {
+            return "feature work context " + state.Goal;
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            return "resolve test target " + state.Goal;
+        }
+
+        return "exact patch synthesis " + state.Goal;
+    }
+
+    private IReadOnlyList<string> BuildContinueCurrentTaskCommandRows(
+        CurrentCodingSessionState state,
+        FeatureWorkContext context,
+        GitWorkingTreeStatus gitStatus)
+    {
+        var rows = new List<string>
+        {
+            BuildCurrentTaskNextAction(state, context, gitStatus),
+            "current coding task",
+            "coding session history"
+        };
+
+        if (_lastPatchPreviewRequest is not null)
+        {
+            rows.Add("confirm apply last patch preview");
+            rows.Add("discard pending patch preview");
+        }
+        else
+        {
+            rows.Add("feature work context " + state.Goal);
+            rows.Add("exact patch synthesis " + state.Goal);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            rows.Add(context.TestTarget.Command);
+        }
+
+        rows.Add(state.BuildCommand);
+        rows.Add("semantic change receipt " + state.Goal);
+        return rows
+            .Where(row => !string.IsNullOrWhiteSpace(row))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
     }
 
     private ProjectCommandDefaultsStore ReadProjectCommandDefaultsStore()
@@ -20440,6 +20686,17 @@ public sealed class LocalCodingToolService(
         string RunCommand,
         IReadOnlyList<string> PipelineRows,
         IReadOnlyList<string> WrongProjectGuardRows);
+
+    private sealed record CurrentCodingSessionHistory(
+        List<CurrentCodingSessionHistoryEntry> Entries);
+
+    private sealed record CurrentCodingSessionHistoryEntry(
+        DateTimeOffset Timestamp,
+        string Event,
+        string Goal,
+        string ProjectPath,
+        string Status,
+        string Note);
 
     private sealed record ProjectCommandDefaultsStore(
         List<ProjectCommandDefaultsEntry> Entries);
