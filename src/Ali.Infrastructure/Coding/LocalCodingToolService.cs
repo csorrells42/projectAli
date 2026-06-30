@@ -13958,6 +13958,11 @@ public sealed class LocalCodingToolService(
 
     private static string BuildWpfWindowXaml(string goal, string xamlClass)
     {
+        if (IsWpfComplexWindowGoal(goal))
+        {
+            return BuildWpfComplexDashboardWindowXaml(xamlClass);
+        }
+
         if (IsWpfTodoGoal(goal))
         {
             return BuildWpfTodoWindowXaml(xamlClass);
@@ -13980,6 +13985,11 @@ public sealed class LocalCodingToolService(
 
     private static string BuildWpfCodeBehind(string goal, string? namespaceName)
     {
+        if (IsWpfComplexWindowGoal(goal))
+        {
+            return BuildWpfComplexDashboardCodeBehind(namespaceName);
+        }
+
         if (IsWpfTodoGoal(goal))
         {
             return BuildWpfTodoCodeBehind(namespaceName);
@@ -14109,6 +14119,104 @@ public sealed class LocalCodingToolService(
                                Margin="0,18,0,0" />
                 </StackPanel>
             </Grid>
+        </Window>
+        """;
+
+    private static string BuildWpfComplexDashboardWindowXaml(string xamlClass) =>
+        $$"""
+        <Window x:Class="{{xamlClass}}"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Project Dashboard" Height="620" Width="980" MinHeight="520" MinWidth="760">
+            <DockPanel>
+                <Menu DockPanel.Dock="Top">
+                    <MenuItem Header="_File">
+                        <MenuItem Header="_Refresh" Click="RefreshButton_Click" />
+                        <Separator />
+                        <MenuItem Header="E_xit" />
+                    </MenuItem>
+                    <MenuItem Header="_View">
+                        <MenuItem Header="Overview" />
+                        <MenuItem Header="Activity" />
+                    </MenuItem>
+                </Menu>
+
+                <StatusBar DockPanel.Dock="Bottom">
+                    <TextBlock x:Name="StatusTextBlock" Text="Ready" />
+                </StatusBar>
+
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Padding="14" Margin="0,0,0,12" Background="#202A36" CornerRadius="4">
+                        <DockPanel>
+                            <Button Content="Refresh" Width="92" DockPanel.Dock="Right" Click="RefreshButton_Click" />
+                            <StackPanel>
+                                <TextBlock Text="Project Dashboard" FontSize="24" FontWeight="SemiBold" Foreground="White" />
+                                <TextBlock Text="Navigation, tabs, data, details, and status in one resizable WPF shell." Foreground="#C8D2DF" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220" MinWidth="160" />
+                            <ColumnDefinition Width="5" />
+                            <ColumnDefinition Width="*" MinWidth="320" />
+                            <ColumnDefinition Width="5" />
+                            <ColumnDefinition Width="280" MinWidth="220" />
+                        </Grid.ColumnDefinitions>
+
+                        <GroupBox Header="Navigation" Padding="8">
+                            <TreeView x:Name="NavigationTreeView">
+                                <TreeViewItem Header="Workspace" IsExpanded="True">
+                                    <TreeViewItem Header="Overview" />
+                                    <TreeViewItem Header="Activity" />
+                                    <TreeViewItem Header="Settings" />
+                                </TreeViewItem>
+                            </TreeView>
+                        </GroupBox>
+
+                        <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" />
+
+                        <TabControl Grid.Column="2" Margin="10,0">
+                            <TabItem Header="Overview">
+                                <DataGrid x:Name="ItemsDataGrid"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          EnableRowVirtualization="True"
+                                          CanUserAddRows="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+                                        <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
+                                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </TabItem>
+                            <TabItem Header="Activity">
+                                <ListBox x:Name="ActivityListBox" />
+                            </TabItem>
+                        </TabControl>
+
+                        <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" />
+
+                        <GroupBox Grid.Column="4" Header="Details" Padding="10">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                    <TextBox x:Name="NewItemTextBox" Height="32" Margin="0,0,0,8" VerticalContentAlignment="Center" />
+                                    <Button Content="Add Item" Height="34" Click="AddItemButton_Click" />
+                                    <Separator Margin="0,16" />
+                                    <TextBlock Text="Use the splitters to resize panes. The center grid virtualizes rows for larger data sets." TextWrapping="Wrap" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </DockPanel>
         </Window>
         """;
 
@@ -14243,6 +14351,69 @@ public sealed class LocalCodingToolService(
             """;
     }
 
+    private static string BuildWpfComplexDashboardCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System;
+            using System.Collections.ObjectModel;
+            using System.Windows;
+
+            {{namespaceLine}}public partial class MainWindow : Window
+            {
+                private readonly ObservableCollection<DashboardItem> _items = new();
+                private readonly ObservableCollection<string> _activity = new();
+
+                public MainWindow()
+                {
+                    InitializeComponent();
+                    ItemsDataGrid.ItemsSource = _items;
+                    ActivityListBox.ItemsSource = _activity;
+                    SeedDashboard();
+                }
+
+                private void SeedDashboard()
+                {
+                    _items.Clear();
+                    _items.Add(new DashboardItem("Intake workflow", "Ali", "Ready"));
+                    _items.Add(new DashboardItem("Validation queue", "Owner", "Review"));
+                    _items.Add(new DashboardItem("Release packet", "Ali", "Draft"));
+
+                    _activity.Clear();
+                    _activity.Add("Dashboard loaded.");
+                    _activity.Add("Three sample work items are ready for review.");
+                    StatusTextBlock.Text = "Ready - 3 items loaded";
+                }
+
+                private void RefreshButton_Click(object sender, RoutedEventArgs e)
+                {
+                    _activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
+                    StatusTextBlock.Text = "Dashboard refreshed";
+                }
+
+                private void AddItemButton_Click(object sender, RoutedEventArgs e)
+                {
+                    var name = NewItemTextBox.Text.Trim();
+                    if (name.Length == 0)
+                    {
+                        StatusTextBlock.Text = "Enter an item name first.";
+                        return;
+                    }
+
+                    _items.Add(new DashboardItem(name, "Owner", "New"));
+                    _activity.Insert(0, $"Added {name}.");
+                    NewItemTextBox.Clear();
+                    StatusTextBlock.Text = $"Added {name}";
+                }
+
+                private sealed record DashboardItem(string Name, string Owner, string Status);
+            }
+            """;
+    }
+
     private static string BuildWpfTodoCodeBehind(string? namespaceName)
     {
         var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
@@ -14311,11 +14482,12 @@ public sealed class LocalCodingToolService(
             return false;
         }
 
-        return MentionsAny(goal, "wpf", "xaml", "desktop window", "desktop app", "windowed app")
+        return (MentionsAny(goal, "wpf", "xaml", "desktop window", "desktop app", "windowed app") || IsWpfComplexWindowGoal(goal))
                && (IsWpfCounterGoal(goal)
                    || IsWpfCalculatorGoal(goal)
                    || IsWpfGreetingGoal(goal)
                    || IsWpfTodoGoal(goal)
+                   || IsWpfComplexWindowGoal(goal)
                    || IsWpfHelloGoal(goal)
                    || MentionsAny(goal, "button", "window", "screen"));
     }
@@ -14324,19 +14496,22 @@ public sealed class LocalCodingToolService(
         IsWpfCounterGoal(goal)
         || IsWpfCalculatorGoal(goal)
         || IsWpfGreetingGoal(goal)
-        || IsWpfTodoGoal(goal);
+        || IsWpfTodoGoal(goal)
+        || IsWpfComplexWindowGoal(goal);
 
     private static string ClassifyWpfStarterNote(string goal, string fileName)
     {
-        var shape = IsWpfTodoGoal(goal)
-            ? "WPF todo-list"
-            : IsWpfCalculatorGoal(goal)
-                ? "WPF calculator"
-                : IsWpfGreetingGoal(goal)
-                    ? "WPF greeting-form"
-                    : IsWpfCounterGoal(goal)
-                        ? "WPF counter"
-                        : "WPF hello";
+        var shape = IsWpfComplexWindowGoal(goal)
+            ? "WPF complex-dashboard"
+            : IsWpfTodoGoal(goal)
+                ? "WPF todo-list"
+                : IsWpfCalculatorGoal(goal)
+                    ? "WPF calculator"
+                    : IsWpfGreetingGoal(goal)
+                        ? "WPF greeting-form"
+                        : IsWpfCounterGoal(goal)
+                            ? "WPF counter"
+                            : "WPF hello";
         return $"{shape} {fileName} starter recipe.";
     }
 
@@ -14356,6 +14531,10 @@ public sealed class LocalCodingToolService(
     private static bool IsWpfTodoGoal(string goal) =>
         MentionsAny(goal, "todo", "to-do", "task list", "tasks", "checklist")
         && MentionsAny(goal, "add", "remove", "list", "selected", "button");
+
+    private static bool IsWpfComplexWindowGoal(string goal) =>
+        MentionsAny(goal, "dashboard", "control center", "complex window", "advanced window", "multi panel", "multi-pane", "split pane", "master detail", "details pane", "navigation shell", "management window", "manager window", "data entry")
+        && MentionsAny(goal, "wpf", "xaml", "desktop", "window", "screen", "app", "layout", "grid", "tabs", "data grid");
 
     private static bool IsWpfHelloGoal(string goal) =>
         MentionsAny(goal, "hello world", "hello-world", "says hello", "display hello");

@@ -5556,6 +5556,13 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         "Build a simple WPF todo list app that can add tasks and remove the selected task.",
         ["TaskTextBox", "TasksListBox", "RemoveTaskButton_Click"],
         ["ObservableCollection<string>", "_tasks.Add", "_tasks.Remove"]);
+    await AssertWpfStarterAsync(
+        service,
+        xamlPath,
+        codeBehindPath,
+        "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
+        ["NavigationTreeView", "ItemsDataGrid", "GridSplitter", "StatusBar", "TabControl", "AddItemButton_Click"],
+        ["ObservableCollection<DashboardItem>", "RefreshButton_Click", "AddItemButton_Click", "DashboardItem", "StatusTextBlock.Text"]);
 }
 
 static async Task AssertWpfStarterAsync(
