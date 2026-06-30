@@ -20,6 +20,7 @@ public sealed class LocalCodingToolService(
     string? configuredNotepadPlusPlusPath = null,
     string? configuredVisualStudioPath = null,
     string? configuredCurrentSolutionOrProjectPath = null,
+    IReadOnlyList<string>? configuredRecentSolutionOrProjectPaths = null,
     string? pdfWorkspaceRoot = null) : ILocalCodingTool
 {
     private static readonly JsonSerializerOptions RoadmapJsonOptions = new(JsonSerializerDefaults.Web)
@@ -126,6 +127,7 @@ public sealed class LocalCodingToolService(
     private readonly string _symbolOwnershipLedgerPath = Path.Combine(dataRoot, "Coding", "symbol-ownership-ledger.json");
     private readonly string _routeDiffTrackerPath = Path.Combine(dataRoot, "Coding", "route-diff-tracker.json");
     private readonly string _codingSessionJournalPath = Path.Combine(dataRoot, "Coding", "coding-session-journal.json");
+    private readonly string _currentProjectMemoryPath = Path.Combine(dataRoot, "Coding", "current-project-memory.json");
     private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
         ? Path.Combine(dataRoot, "GeneratedDocuments")
         : Path.GetFullPath(pdfWorkspaceRoot.Trim().Trim('"'));
@@ -146,6 +148,7 @@ public sealed class LocalCodingToolService(
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
     private string? _configuredCurrentSolutionOrProjectPath = configuredCurrentSolutionOrProjectPath;
+    private IReadOnlyList<string> _configuredRecentSolutionOrProjectPaths = configuredRecentSolutionOrProjectPaths ?? [];
 
     public CodingWorkspacePolicy Policy { get; private set; } = policy;
 
@@ -160,6 +163,7 @@ public sealed class LocalCodingToolService(
         _configuredNotepadPlusPlusPath = settings.NotepadPlusPlusPath;
         _configuredVisualStudioPath = settings.VisualStudioPath;
         _configuredCurrentSolutionOrProjectPath = settings.CurrentSolutionOrProjectPath;
+        _configuredRecentSolutionOrProjectPaths = settings.RecentSolutionOrProjectPaths;
         _pdfWorkspaceRoot = settings.ResolvePdfWorkspaceRoot(dataRoot);
     }
 
@@ -329,6 +333,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowSemanticChangeReceipt => await ShowSemanticChangeReceiptAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationChainPlanner => await ShowValidationChainPlannerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowActiveWorkspaceProject => await ShowActiveWorkspaceProjectAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowProjectControlCenter => await ShowProjectControlCenterAsync(cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowCurrentProjectMemory => ShowCurrentProjectMemory(),
+            CodingToolAction.SaveCurrentProjectMemory => SaveCurrentProjectMemory(request),
+            CodingToolAction.OpenCurrentProjectFolder => OpenCurrentProjectFolder(cancellationToken),
             CodingToolAction.ShowOwnerApprovedApplyPacket => await ShowOwnerApprovedApplyPacketAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowRoslynInsertionPlanner => await ShowRoslynInsertionPlannerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowIntentDiffComposer => await ShowIntentDiffComposerAsync(request, cancellationToken).ConfigureAwait(false),
@@ -481,6 +489,8 @@ public sealed class LocalCodingToolService(
         }
 
         var includesLastFailure = _lastDotNetResult is { Succeeded: false };
+        var currentTarget = GetPrimaryTarget();
+        var hasSelectedTarget = TryGetConfiguredCurrentTarget(out _);
         var lines = new List<string>
         {
             "Ali coding context pack (read-only).",
@@ -488,6 +498,8 @@ public sealed class LocalCodingToolService(
             "Do not claim files were changed, builds were run, or tests were run unless a tool result below proves it.",
             "When proposing code changes, keep them small and tell the user edits require explicit confirmation before Ali writes files.",
             $"Workspace root: {Policy.WorkspaceRoot}",
+            currentTarget is null ? "Current solution/project: not selected or unavailable." : $"Current solution/project: {RelativeToWorkspace(currentTarget)}",
+            hasSelectedTarget ? "Current target source: saved picker value." : "Current target source: inferred fallback.",
             $"Current user request: {userText.Trim()}"
         };
 
@@ -513,7 +525,15 @@ public sealed class LocalCodingToolService(
         lines.Add("Current coding state:");
         lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
+        lines.AddRange(BuildRecentProjectTargetRows().Select(row => $"- Recent target: {row}"));
         AddProjectIndexAwarenessLines(lines, projectAwareness, 6);
+        var projectMemory = ReadCurrentProjectMemoryEntries(currentTarget).TakeLast(8).ToList();
+        if (projectMemory.Count > 0)
+        {
+            lines.Add("Current project memory:");
+            lines.AddRange(projectMemory.Select(entry => $"- {entry.Note}"));
+        }
+
         lines.Add("Targeted validation:");
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command)
             ? "- No targeted test command detected yet."
@@ -590,9 +610,7 @@ public sealed class LocalCodingToolService(
                 : "- Read-only project context: not available yet."
         };
 
-        var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
-            ? primary
-            : null;
+        var primaryTarget = GetPrimaryTarget();
         if (!string.IsNullOrWhiteSpace(primaryTarget))
         {
             lines.Add($"- Primary solution/project: {primaryTarget}");
@@ -9588,6 +9606,180 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Active workspace/project", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowProjectControlCenterAsync(CancellationToken cancellationToken)
+    {
+        var summaries = GetWorkspaceProjectSummaries();
+        var currentTarget = GetPrimaryTarget();
+        var hasSelectedTarget = TryGetConfiguredCurrentTarget(out _);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var testTarget = await ResolveTestTargetRecommendationAsync("current project", cancellationToken).ConfigureAwait(false);
+        var memoryEntries = ReadCurrentProjectMemoryEntries(currentTarget);
+
+        var lines = new List<string>
+        {
+            "Project control center v1:",
+            "No files were changed.",
+            $"Workspace root: {Policy.WorkspaceRoot}",
+            currentTarget is null ? "Current target: Review - pick a solution/project first." : $"Current target: {RelativeToWorkspace(currentTarget)}",
+            hasSelectedTarget ? "Target source: saved picker value." : "Target source: inferred fallback.",
+            $"Git: {gitStatus.Summary}",
+            $"Changed files: {changedFiles.Count}",
+            $"Projects detected: {summaries.Count}",
+            $"Project memory notes: {memoryEntries.Count}"
+        };
+
+        lines.Add("Fast actions:");
+        if (currentTarget is null)
+        {
+            lines.Add("- Pick Solution: choose a .sln, .slnx, or .csproj first.");
+            lines.Add("- New Project: create a starter project and make it current.");
+        }
+        else
+        {
+            var escapedTarget = EscapeCommandPath(currentTarget);
+            lines.Add($"- Build Current: confirm dotnet build \"{escapedTarget}\"");
+            lines.Add($"- Test Current: confirm dotnet test \"{escapedTarget}\"");
+            lines.Add(currentTarget.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                ? $"- Run Current: confirm dotnet run \"{escapedTarget}\""
+                : "- Run Current: Review - pick an app .csproj when the current target is a solution.");
+            lines.Add("- Open in Visual Studio: open solution");
+            lines.Add("- Open Folder: open current project folder");
+            lines.Add("- Context Packet: coding context packet current project");
+            lines.Add("- Project Memory: show project memory");
+        }
+
+        lines.Add("Wrong-project guard:");
+        lines.Add(currentTarget is null
+            ? "- Review - Ali should ask the user to pick the target before edits, builds, or test recommendations."
+            : $"- Good - before edits/builds, Ali should state Current target: {RelativeToWorkspace(currentTarget)}.");
+
+        lines.Add("Recent targets:");
+        lines.AddRange(BuildRecentProjectTargetRows().Select(row => $"- {row}"));
+
+        lines.Add("Targeted validation:");
+        lines.Add(string.IsNullOrWhiteSpace(testTarget.Command)
+            ? "- Review - no targeted test command detected yet."
+            : $"- {testTarget.Command}");
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Project control center",
+            currentTarget ?? Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowCurrentProjectMemory()
+    {
+        var currentTarget = GetPrimaryTarget();
+        if (currentTarget is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Project memory needs a selected solution/project first.",
+                "Project memory",
+                Policy.WorkspaceRoot);
+        }
+
+        var entries = ReadCurrentProjectMemoryEntries(currentTarget);
+        var lines = new List<string>
+        {
+            "Project memory v1:",
+            "No files were changed.",
+            $"Current target: {RelativeToWorkspace(currentTarget)}"
+        };
+
+        if (entries.Count == 0)
+        {
+            lines.Add("Notes: none saved yet.");
+            lines.Add("To save one: remember for this project <plain project fact>");
+        }
+        else
+        {
+            lines.Add("Notes:");
+            lines.AddRange(entries.TakeLast(12).Select(entry => $"- {entry.CreatedAt.LocalDateTime:g}: {entry.Note}"));
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Project memory",
+            currentTarget);
+    }
+
+    private CodingToolResult SaveCurrentProjectMemory(CodingToolRequest request)
+    {
+        var currentTarget = GetPrimaryTarget();
+        if (currentTarget is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Project memory needs a selected solution/project first.",
+                "Project memory",
+                Policy.WorkspaceRoot);
+        }
+
+        var note = request.Query?.Trim();
+        if (string.IsNullOrWhiteSpace(note))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Project memory needs a short note to save.",
+                "Project memory",
+                currentTarget);
+        }
+
+        note = TrimForChat(note, 500);
+        var ledger = ReadProjectMemoryLedger();
+        ledger.Entries.Add(new ProjectMemoryEntry(currentTarget, note, DateTimeOffset.Now));
+        ledger = new ProjectMemoryLedger(
+            ledger.Entries
+                .GroupBy(entry => NormalizeProjectMemoryKey(entry.ProjectPath), StringComparer.OrdinalIgnoreCase)
+                .SelectMany(group => group.OrderByDescending(entry => entry.CreatedAt).Take(40))
+                .OrderBy(entry => entry.CreatedAt)
+                .TakeLast(400)
+                .ToList());
+        WriteProjectMemoryLedger(ledger);
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Project memory saved.{Environment.NewLine}Current target: {RelativeToWorkspace(currentTarget)}{Environment.NewLine}Note: {note}",
+            "Project memory",
+            currentTarget);
+    }
+
+    private CodingToolResult OpenCurrentProjectFolder(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var currentTarget = GetPrimaryTarget();
+        if (currentTarget is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Open current project folder needs a selected solution/project first.",
+                "Explorer",
+                Policy.WorkspaceRoot);
+        }
+
+        var folder = Directory.Exists(currentTarget)
+            ? currentTarget
+            : Path.GetDirectoryName(currentTarget) ?? Policy.WorkspaceRoot;
+        _processLauncher.Start("explorer.exe", [folder], useShellExecute: false);
+        return new CodingToolResult(
+            true,
+            true,
+            $"Opened current project folder: {folder}",
+            "Explorer",
+            folder);
+    }
+
     private async Task<CodingToolResult> ShowOwnerApprovedApplyPacketAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
@@ -10695,6 +10887,9 @@ public sealed class LocalCodingToolService(
         return primary is null ? "Review - not found." : RelativeToWorkspace(primary);
     }
 
+    private static string EscapeCommandPath(string path) =>
+        path.Replace("\"", string.Empty, StringComparison.Ordinal);
+
     private IReadOnlyList<string> BuildActiveProjectSelectionRows(
         IReadOnlyList<ProjectSummary> summaries,
         string? primaryTarget,
@@ -10715,6 +10910,76 @@ public sealed class LocalCodingToolService(
             : "Ambiguity: Good - current project target is explicit or simple.");
         return rows;
     }
+
+    private IReadOnlyList<string> BuildRecentProjectTargetRows()
+    {
+        var rows = _configuredRecentSolutionOrProjectPaths
+            .Where(path => CodingWorkspacePolicy.TryNormalizePath(path, out _))
+            .Select(path => CodingWorkspacePolicy.TryNormalizePath(path, out var normalized) ? normalized : path)
+            .Where(path => Policy.IsInsideWorkspace(path))
+            .Where(path => File.Exists(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .Select(path => $"{RelativeToWorkspace(path)}")
+            .ToList();
+
+        return rows.Count == 0
+            ? ["Review - no recent selected projects saved yet."]
+            : rows;
+    }
+
+    private IReadOnlyList<ProjectMemoryEntry> ReadCurrentProjectMemoryEntries(string? currentTarget)
+    {
+        if (string.IsNullOrWhiteSpace(currentTarget))
+        {
+            return [];
+        }
+
+        var key = NormalizeProjectMemoryKey(currentTarget);
+        return ReadProjectMemoryLedger().Entries
+            .Where(entry => string.Equals(NormalizeProjectMemoryKey(entry.ProjectPath), key, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(entry => entry.CreatedAt)
+            .ToList();
+    }
+
+    private ProjectMemoryLedger ReadProjectMemoryLedger()
+    {
+        if (!File.Exists(_currentProjectMemoryPath))
+        {
+            return new ProjectMemoryLedger([]);
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_currentProjectMemoryPath);
+            return JsonSerializer.Deserialize<ProjectMemoryLedger>(stream, RoadmapJsonOptions)
+                   ?? new ProjectMemoryLedger([]);
+        }
+        catch (IOException)
+        {
+            return new ProjectMemoryLedger([]);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new ProjectMemoryLedger([]);
+        }
+        catch (JsonException)
+        {
+            return new ProjectMemoryLedger([]);
+        }
+    }
+
+    private void WriteProjectMemoryLedger(ProjectMemoryLedger ledger)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_currentProjectMemoryPath)!);
+        using var stream = File.Create(_currentProjectMemoryPath);
+        JsonSerializer.Serialize(stream, ledger, RoadmapJsonOptions);
+    }
+
+    private static string NormalizeProjectMemoryKey(string path) =>
+        CodingWorkspacePolicy.TryNormalizePath(path, out var normalized)
+            ? normalized
+            : path.Trim();
 
     private static IReadOnlyList<string> BuildOwnerApprovedApplyPacketRows(
         FeatureWorkContext context,
@@ -16374,7 +16639,8 @@ public sealed class LocalCodingToolService(
                     Policy.WorkspaceRoot));
             }
 
-            if (!TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out fullPath))
+            fullPath = GetPrimaryTarget() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(fullPath))
             {
                 return Task.FromResult(new CodingToolResult(
                     true,
@@ -18467,7 +18733,7 @@ public sealed class LocalCodingToolService(
     {
         error = string.Empty;
         targetPath = string.IsNullOrWhiteSpace(request.Path)
-            ? Policy.WorkspaceRoot
+            ? GetPrimaryTarget() ?? Policy.WorkspaceRoot
             : request.Path;
         workingDirectory = Policy.WorkspaceRoot;
         if (!CodingWorkspacePolicy.TryNormalizePath(targetPath, out var fullPath))
@@ -19804,6 +20070,14 @@ public sealed class LocalCodingToolService(
 
         return true;
     }
+
+    private sealed record ProjectMemoryLedger(
+        List<ProjectMemoryEntry> Entries);
+
+    private sealed record ProjectMemoryEntry(
+        string ProjectPath,
+        string Note,
+        DateTimeOffset CreatedAt);
 
     private sealed record NormalizedPatchEdit(
         string FullPath,

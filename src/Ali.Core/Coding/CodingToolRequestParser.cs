@@ -1338,6 +1338,57 @@ public static class CodingToolRequestParser
         "how do you know the current project"
     ];
 
+    private static readonly string[] ProjectControlCenterPrefixes =
+    [
+        "project control center ",
+        "current project control center ",
+        "coding project control center ",
+        "project control packet ",
+        "current project packet "
+    ];
+
+    private static readonly string[] ProjectControlCenterRequests =
+    [
+        "project control center",
+        "current project control center",
+        "coding project control center",
+        "project control packet",
+        "current project packet"
+    ];
+
+    private static readonly string[] CurrentProjectMemoryPrefixes =
+    [
+        "project memory ",
+        "show project memory ",
+        "current project memory ",
+        "show current project memory "
+    ];
+
+    private static readonly string[] CurrentProjectMemoryRequests =
+    [
+        "project memory",
+        "show project memory",
+        "current project memory",
+        "show current project memory"
+    ];
+
+    private static readonly string[] SaveCurrentProjectMemoryPrefixes =
+    [
+        "remember for this project ",
+        "remember for current project ",
+        "save project memory ",
+        "save current project memory ",
+        "project remember "
+    ];
+
+    private static readonly string[] OpenCurrentProjectFolderRequests =
+    [
+        "open current project folder",
+        "open project folder",
+        "open selected project folder",
+        "open current coding folder"
+    ];
+
     private static readonly string[] OwnerApprovedApplyPacketPrefixes =
     [
         "owner approved apply packet ",
@@ -3581,6 +3632,15 @@ public static class CodingToolRequestParser
     private static bool IsActiveWorkspaceProjectRequest(string text) =>
         ActiveWorkspaceProjectRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsProjectControlCenterRequest(string text) =>
+        ProjectControlCenterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCurrentProjectMemoryRequest(string text) =>
+        CurrentProjectMemoryRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsOpenCurrentProjectFolderRequest(string text) =>
+        OpenCurrentProjectFolderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsOwnerApprovedApplyPacketRequest(string text) =>
         OwnerApprovedApplyPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -3802,6 +3862,9 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, SemanticChangeReceiptPrefixes, CodingToolAction.ShowSemanticChangeReceipt, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ValidationChainPlannerPrefixes, CodingToolAction.ShowValidationChainPlanner, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ActiveWorkspaceProjectPrefixes, CodingToolAction.ShowActiveWorkspaceProject, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ProjectControlCenterPrefixes, CodingToolAction.ShowProjectControlCenter, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, CurrentProjectMemoryPrefixes, CodingToolAction.ShowCurrentProjectMemory, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, SaveCurrentProjectMemoryPrefixes, CodingToolAction.SaveCurrentProjectMemory, userConfirmed, out request)
             || TryParsePrefixedQuery(text, OwnerApprovedApplyPacketPrefixes, CodingToolAction.ShowOwnerApprovedApplyPacket, userConfirmed, out request)
             || TryParsePrefixedQuery(text, RoslynInsertionPlannerPrefixes, CodingToolAction.ShowRoslynInsertionPlanner, userConfirmed, out request)
             || TryParsePrefixedQuery(text, IntentDiffComposerPrefixes, CodingToolAction.ShowIntentDiffComposer, userConfirmed, out request)
@@ -4085,6 +4148,24 @@ public static class CodingToolRequestParser
         if (IsActiveWorkspaceProjectRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowActiveWorkspaceProject, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsProjectControlCenterRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowProjectControlCenter, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCurrentProjectMemoryRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCurrentProjectMemory, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsOpenCurrentProjectFolderRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.OpenCurrentProjectFolder, null, UserConfirmed: userConfirmed);
             return true;
         }
 

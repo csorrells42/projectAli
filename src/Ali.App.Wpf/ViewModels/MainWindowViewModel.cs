@@ -302,8 +302,15 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingChangeReceiptCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Change receipt", "semantic change receipt current feature", "Coding.ChangeReceipt"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingValidationChainCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation chain", "validation chain planner current feature", "Coding.ValidationChain"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingActiveWorkspaceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Active workspace", "active workspace project", "Coding.ActiveWorkspace"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingProjectControlCenterCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project control center", "project control center", "Coding.ProjectControlCenter"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingProjectMemoryCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project memory", "show project memory", "Coding.ProjectMemory"), () => !IsBusy && !IsRecording && !IsTranscribing);
         PickCodingSolutionCommand = CreateCommand(_ => BrowseCodingCurrentSolutionOrProject());
         StartNewCodingProjectCommand = CreateAsyncCommand(CreateCodingProjectAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBuildCurrentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build current", BuildConfirmedDotNetCommand("build"), "Coding.BuildCurrent"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingTestCurrentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Test current", BuildConfirmedDotNetCommand("test"), "Coding.TestCurrent"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingRunCurrentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Run current", BuildConfirmedDotNetCommand("run"), "Coding.RunCurrent"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        OpenCodingCurrentProjectFolderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Open project folder", "open current project folder", "Coding.OpenProjectFolder"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        OpenCodingCurrentProjectInVisualStudioCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Open in Visual Studio", "open solution", "Coding.OpenCurrentInVisualStudio"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingApplyPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply packet", "owner approved apply packet current feature", "Coding.ApplyPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingInsertionPlannerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Insertion plan", "roslyn insertion planner current feature", "Coding.InsertionPlanner"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingIntentDiffCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Intent diff", "intent diff composer current feature", "Coding.IntentDiff"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -471,6 +478,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<MemoryEntryViewModel> MemoryEntries { get; } = new();
 
     public ObservableCollection<ReminderEntryViewModel> ReminderEntries { get; } = new();
+
+    public ObservableCollection<string> CodingRecentSolutionOrProjectPaths { get; } = new();
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
@@ -831,9 +840,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingActiveWorkspaceCommand { get; }
 
+    public ICommand RunCodingProjectControlCenterCommand { get; }
+
+    public ICommand RunCodingProjectMemoryCommand { get; }
+
     public ICommand PickCodingSolutionCommand { get; }
 
     public ICommand StartNewCodingProjectCommand { get; }
+
+    public ICommand RunCodingBuildCurrentCommand { get; }
+
+    public ICommand RunCodingTestCurrentCommand { get; }
+
+    public ICommand RunCodingRunCurrentCommand { get; }
+
+    public ICommand OpenCodingCurrentProjectFolderCommand { get; }
+
+    public ICommand OpenCodingCurrentProjectInVisualStudioCommand { get; }
 
     public ICommand RunCodingApplyPacketCommand { get; }
 
@@ -1159,6 +1182,7 @@ public sealed class MainWindowViewModel : ObservableObject
             [
                 $"Workspace domain: {CodingWorkspaceRootText}",
                 $"Current solution/project: {DescribeConfiguredToolPath(CodingCurrentSolutionOrProjectPathText)}",
+                $"Recent solution/project targets: {CodingRecentSolutionOrProjectPaths.Count}",
                 $"Notepad++: {DescribeConfiguredToolPath(CodingNotepadPlusPlusPathText)}",
                 $"Visual Studio: {DescribeConfiguredToolPath(CodingVisualStudioPathText)}",
                 $"Read/open/search inside workspace: {CodingWorkspaceAccessMode}.",
@@ -2718,6 +2742,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             WorkspaceRoot = workspaceRoot,
             CurrentSolutionOrProjectPath = NormalizeOptionalCodingToolPath(CodingCurrentSolutionOrProjectPathText),
+            RecentSolutionOrProjectPaths = BuildRecentCodingTargetList(CodingCurrentSolutionOrProjectPathText, CodingRecentSolutionOrProjectPaths),
             AllowExplicitOutsideFileOpen = !CodingPermissionModes.IsDisabled(explicitOutsideFileOpenMode),
             WorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, CodingWorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false),
             ExplicitOutsideFileOpenMode = explicitOutsideFileOpenMode,
@@ -3122,6 +3147,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private string FindCodingDiagnosticTarget()
     {
+        if (CodingWorkspacePolicy.TryNormalizePath(CodingCurrentSolutionOrProjectPathText, out var selectedTarget)
+            && File.Exists(selectedTarget)
+            && IsDotNetTargetFile(selectedTarget))
+        {
+            return selectedTarget;
+        }
+
         var target = CodingWorkspaceRootText;
         if (!CodingWorkspacePolicy.TryNormalizePath(target, out var normalizedTarget))
         {
@@ -3909,6 +3941,15 @@ public sealed class MainWindowViewModel : ObservableObject
             "Primary solution/project:",
             "Project selection:",
             "How Ali uses it:",
+            "Project control center",
+            "Current target:",
+            "Target source:",
+            "Fast actions:",
+            "Wrong-project guard:",
+            "Recent targets:",
+            "Targeted validation:",
+            "Project memory",
+            "Notes:",
             "Owner-approved apply packet",
             "Packet confidence:",
             "Packet rows:",
@@ -4056,6 +4097,14 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Projects:",
             "- Default target:",
             "- Selection source:",
+            "- Build Current:",
+            "- Test Current:",
+            "- Run Current:",
+            "- Open in Visual Studio:",
+            "- Open Folder:",
+            "- Context Packet:",
+            "- Project Memory:",
+            "- Recent target:",
             "- App projects:",
             "- Test projects:",
             "- Ambiguity:",
@@ -4741,6 +4790,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         CodingWorkspaceRootText = settings.WorkspaceRoot;
         CodingCurrentSolutionOrProjectPathText = settings.CurrentSolutionOrProjectPath;
+        ReplaceChoices(CodingRecentSolutionOrProjectPaths, settings.RecentSolutionOrProjectPaths);
         CodingWorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, settings.WorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false);
         CodingExplicitOutsideFileOpenMode = settings.AllowExplicitOutsideFileOpen
             ? PickChoice(CodingExplicitOutsideFileOpenModeChoices, settings.ExplicitOutsideFileOpenMode, CodingPermissionModes.Allowed, resetToSmallest: false)
@@ -4834,6 +4884,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        var template = NormalizeCodingProjectTemplate(Microsoft.VisualBasic.Interaction.InputBox(
+            "Project type: console, library, wpf, webapi, test, or solution",
+            "Start new coding project",
+            "library"));
+
         if (!CodingWorkspacePolicy.TryNormalizePath(CodingWorkspaceRootText, out var workspaceRoot))
         {
             CodingPermissionsStatusText = "Choose a valid coding workspace before creating a project.";
@@ -4841,7 +4896,9 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         var projectDirectory = Path.Combine(workspaceRoot, safeName);
-        var projectPath = Path.Combine(projectDirectory, safeName + ".csproj");
+        var projectPath = template.Equals("solution", StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(projectDirectory, safeName + ".sln")
+            : Path.Combine(projectDirectory, safeName + ".csproj");
         if (Directory.Exists(projectDirectory) || File.Exists(projectPath))
         {
             CodingPermissionsStatusText = $"New project blocked: {projectDirectory} already exists.";
@@ -4849,33 +4906,10 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         Directory.CreateDirectory(projectDirectory);
-        await File.WriteAllTextAsync(
-            projectPath,
-            """
-            <Project Sdk="Microsoft.NET.Sdk">
-              <PropertyGroup>
-                <TargetFramework>net10.0</TargetFramework>
-                <ImplicitUsings>enable</ImplicitUsings>
-                <Nullable>enable</Nullable>
-              </PropertyGroup>
-            </Project>
-            """).ConfigureAwait(true);
-        await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "ProjectAnchor.cs"),
-            $$"""
-            namespace AliProjects;
-
-            public sealed class ProjectAnchor
-            {
-                public string ProjectName => "{{safeName}}";
-            }
-            """).ConfigureAwait(true);
-        await File.WriteAllTextAsync(
-            Path.Combine(projectDirectory, "README.md"),
-            $"# {safeName}{Environment.NewLine}{Environment.NewLine}Created by Ali as the current coding project.{Environment.NewLine}").ConfigureAwait(true);
+        await WriteCodingProjectTemplateAsync(projectDirectory, projectPath, safeName, template).ConfigureAwait(true);
 
         SetCurrentCodingSolutionOrProject(projectPath, save: true);
-        StatusText = $"Created and selected coding project: {safeName}.";
+        StatusText = $"Created and selected {template} coding project: {safeName}.";
     }
 
     private void SetCurrentCodingSolutionOrProject(string selectedPath, bool save)
@@ -4919,6 +4953,182 @@ public sealed class MainWindowViewModel : ObservableObject
         path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeCodingProjectTemplate(string rawTemplate)
+    {
+        var normalized = rawTemplate.Trim().ToLowerInvariant().Replace(" ", string.Empty, StringComparison.Ordinal);
+        return normalized switch
+        {
+            "console" or "consoleapp" => "console",
+            "wpf" or "desktop" or "desktopapp" => "wpf",
+            "web" or "webapi" or "api" => "webapi",
+            "test" or "tests" or "testproject" => "test",
+            "solution" or "blanksolution" or "sln" => "solution",
+            _ => "library"
+        };
+    }
+
+    private static async Task WriteCodingProjectTemplateAsync(
+        string projectDirectory,
+        string projectPath,
+        string safeName,
+        string template)
+    {
+        if (template.Equals("solution", StringComparison.OrdinalIgnoreCase))
+        {
+            await File.WriteAllTextAsync(
+                projectPath,
+                $$"""
+                Microsoft Visual Studio Solution File, Format Version 12.00
+                # Visual Studio Version 17
+                VisualStudioVersion = 17.0.31903.59
+                MinimumVisualStudioVersion = 10.0.40219.1
+                Global
+                EndGlobal
+                """).ConfigureAwait(true);
+            await WriteCodingProjectReadmeAsync(projectDirectory, safeName, template).ConfigureAwait(true);
+            return;
+        }
+
+        await File.WriteAllTextAsync(projectPath, BuildCodingProjectFile(template)).ConfigureAwait(true);
+        switch (template)
+        {
+            case "console":
+                await File.WriteAllTextAsync(
+                    Path.Combine(projectDirectory, "Program.cs"),
+                    $$"""
+                    Console.WriteLine("{{safeName}} is ready.");
+                    """).ConfigureAwait(true);
+                break;
+            case "wpf":
+                await WriteWpfStarterFilesAsync(projectDirectory, safeName).ConfigureAwait(true);
+                break;
+            case "webapi":
+                await File.WriteAllTextAsync(
+                    Path.Combine(projectDirectory, "Program.cs"),
+                    """
+                    var builder = WebApplication.CreateBuilder(args);
+                    var app = builder.Build();
+
+                    app.MapGet("/", () => Results.Ok(new { status = "ready" }));
+
+                    app.Run();
+                    """).ConfigureAwait(true);
+                break;
+            case "test":
+                await File.WriteAllTextAsync(
+                    Path.Combine(projectDirectory, "ProjectAnchorTests.cs"),
+                    $$"""
+                    namespace AliProjects;
+
+                    public sealed class ProjectAnchorTests
+                    {
+                        public string ProjectName => "{{safeName}}";
+                    }
+                    """).ConfigureAwait(true);
+                break;
+            default:
+                await File.WriteAllTextAsync(
+                    Path.Combine(projectDirectory, "ProjectAnchor.cs"),
+                    $$"""
+                    namespace AliProjects;
+
+                    public sealed class ProjectAnchor
+                    {
+                        public string ProjectName => "{{safeName}}";
+                    }
+                    """).ConfigureAwait(true);
+                break;
+        }
+
+        await WriteCodingProjectReadmeAsync(projectDirectory, safeName, template).ConfigureAwait(true);
+    }
+
+    private static string BuildCodingProjectFile(string template)
+    {
+        var sdk = template.Equals("webapi", StringComparison.OrdinalIgnoreCase)
+            ? "Microsoft.NET.Sdk.Web"
+            : "Microsoft.NET.Sdk";
+        var framework = template.Equals("wpf", StringComparison.OrdinalIgnoreCase)
+            ? "net10.0-windows"
+            : "net10.0";
+        var outputType = template is "console" or "wpf"
+            ? $"    <OutputType>{(template == "wpf" ? "WinExe" : "Exe")}</OutputType>{Environment.NewLine}"
+            : string.Empty;
+        var useWpf = template.Equals("wpf", StringComparison.OrdinalIgnoreCase)
+            ? $"    <UseWPF>true</UseWPF>{Environment.NewLine}"
+            : string.Empty;
+        var isTest = template.Equals("test", StringComparison.OrdinalIgnoreCase)
+            ? $"    <IsTestProject>true</IsTestProject>{Environment.NewLine}"
+            : string.Empty;
+
+        return $$"""
+        <Project Sdk="{{sdk}}">
+          <PropertyGroup>
+        {{outputType}}{{useWpf}}{{isTest}}    <TargetFramework>{{framework}}</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """;
+    }
+
+    private static async Task WriteWpfStarterFilesAsync(string projectDirectory, string safeName)
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "App.xaml"),
+            """
+            <Application x:Class="AliProjects.App"
+                         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                         StartupUri="MainWindow.xaml" />
+            """).ConfigureAwait(true);
+        await File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "App.xaml.cs"),
+            """
+            using System.Windows;
+
+            namespace AliProjects;
+
+            public partial class App : Application
+            {
+            }
+            """).ConfigureAwait(true);
+        await File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "MainWindow.xaml"),
+            $$"""
+            <Window x:Class="AliProjects.MainWindow"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    Title="{{safeName}}" Height="360" Width="640">
+                <Grid>
+                    <TextBlock Text="{{safeName}} is ready."
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                </Grid>
+            </Window>
+            """).ConfigureAwait(true);
+        await File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "MainWindow.xaml.cs"),
+            """
+            using System.Windows;
+
+            namespace AliProjects;
+
+            public partial class MainWindow : Window
+            {
+                public MainWindow()
+                {
+                    InitializeComponent();
+                }
+            }
+            """).ConfigureAwait(true);
+    }
+
+    private static Task WriteCodingProjectReadmeAsync(string projectDirectory, string safeName, string template) =>
+        File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "README.md"),
+            $"# {safeName}{Environment.NewLine}{Environment.NewLine}Created by Ali as a {template} coding project.{Environment.NewLine}");
 
     private static string BuildSafeCodingProjectName(string rawName)
     {
@@ -4990,6 +5200,17 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             return path.Trim().Trim('"');
         }
+    }
+
+    private static string[] BuildRecentCodingTargetList(string currentTarget, IEnumerable<string> existingTargets)
+    {
+        return new[] { currentTarget }
+            .Concat(existingTargets)
+            .Select(NormalizeOptionalCodingToolPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToArray();
     }
 
     private static string DescribeConfiguredToolPath(string path) =>
@@ -7672,9 +7893,44 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingActiveWorkspace.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingProjectControlCenterCommand is AsyncRelayCommand runCodingProjectControlCenter)
+        {
+            runCodingProjectControlCenter.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingProjectMemoryCommand is AsyncRelayCommand runCodingProjectMemory)
+        {
+            runCodingProjectMemory.RaiseCanExecuteChanged();
+        }
+
         if (StartNewCodingProjectCommand is AsyncRelayCommand startNewCodingProject)
         {
             startNewCodingProject.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingBuildCurrentCommand is AsyncRelayCommand runCodingBuildCurrent)
+        {
+            runCodingBuildCurrent.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingTestCurrentCommand is AsyncRelayCommand runCodingTestCurrent)
+        {
+            runCodingTestCurrent.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingRunCurrentCommand is AsyncRelayCommand runCodingRunCurrent)
+        {
+            runCodingRunCurrent.RaiseCanExecuteChanged();
+        }
+
+        if (OpenCodingCurrentProjectFolderCommand is AsyncRelayCommand openCodingCurrentProjectFolder)
+        {
+            openCodingCurrentProjectFolder.RaiseCanExecuteChanged();
+        }
+
+        if (OpenCodingCurrentProjectInVisualStudioCommand is AsyncRelayCommand openCodingCurrentProjectInVisualStudio)
+        {
+            openCodingCurrentProjectInVisualStudio.RaiseCanExecuteChanged();
         }
 
         if (RunCodingApplyPacketCommand is AsyncRelayCommand runCodingApplyPacket)

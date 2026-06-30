@@ -89,6 +89,16 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Opening the approved coding workspace is allowed.");
         }
 
+        if (request.Action == CodingToolAction.OpenCurrentProjectFolder)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Opening the selected coding project folder is allowed.");
+        }
+
+        if (request.Action == CodingToolAction.SaveCurrentProjectMemory)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Saving a local note for the selected coding project is allowed.");
+        }
+
         if (request.Action == CodingToolAction.ListWorkspace)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Listing the approved coding workspace is allowed.");
@@ -189,6 +199,8 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowSemanticChangeReceipt
             or CodingToolAction.ShowValidationChainPlanner
             or CodingToolAction.ShowActiveWorkspaceProject
+            or CodingToolAction.ShowProjectControlCenter
+            or CodingToolAction.ShowCurrentProjectMemory
             or CodingToolAction.ShowOwnerApprovedApplyPacket
             or CodingToolAction.ShowRoslynInsertionPlanner
             or CodingToolAction.ShowIntentDiffComposer

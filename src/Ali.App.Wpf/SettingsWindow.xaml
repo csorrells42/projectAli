@@ -1335,6 +1335,11 @@
                                            Foreground="{StaticResource SubtleTextBrush}"
                                            Margin="0,0,0,10" />
 
+                                <TextBlock Text="Recent solution/project targets" Style="{StaticResource FieldLabel}" />
+                                <ListBox ItemsSource="{Binding CodingRecentSolutionOrProjectPaths}"
+                                         MaxHeight="96"
+                                         Margin="0,2,0,10" />
+
                                 <TextBlock Text="PDF workspace folder" Style="{StaticResource FieldLabel}" />
                                 <Grid Margin="0,2,0,4">
                                     <Grid.ColumnDefinitions>

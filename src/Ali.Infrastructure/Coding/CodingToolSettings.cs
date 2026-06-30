@@ -9,6 +9,8 @@ public sealed record CodingToolSettings
 
     public string CurrentSolutionOrProjectPath { get; init; } = string.Empty;
 
+    public string[] RecentSolutionOrProjectPaths { get; init; } = [];
+
     public string PdfWorkspaceRoot { get; init; } = string.Empty;
 
     public bool AllowExplicitOutsideFileOpen { get; init; } = true;

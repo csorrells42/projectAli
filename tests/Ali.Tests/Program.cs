@@ -129,6 +129,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
     ("local coding tool shows full coding readiness scanners", TestLocalCodingToolShowsFullCodingReadinessScanners),
     ("local coding tool shows guided feature workflow", TestLocalCodingToolShowsGuidedFeatureWorkflow),
+    ("local coding tool shows project control center", TestLocalCodingToolShowsProjectControlCenter),
     ("programming dashboard exposes cockpit commands", TestProgrammingDashboardExposesCockpitCommands),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -519,6 +520,7 @@ static Task TestCodingSettingsSaveAndLoad()
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Projects");
     var currentProject = Path.Combine(workspace, "Demo", "Demo.csproj");
+    var recentProject = Path.Combine(workspace, "Other", "Other.csproj");
     var pdfWorkspace = Path.Combine(directory, "Pdfs");
     var notepadPlusPlus = Path.Combine(directory, "Tools", "Notepad++", "notepad++.exe");
     var visualStudio = Path.Combine(directory, "VS", "Common7", "IDE", "devenv.exe");
@@ -526,6 +528,7 @@ static Task TestCodingSettingsSaveAndLoad()
     {
         WorkspaceRoot = workspace,
         CurrentSolutionOrProjectPath = currentProject,
+        RecentSolutionOrProjectPaths = [currentProject, recentProject],
         PdfWorkspaceRoot = pdfWorkspace,
         AllowExplicitOutsideFileOpen = true,
         WorkspaceAccessMode = CodingPermissionModes.Allowed,
@@ -552,6 +555,8 @@ static Task TestCodingSettingsSaveAndLoad()
 
     Equal(workspace, loaded.WorkspaceRoot);
     Equal(currentProject, loaded.CurrentSolutionOrProjectPath);
+    Equal(2, loaded.RecentSolutionOrProjectPaths.Length);
+    Equal(recentProject, loaded.RecentSolutionOrProjectPaths[1]);
     Equal(pdfWorkspace, loaded.PdfWorkspaceRoot);
     Equal(true, loaded.AllowExplicitOutsideFileOpen);
     Equal(CodingPermissionModes.Allowed, loaded.WorkspaceAccessMode);
@@ -932,6 +937,15 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal("Save button", validationChainRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("which project are we working on", out var activeWorkspaceRequest));
     Equal(CodingToolAction.ShowActiveWorkspaceProject, activeWorkspaceRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("project control center", out var projectControlRequest));
+    Equal(CodingToolAction.ShowProjectControlCenter, projectControlRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show project memory", out var projectMemoryRequest));
+    Equal(CodingToolAction.ShowCurrentProjectMemory, projectMemoryRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("remember for this project uses CQRS naming", out var saveProjectMemoryRequest));
+    Equal(CodingToolAction.SaveCurrentProjectMemory, saveProjectMemoryRequest.Action);
+    Equal("uses CQRS naming", saveProjectMemoryRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("open current project folder", out var openCurrentProjectFolderRequest));
+    Equal(CodingToolAction.OpenCurrentProjectFolder, openCurrentProjectFolderRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("owner approved apply packet Save button", out var applyPacketRequest));
     Equal(CodingToolAction.ShowOwnerApprovedApplyPacket, applyPacketRequest.Action);
     Equal("Save button", applyPacketRequest.Query);
@@ -4040,6 +4054,89 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Contains("What Ali can do:", capabilityCard.Message);
 }
 
+static async Task TestLocalCodingToolShowsProjectControlCenter()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    var testDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(appDirectory);
+    Directory.CreateDirectory(testDirectory);
+    var appProject = Path.Combine(appDirectory, "Demo.App.csproj");
+    var testProject = Path.Combine(testDirectory, "Demo.Tests.csproj");
+    await File.WriteAllTextAsync(
+        appProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        testProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+            <IsTestProject>true</IsTestProject>
+          </PropertyGroup>
+        </Project>
+        """);
+    var launcher = new FakeCodingProcessLauncher();
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, "Build succeeded.", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        launcher,
+        runner,
+        configuredCurrentSolutionOrProjectPath: appProject,
+        configuredRecentSolutionOrProjectPaths: [appProject, testProject]);
+
+    var saveMemory = await service.TryHandleAsync("remember for this project uses CQRS naming", CancellationToken.None);
+    var memory = await service.TryHandleAsync("show project memory", CancellationToken.None);
+    var control = await service.TryHandleAsync("project control center", CancellationToken.None);
+    var context = await service.BuildContextPackAsync("fix current project", CancellationToken.None);
+    var build = await service.TryHandleAsync("confirm dotnet build", CancellationToken.None);
+    var folder = await service.TryHandleAsync("open current project folder", CancellationToken.None);
+
+    Equal(true, saveMemory.Handled);
+    Equal(true, saveMemory.Succeeded);
+    Contains("Project memory saved.", saveMemory.Message);
+    Contains("uses CQRS naming", saveMemory.Message);
+
+    Equal(true, memory.Handled);
+    Equal(true, memory.Succeeded);
+    Contains("Project memory v1", memory.Message);
+    Contains("uses CQRS naming", memory.Message);
+
+    Equal(true, control.Handled);
+    Equal(true, control.Succeeded);
+    Contains("Project control center v1", control.Message);
+    Contains("Current target: Demo.App", control.Message);
+    Contains("Target source: saved picker value", control.Message);
+    Contains("Build Current: confirm dotnet build", control.Message);
+    Contains("Wrong-project guard:", control.Message);
+    Contains("Recent targets:", control.Message);
+
+    Equal(true, context.HasContext);
+    Contains("Current solution/project: Demo.App", context.Text);
+    Contains("Current target source: saved picker value", context.Text);
+    Contains("Current project memory:", context.Text);
+    Contains("uses CQRS naming", context.Text);
+
+    Equal(true, build.Handled);
+    Equal(true, build.Succeeded);
+    Equal(true, runner.Runs.Any(run => run.FileName == "dotnet" && string.Join(" ", run.Arguments).Contains(appProject, StringComparison.OrdinalIgnoreCase)));
+
+    Equal(true, folder.Handled);
+    Equal(true, folder.Succeeded);
+    Equal(1, launcher.Starts.Count);
+    Equal("explorer.exe", launcher.Starts[0].FileName);
+    Equal(appDirectory, launcher.Starts[0].Arguments[0]);
+}
+
 static Task TestProgrammingDashboardExposesCockpitCommands()
 {
     var repository = new DirectoryInfo(AppContext.BaseDirectory);
@@ -4088,8 +4185,15 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Change Receipt", dashboard);
     Contains("Validation Chain", dashboard);
     Contains("Active Workspace", dashboard);
+    Contains("Project Center", dashboard);
+    Contains("Project Memory", dashboard);
     Contains("Pick Solution", dashboard);
     Contains("New Project", dashboard);
+    Contains("Build Current", dashboard);
+    Contains("Test Current", dashboard);
+    Contains("Run Current", dashboard);
+    Contains("Open VS", dashboard);
+    Contains("Open Folder", dashboard);
     Contains("Apply Packet", dashboard);
     Contains("Insert Plan", dashboard);
     Contains("Intent Diff", dashboard);
@@ -4124,8 +4228,15 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingChangeReceiptCommand", dashboard);
     Contains("RunCodingValidationChainCommand", dashboard);
     Contains("RunCodingActiveWorkspaceCommand", dashboard);
+    Contains("RunCodingProjectControlCenterCommand", dashboard);
+    Contains("RunCodingProjectMemoryCommand", dashboard);
     Contains("PickCodingSolutionCommand", dashboard);
     Contains("StartNewCodingProjectCommand", dashboard);
+    Contains("RunCodingBuildCurrentCommand", dashboard);
+    Contains("RunCodingTestCurrentCommand", dashboard);
+    Contains("RunCodingRunCurrentCommand", dashboard);
+    Contains("OpenCodingCurrentProjectInVisualStudioCommand", dashboard);
+    Contains("OpenCodingCurrentProjectFolderCommand", dashboard);
     Contains("RunCodingApplyPacketCommand", dashboard);
     Contains("RunCodingInsertionPlannerCommand", dashboard);
     Contains("RunCodingIntentDiffCommand", dashboard);
@@ -4195,12 +4306,23 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("validation chain planner current feature", viewModel);
     Contains("RunCodingActiveWorkspaceCommand = CreateAsyncCommand", viewModel);
     Contains("active workspace project", viewModel);
+    Contains("RunCodingProjectControlCenterCommand = CreateAsyncCommand", viewModel);
+    Contains("project control center", viewModel);
+    Contains("RunCodingProjectMemoryCommand = CreateAsyncCommand", viewModel);
+    Contains("show project memory", viewModel);
     Contains("PickCodingSolutionCommand = CreateCommand", viewModel);
     Contains("StartNewCodingProjectCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingBuildCurrentCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingTestCurrentCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingRunCurrentCommand = CreateAsyncCommand", viewModel);
+    Contains("OpenCodingCurrentProjectFolderCommand = CreateAsyncCommand", viewModel);
+    Contains("OpenCodingCurrentProjectInVisualStudioCommand = CreateAsyncCommand", viewModel);
     Contains("BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand", viewModel);
     Contains("CreateCodingProjectCommand = CreateAsyncCommand", viewModel);
     Contains("CodingCurrentSolutionOrProjectPathText", viewModel);
     Contains("CurrentSolutionOrProjectPath", viewModel);
+    Contains("RecentSolutionOrProjectPaths", viewModel);
+    Contains("Project type: console, library, wpf, webapi, test, or solution", viewModel);
     Contains("RunCodingApplyPacketCommand = CreateAsyncCommand", viewModel);
     Contains("owner approved apply packet current feature", viewModel);
     Contains("RunCodingInsertionPlannerCommand = CreateAsyncCommand", viewModel);
@@ -4242,6 +4364,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("CompactCodingCockpitLines", viewModel);
     Contains("Use the cockpit row", viewModel);
     Contains("Current solution or project", settings);
+    Contains("Recent solution/project targets", settings);
+    Contains("CodingRecentSolutionOrProjectPaths", settings);
     Contains("CodingCurrentSolutionOrProjectPathText", settings);
     Contains("BrowseCodingCurrentSolutionOrProjectCommand", settings);
     Contains("CreateCodingProjectCommand", settings);
