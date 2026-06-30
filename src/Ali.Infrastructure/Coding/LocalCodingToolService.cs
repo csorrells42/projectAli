@@ -14334,6 +14334,10 @@ public sealed class LocalCodingToolService(
                                       AutoGenerateColumns="False"
                                       IsReadOnly="True"
                                       EnableRowVirtualization="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      ScrollViewer.CanContentScroll="True"
+                                      ScrollViewer.IsDeferredScrollingEnabled="True"
                                       RowDetailsVisibilityMode="VisibleWhenSelected"
                                       CanUserAddRows="False">
                                 <DataGrid.GroupStyle>
@@ -14393,7 +14397,10 @@ public sealed class LocalCodingToolService(
                         </Grid>
                     </DataTemplate>
                     <DataTemplate DataType="{x:Type local:ActivityDashboardViewModel}">
-                        <ListBox ItemsSource="{Binding Activity}" />
+                        <ListBox ItemsSource="{Binding Activity}"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 ScrollViewer.CanContentScroll="True" />
                     </DataTemplate>
                     <DataTemplate DataType="{x:Type local:SettingsDashboardViewModel}">
                         <StackPanel>
@@ -14483,7 +14490,11 @@ public sealed class LocalCodingToolService(
                         </Grid.ColumnDefinitions>
 
                         <GroupBox Header="Navigation" Style="{StaticResource DashboardPaneGroupBoxStyle}">
-                            <TreeView x:Name="NavigationTreeView" ItemsSource="{Binding NavigationItems}">
+                            <TreeView x:Name="NavigationTreeView"
+                                      ItemsSource="{Binding NavigationItems}"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      ScrollViewer.CanContentScroll="True">
                                 <TreeView.ItemContainerStyle>
                                     <Style TargetType="TreeViewItem">
                                         <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
