@@ -636,9 +636,12 @@ public sealed class LocalCodingToolService(
             return Task.FromResult(CodingTaskPlan.Empty);
         }
 
-        var goal = string.IsNullOrWhiteSpace(userText)
+        var rawGoal = string.IsNullOrWhiteSpace(userText)
             ? "coding task"
             : userText.Trim();
+        var currentCodingSession = ReadCurrentCodingSession();
+        var isActiveTaskFollowUp = currentCodingSession is not null && MentionsCurrentCodingTaskFollowUp(rawGoal);
+        var goal = isActiveTaskFollowUp ? currentCodingSession!.Goal : rawGoal;
         var taskKind = ClassifyCodingTask(goal);
         var riskPreview = BuildCodingTaskRiskPreview(goal);
         var wantsEdit = MentionsAny(goal, "add", "change", "edit", "fix", "implement", "modify", "patch", "repair", "update", "write");
@@ -659,6 +662,11 @@ public sealed class LocalCodingToolService(
                 ? "- Read-only project context: workspace map, package references, and relevant files are available."
                 : "- Read-only project context: not available yet."
         };
+        if (isActiveTaskFollowUp)
+        {
+            lines.Add($"Active task follow-up: {rawGoal}");
+            lines.Add($"Active task status: {currentCodingSession!.Status}");
+        }
 
         var primaryTarget = GetPrimaryTarget();
         if (!string.IsNullOrWhiteSpace(primaryTarget))

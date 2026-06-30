@@ -4197,6 +4197,7 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     var start = await service.TryHandleAsync("start coding session add export button", CancellationToken.None);
     var current = await service.TryHandleAsync("current coding task", CancellationToken.None);
     var followUpContext = await service.BuildContextPackAsync("keep going", CancellationToken.None);
+    var followUpPlan = await service.BuildTaskPlanAsync("what's next?", followUpContext, CancellationToken.None);
     var defaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
     var saveDefaults = await service.TryHandleAsync("save project command defaults build=custom build; test=custom test; run=custom run", CancellationToken.None);
     var savedDefaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
@@ -4229,6 +4230,11 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     Contains("Likely files:", followUpContext.Text);
     Contains("Build command:", followUpContext.Text);
     Contains("Continue command: continue current task", followUpContext.Text);
+
+    Equal(true, followUpPlan.HasPlan);
+    Contains("Goal: add export button", followUpPlan.Text);
+    Contains("Active task follow-up: what's next?", followUpPlan.Text);
+    Contains("Active task status: planning", followUpPlan.Text);
 
     Equal(true, defaults.Handled);
     Equal(true, defaults.Succeeded);
