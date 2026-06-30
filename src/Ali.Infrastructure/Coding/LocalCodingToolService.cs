@@ -14445,6 +14445,8 @@ public sealed class LocalCodingToolService(
                         <MenuItem Header="Overview" />
                         <MenuItem Header="Activity" />
                         <Separator />
+                        <MenuItem Header="_Toggle theme" Command="{Binding ToggleThemeCommand}" />
+                        <Separator />
                         <MenuItem Header="_Focus details" Command="{x:Static local:MainWindow.FocusDetailsCommand}" />
                     </MenuItem>
                 </Menu>
@@ -14471,6 +14473,7 @@ public sealed class LocalCodingToolService(
                     <Border Style="{StaticResource DashboardHeaderCardStyle}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="{Binding ThemeButtonText}" Command="{Binding ToggleThemeCommand}" Margin="0,0,8,0" />
                                 <Button Content="Refresh" Command="{Binding RefreshCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
                                 <Button Content="Cancel" Margin="8,0,0,0" Command="{Binding CancelRefreshCommand}" />
                             </StackPanel>
@@ -14795,6 +14798,7 @@ public sealed class LocalCodingToolService(
             $$"""
             using System.Windows;
             using System.Windows.Input;
+            using System.Windows.Media;
 
             {{namespaceLine}}public partial class MainWindow : Window
             {
@@ -14807,7 +14811,7 @@ public sealed class LocalCodingToolService(
                 public MainWindow()
                 {
                     InitializeComponent();
-                    DataContext = new MainWindowViewModel(new DashboardDialogService(this));
+                    DataContext = new MainWindowViewModel(new DashboardDialogService(this), new DashboardThemeService(this));
                 }
 
                 private void FocusDetailsCommand_CanExecute(object sender, CanExecuteRoutedEventArgs e)
@@ -14834,6 +14838,25 @@ public sealed class LocalCodingToolService(
 
                 public bool Confirm(DashboardDialogRequest request) =>
                     MessageBox.Show(_owner, request.Message, request.Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
+            }
+
+            public sealed class DashboardThemeService : IDashboardThemeService
+            {
+                private readonly FrameworkElement _owner;
+
+                public DashboardThemeService(FrameworkElement owner)
+                {
+                    _owner = owner;
+                }
+
+                public void ApplyTheme(DashboardThemePalette palette)
+                {
+                    _owner.Resources["DashboardHeaderBrush"] = new SolidColorBrush(palette.Header);
+                    _owner.Resources["DashboardHeaderForegroundBrush"] = new SolidColorBrush(palette.HeaderForeground);
+                    _owner.Resources["DashboardSubtleForegroundBrush"] = new SolidColorBrush(palette.SubtleForeground);
+                    _owner.Resources["DashboardAccentBrush"] = new SolidColorBrush(palette.Accent);
+                    _owner.Resources["DashboardAccentHoverBrush"] = new SolidColorBrush(palette.AccentHover);
+                }
             }
             """;
     }
@@ -15110,18 +15133,18 @@ public sealed class LocalCodingToolService(
             <Style x:Key="DashboardHeaderCardStyle" TargetType="Border">
                 <Setter Property="Padding" Value="14" />
                 <Setter Property="Margin" Value="0,0,0,12" />
-                <Setter Property="Background" Value="{StaticResource DashboardHeaderBrush}" />
+                <Setter Property="Background" Value="{DynamicResource DashboardHeaderBrush}" />
                 <Setter Property="CornerRadius" Value="4" />
             </Style>
 
             <Style x:Key="DashboardHeaderTextStyle" TargetType="TextBlock">
                 <Setter Property="FontSize" Value="24" />
                 <Setter Property="FontWeight" Value="SemiBold" />
-                <Setter Property="Foreground" Value="{StaticResource DashboardHeaderForegroundBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource DashboardHeaderForegroundBrush}" />
             </Style>
 
             <Style x:Key="DashboardSubtleTextStyle" TargetType="TextBlock">
-                <Setter Property="Foreground" Value="{StaticResource DashboardSubtleForegroundBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource DashboardSubtleForegroundBrush}" />
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
 
@@ -15134,13 +15157,13 @@ public sealed class LocalCodingToolService(
                 <Setter Property="MinWidth" Value="92" />
                 <Setter Property="Height" Value="34" />
                 <Setter Property="Padding" Value="12,0" />
-                <Setter Property="Background" Value="{StaticResource DashboardAccentBrush}" />
+                <Setter Property="Background" Value="{DynamicResource DashboardAccentBrush}" />
                 <Setter Property="Foreground" Value="White" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="{StaticResource DashboardAccentHoverBrush}" />
+                        <Setter Property="Background" Value="{DynamicResource DashboardAccentHoverBrush}" />
                     </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
                         <Setter Property="Opacity" Value="0.55" />
@@ -15245,6 +15268,7 @@ public sealed class LocalCodingToolService(
             {
                 private readonly Dictionary<string, List<string>> _errors = new();
                 private readonly IDashboardDialogService _dialogService;
+                private readonly IDashboardThemeService _themeService;
                 private string _newItemName = string.Empty;
                 private string _newItemError = string.Empty;
                 private string _searchText = string.Empty;
@@ -15262,15 +15286,19 @@ public sealed class LocalCodingToolService(
                 private string _selectedItemOwner = string.Empty;
                 private string _selectedItemStatus = string.Empty;
                 private string _statusText = "Ready";
+                private bool _isDarkTheme = true;
+                private string _themeButtonText = "Light Theme";
 
-                public MainWindowViewModel(IDashboardDialogService? dialogService = null)
+                public MainWindowViewModel(IDashboardDialogService? dialogService = null, IDashboardThemeService? themeService = null)
                 {
                     _dialogService = dialogService ?? new NullDashboardDialogService();
+                    _themeService = themeService ?? new NullDashboardThemeService();
                     ItemsView = CollectionViewSource.GetDefaultView(Items);
                     ItemsView.Filter = FilterItem;
                     ConfigureItemsView();
                     RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
+                    ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
                     ApplySelectedItemCommand = new RelayCommand(_ => ApplySelectedItem(), _ => CanApplySelectedItem());
                     MarkItemReadyCommand = new RelayCommand(parameter => MarkItemStatus(parameter, "Ready"), parameter => CanMarkItemStatus(parameter, "Ready"));
@@ -15281,6 +15309,7 @@ public sealed class LocalCodingToolService(
                     SettingsView = new SettingsDashboardViewModel();
                     SeedNavigation();
                     SeedDashboard();
+                    _themeService.ApplyTheme(DashboardThemePalette.Dark);
                 }
 
                 public event PropertyChangedEventHandler? PropertyChanged;
@@ -15310,6 +15339,8 @@ public sealed class LocalCodingToolService(
                 public ICommand RefreshCommand { get; }
 
                 public ICommand CancelRefreshCommand { get; }
+
+                public ICommand ToggleThemeCommand { get; }
 
                 public ICommand AddItemCommand { get; }
 
@@ -15475,6 +15506,18 @@ public sealed class LocalCodingToolService(
                     private set => SetField(ref _statusText, value);
                 }
 
+                public bool IsDarkTheme
+                {
+                    get => _isDarkTheme;
+                    private set => SetField(ref _isDarkTheme, value);
+                }
+
+                public string ThemeButtonText
+                {
+                    get => _themeButtonText;
+                    private set => SetField(ref _themeButtonText, value);
+                }
+
                 private void SeedNavigation()
                 {
                     NavigationItems.Clear();
@@ -15596,6 +15639,16 @@ public sealed class LocalCodingToolService(
                 }
 
                 private void CancelRefresh() => _refreshCancellation?.Cancel();
+
+                private void ToggleTheme()
+                {
+                    IsDarkTheme = !IsDarkTheme;
+                    _themeService.ApplyTheme(IsDarkTheme ? DashboardThemePalette.Dark : DashboardThemePalette.Light);
+                    ThemeButtonText = IsDarkTheme ? "Light Theme" : "Dark Theme";
+                    var themeName = IsDarkTheme ? "Dark" : "Light";
+                    Activity.Insert(0, $"{themeName} theme applied.");
+                    StatusText = $"{themeName} theme applied";
+                }
 
                 public IEnumerable GetErrors(string? propertyName)
                 {
@@ -16232,6 +16285,40 @@ public sealed class LocalCodingToolService(
             public sealed class NullDashboardDialogService : IDashboardDialogService
             {
                 public bool Confirm(DashboardDialogRequest request) => true;
+            }
+
+            public interface IDashboardThemeService
+            {
+                void ApplyTheme(DashboardThemePalette palette);
+            }
+
+            public sealed class NullDashboardThemeService : IDashboardThemeService
+            {
+                public void ApplyTheme(DashboardThemePalette palette)
+                {
+                }
+            }
+
+            public sealed record DashboardThemePalette(
+                Color Header,
+                Color HeaderForeground,
+                Color SubtleForeground,
+                Color Accent,
+                Color AccentHover)
+            {
+                public static DashboardThemePalette Dark { get; } = new(
+                    Color.FromRgb(0x20, 0x2A, 0x36),
+                    Color.FromRgb(0xFF, 0xFF, 0xFF),
+                    Color.FromRgb(0xC8, 0xD2, 0xDF),
+                    Color.FromRgb(0x1F, 0x6F, 0xEB),
+                    Color.FromRgb(0x2F, 0x81, 0xF7));
+
+                public static DashboardThemePalette Light { get; } = new(
+                    Color.FromRgb(0xF6, 0xF8, 0xFA),
+                    Color.FromRgb(0x1F, 0x23, 0x28),
+                    Color.FromRgb(0x57, 0x66, 0x75),
+                    Color.FromRgb(0x09, 0x68, 0xDA),
+                    Color.FromRgb(0x1F, 0x6F, 0xEB));
             }
 
             public sealed class DashboardSelectionSummaryConverter : IMultiValueConverter
