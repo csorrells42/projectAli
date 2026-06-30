@@ -14264,6 +14264,7 @@ public sealed class LocalCodingToolService(
                         <ResourceDictionary Source="AliDashboardStyles.xaml" />
                     </ResourceDictionary.MergedDictionaries>
                     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+                    <local:DashboardStatusBrushConverter x:Key="DashboardStatusBrushConverter" />
                     <DataTemplate x:Key="DashboardDetailTemplate">
                         <local:DashboardDetailCard />
                     </DataTemplate>
@@ -14300,7 +14301,20 @@ public sealed class LocalCodingToolService(
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
                                     <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
-                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
+                                    <DataGridTemplateColumn Header="Status" Width="*">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Border Padding="8,2"
+                                                        CornerRadius="8"
+                                                        HorizontalAlignment="Left">
+                                                    <Border.Background>
+                                                        <Binding Path="Status" Converter="{StaticResource DashboardStatusBrushConverter}" />
+                                                    </Border.Background>
+                                                    <TextBlock Text="{Binding Status}" Foreground="White" FontWeight="SemiBold" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
                         </Grid>
@@ -14935,11 +14949,13 @@ public sealed class LocalCodingToolService(
             using System.Collections.Generic;
             using System.Collections.ObjectModel;
             using System.ComponentModel;
+            using System.Globalization;
             using System.Runtime.CompilerServices;
             using System.Threading;
             using System.Threading.Tasks;
             using System.Windows.Data;
             using System.Windows.Input;
+            using System.Windows.Media;
 
             {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
             {
@@ -15600,6 +15616,32 @@ public sealed class LocalCodingToolService(
             public sealed class NullDashboardDialogService : IDashboardDialogService
             {
                 public bool Confirm(DashboardDialogRequest request) => true;
+            }
+
+            public sealed class DashboardStatusBrushConverter : IValueConverter
+            {
+                public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+                {
+                    var status = value?.ToString() ?? string.Empty;
+                    if (status.Equals("Ready", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Brushes.SeaGreen;
+                    }
+
+                    if (status.Equals("Review", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Brushes.DarkOrange;
+                    }
+
+                    if (status.Equals("Draft", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Brushes.SlateBlue;
+                    }
+
+                    return Brushes.DimGray;
+                }
+
+                public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
             }
             """;
     }
