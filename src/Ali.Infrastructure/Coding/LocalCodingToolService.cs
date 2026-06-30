@@ -14266,7 +14266,7 @@ public sealed class LocalCodingToolService(
                     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
                     <local:DashboardStatusBrushConverter x:Key="DashboardStatusBrushConverter" />
                     <DataTemplate x:Key="DashboardDetailTemplate">
-                        <local:DashboardDetailCard />
+                        <local:DashboardDetailCard Item="{Binding}" />
                     </DataTemplate>
                     <DataTemplate DataType="{x:Type local:OverviewDashboardViewModel}">
                         <Grid>
@@ -14881,6 +14881,7 @@ public sealed class LocalCodingToolService(
         return
             $$"""
             <UserControl x:Class="{{controlClass}}"
+                         x:Name="Root"
                          xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                          MinHeight="130">
@@ -14895,14 +14896,14 @@ public sealed class LocalCodingToolService(
                 <Border Style="{StaticResource DashboardDetailCardStyle}">
                     <StackPanel>
                         <TextBlock Text="Selected item" FontWeight="SemiBold" Margin="0,0,0,8" />
-                        <TextBlock Text="{Binding Name, TargetNullValue=No item selected}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Item.Name, ElementName=Root, TargetNullValue=No item selected}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
                         <TextBlock Margin="0,8,0,0">
                             <Run Text="Owner: " />
-                            <Run Text="{Binding Owner, TargetNullValue=none}" />
+                            <Run Text="{Binding Item.Owner, ElementName=Root, TargetNullValue=none}" />
                         </TextBlock>
                         <TextBlock Margin="0,4,0,0">
                             <Run Text="Status: " />
-                            <Run Text="{Binding Status, TargetNullValue=none}" />
+                            <Run Text="{Binding Item.Status, ElementName=Root, TargetNullValue=none}" />
                         </TextBlock>
                     </StackPanel>
                 </Border>
@@ -14917,13 +14918,27 @@ public sealed class LocalCodingToolService(
             : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
         return
             $$"""
+            using System.Windows;
             using System.Windows.Controls;
 
             {{namespaceLine}}public partial class DashboardDetailCard : UserControl
             {
+                public static readonly DependencyProperty ItemProperty =
+                    DependencyProperty.Register(
+                        nameof(Item),
+                        typeof(MainWindowViewModel.DashboardItem),
+                        typeof(DashboardDetailCard),
+                        new PropertyMetadata(null));
+
                 public DashboardDetailCard()
                 {
                     InitializeComponent();
+                }
+
+                public MainWindowViewModel.DashboardItem? Item
+                {
+                    get => (MainWindowViewModel.DashboardItem?)GetValue(ItemProperty);
+                    set => SetValue(ItemProperty, value);
                 }
             }
             """;
