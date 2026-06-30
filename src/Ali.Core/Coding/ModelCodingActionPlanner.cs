@@ -81,6 +81,7 @@ public sealed class ModelCodingActionPlanner(ILocalModelRuntime runtime) : ICodi
             "- New build/change request: build this for me <goal>.",
             "- Clarify target/project: active workspace project, feature work context <goal>, or feature intake <goal>.",
             "- Plan and target edits: autonomous feature orchestrator <goal>, roslyn edit planner <goal>, multi-file patch synthesis <goal>.",
+            "- Starter app requests: for simple console or WPF apps, use build this for me <goal>; the patch lane can preview starter code for console calculators, guessing games, todo/list/file-backed apps, and WPF hello/counter/calculator/greeting/todo windows before owner apply.",
             "- Draft/preview patch: feature patch draft <goal>, exact patch synthesis <goal>, preview synthesized feature patch <goal>, preview guided feature bundle <goal>.",
             "- Apply only after owner confirmation: confirm apply last patch preview.",
             "- Validate after edits: post patch validation <goal>, validation command minimizer <goal>, validation chain planner <goal>.",

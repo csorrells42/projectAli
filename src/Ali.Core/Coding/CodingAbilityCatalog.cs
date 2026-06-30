@@ -33,6 +33,7 @@ public static class CodingAbilityCatalog
         "autonomous feature orchestrator <goal>",
         "roslyn edit planner <goal>",
         "multi-file patch synthesis <goal>",
+        "preview synthesized feature patch <goal>",
         "concrete patch authoring <goal>",
         "patch body generator <goal>",
         "patch confidence score <goal>",
@@ -132,6 +133,7 @@ public static class CodingAbilityCatalog
             [
                 new("Patch bundle", "preview patch bundle"),
                 new("Patch synthesis v2", "multi-file patch synthesis <goal>"),
+                new("Starter app preview", "preview synthesized feature patch <goal>"),
                 new("Concrete patch authoring", "concrete patch authoring <goal>"),
                 new("Patch body", "patch body generator <goal>"),
                 new("Patch confidence", "patch confidence score <goal>"),
@@ -454,7 +456,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, create simple console and WPF starter apps, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");
