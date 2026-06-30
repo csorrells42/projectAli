@@ -37,6 +37,7 @@ public sealed class LocalCodingToolService(
     private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
     private const int MaxPatchBundleEdits = 8;
+    private const int MaxValidationRepairPreviewAttempts = 2;
     private const int MaxWorkspaceSummaryEntries = 20;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(60);
@@ -132,6 +133,7 @@ public sealed class LocalCodingToolService(
     private CodingToolRequest? _lastPatchPreviewRequest;
     private FeaturePatchSynthesis? _lastFeaturePatchSynthesis;
     private string? _lastFeatureBuildGoal;
+    private int _validationRepairPreviewAttempts;
     private bool _pendingPatchPreviewLoaded;
     private CodingToolRequest? _lastRoadmapRequest;
     private bool _lastRoadmapApproved;
@@ -294,6 +296,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.PreviewSynthesizedFeaturePatch => await PreviewSynthesizedFeaturePatchAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowAutonomousPatchLoop => await ShowAutonomousPatchLoopAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowFeatureSessionLedger => await ShowFeatureSessionLedgerAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowValidationRepairRunner => await ShowValidationRepairRunnerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPlainEnglishFeatureBuilder => await ShowPlainEnglishFeatureBuilderAsync(request, cancellationToken).ConfigureAwait(false),
@@ -4284,18 +4287,18 @@ public sealed class LocalCodingToolService(
             return "locked file";
         }
 
-        if (message.Contains("NU", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("restore", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("package", StringComparison.OrdinalIgnoreCase))
-        {
-            return "restore/package";
-        }
-
         if (message.Contains("CS", StringComparison.OrdinalIgnoreCase)
             || message.Contains("compiler", StringComparison.OrdinalIgnoreCase)
             || message.Contains("error", StringComparison.OrdinalIgnoreCase) && message.Contains(".cs", StringComparison.OrdinalIgnoreCase))
         {
             return "compiler";
+        }
+
+        if (Regex.IsMatch(message, @"\bNU\d{4}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            || message.Contains("restore", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("package", StringComparison.OrdinalIgnoreCase))
+        {
+            return "restore/package";
         }
 
         if (message.Contains("test", StringComparison.OrdinalIgnoreCase)
@@ -8554,6 +8557,114 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature session ledger", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowValidationRepairRunnerAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
+        var context = await BuildFeatureWorkContextAsync(request with { Query = goal }, cancellationToken).ConfigureAwait(false);
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        if (_lastDotNetRequest is null || _lastDotNetResult is null)
+        {
+            var waitingLines = new List<string>
+            {
+                "Validation repair runner v1:",
+                "No files were changed.",
+                $"Goal: {goal}",
+                "Stage: Waiting for failed validation evidence.",
+                "Latest validation: none loaded in this session.",
+                $"Git: {gitStatus.Summary}",
+                "Repair steps:",
+                "- 1. Run the targeted build or test through the normal confirmation gate.",
+                "- 2. If it fails, return here to map the first useful diagnostic.",
+                "- 3. Keep any patch behind preview/apply confirmation.",
+                $"Next command: {BuildValidationRepairRetryCommand(context.TestTarget.Command, goal)}"
+            };
+            return new CodingToolResult(true, true, string.Join(Environment.NewLine, waitingLines), "Validation repair runner", Policy.WorkspaceRoot);
+        }
+
+        if (_lastDotNetResult.Succeeded)
+        {
+            var goodLines = new List<string>
+            {
+                "Validation repair runner v1:",
+                "No files were changed.",
+                $"Goal: {goal}",
+                $"Stage: No active failure - {_lastDotNetRequest.Action} passed.",
+                latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+                $"Git: {gitStatus.Summary}",
+                "Repair steps:",
+                "- 1. No repair is needed for the latest validation command.",
+                "- 2. Review current changes if any files are still modified.",
+                "- 3. Finish with the feature session ledger and safe commit check.",
+                "Next command: feature session ledger " + goal
+            };
+            return new CodingToolResult(true, true, string.Join(Environment.NewLine, goodLines), "Validation repair runner", _lastDotNetResult.TargetPath ?? Policy.WorkspaceRoot);
+        }
+
+        var action = _lastDotNetRequest.Action;
+        var output = _lastDotNetResult.Message;
+        var failureType = ClassifyFailureMessage(output);
+        var diagnostics = ExtractStructuredDiagnostics(action, output, 12);
+        var primaryDiagnostic = (diagnostics.FirstOrDefault()
+            ?? SplitNonEmptyLines(output).FirstOrDefault()
+            ?? "no structured diagnostic captured").TrimStart('-', ' ');
+        var parsed = ParseCompilerDiagnostic(primaryDiagnostic);
+        var absolutePath = string.IsNullOrWhiteSpace(parsed.Path) ? null : ToAbsoluteWorkspacePath(parsed.Path);
+        var symbolContext = absolutePath is not null && File.Exists(absolutePath)
+            ? FindEnclosingSymbolAtLine(absolutePath, parsed.LineNumber)
+            : null;
+        var testQuery = BuildDiagnosticTestQuery(parsed, absolutePath, symbolContext);
+        var testTarget = await ResolveTestTargetRecommendationAsync(testQuery, cancellationToken).ConfigureAwait(false);
+        var candidates = BuildDiagnosticFixCandidates(parsed, primaryDiagnostic, absolutePath, symbolContext, testTarget);
+        var previewRows = new List<string>();
+        var previewAttempted = false;
+        if (_lastPatchPreviewRequest is null
+            && ShouldAttemptDeterministicRepairPreview(output)
+            && _validationRepairPreviewAttempts < MaxValidationRepairPreviewAttempts)
+        {
+            previewAttempted = true;
+            var preview = await SuggestLastFailurePatchAsync(cancellationToken).ConfigureAwait(false);
+            if (preview.Succeeded)
+            {
+                _validationRepairPreviewAttempts++;
+                LoadPendingPatchPreviewIfNeeded();
+                previewRows.Add("Preview: Good - deterministic repair preview is pending.");
+                AddSelectedLines(previewRows, preview.Message, 4, "Diagnostic:", "To apply this pending preview", "Replacement:", "+");
+            }
+            else
+            {
+                previewRows.Add("Preview: Review - deterministic repair preview was not stored.");
+                AddSelectedLines(previewRows, preview.Message, 3, "Reason:", "No deterministic", "Next -");
+            }
+        }
+
+        var retryCommand = BuildValidationRepairRetryCommand(_lastDotNetRequest, _lastDotNetResult, testTarget, context);
+        var lines = new List<string>
+        {
+            "Validation repair runner v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            $"Stage: {BuildValidationRepairStage(failureType, _lastPatchPreviewRequest is not null, previewAttempted)}",
+            $"Failure type: {failureType}",
+            $"Failed action: {action}",
+            $"Failed target: {_lastDotNetResult.TargetPath ?? _lastDotNetRequest.Path ?? Policy.WorkspaceRoot}",
+            $"Retry budget: {_validationRepairPreviewAttempts}/{MaxValidationRepairPreviewAttempts} deterministic preview(s) used.",
+            _lastPatchPreviewRequest is null ? "Pending preview: none" : $"Pending preview: {_lastPatchPreviewRequest.Action}",
+            "Repair focus:"
+        };
+        lines.AddRange(BuildValidationRepairFocusRows(context, primaryDiagnostic, parsed, absolutePath, symbolContext).Select(row => $"- {row}"));
+        lines.Add("Likely fix candidates:");
+        lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates.Select(FormatDiagnosticFixCandidate));
+        lines.Add("Repair steps:");
+        lines.AddRange(BuildValidationRepairStepRows(failureType, primaryDiagnostic, retryCommand).Select(row => $"- {row}"));
+        lines.Add("Preview attempt:");
+        lines.AddRange(previewRows.Count == 0 ? ["- Not attempted - no deterministic preview candidate or a preview is already pending."] : previewRows.Select(row => $"- {row}"));
+        lines.Add($"Next command: {BuildValidationRepairNextCommand(failureType, primaryDiagnostic, retryCommand)}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation repair runner", absolutePath ?? _lastDotNetResult.TargetPath ?? Policy.WorkspaceRoot, parsed.LineNumber);
+    }
+
     private async Task<CodingToolResult> ShowPostPatchValidationRouterAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
@@ -9539,6 +9650,177 @@ public sealed class LocalCodingToolService(
             or nameof(CodingToolAction.ReviewCurrentChanges)
             or nameof(CodingToolAction.GitAdd)
             or nameof(CodingToolAction.GitCommit);
+
+    private static bool ShouldAttemptDeterministicRepairPreview(string output) =>
+        output.Contains("CS1002", StringComparison.OrdinalIgnoreCase)
+            && output.Contains("; expected", StringComparison.OrdinalIgnoreCase)
+        || output.Contains("CS1513", StringComparison.OrdinalIgnoreCase)
+            && output.Contains("} expected", StringComparison.OrdinalIgnoreCase);
+
+    private string BuildValidationRepairStage(string failureType, bool hasPendingPreview, bool previewAttempted)
+    {
+        if (hasPendingPreview)
+        {
+            return previewAttempted ? "Deterministic preview prepared" : "Awaiting owner apply";
+        }
+
+        return failureType switch
+        {
+            "locked file" => "Diagnose file lock",
+            "restore/package" => "Repair restore or package state",
+            "compiler" => "Map compiler diagnostic",
+            "test" => "Repair failing test behavior",
+            "missing sdk/tool" => "Repair SDK or tool setup",
+            _ => "Classify validation failure"
+        };
+    }
+
+    private IReadOnlyList<string> BuildValidationRepairFocusRows(
+        FeatureWorkContext context,
+        string primaryDiagnostic,
+        CompilerDiagnosticInfo parsed,
+        string? absolutePath,
+        string? symbolContext)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault()?.RelativePath ?? "none resolved yet";
+        return
+        [
+            $"Active slice: {topTarget}.",
+            $"First diagnostic: {TrimForChat(primaryDiagnostic, 220)}",
+            string.IsNullOrWhiteSpace(parsed.Code) ? "Code: unknown." : $"Code: {parsed.Code}.",
+            absolutePath is null ? "File: unknown." : $"File: {RelativeToWorkspace(absolutePath)}.",
+            parsed.LineNumber is null ? "Line: unknown." : $"Line: {parsed.LineNumber}.",
+            string.IsNullOrWhiteSpace(symbolContext) ? "Nearest symbol: unknown." : $"Nearest symbol: {symbolContext}.",
+            $"Targeted validation: {(string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "not resolved yet" : context.TestTarget.Command)}."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildValidationRepairStepRows(
+        string failureType,
+        string primaryDiagnostic,
+        string retryCommand)
+    {
+        if (failureType.Equals("locked file", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                "1. Inspect - diagnose build lock.",
+                "2. Verify - collect process evidence for the owning process.",
+                "3. Recover - stop only the confirmed lock owner or shut down dotnet build servers.",
+                $"4. Validate - {retryCommand}.",
+                "5. Closeout - run validation ledger and safe commit check."
+            ];
+        }
+
+        if (failureType.Equals("restore/package", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                "1. Inspect - plan package lookup current failure.",
+                "2. Verify - check package id, version, sources, and restore state.",
+                "3. Recover - run restore only after owner confirmation.",
+                $"4. Validate - {retryCommand}.",
+                "5. Closeout - run validation ledger and safe commit check."
+            ];
+        }
+
+        if (failureType.Equals("test", StringComparison.OrdinalIgnoreCase))
+        {
+            return
+            [
+                "1. Inspect - diagnose last test failure.",
+                "2. Compare - read expected and actual behavior before editing source.",
+                "3. Patch - repair the smallest behavior slice behind preview/apply.",
+                $"4. Validate - {retryCommand}.",
+                "5. Closeout - run validation ledger and safe commit check."
+            ];
+        }
+
+        return
+        [
+            "1. Inspect - open build error.",
+            $"2. Map - map compiler diagnostic {TrimForChat(primaryDiagnostic, 140)}",
+            "3. Candidate - use the ranked fix candidate with the smallest file/symbol scope.",
+            "4. Patch - keep the repair behind patch preview and owner apply confirmation.",
+            $"5. Validate - {retryCommand}.",
+            "6. Closeout - run validation ledger and safe commit check."
+        ];
+    }
+
+    private string BuildValidationRepairNextCommand(string failureType, string primaryDiagnostic, string retryCommand)
+    {
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "confirm apply last patch preview";
+        }
+
+        if (failureType.Equals("locked file", StringComparison.OrdinalIgnoreCase))
+        {
+            return "diagnose build lock";
+        }
+
+        if (failureType.Equals("restore/package", StringComparison.OrdinalIgnoreCase))
+        {
+            return "plan package lookup current failure";
+        }
+
+        if (failureType.Equals("missing sdk/tool", StringComparison.OrdinalIgnoreCase))
+        {
+            return "show install doctor";
+        }
+
+        if (failureType.Equals("test", StringComparison.OrdinalIgnoreCase))
+        {
+            return "diagnose last test failure";
+        }
+
+        if (failureType.Equals("compiler", StringComparison.OrdinalIgnoreCase))
+        {
+            return "map compiler diagnostic " + TrimForChat(primaryDiagnostic, 180);
+        }
+
+        return string.IsNullOrWhiteSpace(retryCommand) ? "diagnose last build failure" : retryCommand;
+    }
+
+    private static string BuildValidationRepairRetryCommand(string? command, string goal) =>
+        string.IsNullOrWhiteSpace(command)
+            ? "resolve test target " + goal
+            : command;
+
+    private static string BuildValidationRepairRetryCommand(
+        CodingToolRequest failedRequest,
+        CodingToolResult failedResult,
+        TestTargetRecommendation testTarget,
+        FeatureWorkContext context)
+    {
+        var target = failedResult.TargetPath ?? failedRequest.Path ?? context.TestTarget.TargetPath ?? context.RankedTargets.FirstOrDefault()?.RelativePath;
+        if (failedRequest.Action == CodingToolAction.Test && !string.IsNullOrWhiteSpace(testTarget.Command))
+        {
+            return testTarget.Command;
+        }
+
+        if (string.IsNullOrWhiteSpace(target))
+        {
+            return string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? "resolve test target " + context.Goal
+                : context.TestTarget.Command;
+        }
+
+        var quotedTarget = QuoteForOwnerCommand(target);
+        return failedRequest.Action switch
+        {
+            CodingToolAction.Build => $"confirm dotnet build {quotedTarget}",
+            CodingToolAction.Test => $"confirm dotnet test {quotedTarget}",
+            CodingToolAction.Restore => $"confirm dotnet restore {quotedTarget}",
+            CodingToolAction.RunProject => $"confirm dotnet run {quotedTarget}",
+            _ => string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? $"confirm dotnet build {quotedTarget}"
+                : context.TestTarget.Command
+        };
+    }
+
+    private static string QuoteForOwnerCommand(string value) =>
+        "\"" + value.Trim().Trim('"').Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)
     {

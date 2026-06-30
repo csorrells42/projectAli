@@ -768,6 +768,29 @@ public static class CodingToolRequestParser
         "show build checkpoint"
     ];
 
+    private static readonly string[] ValidationRepairRunnerPrefixes =
+    [
+        "validation repair runner ",
+        "show validation repair runner ",
+        "repair validation failure ",
+        "repair latest validation failure ",
+        "repair latest build failure ",
+        "build repair runner ",
+        "test repair runner "
+    ];
+
+    private static readonly string[] ValidationRepairRunnerRequests =
+    [
+        "validation repair runner",
+        "show validation repair runner",
+        "repair validation failure",
+        "repair latest validation failure",
+        "repair latest build failure",
+        "build repair runner",
+        "test repair runner",
+        "run repair runner"
+    ];
+
     private static readonly string[] PostPatchValidationRouterPrefixes =
     [
         "post patch validation ",
@@ -2775,6 +2798,9 @@ public static class CodingToolRequestParser
     private static bool IsFeatureSessionLedgerRequest(string text) =>
         FeatureSessionLedgerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsValidationRepairRunnerRequest(string text) =>
+        ValidationRepairRunnerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPostPatchValidationRouterRequest(string text) =>
         PostPatchValidationRouterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2942,6 +2968,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, PreviewSynthesizedFeaturePatchPrefixes, CodingToolAction.PreviewSynthesizedFeaturePatch, userConfirmed, out request)
             || TryParsePrefixedQuery(text, AutonomousPatchLoopPrefixes, CodingToolAction.ShowAutonomousPatchLoop, userConfirmed, out request)
             || TryParsePrefixedQuery(text, FeatureSessionLedgerPrefixes, CodingToolAction.ShowFeatureSessionLedger, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ValidationRepairRunnerPrefixes, CodingToolAction.ShowValidationRepairRunner, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
@@ -3037,6 +3064,12 @@ public static class CodingToolRequestParser
         if (IsFeatureSessionLedgerRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFeatureSessionLedger, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsValidationRepairRunnerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowValidationRepairRunner, null, UserConfirmed: userConfirmed);
             return true;
         }
 

@@ -136,6 +136,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool opens last diagnostic", TestLocalCodingToolOpensLastDiagnostic),
     ("local coding tool diagnoses last failure", TestLocalCodingToolDiagnosesLastFailure),
     ("local coding tool suggests last failure patch", TestLocalCodingToolSuggestsLastFailurePatch),
+    ("local coding tool runs validation repair runner", TestLocalCodingToolRunsValidationRepairRunner),
     ("local coding tool suggests closing brace patch", TestLocalCodingToolSuggestsClosingBracePatch),
     ("local coding tool requires confirmation before restore", TestLocalCodingToolRequiresConfirmationBeforeRestore),
     ("local coding tool requires confirmation before package install", TestLocalCodingToolRequiresConfirmationBeforePackageInstall),
@@ -748,6 +749,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowValidationLedger, ledgerRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("show validation queue runner", out var queueRunnerRequest));
     Equal(CodingToolAction.ShowValidationQueueRunner, queueRunnerRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("validation repair runner Save button", out var repairRunnerRequest));
+    Equal(CodingToolAction.ShowValidationRepairRunner, repairRunnerRequest.Action);
+    Equal("Save button", repairRunnerRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("show mandatory symbol diff audit", out var symbolDiffAuditRequest));
     Equal(CodingToolAction.ShowMandatorySymbolDiffAudit, symbolDiffAuditRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("plan multi file refactor Save button", out var multiFileRefactorRequest));
@@ -3592,6 +3596,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingPatchIntelligenceCommand", dashboard);
     Contains("RunCodingPatchLoopCommand", dashboard);
     Contains("RunCodingFeatureSessionLedgerCommand", dashboard);
+    Contains("RunCodingRepairRunnerCommand", dashboard);
     Contains("RunCodingFeatureExecutionPacketCommand", dashboard);
     Contains("RunCodingApplyGateCommand", dashboard);
     Contains("RunCodingPostPatchValidationCommand", dashboard);
@@ -3614,6 +3619,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingPatchIntelligenceCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchLoopCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureSessionLedgerCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingRepairRunnerCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingApplyGateCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPostPatchValidationCommand = CreateAsyncCommand", viewModel);
@@ -3918,6 +3924,57 @@ static async Task TestLocalCodingToolSuggestsLastFailurePatch()
     Equal(true, applied.Handled);
     Equal(true, applied.Succeeded);
     Contains("Applied last patch preview", applied.Message);
+    Contains("var value = 1;", await File.ReadAllTextAsync(sourcePath));
+}
+
+static async Task TestLocalCodingToolRunsValidationRepairRunner()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var sourcePath = Path.Combine(workspace, "Widget.cs");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(
+        sourcePath,
+        string.Join(
+            Environment.NewLine,
+            Enumerable.Range(1, 15).Select(line => line == 12 ? "var value = 1" : $"// line {line}")));
+    var diagnosticLine = $"{sourcePath}(12,5): error CS1002: ; expected [{projectPath}]";
+    var runner = new SequencedFakeCodingCommandRunner(
+        new CodingCommandRun(1, string.Empty, diagnosticLine, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false),
+        new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner);
+
+    var build = await service.TryHandleAsync($"confirm dotnet build \"{projectPath}\"", CancellationToken.None);
+    var repair = await service.TryHandleAsync("validation repair runner widget semicolon", CancellationToken.None);
+    var afterRepair = await File.ReadAllTextAsync(sourcePath);
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(false, build.Succeeded);
+    Equal(true, repair.Handled);
+    Equal(true, repair.Succeeded);
+    Contains("Validation repair runner v1", repair.Message);
+    Contains("Stage: Deterministic preview prepared", repair.Message);
+    Contains("Failure type: compiler", repair.Message);
+    Contains("Retry budget: 1/2", repair.Message);
+    Contains("Repair focus:", repair.Message);
+    Contains("Likely fix candidates:", repair.Message);
+    Contains("Repair steps:", repair.Message);
+    Contains("Preview attempt:", repair.Message);
+    Contains("Pending preview: PreviewReplaceText", repair.Message);
+    Contains("Next command: confirm apply last patch preview", repair.Message);
+    Contains("var value = 1", afterRepair);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
     Contains("var value = 1;", await File.ReadAllTextAsync(sourcePath));
 }
 

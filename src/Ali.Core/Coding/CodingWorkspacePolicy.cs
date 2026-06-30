@@ -159,6 +159,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.PreviewSynthesizedFeaturePatch
             or CodingToolAction.ShowAutonomousPatchLoop
             or CodingToolAction.ShowFeatureSessionLedger
+            or CodingToolAction.ShowValidationRepairRunner
             or CodingToolAction.ShowPostPatchValidationRouter
             or CodingToolAction.ShowPatchPreviewIntelligence
             or CodingToolAction.ShowPlainEnglishFeatureBuilder

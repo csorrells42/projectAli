@@ -315,6 +315,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingBuildCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build", BuildConfirmedDotNetCommand("build"), "Coding.Build"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingTestCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Tests", BuildConfirmedDotNetCommand("test"), "Coding.Tests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingLastFailureCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Last failure", "diagnose last build failure", "Coding.LastFailure"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingRepairRunnerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Repair runner", "validation repair runner current feature", "Coding.RepairRunner"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSuggestFixCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Suggest fix", "suggest patch from last failure", "Coding.SuggestFix"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingShowPatchPreviewCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch preview", "show pending patch preview", "Coding.PatchPreview"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingApplyPreviewCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply preview", "confirm apply last patch preview", "Coding.ApplyPreview"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -817,6 +818,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingTestCommand { get; }
 
     public ICommand RunCodingLastFailureCommand { get; }
+
+    public ICommand RunCodingRepairRunnerCommand { get; }
 
     public ICommand RunCodingSuggestFixCommand { get; }
 
@@ -3587,9 +3590,17 @@ public sealed class MainWindowViewModel : ObservableObject
             "Stage:",
             "Current stage:",
             "Session score:",
+            "Failure type:",
+            "Failed action:",
+            "Failed target:",
+            "Retry budget:",
             "Checklist:",
             "Evidence:",
             "Owner-safe rule:",
+            "Repair focus:",
+            "Likely fix candidates:",
+            "Repair steps:",
+            "Preview attempt:",
             "Patch intelligence:",
             "Slice approval packet:",
             "Patch preview gate v3:",
@@ -3615,6 +3626,12 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Preview:",
             "- Apply:",
             "- Closeout:",
+            "- Active slice:",
+            "- First diagnostic:",
+            "- Code:",
+            "- Line:",
+            "- Nearest symbol:",
+            "- Targeted validation:",
             "- Input:",
             "- Expected result:",
             "- Failure behavior:",
@@ -7095,6 +7112,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingLastFailureCommand is AsyncRelayCommand runCodingLastFailure)
         {
             runCodingLastFailure.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingRepairRunnerCommand is AsyncRelayCommand runCodingRepairRunner)
+        {
+            runCodingRepairRunner.RaiseCanExecuteChanged();
         }
 
         if (RunCodingSuggestFixCommand is AsyncRelayCommand runCodingSuggestFix)
