@@ -8908,7 +8908,7 @@ public sealed class LocalCodingToolService(
         lines.Add(synthesis.PreviewReady
             ? $"- preview synthesized feature patch {context.Goal}"
             : "- Hold - implementation text is needed before a preview bundle can be produced.");
-        lines.Add($"Next command: {(synthesis.PreviewReady ? "preview synthesized feature patch " : "feature implementation planner ")}{context.Goal}");
+        lines.Add($"Next command: {(synthesis.PreviewReady ? "preview synthesized feature patch " : "concrete patch authoring ")}{context.Goal}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Exact patch synthesis", Policy.WorkspaceRoot);
     }
 
@@ -8930,7 +8930,7 @@ public sealed class LocalCodingToolService(
             lines.AddRange(synthesis.GuardRows.Select(row => $"- {row}"));
             lines.Add("Patch blocks:");
             lines.AddRange(BuildFeaturePatchSynthesisBlockRows(synthesis));
-            lines.Add($"Next command: feature implementation planner {context.Goal}");
+            lines.Add($"Next command: concrete patch authoring {context.Goal}");
             return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Synthesized feature patch preview", Policy.WorkspaceRoot);
         }
 
@@ -11464,7 +11464,7 @@ public sealed class LocalCodingToolService(
             return "resolve test target " + state.Goal;
         }
 
-        return "exact patch synthesis " + state.Goal;
+        return "concrete patch authoring " + state.Goal;
     }
 
     private IReadOnlyList<string> BuildContinueCurrentTaskCommandRows(
@@ -12115,10 +12115,11 @@ public sealed class LocalCodingToolService(
         guardRows.Add(hasTransform
             ? $"Mechanical transform: replace {oldValue} with {newValue}."
             : "Mechanical transform: none detected - exact anchors only until implementation text is supplied.");
-        var targetPaths = context.RankedTargets
+        var targetPaths = FindDeterministicFeaturePatchTargets(context)
+            .Concat(context.RankedTargets
             .Select(target => ToAbsoluteWorkspacePath(target.RelativePath))
             .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(path => path!)
+            .Select(path => path!))
             .Concat(context.CandidateFiles)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxPatchBundleEdits)
@@ -12133,6 +12134,20 @@ public sealed class LocalCodingToolService(
             cancellationToken.ThrowIfCancellationRequested();
             if (!File.Exists(fullPath))
             {
+                if (!hasTransform
+                    && TryBuildConsoleHelloWorldCreateBlock(context.Goal, fullPath, out var createText, out var createNote))
+                {
+                    candidates.Add(new FeaturePatchSynthesisCandidate(
+                        RelativeToWorkspace(fullPath),
+                        fullPath,
+                        "deterministic console recipe",
+                        string.Empty,
+                        createText,
+                        true,
+                        createNote));
+                    continue;
+                }
+
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
                     fullPath,
@@ -12185,6 +12200,34 @@ public sealed class LocalCodingToolService(
                 continue;
             }
 
+            if (!hasTransform
+                && TryBuildConsoleProjectOutputTypePatchBlock(content, context.Goal, fullPath, out var projectOldText, out var projectNewText, out var projectNote))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "deterministic console project recipe",
+                    projectOldText,
+                    projectNewText,
+                    true,
+                    projectNote));
+                continue;
+            }
+
+            if (!hasTransform
+                && TryBuildConsoleHelloWorldPatchBlock(content, context.Goal, fullPath, out var consoleOldText, out var consoleNewText, out var consoleNote))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "deterministic console recipe",
+                    consoleOldText,
+                    consoleNewText,
+                    true,
+                    consoleNote));
+                continue;
+            }
+
             if (TryBuildAnchorPatchBlock(content, context.GoalTerms, hasTransform ? oldValue : null, out var anchorText, out var anchorNote))
             {
                 candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12222,6 +12265,71 @@ public sealed class LocalCodingToolService(
         return new FeaturePatchSynthesis(context.Goal, candidates, previewEdits, guardRows, previewEdits.Count > 0, status);
     }
 
+    private IReadOnlyList<string> FindDeterministicFeaturePatchTargets(FeatureWorkContext context)
+    {
+        if (!IsConsoleHelloWorldGoal(context.Goal))
+        {
+            return [];
+        }
+
+        var targets = new List<string>();
+        var primaryTarget = GetPrimaryTarget();
+        if (!string.IsNullOrWhiteSpace(primaryTarget) && IsSafeProjectPath(primaryTarget))
+        {
+            targets.Add(primaryTarget);
+        }
+
+        foreach (var candidate in context.RankedTargets
+            .Select(target => ToAbsoluteWorkspacePath(target.RelativePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Concat(context.CandidateFiles))
+        {
+            if (IsEditableProgramFile(candidate))
+            {
+                targets.Add(candidate);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(primaryTarget))
+        {
+            var primaryDirectory = Path.GetDirectoryName(primaryTarget);
+            if (!string.IsNullOrWhiteSpace(primaryDirectory))
+            {
+                var primaryProgram = Path.Combine(primaryDirectory, "Program.cs");
+                if (IsSafeProgramPath(primaryProgram))
+                {
+                    targets.Add(primaryProgram);
+                }
+            }
+        }
+
+        targets.AddRange(GetCSharpFiles()
+            .Where(IsEditableProgramFile)
+            .OrderBy(path => RelativeToWorkspace(path), StringComparer.OrdinalIgnoreCase)
+            .Take(1));
+        return targets
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private bool IsEditableProgramFile(string path) =>
+        File.Exists(path)
+        && IsSafeProgramPath(path);
+
+    private bool IsSafeProgramPath(string path) =>
+        Path.GetFileName(path).Equals("Program.cs", StringComparison.OrdinalIgnoreCase)
+        && Policy.IsInsideWorkspace(path)
+        && !IsBuildArtifactPath(path)
+        && !IsGeneratedOrDesignerFile(path);
+
+    private bool IsSafeProjectPath(string path) =>
+        File.Exists(path)
+        && path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+        && Policy.IsInsideWorkspace(path)
+        && !IsBuildArtifactPath(path);
+
     private static IReadOnlyList<string> BuildFeaturePatchSynthesisBlockRows(FeaturePatchSynthesis synthesis)
     {
         if (synthesis.Candidates.Count == 0)
@@ -12240,6 +12348,11 @@ public sealed class LocalCodingToolService(
                 lines.Add("  Old text:");
                 lines.AddRange(IndentBlock(candidate.OldText, "    "));
                 lines.Add("  New text:");
+                lines.AddRange(IndentBlock(candidate.NewText, "    "));
+            }
+            else if (candidate.PreviewReady && !string.IsNullOrWhiteSpace(candidate.NewText))
+            {
+                lines.Add("  New file text:");
                 lines.AddRange(IndentBlock(candidate.NewText, "    "));
             }
         }
@@ -12311,6 +12424,173 @@ public sealed class LocalCodingToolService(
             ? "Transform source text was not found in this file."
             : $"Transform source text occurs {count} time(s) and no unique block was resolved.";
         return false;
+    }
+
+    private static bool TryBuildConsoleHelloWorldCreateBlock(
+        string goal,
+        string fullPath,
+        out string newText,
+        out string note)
+    {
+        newText = string.Empty;
+        note = string.Empty;
+        if (!Path.GetFileName(fullPath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase)
+            || !IsConsoleHelloWorldGoal(goal))
+        {
+            return false;
+        }
+
+        newText = BuildConsoleHelloWorldProgramText(goal, Environment.NewLine, out note);
+        note = "Create Program.cs. " + note;
+        return true;
+    }
+
+    private static bool TryBuildConsoleProjectOutputTypePatchBlock(
+        string content,
+        string goal,
+        string fullPath,
+        out string oldText,
+        out string newText,
+        out string note)
+    {
+        oldText = string.Empty;
+        newText = string.Empty;
+        note = string.Empty;
+        if (!fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || !IsConsoleHelloWorldGoal(goal)
+            || content.Contains("<OutputType>Exe</OutputType>", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var newline = GetPreferredNewline(content);
+        var outputTypeMatch = Regex.Match(
+            content,
+            @"<OutputType>\s*[^<]+\s*</OutputType>",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (outputTypeMatch.Success)
+        {
+            oldText = outputTypeMatch.Value;
+            newText = "<OutputType>Exe</OutputType>";
+            note = "Set project output type to executable.";
+            return !oldText.Equals(newText, StringComparison.Ordinal);
+        }
+
+        var propertyGroupMatch = Regex.Match(
+            content,
+            @"<PropertyGroup>[ \t]*(?:\r?\n)?",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (propertyGroupMatch.Success
+            && TryBuildUniqueContextBlock(content, propertyGroupMatch.Index, propertyGroupMatch.Length, out oldText))
+        {
+            var insertion = propertyGroupMatch.Value + "    <OutputType>Exe</OutputType>" + newline;
+            newText = oldText.Replace(propertyGroupMatch.Value, insertion, StringComparison.Ordinal);
+            note = "Add executable output type to the existing project property group.";
+            return !oldText.Equals(newText, StringComparison.Ordinal);
+        }
+
+        var projectMatch = Regex.Match(
+            content,
+            @"<Project\b[^>]*>[ \t]*(?:\r?\n)?",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (projectMatch.Success
+            && TryBuildUniqueContextBlock(content, projectMatch.Index, projectMatch.Length, out oldText))
+        {
+            var insertion = projectMatch.Value
+                + "  <PropertyGroup>" + newline
+                + "    <OutputType>Exe</OutputType>" + newline
+                + "  </PropertyGroup>" + newline;
+            newText = oldText.Replace(projectMatch.Value, insertion, StringComparison.Ordinal);
+            note = "Add an executable property group to the project file.";
+            return !oldText.Equals(newText, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildConsoleHelloWorldPatchBlock(
+        string content,
+        string goal,
+        string fullPath,
+        out string oldText,
+        out string newText,
+        out string note)
+    {
+        oldText = string.Empty;
+        newText = string.Empty;
+        note = string.Empty;
+        if (!Path.GetFileName(fullPath).Equals("Program.cs", StringComparison.OrdinalIgnoreCase)
+            || !IsConsoleHelloWorldGoal(goal))
+        {
+            return false;
+        }
+
+        var newline = GetPreferredNewline(content);
+        oldText = content;
+        newText = BuildConsoleHelloWorldProgramText(goal, newline, out note);
+        return !content.Equals(newText, StringComparison.Ordinal);
+    }
+
+    private static string BuildConsoleHelloWorldProgramText(string goal, string newline, out string note)
+    {
+        var waitsForKey = MentionsAny(
+            goal,
+            "keypress",
+            "key press",
+            "press a key",
+            "press any key",
+            "press a button",
+            "press button",
+            "before closing",
+            "before it closes",
+            "waits for");
+        string[] replacementLines = waitsForKey
+            ? new[]
+            {
+                "Console.WriteLine(\"Hello, World!\");",
+                "Console.WriteLine(\"Press any key to exit...\");",
+                "Console.ReadKey(intercept: true);"
+            }
+            : ["Console.WriteLine(\"Hello, World!\");"];
+
+        note = waitsForKey
+            ? "Console hello-world recipe with a keypress hold before exit."
+            : "Console hello-world recipe.";
+        return string.Join(newline, replacementLines) + newline;
+    }
+
+    private static string GetPreferredNewline(string content) =>
+        content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+
+    private static bool IsConsoleHelloWorldGoal(string goal)
+    {
+        if (string.IsNullOrWhiteSpace(goal)
+            || (!goal.Contains("hello world", StringComparison.OrdinalIgnoreCase)
+                && !goal.Contains("hello-world", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return MentionsAny(
+            goal,
+            "console",
+            "c#",
+            "csharp",
+            "program",
+            "app",
+            "application",
+            "prints",
+            "print",
+            "says",
+            "display",
+            "write");
+    }
+
+    private static bool IsBuildArtifactPath(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        return normalized.Contains("/bin/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/obj/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryBuildAnchorPatchBlock(
@@ -12511,7 +12791,7 @@ public sealed class LocalCodingToolService(
 
         return synthesis.PreviewReady
             ? "preview synthesized feature patch " + goal
-            : "exact patch synthesis " + goal;
+            : "concrete patch authoring " + goal;
     }
 
     private string ClassifyFeatureSessionStage(
@@ -12687,7 +12967,7 @@ public sealed class LocalCodingToolService(
             return "resolve test target " + goal;
         }
 
-        return "exact patch synthesis " + goal;
+        return "concrete patch authoring " + goal;
     }
 
     private static bool IsFeatureEditReceipt(CodingReceipt receipt) =>
@@ -13142,7 +13422,7 @@ public sealed class LocalCodingToolService(
             return "resolve test target " + goal;
         }
 
-        return "exact patch synthesis " + goal;
+        return "concrete patch authoring " + goal;
     }
 
     private IReadOnlyList<string> BuildFeatureImplementationOrderRows(
@@ -13312,7 +13592,7 @@ public sealed class LocalCodingToolService(
             return testPreview.Command;
         }
 
-        return synthesis.PreviewReady ? "preview synthesized feature patch " + context.Goal : "exact patch synthesis " + context.Goal;
+        return synthesis.PreviewReady ? "preview synthesized feature patch " + context.Goal : "concrete patch authoring " + context.Goal;
     }
 
     private async Task<BehaviorTestPatchReadiness> BuildBehaviorTestPatchReadinessAsync(
@@ -13580,7 +13860,7 @@ public sealed class LocalCodingToolService(
             return testPreview.Command;
         }
 
-        return synthesis.PreviewReady ? "preview synthesized feature patch " + goal : "exact patch synthesis " + goal;
+        return synthesis.PreviewReady ? "preview synthesized feature patch " + goal : "concrete patch authoring " + goal;
     }
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)
@@ -16395,13 +16675,14 @@ public sealed class LocalCodingToolService(
 
         foreach (var edit in edits)
         {
+            var action = edit.CreatesFile ? CodingToolAction.CreateFile : CodingToolAction.ReplaceText;
             var applyRequest = new CodingToolRequest(
-                CodingToolAction.ReplaceText,
+                action,
                 edit.FullPath,
                 ExplicitUserPath: false,
                 UserConfirmed: true,
-                Content: edit.OldText,
-                Replacement: edit.NewText);
+                Content: edit.CreatesFile ? edit.NewText : edit.OldText,
+                Replacement: edit.CreatesFile ? null : edit.NewText);
             var permission = Policy.Evaluate(applyRequest);
             if (permission.Kind != CodingToolPermissionKind.Allow)
             {
@@ -16430,6 +16711,12 @@ public sealed class LocalCodingToolService(
             .ToList();
         foreach (var edit in finalEditsByFile)
         {
+            var directory = Path.GetDirectoryName(edit.FullPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
             await File.WriteAllTextAsync(edit.FullPath, edit.UpdatedText, cancellationToken).ConfigureAwait(false);
         }
 
@@ -16578,7 +16865,7 @@ public sealed class LocalCodingToolService(
                 return false;
             }
 
-            normalized.Add(new NormalizedPatchEdit(fullPath, edit.OldText, edit.NewText));
+            normalized.Add(new NormalizedPatchEdit(fullPath, edit.OldText, edit.NewText, edit.OldText.Length == 0));
         }
 
         edits = normalized;
@@ -16617,14 +16904,47 @@ public sealed class LocalCodingToolService(
             return new PatchEditPreparation(null, new CodingToolResult(true, false, oldTextError, toolName, edit.FullPath));
         }
 
-        if (edit.OldText.Length == 0)
-        {
-            return new PatchEditPreparation(null, new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", toolName, edit.FullPath));
-        }
-
         if (!ValidateEditContent(edit.NewText, "Replacement text", out var newTextError))
         {
             return new PatchEditPreparation(null, new CodingToolResult(true, false, newTextError, toolName, edit.FullPath));
+        }
+
+        if (edit.CreatesFile)
+        {
+            if (File.Exists(edit.FullPath) || Directory.Exists(edit.FullPath))
+            {
+                return new PatchEditPreparation(
+                    null,
+                    new CodingToolResult(
+                        true,
+                        false,
+                        $"Coding tool blocked: create file will not overwrite an existing path: {edit.FullPath}",
+                        toolName,
+                        edit.FullPath));
+            }
+
+            var directory = Path.GetDirectoryName(edit.FullPath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return new PatchEditPreparation(
+                    null,
+                    new CodingToolResult(true, false, "Coding tool blocked: create file needs a parent directory.", toolName, edit.FullPath));
+            }
+
+            currentTexts[edit.FullPath] = edit.NewText;
+            return new PatchEditPreparation(
+                new PreparedPatchEdit(
+                    edit.FullPath,
+                    edit.NewText,
+                    "(new file)",
+                    BuildSnippet(edit.NewText, 0, edit.NewText.Length),
+                    true),
+                null);
+        }
+
+        if (edit.OldText.Length == 0)
+        {
+            return new PatchEditPreparation(null, new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", toolName, edit.FullPath));
         }
 
         if (!File.Exists(edit.FullPath))
@@ -16678,7 +16998,8 @@ public sealed class LocalCodingToolService(
                 edit.FullPath,
                 updated,
                 BuildSnippet(existing, index, edit.OldText.Length),
-                BuildSnippet(updated, index, edit.NewText.Length)),
+                BuildSnippet(updated, index, edit.NewText.Length),
+                false),
             null);
     }
 
@@ -20826,13 +21147,15 @@ public sealed class LocalCodingToolService(
     private sealed record NormalizedPatchEdit(
         string FullPath,
         string OldText,
-        string NewText);
+        string NewText,
+        bool CreatesFile);
 
     private sealed record PreparedPatchEdit(
         string FullPath,
         string UpdatedText,
         string BeforeSnippet,
-        string AfterSnippet);
+        string AfterSnippet,
+        bool CreatesFile);
 
     private sealed record PatchEditPreparation(
         PreparedPatchEdit? Edit,

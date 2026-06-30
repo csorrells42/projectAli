@@ -149,6 +149,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
     ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
+    ("local coding tool synthesizes hello world console patch", TestLocalCodingToolSynthesizesHelloWorldConsolePatch),
+    ("local coding tool creates hello world Program file", TestLocalCodingToolCreatesHelloWorldProgramFile),
     ("local coding tool previews behavior test patch", TestLocalCodingToolPreviewsBehaviorTestPatch),
     ("local coding tool previews guided feature bundle", TestLocalCodingToolPreviewsGuidedFeatureBundle),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
@@ -5098,6 +5100,121 @@ static async Task TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch()
     Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
 }
 
+static async Task TestLocalCodingToolSynthesizesHelloWorldConsolePatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    var programPath = Path.Combine(projectDirectory, "Program.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(programPath, "Console.WriteLine(\"Old\");\r\n");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    const string goal = "a simple \"hello world\" program that waits for the user to press a button before closing";
+
+    var synthesis = await service.TryHandleAsync("exact patch synthesis " + goal, CancellationToken.None);
+    var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+
+    Equal(true, synthesis.Handled);
+    Equal(true, synthesis.Succeeded);
+    Contains("Exact patch synthesis v1", synthesis.Message);
+    Contains("Preview-ready edits: 2", synthesis.Message);
+    Contains("OutputType>Exe</OutputType", synthesis.Message);
+    Contains("deterministic console recipe", synthesis.Message);
+    Contains("Console.ReadKey(intercept: true);", synthesis.Message);
+    Contains("Next command: preview synthesized feature patch " + goal, synthesis.Message);
+    Equal("Console.WriteLine(\"Old\");\r\n", await File.ReadAllTextAsync(programPath));
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Synthesized feature patch preview", preview.Message);
+    Contains("Patch bundle preview", preview.Message);
+    Contains("Edits: 2", preview.Message);
+    Contains("Next command: confirm apply last patch preview", preview.Message);
+    Equal("Console.WriteLine(\"Old\");\r\n", await File.ReadAllTextAsync(programPath));
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview bundle", applied.Message);
+    var content = await File.ReadAllTextAsync(programPath);
+    Contains("Console.WriteLine(\"Hello, World!\");", content);
+    Contains("Console.ReadKey(intercept: true);", content);
+    Equal(false, content.Contains("Old", StringComparison.Ordinal));
+    Contains("<OutputType>Exe</OutputType>", await File.ReadAllTextAsync(projectPath));
+}
+
+static async Task TestLocalCodingToolCreatesHelloWorldProgramFile()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    var programPath = Path.Combine(projectDirectory, "Program.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    const string goal = "a simple hello world console program that waits for a keypress before closing";
+
+    var synthesis = await service.TryHandleAsync("exact patch synthesis " + goal, CancellationToken.None);
+    var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+
+    Equal(true, synthesis.Handled);
+    Equal(true, synthesis.Succeeded);
+    Contains("Preview-ready edits: 2", synthesis.Message);
+    Contains("OutputType>Exe</OutputType", synthesis.Message);
+    Contains("Create Program.cs", synthesis.Message);
+    Contains("Next command: preview synthesized feature patch " + goal, synthesis.Message);
+    Equal(false, File.Exists(programPath));
+    Equal(false, (await File.ReadAllTextAsync(projectPath)).Contains("<OutputType>Exe</OutputType>", StringComparison.OrdinalIgnoreCase));
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Patch bundle preview", preview.Message);
+    Contains("Edits: 2", preview.Message);
+    Contains("(new file)", preview.Message);
+    Contains("Next command: confirm apply last patch preview", preview.Message);
+    Equal(false, File.Exists(programPath));
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Equal(true, File.Exists(programPath));
+    var content = await File.ReadAllTextAsync(programPath);
+    Contains("Console.WriteLine(\"Hello, World!\");", content);
+    Contains("Console.ReadKey(intercept: true);", content);
+    Contains("<OutputType>Exe</OutputType>", await File.ReadAllTextAsync(projectPath));
+}
+
 static async Task TestLocalCodingToolPreviewsBehaviorTestPatch()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -5577,7 +5694,7 @@ static async Task TestOrchestratorUsesCodingPlannerInProgrammingMode()
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
     Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
     Contains("Next:", answer);
-    Contains("exact patch synthesis", answer);
+    Contains("concrete patch authoring", answer);
     Contains("Status: No files changed yet.", answer);
     Contains("Use Next to run that step.", answer);
     Equal(false, answer.Contains("Programming mode:", StringComparison.OrdinalIgnoreCase));
@@ -5708,7 +5825,7 @@ static async Task TestOrchestratorFallsBackToBuildLaneInProgrammingMode()
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
     Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
     Contains("Next:", answer);
-    Contains("exact patch synthesis", answer);
+    Contains("concrete patch authoring", answer);
     Contains("Status: No files changed yet.", answer);
     Contains("Use Next to run that step.", answer);
     Equal(false, answer.Contains("Programming mode selected the next internal action.", StringComparison.OrdinalIgnoreCase));
