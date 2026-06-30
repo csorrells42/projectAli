@@ -5613,6 +5613,13 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("private void ResetLayout()", generatedDashboardViewModel);
     Contains("new GridLength(220d)", generatedDashboardViewModel);
     Contains("new GridLength(280d)", generatedDashboardViewModel);
+    Contains("DispatcherTimer _searchRefreshTimer", generatedDashboardViewModel);
+    Contains("TimeSpan.FromMilliseconds(250)", generatedDashboardViewModel);
+    Contains("_searchRefreshTimer.Tick += SearchRefreshTimer_Tick", generatedDashboardViewModel);
+    Contains("ScheduleSearchRefresh()", generatedDashboardViewModel);
+    Contains("SearchRefreshTimer_Tick", generatedDashboardViewModel);
+    Contains("ApplySearchRefresh()", generatedDashboardViewModel);
+    Contains("Search queued for", generatedDashboardViewModel);
     Contains("PropertyChangedEventManager.AddHandler", generatedDashboardViewModel);
     Contains("WeakEventManager<INotifyDataErrorInfo, DataErrorsChangedEventArgs>.AddHandler", generatedDashboardViewModel);
     Contains("OnOwnerPropertyChanged", generatedDashboardViewModel);

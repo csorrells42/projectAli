@@ -15319,12 +15319,14 @@ public sealed class LocalCodingToolService(
             using System.Windows.Data;
             using System.Windows.Input;
             using System.Windows.Media;
+            using System.Windows.Threading;
 
             {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
             {
                 private readonly Dictionary<string, List<string>> _errors = new();
                 private readonly IDashboardDialogService _dialogService;
                 private readonly IDashboardThemeService _themeService;
+                private readonly DispatcherTimer _searchRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
                 private string _newItemName = string.Empty;
                 private string _newItemError = string.Empty;
                 private string _searchText = string.Empty;
@@ -15351,6 +15353,7 @@ public sealed class LocalCodingToolService(
                 {
                     _dialogService = dialogService ?? new NullDashboardDialogService();
                     _themeService = themeService ?? new NullDashboardThemeService();
+                    _searchRefreshTimer.Tick += SearchRefreshTimer_Tick;
                     ItemsView = CollectionViewSource.GetDefaultView(Items);
                     ItemsView.Filter = FilterItem;
                     ConfigureItemsView();
@@ -15471,12 +15474,10 @@ public sealed class LocalCodingToolService(
                         var normalized = value ?? string.Empty;
                         if (SetField(ref _searchText, normalized))
                         {
-                            ItemsView.Refresh();
-                            SelectedItem = FirstVisibleItem();
-                            UpdateMetrics();
+                            ScheduleSearchRefresh();
                             StatusText = string.IsNullOrWhiteSpace(SearchText)
-                                ? $"Ready - {Items.Count} items loaded"
-                                : $"Filtered by \"{SearchText}\"";
+                                ? "Search cleared - refreshing"
+                                : $"Search queued for \"{SearchText}\"";
                         }
                     }
                 }
@@ -15713,6 +15714,28 @@ public sealed class LocalCodingToolService(
                 }
 
                 private void CancelRefresh() => _refreshCancellation?.Cancel();
+
+                private void ScheduleSearchRefresh()
+                {
+                    _searchRefreshTimer.Stop();
+                    _searchRefreshTimer.Start();
+                }
+
+                private void SearchRefreshTimer_Tick(object? sender, EventArgs args)
+                {
+                    _searchRefreshTimer.Stop();
+                    ApplySearchRefresh();
+                }
+
+                private void ApplySearchRefresh()
+                {
+                    ItemsView.Refresh();
+                    SelectedItem = FirstVisibleItem();
+                    UpdateMetrics();
+                    StatusText = string.IsNullOrWhiteSpace(SearchText)
+                        ? $"Ready - {Items.Count} items loaded"
+                        : $"Filtered by \"{SearchText}\"";
+                }
 
                 private void ToggleTheme()
                 {
