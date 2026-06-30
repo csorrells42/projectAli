@@ -4225,6 +4225,8 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     Contains("Likely files:", current.Message);
 
     Equal(true, followUpContext.HasContext);
+    Contains("Current user request: keep going", followUpContext.Text);
+    Contains("Current coding task goal: add export button", followUpContext.Text);
     Contains("Current coding task:", followUpContext.Text);
     Contains("Goal: add export button", followUpContext.Text);
     Contains("Likely files:", followUpContext.Text);

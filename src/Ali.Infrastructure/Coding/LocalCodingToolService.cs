@@ -498,6 +498,11 @@ public sealed class LocalCodingToolService(
             return CodingContextPack.Empty;
         }
 
+        var requestText = userText.Trim();
+        var currentCodingSession = ReadCurrentCodingSession();
+        var contextGoal = currentCodingSession is not null && MentionsCurrentCodingTaskFollowUp(requestText)
+            ? currentCodingSession.Goal
+            : requestText;
         var includesLastFailure = _lastDotNetResult is { Succeeded: false };
         var currentTarget = GetPrimaryTarget();
         var hasSelectedTarget = TryGetConfiguredCurrentTarget(out _);
@@ -510,8 +515,12 @@ public sealed class LocalCodingToolService(
             $"Workspace root: {Policy.WorkspaceRoot}",
             currentTarget is null ? "Current solution/project: not selected or unavailable." : $"Current solution/project: {RelativeToWorkspace(currentTarget)}",
             hasSelectedTarget ? "Current target source: saved picker value." : "Current target source: inferred fallback.",
-            $"Current user request: {userText.Trim()}"
+            $"Current user request: {requestText}"
         };
+        if (!contextGoal.Equals(requestText, StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add($"Current coding task goal: {contextGoal}");
+        }
 
         if (!Directory.Exists(Policy.WorkspaceRoot))
         {
@@ -531,8 +540,7 @@ public sealed class LocalCodingToolService(
         var projectIndexStatus = GetProjectIndexStatus();
         var projectAwareness = LoadProjectIndexAwareness();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
-        var testTarget = await ResolveTestTargetRecommendationAsync(userText.Trim(), cancellationToken).ConfigureAwait(false);
-        var currentCodingSession = ReadCurrentCodingSession();
+        var testTarget = await ResolveTestTargetRecommendationAsync(contextGoal, cancellationToken).ConfigureAwait(false);
         lines.Add("Current coding state:");
         lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
@@ -573,7 +581,7 @@ public sealed class LocalCodingToolService(
             await AddDiagnosticFileExcerptsAsync(lines, lastDotNetResult.Message, cancellationToken).ConfigureAwait(false);
         }
 
-        var searchTerms = ExtractContextSearchTerms(userText);
+        var searchTerms = ExtractContextSearchTerms(contextGoal);
         var matches = FindContextMatches(searchTerms);
         if (matches.Count > 0)
         {
