@@ -15478,15 +15478,17 @@ public sealed class LocalCodingToolService(
 
                 private void SeedDashboard()
                 {
-                    Items.Clear();
-                    Items.Add(new DashboardItem("Intake workflow", "Ali", "Ready"));
-                    Items.Add(new DashboardItem("Validation queue", "Owner", "Review"));
-                    Items.Add(new DashboardItem("Release packet", "Ali", "Draft"));
+                    using (ItemsView.DeferRefresh())
+                    {
+                        Items.Clear();
+                        Items.Add(new DashboardItem("Intake workflow", "Ali", "Ready"));
+                        Items.Add(new DashboardItem("Validation queue", "Owner", "Review"));
+                        Items.Add(new DashboardItem("Release packet", "Ali", "Draft"));
+                    }
 
                     Activity.Clear();
                     Activity.Add("Dashboard loaded.");
                     Activity.Add("Three sample work items are ready for review.");
-                    ItemsView.Refresh();
                     SelectedItem = FirstVisibleItem();
                     UpdateMetrics();
                     StatusText = "Ready - 3 items loaded";
@@ -15575,8 +15577,11 @@ public sealed class LocalCodingToolService(
                     }
 
                     var item = new DashboardItem(name, "Owner", "New");
-                    Items.Add(item);
-                    ItemsView.Refresh();
+                    using (ItemsView.DeferRefresh())
+                    {
+                        Items.Add(item);
+                    }
+
                     UpdateMetrics();
                     SelectedItem = FilterItem(item) ? item : FirstVisibleItem();
                     RaiseRowActionCanExecuteChanged();
@@ -15609,10 +15614,12 @@ public sealed class LocalCodingToolService(
                     var index = Items.IndexOf(item);
                     if (index >= 0)
                     {
-                        Items[index] = updated;
+                        using (ItemsView.DeferRefresh())
+                        {
+                            Items[index] = updated;
+                        }
                     }
 
-                    ItemsView.Refresh();
                     UpdateMetrics();
                     SelectedItem = updated;
                     RaiseRowActionCanExecuteChanged();
@@ -15636,8 +15643,11 @@ public sealed class LocalCodingToolService(
                     }
 
                     var updated = item with { Status = status };
-                    Items[index] = updated;
-                    ItemsView.Refresh();
+                    using (ItemsView.DeferRefresh())
+                    {
+                        Items[index] = updated;
+                    }
+
                     UpdateMetrics();
                     SelectedItem = updated;
                     Activity.Insert(0, $"Marked {updated.Name} as {status}.");
@@ -15660,8 +15670,11 @@ public sealed class LocalCodingToolService(
                         return;
                     }
 
-                    Items.Remove(item);
-                    ItemsView.Refresh();
+                    using (ItemsView.DeferRefresh())
+                    {
+                        Items.Remove(item);
+                    }
+
                     UpdateMetrics();
                     SelectedItem = FirstVisibleItem();
                     RaiseRowActionCanExecuteChanged();
@@ -15815,6 +15828,21 @@ public sealed class LocalCodingToolService(
                     ItemsView.SortDescriptions.Add(new SortDescription(nameof(DashboardItem.Name), ListSortDirection.Ascending));
                     ItemsView.GroupDescriptions?.Clear();
                     ItemsView.GroupDescriptions?.Add(new PropertyGroupDescription(nameof(DashboardItem.Status)));
+                    if (ItemsView is ICollectionViewLiveShaping liveShaping)
+                    {
+                        if (liveShaping.CanChangeLiveSorting)
+                        {
+                            liveShaping.IsLiveSorting = true;
+                            liveShaping.LiveSortingProperties.Add(nameof(DashboardItem.Status));
+                            liveShaping.LiveSortingProperties.Add(nameof(DashboardItem.Name));
+                        }
+
+                        if (liveShaping.CanChangeLiveGrouping)
+                        {
+                            liveShaping.IsLiveGrouping = true;
+                            liveShaping.LiveGroupingProperties.Add(nameof(DashboardItem.Status));
+                        }
+                    }
                 }
 
                 private bool FilterItem(object item)
