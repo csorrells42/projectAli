@@ -104,6 +104,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isCommandExplorerOpen;
     private CommandExplorerNodeViewModel? _selectedCommandExplorerNode;
     private bool _isBusy;
+    private bool _isProgrammingModeActive;
     private bool _isRecording;
     private bool _isTranscribing;
     private bool _isSpeaking;
@@ -1598,6 +1599,24 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool IsProgrammingModeActive
+    {
+        get => _isProgrammingModeActive;
+        private set => SetProperty(ref _isProgrammingModeActive, value);
+    }
+
+    public void EnterProgrammingMode()
+    {
+        IsProgrammingModeActive = true;
+        SuspendVoiceFeaturesForProgramming();
+    }
+
+    public void ExitProgrammingMode()
+    {
+        RestoreVoiceFeaturesAfterProgramming();
+        IsProgrammingModeActive = false;
+    }
+
     public void SuspendVoiceFeaturesForProgramming()
     {
         _programmingAudioSuspension ??= new ProgrammingAudioSuspension(
@@ -2403,14 +2422,24 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
-            await foreach (var chunk in _services.Orchestrator.StreamAnswerAsync(
-                               _conversationId,
-                               userMessageId,
-                               assistantMessageId,
-                               text,
-                               history,
-                               attachments,
-                               _activeResponse.Token))
+            var responseStream = IsProgrammingModeActive
+                ? _services.Orchestrator.StreamProgrammingAnswerAsync(
+                    _conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    text,
+                    history,
+                    attachments,
+                    _activeResponse.Token)
+                : _services.Orchestrator.StreamAnswerAsync(
+                    _conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    text,
+                    history,
+                    attachments,
+                    _activeResponse.Token);
+            await foreach (var chunk in responseStream)
             {
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
                 reachedOutputLimit |= chunk.ReachedOutputLimit;

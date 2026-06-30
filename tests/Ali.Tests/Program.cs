@@ -159,6 +159,9 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
+    ("orchestrator uses coding planner in programming mode", TestOrchestratorUsesCodingPlannerInProgrammingMode),
+    ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
+    ("orchestrator falls back to build lane in programming mode", TestOrchestratorFallsBackToBuildLaneInProgrammingMode),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
     ("orchestrator injects active coding task followup context", TestOrchestratorInjectsActiveCodingTaskFollowupContext),
     ("orchestrator injects last build failure context", TestOrchestratorInjectsLastBuildFailureContext),
@@ -202,6 +205,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI runtime uses configured assistant name", TestRuntimeUsesConfiguredAssistantName),
     ("OpenAI runtime includes current local date", TestRuntimeIncludesCurrentLocalDate),
     ("OpenAI runtime omits Ali persona for source planner", TestRuntimeOmitsAliPersonaForSourcePlanner),
+    ("OpenAI runtime omits Ali persona for coding planner", TestRuntimeOmitsAliPersonaForCodingPlanner),
     ("OpenAI runtime disables qwen thinking", TestRuntimeDisablesQwenThinking),
     ("OpenAI runtime shutdown unloads model", TestRuntimeShutdownUnloadsModel),
     ("OpenAI runtime reports empty visible stream content", TestRuntimeReportsEmptyVisibleStreamContent),
@@ -4340,12 +4344,16 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("MessagesScrollViewer.ScrollToEnd", codeBehind);
     Contains("ProgrammingComposerTextBox_OnPreviewKeyDown", codeBehind);
     Contains("viewModel.SendAsync()", codeBehind);
-    Contains("SuspendVoiceFeaturesForProgramming", codeBehind);
-    Contains("RestoreVoiceFeaturesAfterProgramming", codeBehind);
+    Contains("EnterProgrammingMode", codeBehind);
+    Contains("ExitProgrammingMode", codeBehind);
 
     Contains("SendProgrammingNextCommand = CreateAsyncCommand", viewModel);
     Contains("SendProgrammingShortcutAsync", viewModel);
     Contains("continue current task", viewModel);
+    Contains("IsProgrammingModeActive", viewModel);
+    Contains("EnterProgrammingMode", viewModel);
+    Contains("ExitProgrammingMode", viewModel);
+    Contains("StreamProgrammingAnswerAsync", viewModel);
     Contains("ProgrammingAudioSuspension", viewModel);
     Contains("SuspendVoiceFeaturesForProgramming", viewModel);
     Contains("RestoreVoiceFeaturesAfterProgramming", viewModel);
@@ -5519,6 +5527,133 @@ static async Task TestOrchestratorHandlesExplicitCodingOpenRequest()
     Equal(1, launcher.Starts.Count);
 }
 
+static async Task TestOrchestratorUsesCodingPlannerInProgrammingMode()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "ExportView.cs"), "public sealed class ExportView { }");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedTextRuntime(
+        "{\"use_coding_tool\":true,\"command\":\"build this for me add export button\",\"summary\":\"Start the guided build lane.\",\"confidence\":0.9}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Please add an export button.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
+    Contains("Programming mode: Start the guided build lane.", answer);
+    Contains("Internal action: build this for me add export button", answer);
+    Contains("Build this feature v1:", answer);
+    Contains("Request: add export button", answer);
+    Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
+}
+
+static async Task TestOrchestratorKeepsCodingPlannerOutOfNormalChat()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)));
+    var runtime = new FixedTextRuntime(
+        "{\"use_coding_tool\":true,\"command\":\"build this for me add export button\",\"summary\":\"Start the guided build lane.\",\"confidence\":0.9}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Please add an export button.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal("conv", runtime.LastRequest!.ConversationId);
+    Contains("\"use_coding_tool\":true", answer);
+    Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
+}
+
+static async Task TestOrchestratorFallsBackToBuildLaneInProgrammingMode()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "SettingsView.cs"), "public sealed class SettingsView { }");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedTextRuntime("not json");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Please add a settings button.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
+    Contains("Programming mode selected the next internal action.", answer);
+    Contains("Internal action: build this for me Please add a settings button.", answer);
+    Contains("Build this feature v1:", answer);
+    Contains("Request: Please add a settings button.", answer);
+}
+
 static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -6585,6 +6720,31 @@ static async Task TestRuntimeOmitsAliPersonaForSourcePlanner()
     Contains("source query planner", handler.LastChatBody);
     Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
     Equal(false, handler.LastChatBody.Contains("do not claim live web browsing", StringComparison.OrdinalIgnoreCase));
+    Equal(false, handler.LastChatBody.Contains("patch preview before apply", StringComparison.OrdinalIgnoreCase));
+    Contains("\"think\":false", handler.LastChatBody);
+}
+
+static async Task TestRuntimeOmitsAliPersonaForCodingPlanner()
+{
+    var options = CreateRuntimeOptions("qwen3-vl:8b");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+    var request = new ChatRequest(
+        "coding_action_plan",
+        "coding_action_plan_user",
+        "please add an export button",
+        [
+            new ChatMessage(
+                "coding_action_planner_system",
+                ChatRole.System,
+                "You are the app's programming action planner. Return exactly one JSON object.",
+                DateTimeOffset.UtcNow)
+        ]);
+
+    await StreamRequestToStringAsync(runtime, request, CancellationToken.None);
+
+    Contains("programming action planner", handler.LastChatBody);
+    Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
     Equal(false, handler.LastChatBody.Contains("patch preview before apply", StringComparison.OrdinalIgnoreCase));
     Contains("\"think\":false", handler.LastChatBody);
 }

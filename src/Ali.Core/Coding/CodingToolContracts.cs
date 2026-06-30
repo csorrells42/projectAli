@@ -288,6 +288,23 @@ public sealed record CodingTaskPlan(
     public static CodingTaskPlan Empty { get; } = new(false, string.Empty);
 }
 
+public sealed record CodingActionPlan(
+    bool UseCodingTool,
+    string Command,
+    string Summary,
+    double Confidence = 0)
+{
+    public static CodingActionPlan NoAction { get; } = new(false, string.Empty, string.Empty, 0);
+}
+
+public interface ICodingActionPlanner
+{
+    Task<CodingActionPlan> PlanAsync(
+        string userText,
+        IReadOnlyList<Ali.Core.Runtime.ChatMessage> history,
+        CancellationToken cancellationToken);
+}
+
 public interface ILocalCodingTool
 {
     CodingWorkspacePolicy Policy { get; }

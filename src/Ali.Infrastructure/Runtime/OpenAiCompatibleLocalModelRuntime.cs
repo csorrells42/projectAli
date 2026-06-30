@@ -19,6 +19,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const int MaxAutomaticLengthContinuations = 1;
     private const string HealthProbeExpectedResponse = "OK";
     private const string SourcePlannerConversationId = "source_query_plan";
+    private const string CodingActionPlannerConversationId = "coding_action_plan";
     private const string VisibleOutputRetryInstruction =
         "The previous runtime attempt produced no visible assistant content. Follow the existing instructions exactly, but write the final result in visible assistant message content only. Do not include hidden reasoning, analysis, or <think> blocks. If the task requires JSON, return only that JSON.";
     private const string ContinueAfterLengthInstruction =
@@ -583,7 +584,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private object BuildChatPayload(ChatRequest request, bool? stream = null, int? maxTokens = null)
     {
         var messages = new List<object>();
-        if (!IsHealthCheckRequest(request) && !IsSourcePlannerRequest(request))
+        if (!IsHealthCheckRequest(request) && !IsPlannerRequest(request))
         {
             messages.Add(new
             {
@@ -701,6 +702,12 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private static bool IsSourcePlannerRequest(ChatRequest request) =>
         string.Equals(request.ConversationId, SourcePlannerConversationId, StringComparison.Ordinal);
+
+    private static bool IsCodingActionPlannerRequest(ChatRequest request) =>
+        string.Equals(request.ConversationId, CodingActionPlannerConversationId, StringComparison.Ordinal);
+
+    private static bool IsPlannerRequest(ChatRequest request) =>
+        IsSourcePlannerRequest(request) || IsCodingActionPlannerRequest(request);
 
     private bool ShouldDisableThinking() =>
         IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);

@@ -30,7 +30,8 @@ public sealed class ConversationOrchestrator(
     ISourceRetriever? sourceRetriever = null,
     ISourceQueryPlanner? sourceQueryPlanner = null,
     IMemoryStore? memoryStore = null,
-    ILocalCodingTool? localCodingTool = null)
+    ILocalCodingTool? localCodingTool = null,
+    ICodingActionPlanner? codingActionPlanner = null)
 {
     private const int MaxPromptMemories = 20;
     private static readonly char[] MemoryRelevanceTokenSeparators =
@@ -85,6 +86,10 @@ public sealed class ConversationOrchestrator(
     public IMemoryStore? Memories { get; } = memoryStore;
 
     public ILocalCodingTool? LocalCodingTool { get; } = localCodingTool;
+
+    public ICodingActionPlanner? CodingPlanner { get; } = localCodingTool is null
+        ? null
+        : codingActionPlanner ?? new ModelCodingActionPlanner(runtime);
 
     public async IAsyncEnumerable<AssistantStreamChunk> StreamAnswerAsync(
         string conversationId,
@@ -242,8 +247,104 @@ public sealed class ConversationOrchestrator(
         }
     }
 
+    public async IAsyncEnumerable<AssistantStreamChunk> StreamProgrammingAnswerAsync(
+        string conversationId,
+        string userMessageId,
+        string assistantMessageId,
+        string userText,
+        IReadOnlyList<ChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(assistantMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userText);
+
+        if (LocalCodingTool is null)
+        {
+            await foreach (var chunk in StreamAnswerAsync(
+                               conversationId,
+                               userMessageId,
+                               assistantMessageId,
+                               userText,
+                               history,
+                               attachments,
+                               cancellationToken).ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+
+            yield break;
+        }
+
+        var plan = CodingPlanner is null
+            ? CodingActionPlan.NoAction
+            : await CodingPlanner.PlanAsync(userText, history, cancellationToken).ConfigureAwait(false);
+        var command = plan.UseCodingTool ? plan.Command : string.Empty;
+        var result = string.IsNullOrWhiteSpace(command)
+            ? CodingToolResult.NotHandled
+            : await LocalCodingTool.TryHandleAsync(command, cancellationToken).ConfigureAwait(false);
+
+        if (!result.Handled)
+        {
+            command = BuildDefaultProgrammingCommand(userText);
+            result = await LocalCodingTool.TryHandleAsync(command, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (result.Handled)
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                BuildProgrammingToolMessage(plan, command, result),
+                result.Succeeded ? EvidenceStatus.Verified : EvidenceStatus.Unknown);
+            yield break;
+        }
+
+        await foreach (var chunk in StreamAnswerAsync(
+                           conversationId,
+                           userMessageId,
+                           assistantMessageId,
+                           userText,
+                           history,
+                           attachments,
+                           cancellationToken).ConfigureAwait(false))
+        {
+            yield return chunk;
+        }
+    }
+
     private static string StripModelGeneratedSourceAppendix(string answer) =>
         SourcesCheckedRegex.Replace(answer, string.Empty).TrimEnd();
+
+    private static string BuildDefaultProgrammingCommand(string userText) =>
+        $"build this for me {NormalizeProgrammingGoal(userText)}";
+
+    private static string NormalizeProgrammingGoal(string userText)
+    {
+        var normalized = userText.ReplaceLineEndings(" ").Trim().Trim('"', '\'', '`');
+        return normalized.Length <= 180 ? normalized : normalized[..180];
+    }
+
+    private static string BuildProgrammingToolMessage(
+        CodingActionPlan plan,
+        string command,
+        CodingToolResult result)
+    {
+        var lines = new List<string>
+        {
+            string.IsNullOrWhiteSpace(plan.Summary)
+                ? "Programming mode selected the next internal action."
+                : $"Programming mode: {plan.Summary}",
+            $"Internal action: {command}",
+            string.Empty,
+            result.Message
+        };
+
+        return string.Join(Environment.NewLine, lines).TrimEnd();
+    }
 
     private static bool IsDisabledMultiDayForecastRequest(string userText) =>
         MultiDayForecastRegex.IsMatch(userText);

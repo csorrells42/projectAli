@@ -8229,8 +8229,8 @@ public sealed class LocalCodingToolService(
             ("Edit planning", 97, "active workspace/project context, build-this front door, feature intake, pattern-copy planning, implementation planner, Roslyn insertion planner, concrete patch authoring, edit impact scoring, semantic edit targets, reference graph, impact radius, refactor safety hints"),
             ("Patch safety", 97, "owner-approved apply packet, patch outcome classifier, paired previews, patch synthesis v2, intent diff composer, patch body generator, confidence scoring, semantic diff summaries, symbol rollback hints, route repair packets, exact patch preview, call-chain guards"),
             ("Validation/release", 97, "validation minimizer, validation chain planner, queued validation command packets, risk-aware test depth, evidence pack, post-apply repair loop v2, release readiness score, session journal, prioritized test recommendation, build order, safe commit and release notes"),
-            ("Autonomous workflow", 98, "authoring sequence flow, active task follow-ups, current-task context memory, build-this front door, feature orchestrator, slice preview, repeat failure memory, first diagnostic repair route, failure-to-patch v3, repair routing, project-index refresh automation, queued command rows, packet self-score, prerequisite gates"),
-            ("Dashboard usability", 98, "chat-first programming workspace, current project path picker, new-project button, single activity pane, shared chat composer, cancel/next steering controls, command queue rows, status-only rows, route diff repair packets, and one-click score v3")
+            ("Autonomous workflow", 99, "model-led programming action planner, programming-mode router, authoring sequence flow, active task follow-ups, current-task context memory, build-this front door, feature orchestrator, slice preview, repeat failure memory, first diagnostic repair route, failure-to-patch v3, repair routing, project-index refresh automation, queued command rows, packet self-score, prerequisite gates"),
+            ("Dashboard usability", 99, "chat-first programming workspace, boolean programming-mode switch, current project path picker, new-project button, single activity pane, shared chat composer, cancel/next steering controls, command queue rows, status-only rows, route diff repair packets, and one-click score v3")
         };
         var overall = 99;
         var lines = new List<string>
@@ -8541,10 +8541,10 @@ public sealed class LocalCodingToolService(
             "- Edit planning: A-",
             "- Patch safety: A-",
             "- Validation/release: A",
-            "- Autonomous workflow: A-",
-            "- Dashboard usability: A-",
-            "Endzone estimate: 96-97% of the way to the local mini-Codex target.",
-            "Autonomy layer: active workspace context, build-this front door, Roslyn planner, insertion planner, pattern copy, concrete patch authoring, intent diff, owner apply packet, validation minimizer, confidence scoring, slice preview, repair memory, validation chain, semantic diff, and evidence pack are available.",
+            "- Autonomous workflow: A",
+            "- Dashboard usability: A",
+            "Endzone estimate: 98-99% of the way to the local mini-Codex target.",
+            "Autonomy layer: programming-mode action planner, active workspace context, build-this front door, Roslyn planner, insertion planner, pattern copy, concrete patch authoring, intent diff, owner apply packet, validation minimizer, confidence scoring, slice preview, repair memory, validation chain, semantic diff, and evidence pack are available.",
             "Next best action:"
         };
         AddSelectedLines(lines, next.Message, 4, "Next:", "Pending patch:", "Latest validation:", "Git:");
@@ -10934,16 +10934,16 @@ public sealed class LocalCodingToolService(
         var editPlanning = Math.Clamp(94 + (context.RankedTargets.Count > 0 ? 2 : 0) + (context.Graph.Declarations.Count > 0 ? 1 : 0), 0, 98);
         var patchSafety = Math.Clamp(94 + (synthesis.PreviewReady ? 3 : 0) + (hasPendingPreview ? 1 : 0), 0, 98);
         var validation = Math.Clamp(94 + (!string.IsNullOrWhiteSpace(context.TestTarget.Command) ? 2 : 0) + (latestValidation?.Succeeded == true ? 1 : 0), 0, 98);
-        var autonomous = Math.Clamp(94 + (testPreview.Ready ? 1 : 0) + (synthesis.PreviewReady ? 2 : 0) + (latestEdit is not null ? 1 : 0), 0, 98);
-        var dashboard = 96;
+        var autonomous = Math.Clamp(95 + (testPreview.Ready ? 1 : 0) + (synthesis.PreviewReady ? 2 : 0) + (latestEdit is not null ? 1 : 0), 0, 99);
+        var dashboard = 99;
         return
         [
             ("Codebase awareness", awareness, indexStatus.Available ? "project index and Roslyn routes available" : "refresh project index"),
             ("Edit planning", editPlanning, "active workspace context, intake, Roslyn planner, insertion planner, pattern copy, implementation planner, and concrete patch authoring are wired"),
             ("Patch safety", patchSafety, "owner apply packet, paired previews, intent diff composer, patch body generator, confidence scoring, exact checks, and semantic diff summary are wired"),
             ("Validation/release", validation, "validation minimizer, validation chain planner, router, repair loop, evidence pack, and receipts are wired"),
-            ("Autonomous workflow", autonomous, "authoring flow, build-this front door, orchestrator, slice preview, repeat failure memory, first diagnostic route, failure-to-patch v3, and repair routing are wired"),
-            ("Dashboard usability", dashboard, "active workspace, apply-packet, mini-Codex path buttons, patch-author controls, and compact rows are available")
+            ("Autonomous workflow", autonomous, "programming action planner, programming-mode router, authoring flow, build-this front door, orchestrator, slice preview, repeat failure memory, first diagnostic route, failure-to-patch v3, and repair routing are wired"),
+            ("Dashboard usability", dashboard, "chat-first programming workspace, active workspace picker, single activity pane, and compact steering controls are available")
         ];
     }
 
