@@ -532,11 +532,13 @@ public sealed class LocalCodingToolService(
         var projectAwareness = LoadProjectIndexAwareness();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var testTarget = await ResolveTestTargetRecommendationAsync(userText.Trim(), cancellationToken).ConfigureAwait(false);
+        var currentCodingSession = ReadCurrentCodingSession();
         lines.Add("Current coding state:");
         lines.Add($"- Project index: {projectIndexStatus.Summary}");
         lines.Add($"- Git: {gitStatus.Summary}");
         lines.AddRange(BuildRecentProjectTargetRows().Select(row => $"- Recent target: {row}"));
         AddProjectIndexAwarenessLines(lines, projectAwareness, 6);
+        AddCurrentCodingSessionContext(lines, currentCodingSession, gitStatus);
         var projectMemory = ReadCurrentProjectMemoryEntries(currentTarget).TakeLast(8).ToList();
         if (projectMemory.Count > 0)
         {
@@ -583,6 +585,44 @@ public sealed class LocalCodingToolService(
             true,
             TrimForChat(string.Join(Environment.NewLine, lines), MaxContextPackCharacters),
             includesLastFailure);
+    }
+
+    private void AddCurrentCodingSessionContext(
+        List<string> lines,
+        CurrentCodingSessionState? state,
+        GitWorkingTreeStatus gitStatus)
+    {
+        if (state is null)
+        {
+            lines.Add("- Active coding task: none selected.");
+            return;
+        }
+
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestReceipt = receipts.LastOrDefault();
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(IsFeatureEditReceipt);
+        lines.Add("Current coding task:");
+        lines.Add($"- Goal: {state.Goal}");
+        lines.Add(string.IsNullOrWhiteSpace(state.ProjectPath)
+            ? "- Target: Review - pick a solution/project."
+            : $"- Target: {FormatWorkspacePath(state.ProjectPath)}");
+        lines.Add($"- Status: {state.Status}");
+        lines.Add($"- Updated: {state.UpdatedAt.LocalDateTime:g}");
+        lines.Add($"- Git: {gitStatus.Summary}");
+        lines.Add($"- Patch preview: {DescribePendingPatchPreview()}");
+        lines.Add(latestReceipt is null ? "- Latest receipt: none" : $"- {FormatReceiptSummary("Latest receipt", latestReceipt)}");
+        lines.Add(latestValidation is null ? "- Latest validation: none" : $"- {FormatReceiptSummary("Latest validation", latestValidation)}");
+        lines.Add(latestEdit is null ? "- Latest edit: none" : $"- {FormatReceiptSummary("Latest edit", latestEdit)}");
+        lines.Add($"- Likely files: {FormatInlineList(state.LikelyFiles.Take(6))}");
+        lines.Add($"- Likely tests: {FormatInlineList(state.LikelyTests.Take(4))}");
+        lines.Add($"- Changed files: {FormatInlineList(state.ChangedFiles.Take(6))}");
+        lines.Add($"- Build command: {state.BuildCommand}");
+        lines.Add($"- Test command: {state.TestCommand}");
+        lines.Add($"- Run command: {state.RunCommand}");
+        lines.Add($"- Pipeline: {FormatInlineList(state.PipelineRows.Take(5))}");
+        lines.Add("- Continue command: continue current task");
     }
 
     public Task<CodingTaskPlan> BuildTaskPlanAsync(
@@ -19863,6 +19903,11 @@ public sealed class LocalCodingToolService(
             return true;
         }
 
+        if (ReadCurrentCodingSession() is not null && MentionsCurrentCodingTaskFollowUp(text))
+        {
+            return true;
+        }
+
         if (text.Contains("c#", StringComparison.OrdinalIgnoreCase)
             || text.Contains(".cs", StringComparison.OrdinalIgnoreCase)
             || text.Contains(".xaml", StringComparison.OrdinalIgnoreCase)
@@ -19895,6 +19940,55 @@ public sealed class LocalCodingToolService(
                || tokens.Contains("it")
                || tokens.Contains("that")
                || tokens.Contains("this");
+    }
+
+    private static bool MentionsCurrentCodingTaskFollowUp(string text)
+    {
+        if (MentionsAny(
+                text,
+                "current task",
+                "current coding task",
+                "keep going",
+                "keep building",
+                "continue",
+                "carry on",
+                "what next",
+                "what's next",
+                "next step",
+                "next steps",
+                "go ahead",
+                "green light",
+                "greenlight",
+                "proceed",
+                "full send",
+                "charge",
+                "do it",
+                "do it to it",
+                "knock it out",
+                "finish it",
+                "build it",
+                "implement it",
+                "work on it"))
+        {
+            return true;
+        }
+
+        var tokens = text
+            .Split(ContextTokenSeparators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (tokens.Contains("next") || tokens.Contains("continue"))
+        {
+            return true;
+        }
+
+        var hasSubjectPointer = tokens.Contains("it") || tokens.Contains("that") || tokens.Contains("this");
+        return hasSubjectPointer
+               && (tokens.Contains("finish")
+                   || tokens.Contains("build")
+                   || tokens.Contains("implement")
+                   || tokens.Contains("proceed")
+                   || tokens.Contains("continue"));
     }
 
     private static bool MentionsAny(string text, params string[] terms)

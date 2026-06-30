@@ -4196,12 +4196,14 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
 
     var start = await service.TryHandleAsync("start coding session add export button", CancellationToken.None);
     var current = await service.TryHandleAsync("current coding task", CancellationToken.None);
+    var followUpContext = await service.BuildContextPackAsync("keep going", CancellationToken.None);
     var defaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
     var saveDefaults = await service.TryHandleAsync("save project command defaults build=custom build; test=custom test; run=custom run", CancellationToken.None);
     var savedDefaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
     var continued = await service.TryHandleAsync("continue current task", CancellationToken.None);
     var clear = await service.TryHandleAsync("clear current coding task", CancellationToken.None);
     var empty = await service.TryHandleAsync("current coding task", CancellationToken.None);
+    var emptyFollowUpContext = await service.BuildContextPackAsync("keep going", CancellationToken.None);
     var history = await service.TryHandleAsync("coding session history", CancellationToken.None);
 
     Equal(true, start.Handled);
@@ -4220,6 +4222,13 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     Contains("Patch preview:", current.Message);
     Contains("Latest receipt:", current.Message);
     Contains("Likely files:", current.Message);
+
+    Equal(true, followUpContext.HasContext);
+    Contains("Current coding task:", followUpContext.Text);
+    Contains("Goal: add export button", followUpContext.Text);
+    Contains("Likely files:", followUpContext.Text);
+    Contains("Build command:", followUpContext.Text);
+    Contains("Continue command: continue current task", followUpContext.Text);
 
     Equal(true, defaults.Handled);
     Equal(true, defaults.Succeeded);
@@ -4249,6 +4258,7 @@ static async Task TestLocalCodingToolManagesCurrentCodingSession()
     Equal(true, empty.Handled);
     Equal(false, empty.Succeeded);
     Contains("Current coding task: none.", empty.Message);
+    Equal(false, emptyFollowUpContext.HasContext);
 
     Equal(true, history.Handled);
     Equal(true, history.Succeeded);
