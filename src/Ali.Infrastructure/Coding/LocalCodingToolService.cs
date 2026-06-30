@@ -14454,9 +14454,19 @@ public sealed class LocalCodingToolService(
 
                         <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" />
 
-                        <ContentControl Grid.Column="2"
-                                        Margin="10,0"
-                                        Content="{Binding SelectedWorkspaceView}" />
+                        <TabControl Grid.Column="2"
+                                    Margin="10,0"
+                                    SelectedIndex="{Binding SelectedViewIndex, Mode=TwoWay}">
+                            <TabItem Header="Overview">
+                                <ContentControl Content="{Binding OverviewView}" />
+                            </TabItem>
+                            <TabItem Header="Activity">
+                                <ContentControl Content="{Binding ActivityView}" />
+                            </TabItem>
+                            <TabItem Header="Settings">
+                                <ContentControl Content="{Binding SettingsView}" />
+                            </TabItem>
+                        </TabControl>
 
                         <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" />
 
