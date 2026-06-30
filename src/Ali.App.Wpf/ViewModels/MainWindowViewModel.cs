@@ -275,7 +275,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingPatchBatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch batch", "show owner safe patch batch", "Coding.PatchBatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolDiffAuditCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol diff audit", "show mandatory symbol diff audit", "Coding.SymbolDiffAudit"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGeneratedFileGuardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Generated file guard", "show generated file guard", "Coding.GeneratedFileGuard"), () => !IsBusy && !IsRecording && !IsTranscribing);
-        RunCodingFeatureBuilderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature builder", "feature builder current feature", "Coding.FeatureBuilder"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureBuilderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Guided feature workflow", "guided feature workflow current feature", "Coding.FeatureBuilder"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -3421,6 +3421,7 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("show owner safe patch batch", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show mandatory symbol diff audit", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show generated file guard", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("guided feature workflow", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
@@ -3525,6 +3526,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         if (command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("guided feature workflow", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
@@ -3537,7 +3539,9 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("post patch validation", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature completion receipt", StringComparison.OrdinalIgnoreCase))
         {
-            return "Next - Work the feature lane top to bottom before previewing a patch.";
+            return command.StartsWith("guided feature workflow", StringComparison.OrdinalIgnoreCase)
+                ? "Next - Run the single next command shown by the workflow."
+                : "Next - Work the feature lane top to bottom before previewing a patch.";
         }
 
         if (command.StartsWith("confirm apply last patch preview", StringComparison.OrdinalIgnoreCase))
@@ -3569,6 +3573,13 @@ public sealed class MainWindowViewModel : ObservableObject
             "Latest validation:",
             "Plan confidence:",
             "Plan reasons:",
+            "Request:",
+            "Guided feature workflow",
+            "Workflow stage:",
+            "Build readiness:",
+            "Code preview:",
+            "Test preview:",
+            "Patch/test pairing:",
             "Goal:",
             "Behavior test patch preview:",
             "Test file:",
@@ -3593,6 +3604,9 @@ public sealed class MainWindowViewModel : ObservableObject
             "Builder status:",
             "Builder runbook:",
             "Failure repair packet:",
+            "One-command path:",
+            "Ask/stop rules:",
+            "Owner boundary:",
             "Next command:",
             "Preview-ready edits:",
             "Patch blocks:",
@@ -3678,7 +3692,14 @@ public sealed class MainWindowViewModel : ObservableObject
             "- 6.",
             "- High",
             "- Medium",
-            "- Low"
+            "- Low",
+            "- Intake:",
+            "- Target:",
+            "- Behavior test:",
+            "- Code patch:",
+            "- Apply state:",
+            "- Release state:",
+            "- Git state:"
         };
         var compact = lines
             .Where(line => prefixes.Any(prefix => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))

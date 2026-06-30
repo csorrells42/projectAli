@@ -124,7 +124,7 @@
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Feature Builder"
+                                <Button Content="Guided Build"
                                         Command="{Binding RunCodingFeatureBuilderCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />

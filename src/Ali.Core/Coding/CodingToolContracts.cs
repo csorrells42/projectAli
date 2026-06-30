@@ -64,6 +64,7 @@ public enum CodingToolAction
     ShowFeatureRunController,
     ShowPostPatchValidationRouter,
     ShowPatchPreviewIntelligence,
+    ShowGuidedFeatureWorkflow,
     ShowPlainEnglishFeatureBuilder,
     ShowBuildFeatureLane,
     ShowCSharpSymbolIndex,

@@ -164,6 +164,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFeatureRunController
             or CodingToolAction.ShowPostPatchValidationRouter
             or CodingToolAction.ShowPatchPreviewIntelligence
+            or CodingToolAction.ShowGuidedFeatureWorkflow
             or CodingToolAction.ShowPlainEnglishFeatureBuilder
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex

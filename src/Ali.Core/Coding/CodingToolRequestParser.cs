@@ -869,6 +869,28 @@ public static class CodingToolRequestParser
         "feature patch intelligence"
     ];
 
+    private static readonly string[] GuidedFeatureWorkflowPrefixes =
+    [
+        "guided feature workflow ",
+        "feature build workflow ",
+        "build feature workflow ",
+        "start feature build ",
+        "start guided build ",
+        "tell ali to build ",
+        "build this feature "
+    ];
+
+    private static readonly string[] GuidedFeatureWorkflowRequests =
+    [
+        "guided feature workflow",
+        "feature build workflow",
+        "build feature workflow",
+        "start feature build",
+        "start guided build",
+        "tell ali to build",
+        "build this feature"
+    ];
+
     private static readonly string[] PlainEnglishFeatureBuilderPrefixes =
     [
         "feature builder ",
@@ -2857,6 +2879,9 @@ public static class CodingToolRequestParser
     private static bool IsPatchPreviewIntelligenceRequest(string text) =>
         PatchPreviewIntelligenceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsGuidedFeatureWorkflowRequest(string text) =>
+        GuidedFeatureWorkflowRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPlainEnglishFeatureBuilderRequest(string text) =>
         PlainEnglishFeatureBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -3023,6 +3048,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, FeatureRunControllerPrefixes, CodingToolAction.ShowFeatureRunController, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, GuidedFeatureWorkflowPrefixes, CodingToolAction.ShowGuidedFeatureWorkflow, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
             || TryParsePlainEnglishBuildRequest(text, userConfirmed, out request))
         {
@@ -3146,6 +3172,12 @@ public static class CodingToolRequestParser
         if (IsPatchPreviewIntelligenceRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowPatchPreviewIntelligence, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsGuidedFeatureWorkflowRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowGuidedFeatureWorkflow, null, UserConfirmed: userConfirmed);
             return true;
         }
 

@@ -128,6 +128,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
     ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
     ("local coding tool shows full coding readiness scanners", TestLocalCodingToolShowsFullCodingReadinessScanners),
+    ("local coding tool shows guided feature workflow", TestLocalCodingToolShowsGuidedFeatureWorkflow),
     ("programming dashboard exposes cockpit commands", TestProgrammingDashboardExposesCockpitCommands),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -829,6 +830,12 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal("Save button", patchIntelligenceRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("patch preview intelligence", out var barePatchIntelligenceRequest));
     Equal(CodingToolAction.ShowPatchPreviewIntelligence, barePatchIntelligenceRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("guided feature workflow Save button", out var guidedWorkflowRequest));
+    Equal(CodingToolAction.ShowGuidedFeatureWorkflow, guidedWorkflowRequest.Action);
+    Equal("Save button", guidedWorkflowRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("tell ali to build settings button", out var tellAliBuildRequest));
+    Equal(CodingToolAction.ShowGuidedFeatureWorkflow, tellAliBuildRequest.Action);
+    Equal("settings button", tellAliBuildRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("feature builder Save button", out var featureBuilderRequest));
     Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, featureBuilderRequest.Action);
     Equal("Save button", featureBuilderRequest.Query);
@@ -3577,6 +3584,85 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Endzone estimate: 86-88%", reportCard.Message);
 }
 
+static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var sourceProject = Path.Combine(workspace, "src", "Demo");
+    var testProject = Path.Combine(workspace, "tests", "Demo.Tests");
+    Directory.CreateDirectory(sourceProject);
+    Directory.CreateDirectory(testProject);
+    await File.WriteAllTextAsync(
+        Path.Combine(sourceProject, "Demo.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(sourceProject, "SaveButtonWorkflow.cs"),
+        """
+        namespace Demo;
+
+        public sealed class SaveButtonWorkflow
+        {
+            public string Label => "Save";
+        }
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(testProject, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+            <PackageReference Include="xunit" Version="2.8.1" />
+          </ItemGroup>
+        </Project>
+        """);
+    var testPath = Path.Combine(testProject, "SaveButtonWorkflowTests.cs");
+    await File.WriteAllTextAsync(
+        testPath,
+        """
+        using Xunit;
+
+        namespace Demo.Tests;
+
+        public sealed class SaveButtonWorkflowTests
+        {
+            [Fact]
+            public void ExistingTest()
+            {
+                Assert.True(true);
+            }
+        }
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)));
+
+    var workflow = await service.TryHandleAsync("guided feature workflow Save button", CancellationToken.None);
+
+    Equal(true, workflow.Handled);
+    Equal(true, workflow.Succeeded);
+    Contains("Guided feature workflow v1", workflow.Message);
+    Contains("Workflow stage:", workflow.Message);
+    Contains("Build readiness:", workflow.Message);
+    Contains("Code preview:", workflow.Message);
+    Contains("Test preview: Ready", workflow.Message);
+    Contains("Patch/test pairing:", workflow.Message);
+    Contains("One-command path:", workflow.Message);
+    Contains("Ask/stop rules:", workflow.Message);
+    Contains("Next command: preview behavior test patch Save button", workflow.Message);
+    Equal(false, (await File.ReadAllTextAsync(testPath)).Contains("NotImplementedException", StringComparison.Ordinal));
+}
+
 static Task TestProgrammingDashboardExposesCockpitCommands()
 {
     var repository = new DirectoryInfo(AppContext.BaseDirectory);
@@ -3599,6 +3685,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSymbolDiffAuditCommand", dashboard);
     Contains("RunCodingGeneratedFileGuardCommand", dashboard);
     Contains("Build Feature", dashboard);
+    Contains("Guided Build", dashboard);
     Contains("RunCodingFeatureBuilderCommand", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
     Contains("RunCodingFeatureWorkContextCommand", dashboard);
@@ -3625,6 +3712,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSymbolDiffAuditCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureBuilderCommand = CreateAsyncCommand", viewModel);
+    Contains("guided feature workflow current feature", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
