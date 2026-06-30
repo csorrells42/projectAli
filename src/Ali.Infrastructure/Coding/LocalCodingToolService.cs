@@ -14449,6 +14449,26 @@ public sealed class LocalCodingToolService(
                                     <ContentControl Content="{Binding SelectedItem}"
                                                     ContentTemplate="{StaticResource DashboardDetailTemplate}"
                                                     Margin="0,0,0,16" />
+                                    <TextBlock Text="Edit selected" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                    <TextBlock Text="Name" Style="{StaticResource DashboardFormLabelStyle}" />
+                                    <TextBox Text="{Binding SelectedItemName, UpdateSourceTrigger=PropertyChanged}"
+                                             Style="{StaticResource DashboardInputTextBoxStyle}" />
+                                    <TextBlock Text="Owner" Style="{StaticResource DashboardFormLabelStyle}" />
+                                    <TextBox Text="{Binding SelectedItemOwner, UpdateSourceTrigger=PropertyChanged}"
+                                             Style="{StaticResource DashboardInputTextBoxStyle}" />
+                                    <TextBlock Text="Status" Style="{StaticResource DashboardFormLabelStyle}" />
+                                    <ComboBox ItemsSource="{Binding StatusOptions}"
+                                              SelectedItem="{Binding SelectedItemStatus, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              Style="{StaticResource DashboardInputComboBoxStyle}" />
+                                    <ItemsControl ItemsSource="{Binding ValidationSummary}" Margin="0,0,0,8">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button Content="Apply Selected" Command="{Binding ApplySelectedItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
+                                    <Separator Margin="0,16" />
                                     <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
                                     <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True}"
                                              Style="{StaticResource DashboardInputTextBoxStyle}" />
@@ -14910,6 +14930,11 @@ public sealed class LocalCodingToolService(
                 <Setter Property="TextWrapping" Value="Wrap" />
             </Style>
 
+            <Style x:Key="DashboardFormLabelStyle" TargetType="TextBlock">
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Margin" Value="0,0,0,4" />
+            </Style>
+
             <Style x:Key="DashboardPrimaryButtonStyle" TargetType="Button">
                 <Setter Property="MinWidth" Value="92" />
                 <Setter Property="Height" Value="34" />
@@ -14939,6 +14964,13 @@ public sealed class LocalCodingToolService(
                         <Setter Property="BorderThickness" Value="2" />
                     </Trigger>
                 </Style.Triggers>
+            </Style>
+
+            <Style x:Key="DashboardInputComboBoxStyle" TargetType="ComboBox">
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Margin" Value="0,0,0,8" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Padding" Value="6,0" />
             </Style>
 
             <Style x:Key="DashboardMetricCardStyle" TargetType="Border">
@@ -15001,6 +15033,10 @@ public sealed class LocalCodingToolService(
                 private int _selectedViewIndex;
                 private bool _synchronizingNavigation;
                 private DashboardItem? _selectedItem;
+                private string _selectedItemError = string.Empty;
+                private string _selectedItemName = string.Empty;
+                private string _selectedItemOwner = string.Empty;
+                private string _selectedItemStatus = string.Empty;
                 private string _statusText = "Ready";
 
                 public MainWindowViewModel(IDashboardDialogService? dialogService = null)
@@ -15012,6 +15048,7 @@ public sealed class LocalCodingToolService(
                     RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
+                    ApplySelectedItemCommand = new RelayCommand(_ => ApplySelectedItem(), _ => CanApplySelectedItem());
                     RemoveSelectedItemCommand = new RelayCommand(_ => RemoveSelectedItem(), _ => CanRemoveSelectedItem());
                     OverviewView = new OverviewDashboardViewModel(this);
                     ActivityView = new ActivityDashboardViewModel(this);
@@ -15027,6 +15064,10 @@ public sealed class LocalCodingToolService(
                 public ObservableCollection<DashboardItem> Items { get; } = new();
 
                 public ObservableCollection<DashboardMetric> Metrics { get; } = new();
+
+                public ObservableCollection<string> StatusOptions { get; } = new() { "New", "Draft", "Ready", "Review" };
+
+                public ObservableCollection<string> ValidationSummary { get; } = new();
 
                 public ICollectionView ItemsView { get; }
 
@@ -15045,6 +15086,8 @@ public sealed class LocalCodingToolService(
                 public ICommand CancelRefreshCommand { get; }
 
                 public ICommand AddItemCommand { get; }
+
+                public ICommand ApplySelectedItemCommand { get; }
 
                 public ICommand RemoveSelectedItemCommand { get; }
 
@@ -15126,6 +15169,7 @@ public sealed class LocalCodingToolService(
                             ((AsyncRelayCommand)RefreshCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)CancelRefreshCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)ApplySelectedItemCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)RemoveSelectedItemCommand).RaiseCanExecuteChanged();
                         }
                     }
@@ -15144,9 +15188,53 @@ public sealed class LocalCodingToolService(
                     {
                         if (SetField(ref _selectedItem, value))
                         {
+                            LoadSelectedItemEditor();
+                            ((RelayCommand)ApplySelectedItemCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)RemoveSelectedItemCommand).RaiseCanExecuteChanged();
                         }
                     }
+                }
+
+                public string SelectedItemName
+                {
+                    get => _selectedItemName;
+                    set
+                    {
+                        if (SetField(ref _selectedItemName, value ?? string.Empty))
+                        {
+                            ValidateSelectedItemEditor();
+                        }
+                    }
+                }
+
+                public string SelectedItemOwner
+                {
+                    get => _selectedItemOwner;
+                    set
+                    {
+                        if (SetField(ref _selectedItemOwner, value ?? string.Empty))
+                        {
+                            ValidateSelectedItemEditor();
+                        }
+                    }
+                }
+
+                public string SelectedItemStatus
+                {
+                    get => _selectedItemStatus;
+                    set
+                    {
+                        if (SetField(ref _selectedItemStatus, value ?? string.Empty))
+                        {
+                            ValidateSelectedItemEditor();
+                        }
+                    }
+                }
+
+                public string SelectedItemError
+                {
+                    get => _selectedItemError;
+                    private set => SetField(ref _selectedItemError, value);
                 }
 
                 public string StatusText
@@ -15295,6 +15383,14 @@ public sealed class LocalCodingToolService(
 
                 private bool CanAddItem() => !IsBusy && !HasErrors && !string.IsNullOrWhiteSpace(NewItemName);
 
+                private bool CanApplySelectedItem() =>
+                    !IsBusy
+                    && SelectedItem is not null
+                    && SelectedItemName.Trim().Length > 0
+                    && SelectedItemOwner.Trim().Length > 0
+                    && StatusOptions.Contains(SelectedItemStatus)
+                    && ValidationSummary.Count == 0;
+
                 private bool CanRemoveSelectedItem() => !IsBusy && SelectedItem is not null;
 
                 private void AddItem()
@@ -15323,6 +15419,40 @@ public sealed class LocalCodingToolService(
                     StatusText = $"Added {name}";
                 }
 
+                private void ApplySelectedItem()
+                {
+                    if (SelectedItem is not { } item)
+                    {
+                        StatusText = "Select an item first.";
+                        return;
+                    }
+
+                    ValidateSelectedItemEditor();
+                    if (!CanApplySelectedItem())
+                    {
+                        StatusText = string.IsNullOrWhiteSpace(SelectedItemError) ? "Fix the selected item first." : SelectedItemError;
+                        return;
+                    }
+
+                    var updated = item with
+                    {
+                        Name = SelectedItemName.Trim(),
+                        Owner = SelectedItemOwner.Trim(),
+                        Status = SelectedItemStatus
+                    };
+                    var index = Items.IndexOf(item);
+                    if (index >= 0)
+                    {
+                        Items[index] = updated;
+                    }
+
+                    ItemsView.Refresh();
+                    UpdateMetrics();
+                    SelectedItem = updated;
+                    Activity.Insert(0, $"Updated {updated.Name}.");
+                    StatusText = $"Updated {updated.Name}";
+                }
+
                 private void RemoveSelectedItem()
                 {
                     if (SelectedItem is not { } item)
@@ -15345,6 +15475,24 @@ public sealed class LocalCodingToolService(
                     Activity.Insert(0, $"Removed {item.Name}.");
                     StatusText = $"Removed {item.Name}";
                     ValidateNewItemName();
+                }
+
+                private void LoadSelectedItemEditor()
+                {
+                    if (SelectedItem is null)
+                    {
+                        SelectedItemName = string.Empty;
+                        SelectedItemOwner = string.Empty;
+                        SelectedItemStatus = StatusOptions[0];
+                    }
+                    else
+                    {
+                        SelectedItemName = SelectedItem.Name;
+                        SelectedItemOwner = SelectedItem.Owner;
+                        SelectedItemStatus = StatusOptions.Contains(SelectedItem.Status) ? SelectedItem.Status : StatusOptions[0];
+                    }
+
+                    ValidateSelectedItemEditor();
                 }
 
                 private void UpdateMetrics()
@@ -15397,6 +15545,38 @@ public sealed class LocalCodingToolService(
                     SetErrors(nameof(NewItemName), errors);
                     NewItemError = errors.Count > 0 ? errors[0] : string.Empty;
                     ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                }
+
+                private void ValidateSelectedItemEditor()
+                {
+                    ValidationSummary.Clear();
+                    if (SelectedItem is null)
+                    {
+                        SelectedItemError = "Select an item to edit.";
+                    }
+                    else if (SelectedItemName.Trim().Length == 0)
+                    {
+                        SelectedItemError = "Enter a selected item name.";
+                    }
+                    else if (SelectedItemOwner.Trim().Length == 0)
+                    {
+                        SelectedItemError = "Enter a selected item owner.";
+                    }
+                    else if (!StatusOptions.Contains(SelectedItemStatus))
+                    {
+                        SelectedItemError = "Choose a valid status.";
+                    }
+                    else
+                    {
+                        SelectedItemError = string.Empty;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(SelectedItemError))
+                    {
+                        ValidationSummary.Add(SelectedItemError);
+                    }
+
+                    ((RelayCommand)ApplySelectedItemCommand).RaiseCanExecuteChanged();
                 }
 
                 private bool ContainsItemName(string name)
