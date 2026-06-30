@@ -35,7 +35,7 @@ public sealed class LocalCodingToolService(
     private const int MaxContextSearchMatches = 14;
     private const int MaxReceiptEntries = 12;
     private const int MaxDiagnosticLines = 12;
-    private const int MaxEditContentCharacters = 20_000;
+    private const int MaxEditContentCharacters = 32_000;
     private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
     private const int MaxPatchBundleEdits = 8;
@@ -14336,6 +14336,9 @@ public sealed class LocalCodingToolService(
                         <Separator />
                         <MenuItem Header="E_xit" />
                     </MenuItem>
+                    <MenuItem Header="_Edit">
+                        <MenuItem Header="_Remove selected" Command="{Binding RemoveSelectedItemCommand}" />
+                    </MenuItem>
                     <MenuItem Header="_View">
                         <MenuItem Header="Overview" />
                         <MenuItem Header="Activity" />
@@ -14418,6 +14421,7 @@ public sealed class LocalCodingToolService(
                                              Style="{StaticResource DashboardInputTextBoxStyle}" />
                                     <TextBlock Text="{Binding NewItemError}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,8" />
                                     <Button Content="Add Item" Command="{Binding AddItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
+                                    <Button Content="Remove Selected" Command="{Binding RemoveSelectedItemCommand}" Margin="0,8,0,0" />
                                     <Separator Margin="0,16" />
                                     <TextBlock Text="Use the splitters to resize panes. The center grid virtualizes rows for larger data sets." TextWrapping="Wrap" />
                                 </StackPanel>
@@ -14582,8 +14586,21 @@ public sealed class LocalCodingToolService(
                 public MainWindow()
                 {
                     InitializeComponent();
-                    DataContext = new MainWindowViewModel();
+                    DataContext = new MainWindowViewModel(new DashboardDialogService(this));
                 }
+            }
+
+            public sealed class DashboardDialogService : IDashboardDialogService
+            {
+                private readonly Window _owner;
+
+                public DashboardDialogService(Window owner)
+                {
+                    _owner = owner;
+                }
+
+                public bool Confirm(DashboardDialogRequest request) =>
+                    MessageBox.Show(_owner, request.Message, request.Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
             }
             """;
     }
@@ -14927,6 +14944,7 @@ public sealed class LocalCodingToolService(
             {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
             {
                 private readonly Dictionary<string, List<string>> _errors = new();
+                private readonly IDashboardDialogService _dialogService;
                 private string _newItemName = string.Empty;
                 private string _newItemError = string.Empty;
                 private string _searchText = string.Empty;
@@ -14941,14 +14959,16 @@ public sealed class LocalCodingToolService(
                 private DashboardItem? _selectedItem;
                 private string _statusText = "Ready";
 
-                public MainWindowViewModel()
+                public MainWindowViewModel(IDashboardDialogService? dialogService = null)
                 {
+                    _dialogService = dialogService ?? new NullDashboardDialogService();
                     ItemsView = CollectionViewSource.GetDefaultView(Items);
                     ItemsView.Filter = FilterItem;
                     ConfigureItemsView();
                     RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
+                    RemoveSelectedItemCommand = new RelayCommand(_ => RemoveSelectedItem(), _ => CanRemoveSelectedItem());
                     OverviewView = new OverviewDashboardViewModel(this);
                     ActivityView = new ActivityDashboardViewModel(this);
                     SettingsView = new SettingsDashboardViewModel();
@@ -14979,6 +14999,8 @@ public sealed class LocalCodingToolService(
                 public ICommand CancelRefreshCommand { get; }
 
                 public ICommand AddItemCommand { get; }
+
+                public ICommand RemoveSelectedItemCommand { get; }
 
                 public string NewItemName
                 {
@@ -15057,6 +15079,7 @@ public sealed class LocalCodingToolService(
                             ((AsyncRelayCommand)RefreshCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)CancelRefreshCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)RemoveSelectedItemCommand).RaiseCanExecuteChanged();
                         }
                     }
                 }
@@ -15070,7 +15093,13 @@ public sealed class LocalCodingToolService(
                 public DashboardItem? SelectedItem
                 {
                     get => _selectedItem;
-                    set => SetField(ref _selectedItem, value);
+                    set
+                    {
+                        if (SetField(ref _selectedItem, value))
+                        {
+                            ((RelayCommand)RemoveSelectedItemCommand).RaiseCanExecuteChanged();
+                        }
+                    }
                 }
 
                 public string StatusText
@@ -15217,6 +15246,8 @@ public sealed class LocalCodingToolService(
 
                 private bool CanAddItem() => !IsBusy && !HasErrors && !string.IsNullOrWhiteSpace(NewItemName);
 
+                private bool CanRemoveSelectedItem() => !IsBusy && SelectedItem is not null;
+
                 private void AddItem()
                 {
                     var name = NewItemName.Trim();
@@ -15240,6 +15271,29 @@ public sealed class LocalCodingToolService(
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
                     StatusText = $"Added {name}";
+                }
+
+                private void RemoveSelectedItem()
+                {
+                    if (SelectedItem is not { } item)
+                    {
+                        StatusText = "Select an item first.";
+                        return;
+                    }
+
+                    var request = new DashboardDialogRequest("Remove selected item", $"Remove {item.Name}?");
+                    if (!_dialogService.Confirm(request))
+                    {
+                        StatusText = "Remove canceled";
+                        return;
+                    }
+
+                    Items.Remove(item);
+                    ItemsView.Refresh();
+                    SelectedItem = FirstVisibleItem();
+                    Activity.Insert(0, $"Removed {item.Name}.");
+                    StatusText = $"Removed {item.Name}";
+                    ValidateNewItemName();
                 }
 
                 private void ValidateNewItemName()
@@ -15501,6 +15555,8 @@ public sealed class LocalCodingToolService(
 
                 public ICommand AddItemCommand => _owner.AddItemCommand;
 
+                public ICommand RemoveSelectedItemCommand => _owner.RemoveSelectedItemCommand;
+
                 public bool HasErrors => _owner.HasErrors;
 
                 public IEnumerable GetErrors(string? propertyName) => _owner.GetErrors(propertyName);
@@ -15532,6 +15588,18 @@ public sealed class LocalCodingToolService(
                 public string Description { get; } = "This composed settings view is a placeholder for real application configuration.";
 
                 public ObservableCollection<string> SettingsNotes { get; } = new();
+            }
+
+            public interface IDashboardDialogService
+            {
+                bool Confirm(DashboardDialogRequest request);
+            }
+
+            public sealed record DashboardDialogRequest(string Title, string Message);
+
+            public sealed class NullDashboardDialogService : IDashboardDialogService
+            {
+                public bool Confirm(DashboardDialogRequest request) => true;
             }
             """;
     }
