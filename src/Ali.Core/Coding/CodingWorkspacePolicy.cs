@@ -130,6 +130,16 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFullCodingReadiness
             or CodingToolAction.ShowMiniCodexStatus
             or CodingToolAction.ShowValidationLedger
+            or CodingToolAction.ShowValidationQueueRunner
+            or CodingToolAction.ShowMandatorySymbolDiffAudit
+            or CodingToolAction.PlanMultiFileRefactor
+            or CodingToolAction.ShowTestFailurePatchLoop
+            or CodingToolAction.ShowBuildErrorTriage
+            or CodingToolAction.ShowCodebaseMemoryIndex
+            or CodingToolAction.ShowCodingNextBestAction
+            or CodingToolAction.ShowOwnerSafePatchBatch
+            or CodingToolAction.ShowGeneratedFileGuard
+            or CodingToolAction.ShowMiniCodexReadinessReport
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowOwnershipMap
             or CodingToolAction.ShowCallGraph

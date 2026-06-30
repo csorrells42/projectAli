@@ -744,6 +744,26 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
 
     Equal(true, CodingToolRequestParser.TryParse("show validation ledger", out var ledgerRequest));
     Equal(CodingToolAction.ShowValidationLedger, ledgerRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show validation queue runner", out var queueRunnerRequest));
+    Equal(CodingToolAction.ShowValidationQueueRunner, queueRunnerRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show mandatory symbol diff audit", out var symbolDiffAuditRequest));
+    Equal(CodingToolAction.ShowMandatorySymbolDiffAudit, symbolDiffAuditRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("plan multi file refactor Save button", out var multiFileRefactorRequest));
+    Equal(CodingToolAction.PlanMultiFileRefactor, multiFileRefactorRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show test failure patch loop", out var testFailureLoopRequest));
+    Equal(CodingToolAction.ShowTestFailurePatchLoop, testFailureLoopRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show build error triage", out var buildTriageRequest));
+    Equal(CodingToolAction.ShowBuildErrorTriage, buildTriageRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show codebase memory index", out var memoryIndexRequest));
+    Equal(CodingToolAction.ShowCodebaseMemoryIndex, memoryIndexRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show coding next best action", out var nextBestActionRequest));
+    Equal(CodingToolAction.ShowCodingNextBestAction, nextBestActionRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show owner safe patch batch", out var patchBatchRequest));
+    Equal(CodingToolAction.ShowOwnerSafePatchBatch, patchBatchRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show generated file guard", out var generatedGuardRequest));
+    Equal(CodingToolAction.ShowGeneratedFileGuard, generatedGuardRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("mini codex readiness report", out var reportCardRequest));
+    Equal(CodingToolAction.ShowMiniCodexReadinessReport, reportCardRequest.Action);
 
     Equal(true, CodingToolRequestParser.TryParse("show csharp symbol index", out var indexRequest));
     Equal(CodingToolAction.ShowCSharpSymbolIndex, indexRequest.Action);
@@ -3269,6 +3289,16 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     var commandSurface = await service.TryHandleAsync("command surface doctor", CancellationToken.None);
     var ledger = await service.TryHandleAsync("show validation ledger", CancellationToken.None);
     var miniCodex = await service.TryHandleAsync("mini codex status", CancellationToken.None);
+    var queueRunner = await service.TryHandleAsync("show validation queue runner", CancellationToken.None);
+    var symbolAudit = await service.TryHandleAsync("show mandatory symbol diff audit", CancellationToken.None);
+    var refactorPlan = await service.TryHandleAsync("plan multi file refactor Save button", CancellationToken.None);
+    var testFailureLoop = await service.TryHandleAsync("show test failure patch loop", CancellationToken.None);
+    var buildTriage = await service.TryHandleAsync("show build error triage", CancellationToken.None);
+    var memoryIndex = await service.TryHandleAsync("show codebase memory index", CancellationToken.None);
+    var nextBestAction = await service.TryHandleAsync("show coding next best action", CancellationToken.None);
+    var patchBatch = await service.TryHandleAsync("show owner safe patch batch", CancellationToken.None);
+    var generatedGuard = await service.TryHandleAsync("show generated file guard", CancellationToken.None);
+    var reportCard = await service.TryHandleAsync("mini codex readiness report", CancellationToken.None);
 
     Equal(true, readiness.Handled);
     Equal(true, readiness.Succeeded);
@@ -3364,12 +3394,36 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Edit receipt timeline v2:", ledger.Message);
     Contains("Command queue dashboard rows:", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 96%", miniCodex.Message);
+    Contains("Overall score: 98%", miniCodex.Message);
     Contains("Score explainer:", miniCodex.Message);
     Contains("Project index refresh automation", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
     Contains("Codebase awareness", miniCodex.Message);
     Contains("Mini-Codex self audit", miniCodex.Message);
+    Contains("Validation queue runner", queueRunner.Message);
+    Contains("owner-approved queue", queueRunner.Message);
+    Contains("Queue rows:", queueRunner.Message);
+    Contains("Mandatory symbol diff audit", symbolAudit.Message);
+    Contains("Coverage: Good", symbolAudit.Message);
+    Contains("Receipt enforcement: Good", symbolAudit.Message);
+    Contains("Multi-file refactor plan", refactorPlan.Message);
+    Contains("Dependency order:", refactorPlan.Message);
+    Contains("Refactor gates:", refactorPlan.Message);
+    Contains("Test failure to patch loop", testFailureLoop.Message);
+    Contains("Loop rows:", testFailureLoop.Message);
+    Contains("Build error triage v4", buildTriage.Message);
+    Contains("Grouped root causes:", buildTriage.Message);
+    Contains("Codebase memory index", memoryIndex.Message);
+    Contains("Architecture memory:", memoryIndex.Message);
+    Contains("Coding next best action", nextBestAction.Message);
+    Contains("Next:", nextBestAction.Message);
+    Contains("Owner-safe patch batch approvals", patchBatch.Message);
+    Contains("Approval rules:", patchBatch.Message);
+    Contains("Generated/designer file guard v2", generatedGuard.Message);
+    Contains("Guarded patterns:", generatedGuard.Message);
+    Contains("Mini-Codex readiness report v2", reportCard.Message);
+    Contains("Report card:", reportCard.Message);
+    Contains("Endzone estimate: 86-88%", reportCard.Message);
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
 {

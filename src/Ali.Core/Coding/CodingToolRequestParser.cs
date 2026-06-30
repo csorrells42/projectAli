@@ -434,6 +434,87 @@ public static class CodingToolRequestParser
         "vs integration plan"
     ];
 
+
+    private static readonly string[] ValidationQueueRunnerRequests =
+    [
+        "show validation queue runner",
+        "validation queue runner",
+        "show queued validation runner",
+        "one click validation queue",
+        "show one click validation queue"
+    ];
+
+    private static readonly string[] MandatorySymbolDiffAuditRequests =
+    [
+        "show mandatory symbol diff audit",
+        "symbol diff audit",
+        "show symbol diff enforcement",
+        "before after symbol diff audit"
+    ];
+
+    private static readonly string[] MultiFileRefactorPlanPrefixes =
+    [
+        "multi file refactor plan ",
+        "plan multi file refactor ",
+        "plan multifile refactor ",
+        "coordinated refactor plan "
+    ];
+
+    private static readonly string[] TestFailurePatchLoopRequests =
+    [
+        "show test failure patch loop",
+        "test failure patch loop",
+        "show failing test repair loop",
+        "test to patch loop"
+    ];
+
+    private static readonly string[] BuildErrorTriageRequests =
+    [
+        "show build error triage",
+        "build error triage",
+        "build error auto triage",
+        "group build errors"
+    ];
+
+    private static readonly string[] CodebaseMemoryIndexRequests =
+    [
+        "show codebase memory index",
+        "codebase memory index",
+        "show coding memory index",
+        "project memory index"
+    ];
+
+    private static readonly string[] CodingNextBestActionRequests =
+    [
+        "show coding next best action",
+        "coding next best action",
+        "show next best coding action",
+        "next best coding action"
+    ];
+
+    private static readonly string[] OwnerSafePatchBatchRequests =
+    [
+        "show owner safe patch batch",
+        "owner safe patch batch",
+        "show patch batch approvals",
+        "patch batch approvals"
+    ];
+
+    private static readonly string[] GeneratedFileGuardRequests =
+    [
+        "show generated file guard",
+        "generated file guard",
+        "show designer file guard",
+        "generated designer guard"
+    ];
+
+    private static readonly string[] MiniCodexReadinessReportRequests =
+    [
+        "mini codex readiness report",
+        "show mini codex readiness report",
+        "mini codex report card",
+        "show coding report card"
+    ];
     private static readonly string[] ApplyLastPatchPreviewRequests =
     [
         "apply last patch preview",
@@ -1638,6 +1719,65 @@ public static class CodingToolRequestParser
             return true;
         }
 
+
+        if (IsValidationQueueRunnerRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowValidationQueueRunner, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsMandatorySymbolDiffAuditRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowMandatorySymbolDiffAudit, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePrefixedQuery(trimmed, MultiFileRefactorPlanPrefixes, CodingToolAction.PlanMultiFileRefactor, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsTestFailurePatchLoopRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowTestFailurePatchLoop, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBuildErrorTriageRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBuildErrorTriage, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCodebaseMemoryIndexRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCodebaseMemoryIndex, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsCodingNextBestActionRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCodingNextBestAction, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsOwnerSafePatchBatchRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowOwnerSafePatchBatch, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsGeneratedFileGuardRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowGeneratedFileGuard, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsMiniCodexReadinessReportRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowMiniCodexReadinessReport, null, UserConfirmed: userConfirmed);
+            return true;
+        }
         if (IsCSharpSymbolIndexRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowCSharpSymbolIndex, null, UserConfirmed: userConfirmed);
@@ -2202,6 +2342,33 @@ public static class CodingToolRequestParser
     private static bool IsSuggestLastFailurePatchRequest(string text) =>
         SuggestLastFailurePatchRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+
+    private static bool IsValidationQueueRunnerRequest(string text) =>
+        ValidationQueueRunnerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsMandatorySymbolDiffAuditRequest(string text) =>
+        MandatorySymbolDiffAuditRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsTestFailurePatchLoopRequest(string text) =>
+        TestFailurePatchLoopRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBuildErrorTriageRequest(string text) =>
+        BuildErrorTriageRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCodebaseMemoryIndexRequest(string text) =>
+        CodebaseMemoryIndexRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCodingNextBestActionRequest(string text) =>
+        CodingNextBestActionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsOwnerSafePatchBatchRequest(string text) =>
+        OwnerSafePatchBatchRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsGeneratedFileGuardRequest(string text) =>
+        GeneratedFileGuardRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsMiniCodexReadinessReportRequest(string text) =>
+        MiniCodexReadinessReportRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
     private static bool IsShowLastPatchPreviewRequest(string text) =>
         ShowLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
