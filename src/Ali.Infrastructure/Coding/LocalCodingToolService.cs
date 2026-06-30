@@ -14267,6 +14267,60 @@ public sealed class LocalCodingToolService(
                     <DataTemplate x:Key="DashboardDetailTemplate">
                         <local:DashboardDetailCard />
                     </DataTemplate>
+                    <DataTemplate DataType="{x:Type local:OverviewDashboardViewModel}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Margin="0,0,0,8">
+                                <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         VerticalContentAlignment="Center" />
+                            </DockPanel>
+                            <DataGrid x:Name="ItemsDataGrid"
+                                      Grid.Row="1"
+                                      ItemsSource="{Binding ItemsView}"
+                                      SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      EnableRowVirtualization="True"
+                                      CanUserAddRows="False">
+                                <DataGrid.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate>
+                                                <Border Padding="6" Background="#EEF2F7">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </DataGrid.GroupStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+                                    <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </DataTemplate>
+                    <DataTemplate DataType="{x:Type local:ActivityDashboardViewModel}">
+                        <ListBox ItemsSource="{Binding Activity}" />
+                    </DataTemplate>
+                    <DataTemplate DataType="{x:Type local:SettingsDashboardViewModel}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
+                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                            <ItemsControl ItemsSource="{Binding SettingsNotes}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,6" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </DataTemplate>
                 </ResourceDictionary>
             </Window.Resources>
 
@@ -14347,49 +14401,9 @@ public sealed class LocalCodingToolService(
 
                         <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" />
 
-                        <TabControl Grid.Column="2" Margin="10,0" SelectedIndex="{Binding SelectedViewIndex, Mode=TwoWay}">
-                            <TabItem Header="Overview">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                    </Grid.RowDefinitions>
-                                    <DockPanel Margin="0,0,0,8">
-                                        <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                        <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                                                 VerticalContentAlignment="Center" />
-                                    </DockPanel>
-                                    <DataGrid x:Name="ItemsDataGrid"
-                                          Grid.Row="1"
-                                          ItemsSource="{Binding ItemsView}"
-                                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-                                          AutoGenerateColumns="False"
-                                          IsReadOnly="True"
-                                          EnableRowVirtualization="True"
-                                          CanUserAddRows="False">
-                                        <DataGrid.GroupStyle>
-                                            <GroupStyle>
-                                                <GroupStyle.HeaderTemplate>
-                                                    <DataTemplate>
-                                                        <Border Padding="6" Background="#EEF2F7">
-                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </GroupStyle.HeaderTemplate>
-                                            </GroupStyle>
-                                        </DataGrid.GroupStyle>
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
-                                            <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
-                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </Grid>
-                            </TabItem>
-                            <TabItem Header="Activity">
-                                <ListBox ItemsSource="{Binding Activity}" />
-                            </TabItem>
-                        </TabControl>
+                        <ContentControl Grid.Column="2"
+                                        Margin="10,0"
+                                        Content="{Binding SelectedWorkspaceView}" />
 
                         <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" />
 
@@ -14921,6 +14935,7 @@ public sealed class LocalCodingToolService(
                 private string _progressText = "Idle";
                 private DashboardNavigationItem? _selectedNavigation;
                 private string _selectedNavigationSummary = "Navigation, tabs, data, details, and status in one resizable WPF shell.";
+                private object? _selectedWorkspaceView;
                 private int _selectedViewIndex;
                 private bool _synchronizingNavigation;
                 private DashboardItem? _selectedItem;
@@ -14934,6 +14949,9 @@ public sealed class LocalCodingToolService(
                     RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
+                    OverviewView = new OverviewDashboardViewModel(this);
+                    ActivityView = new ActivityDashboardViewModel(this);
+                    SettingsView = new SettingsDashboardViewModel();
                     SeedNavigation();
                     SeedDashboard();
                 }
@@ -14949,6 +14967,12 @@ public sealed class LocalCodingToolService(
                 public ObservableCollection<string> Activity { get; } = new();
 
                 public ObservableCollection<DashboardNavigationItem> NavigationItems { get; } = new();
+
+                public OverviewDashboardViewModel OverviewView { get; }
+
+                public ActivityDashboardViewModel ActivityView { get; }
+
+                public SettingsDashboardViewModel SettingsView { get; }
 
                 public ICommand RefreshCommand { get; }
 
@@ -14986,6 +15010,12 @@ public sealed class LocalCodingToolService(
                 {
                     get => _selectedNavigationSummary;
                     private set => SetField(ref _selectedNavigationSummary, value);
+                }
+
+                public object? SelectedWorkspaceView
+                {
+                    get => _selectedWorkspaceView;
+                    private set => SetField(ref _selectedWorkspaceView, value);
                 }
 
                 public int SelectedViewIndex
@@ -15052,10 +15082,10 @@ public sealed class LocalCodingToolService(
                 private void SeedNavigation()
                 {
                     NavigationItems.Clear();
-                    var overview = CreateNavigationItem("Overview", "Review current dashboard items, filters, and selected detail records.", 0);
-                    var activity = CreateNavigationItem("Activity", "Inspect recent dashboard activity and refresh history.", 1);
-                    var settings = CreateNavigationItem("Settings", "Settings are represented as a navigation state until a dedicated settings view is added.", 0);
-                    var workspace = CreateNavigationItem("Workspace", "Project workspace navigation.", 0);
+                    var overview = CreateNavigationItem("Overview", "Review current dashboard items, filters, and selected detail records.", OverviewView, 0);
+                    var activity = CreateNavigationItem("Activity", "Inspect recent dashboard activity and refresh history.", ActivityView, 1);
+                    var settings = CreateNavigationItem("Settings", "Review local configuration notes for this dashboard shell.", SettingsView, 2);
+                    var workspace = CreateNavigationItem("Workspace", "Project workspace navigation.", OverviewView, 0);
                     workspace.IsExpanded = true;
                     workspace.Children.Add(overview);
                     workspace.Children.Add(activity);
@@ -15064,8 +15094,8 @@ public sealed class LocalCodingToolService(
                     overview.IsSelected = true;
                 }
 
-                private DashboardNavigationItem CreateNavigationItem(string header, string summary, int viewIndex) =>
-                    new(header, summary, viewIndex, SelectNavigationItem);
+                private DashboardNavigationItem CreateNavigationItem(string header, string summary, object view, int viewIndex) =>
+                    new(header, summary, view, viewIndex, SelectNavigationItem);
 
                 private void SelectNavigationByViewIndex(int viewIndex)
                 {
@@ -15112,6 +15142,7 @@ public sealed class LocalCodingToolService(
 
                         SelectedNavigation = item;
                         SelectedNavigationSummary = item.Summary;
+                        SelectedWorkspaceView = item.View;
                         SelectedViewIndex = item.ViewIndex;
                         StatusText = $"View: {item.Header}";
                     }
@@ -15319,10 +15350,11 @@ public sealed class LocalCodingToolService(
                     private bool _isExpanded;
                     private bool _isSelected;
 
-                    public DashboardNavigationItem(string header, string summary, int viewIndex, Action<DashboardNavigationItem> select)
+                    public DashboardNavigationItem(string header, string summary, object view, int viewIndex, Action<DashboardNavigationItem> select)
                     {
                         Header = header;
                         Summary = summary;
+                        View = view;
                         ViewIndex = viewIndex;
                         _select = select;
                     }
@@ -15332,6 +15364,8 @@ public sealed class LocalCodingToolService(
                     public string Header { get; }
 
                     public string Summary { get; }
+
+                    public object View { get; }
 
                     public int ViewIndex { get; }
 
@@ -15426,6 +15460,78 @@ public sealed class LocalCodingToolService(
 
                     public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
                 }
+            }
+
+            public sealed class OverviewDashboardViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
+            {
+                private readonly MainWindowViewModel _owner;
+
+                public OverviewDashboardViewModel(MainWindowViewModel owner)
+                {
+                    _owner = owner;
+                    _owner.PropertyChanged += (_, args) => PropertyChanged?.Invoke(this, args);
+                    _owner.ErrorsChanged += (_, args) => ErrorsChanged?.Invoke(this, args);
+                }
+
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+
+                public ICollectionView ItemsView => _owner.ItemsView;
+
+                public string SearchText
+                {
+                    get => _owner.SearchText;
+                    set => _owner.SearchText = value;
+                }
+
+                public MainWindowViewModel.DashboardItem? SelectedItem
+                {
+                    get => _owner.SelectedItem;
+                    set => _owner.SelectedItem = value;
+                }
+
+                public string NewItemName
+                {
+                    get => _owner.NewItemName;
+                    set => _owner.NewItemName = value;
+                }
+
+                public string NewItemError => _owner.NewItemError;
+
+                public ICommand AddItemCommand => _owner.AddItemCommand;
+
+                public bool HasErrors => _owner.HasErrors;
+
+                public IEnumerable GetErrors(string? propertyName) => _owner.GetErrors(propertyName);
+            }
+
+            public sealed class ActivityDashboardViewModel
+            {
+                private readonly MainWindowViewModel _owner;
+
+                public ActivityDashboardViewModel(MainWindowViewModel owner)
+                {
+                    _owner = owner;
+                }
+
+                public ObservableCollection<string> Activity => _owner.Activity;
+            }
+
+            public sealed class SettingsDashboardViewModel
+            {
+                public SettingsDashboardViewModel()
+                {
+                    SettingsNotes.Add("Use view-model properties for settings so the UI can bind, validate, and test them.");
+                    SettingsNotes.Add("Keep shell navigation independent from each view's internal layout.");
+                    SettingsNotes.Add("Move long-running work behind async commands so the window remains responsive.");
+                }
+
+                public string Title { get; } = "Settings";
+
+                public string Description { get; } = "This composed settings view is a placeholder for real application configuration.";
+
+                public ObservableCollection<string> SettingsNotes { get; } = new();
             }
             """;
     }
