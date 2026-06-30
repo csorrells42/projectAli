@@ -14343,11 +14343,22 @@ public sealed class LocalCodingToolService(
                                           IsReadOnly="True"
                                           EnableRowVirtualization="True"
                                           CanUserAddRows="False">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
-                                        <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
-                                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
-                                    </DataGrid.Columns>
+                                        <DataGrid.GroupStyle>
+                                            <GroupStyle>
+                                                <GroupStyle.HeaderTemplate>
+                                                    <DataTemplate>
+                                                        <Border Padding="6" Background="#EEF2F7">
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </GroupStyle.HeaderTemplate>
+                                            </GroupStyle>
+                                        </DataGrid.GroupStyle>
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+                                            <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
+                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" />
+                                        </DataGrid.Columns>
                                     </DataGrid>
                                 </Grid>
                             </TabItem>
@@ -14867,6 +14878,7 @@ public sealed class LocalCodingToolService(
                 {
                     ItemsView = CollectionViewSource.GetDefaultView(Items);
                     ItemsView.Filter = FilterItem;
+                    ConfigureItemsView();
                     RefreshCommand = new RelayCommand(_ => Refresh());
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
                     SeedDashboard();
@@ -14965,6 +14977,15 @@ public sealed class LocalCodingToolService(
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
                     StatusText = $"Added {name}";
+                }
+
+                private void ConfigureItemsView()
+                {
+                    ItemsView.SortDescriptions.Clear();
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(DashboardItem.Status), ListSortDirection.Ascending));
+                    ItemsView.SortDescriptions.Add(new SortDescription(nameof(DashboardItem.Name), ListSortDirection.Ascending));
+                    ItemsView.GroupDescriptions?.Clear();
+                    ItemsView.GroupDescriptions?.Add(new PropertyGroupDescription(nameof(DashboardItem.Status)));
                 }
 
                 private bool FilterItem(object item)

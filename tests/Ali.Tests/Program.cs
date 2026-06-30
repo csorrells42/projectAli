@@ -5573,10 +5573,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         xamlPath,
         codeBehindPath,
         "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
-        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged}\"", "ItemsSource=\"{Binding ItemsView}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
+        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged}\"", "ItemsSource=\"{Binding ItemsView}\"", "DataGrid.GroupStyle", "GroupStyle.HeaderTemplate", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
         ["DataContext = new MainWindowViewModel();"],
         "MainWindowViewModel.cs",
-        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICollectionView ItemsView", "CollectionViewSource.GetDefaultView", "SearchText", "FilterItem", "FirstVisibleItem", "ICommand RefreshCommand", "DashboardItem? SelectedItem", "RelayCommand", "CanExecuteChanged"]);
+        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICollectionView ItemsView", "CollectionViewSource.GetDefaultView", "ConfigureItemsView", "SortDescriptions", "PropertyGroupDescription", "SearchText", "FilterItem", "FirstVisibleItem", "ICommand RefreshCommand", "DashboardItem? SelectedItem", "RelayCommand", "CanExecuteChanged"]);
     var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
     var detailCardPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml");
     var detailCardCodeBehindPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml.cs");
