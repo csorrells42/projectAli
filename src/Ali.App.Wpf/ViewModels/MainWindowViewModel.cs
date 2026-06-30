@@ -281,6 +281,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBehaviorContractCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior contract", "behavior contract current feature", "Coding.BehaviorContract"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBehaviorTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior tests", "behavior test plan current feature", "Coding.BehaviorTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBehaviorTestPreviewCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior test preview", "preview behavior test patch current feature", "Coding.BehaviorTestPreview"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImplementationSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation slices", "implementation slice plan current feature", "Coding.ImplementationSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPatchSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch slices", "patch slice plan current feature", "Coding.PatchSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingExactPatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Exact patch", "exact patch synthesis current feature", "Coding.ExactPatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -751,6 +752,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingBehaviorContractCommand { get; }
 
     public ICommand RunCodingBehaviorTestsCommand { get; }
+
+    public ICommand RunCodingBehaviorTestPreviewCommand { get; }
 
     public ICommand RunCodingImplementationSlicesCommand { get; }
 
@@ -3423,6 +3426,7 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior test plan", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("preview behavior test patch", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation slice plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("patch slice plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature execution packet", StringComparison.OrdinalIgnoreCase)
@@ -3525,6 +3529,7 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior test plan", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("preview behavior test patch", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation slice plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("patch slice plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature execution packet", StringComparison.OrdinalIgnoreCase)
@@ -3565,6 +3570,10 @@ public sealed class MainWindowViewModel : ObservableObject
             "Plan confidence:",
             "Plan reasons:",
             "Goal:",
+            "Behavior test patch preview:",
+            "Test file:",
+            "Framework:",
+            "Generated test:",
             "Top target:",
             "Risk labels:",
             "Test target:",
@@ -6952,6 +6961,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingBehaviorTestsCommand is AsyncRelayCommand runCodingBehaviorTests)
         {
             runCodingBehaviorTests.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingBehaviorTestPreviewCommand is AsyncRelayCommand runCodingBehaviorTestPreview)
+        {
+            runCodingBehaviorTestPreview.RaiseCanExecuteChanged();
         }
 
         if (RunCodingImplementationSlicesCommand is AsyncRelayCommand runCodingImplementationSlices)

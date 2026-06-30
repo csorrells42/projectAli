@@ -138,6 +138,8 @@
                                         Command="{Binding RunCodingBehaviorContractCommand}" />
                                 <Button Content="Behavior Tests"
                                         Command="{Binding RunCodingBehaviorTestsCommand}" />
+                                <Button Content="Test Preview"
+                                        Command="{Binding RunCodingBehaviorTestPreviewCommand}" />
                                 <Button Content="Implementation Slices"
                                         Command="{Binding RunCodingImplementationSlicesCommand}" />
                                 <Button Content="Patch Slices"

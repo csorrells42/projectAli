@@ -146,6 +146,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
     ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
+    ("local coding tool previews behavior test patch", TestLocalCodingToolPreviewsBehaviorTestPatch),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
     ("local coding tool rejects stale patch bundle", TestLocalCodingToolRejectsStalePatchBundle),
     ("local coding tool manages pending patch preview", TestLocalCodingToolManagesPendingPatchPreview),
@@ -778,6 +779,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal("Save button", featureIntentRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("behavior test plan Save button", out var behaviorTestsRequest));
     Equal(CodingToolAction.PlanBehaviorTests, behaviorTestsRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("preview behavior test patch Save button", out var behaviorTestPreviewRequest));
+    Equal(CodingToolAction.PreviewBehaviorTestPatch, behaviorTestPreviewRequest.Action);
+    Equal("Save button", behaviorTestPreviewRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("implementation slice plan Save button", out var slicesRequest));
     Equal(CodingToolAction.PlanImplementationSlices, slicesRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("show patch bundle builder", out var patchBuilderRequest));
@@ -3601,6 +3605,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFeatureIntentCommand", dashboard);
     Contains("RunCodingBehaviorContractCommand", dashboard);
     Contains("RunCodingBehaviorTestsCommand", dashboard);
+    Contains("RunCodingBehaviorTestPreviewCommand", dashboard);
     Contains("RunCodingImplementationSlicesCommand", dashboard);
     Contains("RunCodingPatchSlicesCommand", dashboard);
     Contains("RunCodingExactPatchCommand", dashboard);
@@ -3625,6 +3630,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBehaviorContractCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBehaviorTestsCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingBehaviorTestPreviewCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingImplementationSlicesCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchSlicesCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingExactPatchCommand = CreateAsyncCommand", viewModel);
@@ -4350,6 +4356,65 @@ static async Task TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch()
     Equal(true, applied.Succeeded);
     Contains("Applied last patch preview bundle", applied.Message);
     Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
+}
+
+static async Task TestLocalCodingToolPreviewsBehaviorTestPatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var testProject = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testProject);
+    var projectPath = Path.Combine(testProject, "Demo.Tests.csproj");
+    await File.WriteAllTextAsync(projectPath, """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net8.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+            <PackageReference Include="xunit" Version="2.8.1" />
+          </ItemGroup>
+        </Project>
+        """);
+    var testPath = Path.Combine(testProject, "WidgetTests.cs");
+    await File.WriteAllTextAsync(testPath, """
+        using Xunit;
+
+        namespace Demo.Tests;
+
+        public sealed class WidgetTests
+        {
+            [Fact]
+            public void ExistingTest()
+            {
+                Assert.True(true);
+            }
+        }
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var preview = await service.TryHandleAsync("preview behavior test patch Save button", CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Behavior test patch preview", preview.Message);
+    Contains("No files were changed", preview.Message);
+    Contains("Framework: xUnit", preview.Message);
+    Contains("Generated test:", preview.Message);
+    Contains("confirm apply last patch preview", preview.Message);
+    Equal(false, (await File.ReadAllTextAsync(testPath)).Contains("NotImplementedException", StringComparison.Ordinal));
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview bundle", applied.Message);
+    var updated = await File.ReadAllTextAsync(testPath);
+    Contains("SaveButtonBehaviorContract", updated);
+    Contains("NotImplementedException", updated);
 }
 
 static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()

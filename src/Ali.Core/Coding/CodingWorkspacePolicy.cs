@@ -142,6 +142,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowMiniCodexReadinessReport
             or CodingToolAction.BuildFeatureIntentPacket
             or CodingToolAction.PlanBehaviorTests
+            or CodingToolAction.PreviewBehaviorTestPatch
             or CodingToolAction.PlanImplementationSlices
             or CodingToolAction.ShowPatchBundleBuilder
             or CodingToolAction.ShowTestStubGeneratorPlan

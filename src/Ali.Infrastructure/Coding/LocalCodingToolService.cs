@@ -279,6 +279,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowMiniCodexReadinessReport => await ShowMiniCodexReadinessReportAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.BuildFeatureIntentPacket => BuildFeatureIntentPacket(request),
             CodingToolAction.PlanBehaviorTests => await PlanBehaviorTestsAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PreviewBehaviorTestPatch => await PreviewBehaviorTestPatchAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PlanImplementationSlices => await PlanImplementationSlicesAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchBundleBuilder => await ShowPatchBundleBuilderAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowTestStubGeneratorPlan => await ShowTestStubGeneratorPlanAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8263,6 +8264,92 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Behavior test plan", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> PreviewBehaviorTestPatchAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var targetFile = ResolveBehaviorTestPatchTarget(context);
+        if (string.IsNullOrWhiteSpace(targetFile))
+        {
+            var lines = new List<string>
+            {
+                "Behavior test patch preview:",
+                "No files were changed.",
+                $"Goal: {context.Goal}",
+                "Preview blocked: no existing C# test file target was resolved.",
+                "Candidate test files:"
+            };
+            var candidates = GetCSharpFiles().Where(IsTestFile).Take(6).Select(file => $"- {RelativeToWorkspace(file)}").ToList();
+            lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates);
+            lines.Add("Next command: identify or create the intended test file, then run preview behavior test patch again.");
+            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", Policy.WorkspaceRoot);
+        }
+
+        var content = await File.ReadAllTextAsync(targetFile, cancellationToken).ConfigureAwait(false);
+        var framework = ResolveBehaviorTestFramework(targetFile, content);
+        if (framework is null)
+        {
+            var lines = new[]
+            {
+                "Behavior test patch preview:",
+                "No files were changed.",
+                $"Goal: {context.Goal}",
+                $"Test file: {RelativeToWorkspace(targetFile)}",
+                "Preview blocked: test framework could not be detected as xUnit, NUnit, or MSTest."
+            };
+            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", targetFile);
+        }
+
+        var methodName = BuildBehaviorTestMethodName(context.Goal, content);
+        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var testMethod = BuildBehaviorTestMethod(context.Goal, methodName, framework, newline);
+        if (!TryBuildBehaviorTestInsertionBlock(content, testMethod, out var oldText, out var newText, out var blockReason))
+        {
+            var lines = new[]
+            {
+                "Behavior test patch preview:",
+                "No files were changed.",
+                $"Goal: {context.Goal}",
+                $"Test file: {RelativeToWorkspace(targetFile)}",
+                $"Framework: {framework.Name}",
+                $"Preview blocked: {blockReason}"
+            };
+            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", targetFile);
+        }
+
+        var previewRequest = new CodingToolRequest(
+            CodingToolAction.PreviewPatchBundle,
+            null,
+            ExplicitUserPath: true,
+            UserConfirmed: false,
+            Query: context.Goal,
+            PatchEdits: [new CodingPatchEdit(targetFile, oldText, newText)]);
+        var preview = await PreviewPatchBundleAsync(previewRequest, cancellationToken).ConfigureAwait(false);
+        if (preview.Succeeded)
+        {
+            _lastPatchPreviewRequest = previewRequest;
+            SavePendingPatchPreview();
+        }
+
+        var prefix = string.Join(Environment.NewLine, new[]
+        {
+            "Behavior test patch preview:",
+            "No files were changed.",
+            $"Goal: {context.Goal}",
+            $"Test file: {RelativeToWorkspace(targetFile)}",
+            $"Framework: {framework.Name}",
+            $"Generated test: {methodName}",
+            "Intent: preview a red placeholder behavior test; complete the assertion before relying on it.",
+            $"Anchor: {blockReason}",
+            "Next command: confirm apply last patch preview"
+        });
+        return preview with
+        {
+            Message = prefix + Environment.NewLine + preview.Message,
+            ToolName = "Behavior test patch preview",
+            TargetPath = targetFile
+        };
+    }
+
     private async Task<CodingToolResult> PlanImplementationSlicesAsync(
         CodingToolRequest request,
         CancellationToken cancellationToken,
@@ -10123,6 +10210,165 @@ public sealed class LocalCodingToolService(
             "Assertion draft: output contains the contract heading, target file row, validation row, and no hidden apply step."
         ];
     }
+
+    private string? ResolveBehaviorTestPatchTarget(FeatureWorkContext context)
+    {
+        return context.TestTarget.TestFiles
+            .Select(path => ToAbsoluteWorkspacePath(path))
+            .Concat(context.RelativeCandidateFiles.Where(IsTestFile).Select(path => ToAbsoluteWorkspacePath(path)))
+            .Concat(GetCSharpFiles().Where(IsTestFile).Select(path => ToAbsoluteWorkspacePath(path) ?? path))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Where(path => File.Exists(path)
+                && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                && Policy.IsInsideWorkspace(path)
+                && LooksTextReadable(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path.Contains($"{Path.DirectorySeparatorChar}test", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    private BehaviorTestFramework? ResolveBehaviorTestFramework(string testFile, string content)
+    {
+        var summaries = GetWorkspaceProjectSummaries();
+        var project = FindProjectForWorkspaceFile(testFile, summaries);
+        var packageText = string.Empty;
+        if (!string.IsNullOrWhiteSpace(project))
+        {
+            packageText = string.Join(Environment.NewLine, summaries
+                .Where(summary => summary.RelativePath.Equals(project, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(summary => summary.PackageReferences));
+        }
+
+        if (MentionsAny(content, "using Xunit", "[Fact", "[Theory")
+            || MentionsAny(packageText, "xunit"))
+        {
+            return new BehaviorTestFramework("xUnit", "[global::Xunit.Fact]");
+        }
+
+        if (MentionsAny(content, "using NUnit.Framework", "[Test]")
+            || MentionsAny(packageText, "NUnit"))
+        {
+            return new BehaviorTestFramework("NUnit", "[global::NUnit.Framework.Test]");
+        }
+
+        if (MentionsAny(content, "using Microsoft.VisualStudio.TestTools.UnitTesting", "[TestMethod]")
+            || MentionsAny(packageText, "MSTest"))
+        {
+            return new BehaviorTestFramework("MSTest", "[global::Microsoft.VisualStudio.TestTools.UnitTesting.TestMethod]");
+        }
+
+        return null;
+    }
+
+    private static string BuildBehaviorTestMethod(string goal, string methodName, BehaviorTestFramework framework, string newline)
+    {
+        var escapedGoal = EscapeCSharpStringLiteral(TrimForChat(goal, 160));
+        var failureStatement = framework.Name switch
+        {
+            "NUnit" => $"global::NUnit.Framework.Assert.Fail(\"Capture expected behavior for: {escapedGoal}\");",
+            "MSTest" => $"global::Microsoft.VisualStudio.TestTools.UnitTesting.Assert.Fail(\"Capture expected behavior for: {escapedGoal}\");",
+            _ => $"throw new global::System.NotImplementedException(\"Capture expected behavior for: {escapedGoal}\");"
+        };
+        return string.Join(newline, new[]
+        {
+            string.Empty,
+            "    " + framework.Attribute,
+            $"    public void {methodName}()",
+            "    {",
+            "        " + failureStatement,
+            "    }",
+            string.Empty
+        });
+    }
+
+    private static string BuildBehaviorTestMethodName(string goal, string content)
+    {
+        var tokens = Regex.Matches(goal, "[A-Za-z0-9]+")
+            .Select(match => match.Value)
+            .Where(token => token.Length > 0)
+            .Take(6)
+            .Select(token => char.ToUpperInvariant(token[0]) + (token.Length == 1 ? string.Empty : token[1..]))
+            .ToList();
+        var stem = tokens.Count == 0 ? "GeneratedBehavior" : string.Concat(tokens);
+        if (char.IsDigit(stem[0]))
+        {
+            stem = "Generated" + stem;
+        }
+
+        if (stem.Length > 56)
+        {
+            stem = stem[..56];
+        }
+
+        var baseName = stem.EndsWith("Behavior", StringComparison.OrdinalIgnoreCase)
+            ? stem + "Contract"
+            : stem + "BehaviorContract";
+        var candidate = baseName;
+        for (var suffix = 2; Regex.IsMatch(content, $@"\b{Regex.Escape(candidate)}\b", RegexOptions.None, TimeSpan.FromMilliseconds(100)); suffix++)
+        {
+            candidate = baseName + suffix.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return candidate;
+    }
+
+    private static bool TryBuildBehaviorTestInsertionBlock(
+        string content,
+        string insertion,
+        out string oldText,
+        out string newText,
+        out string reason)
+    {
+        oldText = string.Empty;
+        newText = string.Empty;
+        reason = string.Empty;
+        if (!content.Contains("class ", StringComparison.Ordinal))
+        {
+            reason = "target test file does not contain a class declaration anchor.";
+            return false;
+        }
+
+        var lastBrace = content.LastIndexOf('}');
+        if (lastBrace < 0)
+        {
+            reason = "target test file does not have a class closing brace.";
+            return false;
+        }
+
+        var lineStart = content.LastIndexOf('\n', Math.Max(0, lastBrace - 1));
+        var start = lineStart < 0 ? 0 : lineStart + 1;
+        var candidate = content[start..];
+        if (!string.IsNullOrWhiteSpace(candidate) && CountOrdinalOccurrences(content, candidate) == 1)
+        {
+            oldText = candidate;
+            newText = candidate.Insert(lastBrace - start, insertion);
+            reason = "Inserted before the final class closing brace.";
+            return true;
+        }
+
+        if (TryBuildUniqueContextBlock(content, lastBrace, 1, out var block))
+        {
+            var offset = block.LastIndexOf('}');
+            if (offset >= 0)
+            {
+                oldText = block;
+                newText = block.Insert(offset, insertion);
+                reason = "Inserted through a unique surrounding class-end block.";
+                return true;
+            }
+        }
+
+        reason = "target class closing brace was not unique enough for a safe literal patch.";
+        return false;
+    }
+
+    private static string EscapeCSharpStringLiteral(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
 
     private static IReadOnlyList<string> BuildApplyGateRows(FeatureWorkContext context)
     {
@@ -17022,6 +17268,10 @@ public sealed class LocalCodingToolService(
     private sealed record PatchBundlePreparation(
         IReadOnlyList<PreparedPatchEdit> Edits,
         CodingToolResult? Error);
+
+    private sealed record BehaviorTestFramework(
+        string Name,
+        string Attribute);
 
     private sealed record EditImpactSurface(
         IReadOnlyList<string> DirectFiles,

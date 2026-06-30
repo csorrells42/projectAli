@@ -532,6 +532,26 @@ public static class CodingToolRequestParser
         "plan feature tests "
     ];
 
+    private static readonly string[] BehaviorTestPatchPreviewPrefixes =
+    [
+        "preview behavior test patch ",
+        "preview behavior test ",
+        "preview test patch ",
+        "synthesize behavior test ",
+        "synthesize test patch ",
+        "draft behavior test patch "
+    ];
+
+    private static readonly string[] BehaviorTestPatchPreviewRequests =
+    [
+        "preview behavior test patch",
+        "preview behavior test",
+        "preview test patch",
+        "synthesize behavior test",
+        "synthesize test patch",
+        "draft behavior test patch"
+    ];
+
     private static readonly string[] ImplementationSlicePlanPrefixes =
     [
         "implementation slice plan ",
@@ -2801,6 +2821,9 @@ public static class CodingToolRequestParser
     private static bool IsBehaviorContractRequest(string text) =>
         BehaviorContractRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsBehaviorTestPatchPreviewRequest(string text) =>
+        BehaviorTestPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPatchSlicePlanRequest(string text) =>
         PatchSlicePlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2983,6 +3006,7 @@ public static class CodingToolRequestParser
     {
         if (TryParsePrefixedQuery(text, FeatureIntentPacketPrefixes, CodingToolAction.BuildFeatureIntentPacket, userConfirmed, out request)
             || TryParsePrefixedQuery(text, BehaviorTestPlanPrefixes, CodingToolAction.PlanBehaviorTests, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, BehaviorTestPatchPreviewPrefixes, CodingToolAction.PreviewBehaviorTestPatch, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ImplementationSlicePlanPrefixes, CodingToolAction.PlanImplementationSlices, userConfirmed, out request)
             || TryParsePrefixedQuery(text, TestStubGeneratorPlanPrefixes, CodingToolAction.ShowTestStubGeneratorPlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, FeatureExecutionPacketPrefixes, CodingToolAction.ShowFeatureExecutionPacket, userConfirmed, out request)
@@ -3050,6 +3074,12 @@ public static class CodingToolRequestParser
         if (IsBehaviorContractRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowBehaviorContract, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBehaviorTestPatchPreviewRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.PreviewBehaviorTestPatch, null, UserConfirmed: userConfirmed);
             return true;
         }
 

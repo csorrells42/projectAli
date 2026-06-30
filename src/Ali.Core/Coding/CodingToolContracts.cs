@@ -42,6 +42,7 @@ public enum CodingToolAction
     ShowMiniCodexReadinessReport,
     BuildFeatureIntentPacket,
     PlanBehaviorTests,
+    PreviewBehaviorTestPatch,
     PlanImplementationSlices,
     ShowPatchBundleBuilder,
     ShowTestStubGeneratorPlan,
