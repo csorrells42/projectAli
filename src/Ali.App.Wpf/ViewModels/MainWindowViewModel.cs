@@ -180,6 +180,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _codingCurrentSolutionOrProjectPathText = string.Empty;
     private string _selectedCodingRecentSolutionOrProjectPath = string.Empty;
     private string _codingDashboardCurrentTaskText = "Current task: none loaded.";
+    private string _programmingNextCommandText = string.Empty;
     private bool _codingAllowExplicitOutsideFileOpen = true;
     private string _codingWorkspaceAccessMode = CodingPermissionModes.Allowed;
     private string _codingExplicitOutsideFileOpenMode = CodingPermissionModes.Allowed;
@@ -237,7 +238,13 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
         RunSelectedCommandExplorerCommand = CreateCommand(parameter => _ = RunCommandExplorerNodeSafelyAsync(parameter), parameter => CanRunCommandExplorerNode(parameter));
-        SendProgrammingNextCommand = CreateAsyncCommand(() => SendProgrammingShortcutAsync("continue current task"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        SendProgrammingNextCommand = CreateAsyncCommand(
+            SendProgrammingNextAsync,
+            () => IsProgrammingModeActive
+                  && !IsBusy
+                  && !IsRecording
+                  && !IsTranscribing
+                  && !string.IsNullOrWhiteSpace(ProgrammingNextCommandText));
         PlayVoiceSampleCommand = CreateAsyncCommand(PlayVoiceSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -1064,6 +1071,18 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _codingDashboardCurrentTaskText, value);
     }
 
+    public string ProgrammingNextCommandText
+    {
+        get => _programmingNextCommandText;
+        private set
+        {
+            if (SetProperty(ref _programmingNextCommandText, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
+
     public string CodingPdfWorkspaceRootText
     {
         get => _codingPdfWorkspaceRootText;
@@ -1602,7 +1621,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool IsProgrammingModeActive
     {
         get => _isProgrammingModeActive;
-        private set => SetProperty(ref _isProgrammingModeActive, value);
+        private set
+        {
+            if (SetProperty(ref _isProgrammingModeActive, value))
+            {
+                RaiseCommandStates();
+            }
+        }
     }
 
     public void EnterProgrammingMode()
@@ -2332,6 +2357,21 @@ public sealed class MainWindowViewModel : ObservableObject
         return node is { IsCommand: true };
     }
 
+    private async Task SendProgrammingNextAsync()
+    {
+        var next = ProgrammingNextCommandText.Trim();
+        if (string.IsNullOrWhiteSpace(next))
+        {
+            StatusText = "No next programming step is queued yet.";
+            CodingDashboardCurrentTaskText = "Next: none queued";
+            return;
+        }
+
+        ProgrammingNextCommandText = string.Empty;
+        CodingDashboardCurrentTaskText = $"Running: {TrimCodingStatusText(next)}";
+        await SendProgrammingShortcutAsync(next).ConfigureAwait(true);
+    }
+
     private async Task SendProgrammingShortcutAsync(string text)
     {
         if (IsBusy || string.IsNullOrWhiteSpace(text))
@@ -2456,6 +2496,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             CompleteStreamingSpeechInput(streamingSpeech);
+            if (IsProgrammingModeActive)
+            {
+                UpdateProgrammingNextStepFromAssistantText(assistantMessage.Text);
+            }
 
             if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
             {
@@ -3339,6 +3383,49 @@ public sealed class MainWindowViewModel : ObservableObject
             .Where(line => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             .Select(line => line[prefix.Length..].Trim())
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private void UpdateProgrammingNextStepFromAssistantText(string text)
+    {
+        var next = ExtractProgrammingNextCommand(text);
+        ProgrammingNextCommandText = next;
+        CodingDashboardCurrentTaskText = string.IsNullOrWhiteSpace(next)
+            ? "Next: none queued"
+            : $"Next: {TrimCodingStatusText(next)}";
+    }
+
+    private static string ExtractProgrammingNextCommand(string text)
+    {
+        foreach (var line in text.Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            var value = trimmed.StartsWith("Next command:", StringComparison.OrdinalIgnoreCase)
+                ? trimmed["Next command:".Length..].Trim()
+                : trimmed.StartsWith("Next:", StringComparison.OrdinalIgnoreCase)
+                    ? trimmed["Next:".Length..].Trim()
+                    : string.Empty;
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            return IsNoQueuedProgrammingStep(value) ? string.Empty : value;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsNoQueuedProgrammingStep(string value) =>
+        value.StartsWith("no queued", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("no next", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("none", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("nothing", StringComparison.OrdinalIgnoreCase);
+
+    private static string TrimCodingStatusText(string text)
+    {
+        var normalized = text.ReplaceLineEndings(" ").Trim();
+        return normalized.Length <= 120 ? normalized : normalized[..117] + "...";
     }
 
     private string BuildConfirmedDotNetCommand(string verb)
@@ -7845,6 +7932,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (SendCommand is AsyncRelayCommand send)
         {
             send.RaiseCanExecuteChanged();
+        }
+
+        if (SendProgrammingNextCommand is AsyncRelayCommand sendProgrammingNext)
+        {
+            sendProgrammingNext.RaiseCanExecuteChanged();
         }
 
         if (StopCommand is RelayCommand stop)

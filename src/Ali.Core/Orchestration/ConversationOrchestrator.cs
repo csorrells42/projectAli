@@ -278,6 +278,18 @@ public sealed class ConversationOrchestrator(
             yield break;
         }
 
+        var directResult = await LocalCodingTool.TryHandleAsync(userText, cancellationToken).ConfigureAwait(false);
+        if (directResult.Handled)
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                BuildProgrammingToolMessage(directResult),
+                directResult.Succeeded ? EvidenceStatus.Verified : EvidenceStatus.Unknown);
+            yield break;
+        }
+
         var plan = CodingPlanner is null
             ? CodingActionPlan.NoAction
             : await CodingPlanner.PlanAsync(userText, history, cancellationToken).ConfigureAwait(false);
@@ -298,7 +310,7 @@ public sealed class ConversationOrchestrator(
                 conversationId,
                 userMessageId,
                 assistantMessageId,
-                BuildProgrammingToolMessage(plan, command, result),
+                BuildProgrammingToolMessage(result),
                 result.Succeeded ? EvidenceStatus.Verified : EvidenceStatus.Unknown);
             yield break;
         }
@@ -328,22 +340,64 @@ public sealed class ConversationOrchestrator(
         return normalized.Length <= 180 ? normalized : normalized[..180];
     }
 
-    private static string BuildProgrammingToolMessage(
-        CodingActionPlan plan,
-        string command,
-        CodingToolResult result)
+    private static string BuildProgrammingToolMessage(CodingToolResult result)
     {
-        var lines = new List<string>
+        var nextCommand = ExtractProgrammingLineValue(result.Message, "Next command:");
+        var status = BuildProgrammingStatus(result);
+        if (!string.IsNullOrWhiteSpace(nextCommand))
         {
-            string.IsNullOrWhiteSpace(plan.Summary)
-                ? "Programming mode selected the next internal action."
-                : $"Programming mode: {plan.Summary}",
-            $"Internal action: {command}",
-            string.Empty,
-            result.Message
-        };
+            return string.Join(
+                Environment.NewLine,
+                $"Next: {nextCommand}",
+                $"Status: {status}",
+                "Use Next to run that step.");
+        }
 
-        return string.Join(Environment.NewLine, lines).TrimEnd();
+        var next = result.Succeeded
+            ? "no queued step yet."
+            : "review the status before continuing.";
+        return string.Join(
+            Environment.NewLine,
+            $"Next: {next}",
+            $"Status: {status}");
+    }
+
+    private static string BuildProgrammingStatus(CodingToolResult result)
+    {
+        if (result.Message.Contains("No files were changed.", StringComparison.OrdinalIgnoreCase))
+        {
+            return "No files changed yet.";
+        }
+
+        if (result.Message.Contains("Coding tool needs confirmation:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Waiting for confirmation.";
+        }
+
+        if (!result.Succeeded)
+        {
+            return FirstProgrammingMessageLine(result.Message) ?? "Needs attention.";
+        }
+
+        return FirstProgrammingMessageLine(result.Message) ?? "Ready.";
+    }
+
+    private static string? ExtractProgrammingLineValue(string text, string prefix)
+    {
+        return text
+            .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(line => line[prefix.Length..].Trim())
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private static string? FirstProgrammingMessageLine(string text)
+    {
+        return text
+            .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
     }
 
     private static bool IsDisabledMultiDayForecastRequest(string userText) =>

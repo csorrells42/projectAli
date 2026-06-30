@@ -3743,7 +3743,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Guarded patterns:", generatedGuard.Message);
     Contains("Mini-Codex readiness report v2", reportCard.Message);
     Contains("Report card:", reportCard.Message);
-    Contains("Endzone estimate: 96-97%", reportCard.Message);
+    Contains("Endzone estimate: 98-99%", reportCard.Message);
     Contains("active workspace context", reportCard.Message);
     Contains("owner apply packet", reportCard.Message);
 }
@@ -4348,8 +4348,12 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("ExitProgrammingMode", codeBehind);
 
     Contains("SendProgrammingNextCommand = CreateAsyncCommand", viewModel);
+    Contains("SendProgrammingNextAsync", viewModel);
     Contains("SendProgrammingShortcutAsync", viewModel);
-    Contains("continue current task", viewModel);
+    Contains("ProgrammingNextCommandText", viewModel);
+    Contains("ExtractProgrammingNextCommand", viewModel);
+    Contains("No next programming step is queued yet.", viewModel);
+    Equal(false, viewModel.Contains("SendProgrammingShortcutAsync(\"continue current task\")", StringComparison.OrdinalIgnoreCase));
     Contains("IsProgrammingModeActive", viewModel);
     Contains("EnterProgrammingMode", viewModel);
     Contains("ExitProgrammingMode", viewModel);
@@ -5565,10 +5569,14 @@ static async Task TestOrchestratorUsesCodingPlannerInProgrammingMode()
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
     Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
-    Contains("Programming mode: Start the guided build lane.", answer);
-    Contains("Internal action: build this for me add export button", answer);
-    Contains("Build this feature v1:", answer);
-    Contains("Request: add export button", answer);
+    Contains("Next:", answer);
+    Contains("exact patch synthesis", answer);
+    Contains("Status: No files changed yet.", answer);
+    Contains("Use Next to run that step.", answer);
+    Equal(false, answer.Contains("Programming mode:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Front-door plan:", StringComparison.OrdinalIgnoreCase));
     Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
 }
 
@@ -5648,10 +5656,14 @@ static async Task TestOrchestratorFallsBackToBuildLaneInProgrammingMode()
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
     Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
-    Contains("Programming mode selected the next internal action.", answer);
-    Contains("Internal action: build this for me Please add a settings button.", answer);
-    Contains("Build this feature v1:", answer);
-    Contains("Request: Please add a settings button.", answer);
+    Contains("Next:", answer);
+    Contains("exact patch synthesis", answer);
+    Contains("Status: No files changed yet.", answer);
+    Contains("Use Next to run that step.", answer);
+    Equal(false, answer.Contains("Programming mode selected the next internal action.", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Front-door plan:", StringComparison.OrdinalIgnoreCase));
 }
 
 static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
