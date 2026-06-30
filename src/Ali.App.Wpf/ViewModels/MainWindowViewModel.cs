@@ -276,10 +276,15 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingSymbolDiffAuditCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol diff audit", "show mandatory symbol diff audit", "Coding.SymbolDiffAudit"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGeneratedFileGuardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Generated file guard", "show generated file guard", "Coding.GeneratedFileGuard"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBehaviorContractCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior contract", "behavior contract current feature", "Coding.BehaviorContract"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBehaviorTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior tests", "behavior test plan current feature", "Coding.BehaviorTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImplementationSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation slices", "implementation slice plan current feature", "Coding.ImplementationSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch slices", "patch slice plan current feature", "Coding.PatchSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature execution packet", "feature execution packet current feature", "Coding.FeatureExecutionPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingApplyGateCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply gate", "apply gate current feature", "Coding.ApplyGate"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPostPatchValidationCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation router", "post patch validation current feature", "Coding.PostPatchValidation"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureCompletionReceiptCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Completion receipt", "feature completion receipt", "Coding.FeatureCompletionReceipt"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -730,13 +735,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingBuildFeatureLaneCommand { get; }
 
+    public ICommand RunCodingFeatureWorkContextCommand { get; }
+
     public ICommand RunCodingFeatureIntentCommand { get; }
+
+    public ICommand RunCodingBehaviorContractCommand { get; }
 
     public ICommand RunCodingBehaviorTestsCommand { get; }
 
     public ICommand RunCodingImplementationSlicesCommand { get; }
 
+    public ICommand RunCodingPatchSlicesCommand { get; }
+
     public ICommand RunCodingFeatureExecutionPacketCommand { get; }
+
+    public ICommand RunCodingApplyGateCommand { get; }
+
+    public ICommand RunCodingPostPatchValidationCommand { get; }
 
     public ICommand RunCodingFeatureCompletionReceiptCommand { get; }
 
@@ -3383,10 +3398,15 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("show mandatory symbol diff audit", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show generated file guard", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior test plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation slice plan", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("patch slice plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature execution packet", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("apply gate", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("post patch validation", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature completion receipt", StringComparison.OrdinalIgnoreCase))
         {
             return CompactCodingCockpitLines(lines);
@@ -3480,10 +3500,15 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         if (command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior test plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation slice plan", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("patch slice plan", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature execution packet", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("apply gate", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("post patch validation", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature completion receipt", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Work the feature lane top to bottom before previewing a patch.";
@@ -3519,12 +3544,25 @@ public sealed class MainWindowViewModel : ObservableObject
             "Plan confidence:",
             "Plan reasons:",
             "Goal:",
+            "Top target:",
+            "Risk labels:",
+            "Test target:",
+            "Gate result:",
+            "Validation router:",
             "User-facing behavior:",
             "Affected area:",
             "Validation depth:",
             "Risk-aware test depth:",
             "Scores:",
             "Closeout checklist:",
+            "- Input:",
+            "- Expected result:",
+            "- Failure behavior:",
+            "- Permission boundary:",
+            "- Target confidence:",
+            "- Protected files:",
+            "- Gate result:",
+            "- Final:",
             "- Codebase awareness:",
             "- Edit planning:",
             "- Patch safety:",
@@ -6799,9 +6837,19 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingBuildFeatureLane.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingFeatureWorkContextCommand is AsyncRelayCommand runCodingFeatureWorkContext)
+        {
+            runCodingFeatureWorkContext.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingFeatureIntentCommand is AsyncRelayCommand runCodingFeatureIntent)
         {
             runCodingFeatureIntent.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingBehaviorContractCommand is AsyncRelayCommand runCodingBehaviorContract)
+        {
+            runCodingBehaviorContract.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBehaviorTestsCommand is AsyncRelayCommand runCodingBehaviorTests)
@@ -6814,9 +6862,24 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingImplementationSlices.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingPatchSlicesCommand is AsyncRelayCommand runCodingPatchSlices)
+        {
+            runCodingPatchSlices.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingFeatureExecutionPacketCommand is AsyncRelayCommand runCodingFeatureExecutionPacket)
         {
             runCodingFeatureExecutionPacket.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingApplyGateCommand is AsyncRelayCommand runCodingApplyGate)
+        {
+            runCodingApplyGate.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPostPatchValidationCommand is AsyncRelayCommand runCodingPostPatchValidation)
+        {
+            runCodingPostPatchValidation.RaiseCanExecuteChanged();
         }
 
         if (RunCodingFeatureCompletionReceiptCommand is AsyncRelayCommand runCodingFeatureCompletionReceipt)

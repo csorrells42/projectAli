@@ -150,6 +150,11 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowSliceRiskScoring
             or CodingToolAction.ShowFeatureCompletionReceipt
             or CodingToolAction.ShowFeatureExecutionPacket
+            or CodingToolAction.ShowFeatureWorkContext
+            or CodingToolAction.ShowBehaviorContract
+            or CodingToolAction.ShowPatchSlicePlan
+            or CodingToolAction.ShowApplyGate
+            or CodingToolAction.ShowPostPatchValidationRouter
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowOwnershipMap

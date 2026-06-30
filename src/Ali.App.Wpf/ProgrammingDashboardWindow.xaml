@@ -128,14 +128,24 @@
                                         Command="{Binding RunCodingBuildFeatureLaneCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Work Context"
+                                        Command="{Binding RunCodingFeatureWorkContextCommand}" />
                                 <Button Content="Feature Intent"
                                         Command="{Binding RunCodingFeatureIntentCommand}" />
+                                <Button Content="Contract"
+                                        Command="{Binding RunCodingBehaviorContractCommand}" />
                                 <Button Content="Behavior Tests"
                                         Command="{Binding RunCodingBehaviorTestsCommand}" />
                                 <Button Content="Implementation Slices"
                                         Command="{Binding RunCodingImplementationSlicesCommand}" />
+                                <Button Content="Patch Slices"
+                                        Command="{Binding RunCodingPatchSlicesCommand}" />
                                 <Button Content="Execution Packet"
                                         Command="{Binding RunCodingFeatureExecutionPacketCommand}" />
+                                <Button Content="Apply Gate"
+                                        Command="{Binding RunCodingApplyGateCommand}" />
+                                <Button Content="Validation Router"
+                                        Command="{Binding RunCodingPostPatchValidationCommand}" />
                                 <Button Content="Completion Receipt"
                                         Command="{Binding RunCodingFeatureCompletionReceiptCommand}" />
                             </WrapPanel>

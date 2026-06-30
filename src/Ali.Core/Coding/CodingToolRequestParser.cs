@@ -606,6 +606,84 @@ public static class CodingToolRequestParser
         "plain request execution packet"
     ];
 
+    private static readonly string[] FeatureWorkContextPrefixes =
+    [
+        "feature work context ",
+        "show feature work context ",
+        "build feature work context "
+    ];
+
+    private static readonly string[] FeatureWorkContextRequests =
+    [
+        "feature work context",
+        "show feature work context",
+        "build feature work context"
+    ];
+
+    private static readonly string[] BehaviorContractPrefixes =
+    [
+        "behavior contract ",
+        "show behavior contract ",
+        "feature behavior contract ",
+        "build behavior contract "
+    ];
+
+    private static readonly string[] BehaviorContractRequests =
+    [
+        "behavior contract",
+        "show behavior contract",
+        "feature behavior contract",
+        "build behavior contract"
+    ];
+
+    private static readonly string[] PatchSlicePlanPrefixes =
+    [
+        "patch slice plan ",
+        "show patch slice plan ",
+        "feature patch slices ",
+        "plan patch slices "
+    ];
+
+    private static readonly string[] PatchSlicePlanRequests =
+    [
+        "patch slice plan",
+        "show patch slice plan",
+        "feature patch slices",
+        "plan patch slices"
+    ];
+
+    private static readonly string[] ApplyGatePrefixes =
+    [
+        "apply gate ",
+        "show apply gate ",
+        "feature apply gate ",
+        "patch apply gate "
+    ];
+
+    private static readonly string[] ApplyGateRequests =
+    [
+        "apply gate",
+        "show apply gate",
+        "feature apply gate",
+        "patch apply gate"
+    ];
+
+    private static readonly string[] PostPatchValidationRouterPrefixes =
+    [
+        "post patch validation ",
+        "post patch validation router ",
+        "show post patch validation ",
+        "validation router "
+    ];
+
+    private static readonly string[] PostPatchValidationRouterRequests =
+    [
+        "post patch validation",
+        "post patch validation router",
+        "show post patch validation",
+        "validation router"
+    ];
+
     private static readonly string[] BuildFeatureLaneRequests =
     [
         "show build feature lane",
@@ -2491,6 +2569,21 @@ public static class CodingToolRequestParser
     private static bool IsFeatureExecutionPacketRequest(string text) =>
         FeatureExecutionPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsFeatureWorkContextRequest(string text) =>
+        FeatureWorkContextRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBehaviorContractRequest(string text) =>
+        BehaviorContractRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPatchSlicePlanRequest(string text) =>
+        PatchSlicePlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsApplyGateRequest(string text) =>
+        ApplyGateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPostPatchValidationRouterRequest(string text) =>
+        PostPatchValidationRouterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsBuildFeatureLaneRequest(string text) =>
         BuildFeatureLaneRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
     private static bool IsShowLastPatchPreviewRequest(string text) =>
@@ -2639,7 +2732,12 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, BehaviorTestPlanPrefixes, CodingToolAction.PlanBehaviorTests, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ImplementationSlicePlanPrefixes, CodingToolAction.PlanImplementationSlices, userConfirmed, out request)
             || TryParsePrefixedQuery(text, TestStubGeneratorPlanPrefixes, CodingToolAction.ShowTestStubGeneratorPlan, userConfirmed, out request)
-            || TryParsePrefixedQuery(text, FeatureExecutionPacketPrefixes, CodingToolAction.ShowFeatureExecutionPacket, userConfirmed, out request))
+            || TryParsePrefixedQuery(text, FeatureExecutionPacketPrefixes, CodingToolAction.ShowFeatureExecutionPacket, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureWorkContextPrefixes, CodingToolAction.ShowFeatureWorkContext, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, BehaviorContractPrefixes, CodingToolAction.ShowBehaviorContract, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PatchSlicePlanPrefixes, CodingToolAction.ShowPatchSlicePlan, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ApplyGatePrefixes, CodingToolAction.ShowApplyGate, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request))
         {
             return true;
         }
@@ -2677,6 +2775,36 @@ public static class CodingToolRequestParser
         if (IsFeatureExecutionPacketRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFeatureExecutionPacket, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeatureWorkContextRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeatureWorkContext, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBehaviorContractRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBehaviorContract, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPatchSlicePlanRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatchSlicePlan, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsApplyGateRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowApplyGate, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPostPatchValidationRouterRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPostPatchValidationRouter, null, UserConfirmed: userConfirmed);
             return true;
         }
 

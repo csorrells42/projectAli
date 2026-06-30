@@ -789,6 +789,16 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal("Save button", executionPacketRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("feature execution packet", out var bareExecutionPacketRequest));
     Equal(CodingToolAction.ShowFeatureExecutionPacket, bareExecutionPacketRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature work context Save button", out var workContextRequest));
+    Equal(CodingToolAction.ShowFeatureWorkContext, workContextRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("behavior contract Save button", out var behaviorContractRequest));
+    Equal(CodingToolAction.ShowBehaviorContract, behaviorContractRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("patch slice plan Save button", out var patchSliceRequest));
+    Equal(CodingToolAction.ShowPatchSlicePlan, patchSliceRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("apply gate", out var applyGateRequest));
+    Equal(CodingToolAction.ShowApplyGate, applyGateRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("post patch validation Save button", out var validationRouterRequest));
+    Equal(CodingToolAction.ShowPostPatchValidationRouter, validationRouterRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("show build feature lane", out var buildFeatureLaneRequest));
     Equal(CodingToolAction.ShowBuildFeatureLane, buildFeatureLaneRequest.Action);
 
@@ -3160,6 +3170,11 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var riskScoring = await service.TryHandleAsync("show slice risk scoring", CancellationToken.None);
     var completionReceipt = await service.TryHandleAsync("feature completion receipt", CancellationToken.None);
     var executionPacket = await service.TryHandleAsync("feature execution packet Save button", CancellationToken.None);
+    var workContext = await service.TryHandleAsync("feature work context Save button", CancellationToken.None);
+    var behaviorContract = await service.TryHandleAsync("behavior contract Save button", CancellationToken.None);
+    var patchSlices = await service.TryHandleAsync("patch slice plan Save button", CancellationToken.None);
+    var applyGate = await service.TryHandleAsync("apply gate", CancellationToken.None);
+    var validationRouter = await service.TryHandleAsync("post patch validation Save button", CancellationToken.None);
     var buildFeatureLane = await service.TryHandleAsync("show build feature lane", CancellationToken.None);
 
     Contains("Workspace health score", health.Message);
@@ -3197,6 +3212,11 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Plan confidence:", executionPacket.Message);
     Contains("Top edit targets:", executionPacket.Message);
     Contains("Prioritized tests:", executionPacket.Message);
+    Contains("Feature work context v1", workContext.Message);
+    Contains("Behavior contract v1", behaviorContract.Message);
+    Contains("Patch slice plan v1", patchSlices.Message);
+    Contains("Apply gate v2", applyGate.Message);
+    Contains("Post-patch validation router", validationRouter.Message);
     Contains("Build Feature lane", buildFeatureLane.Message);
 }
 
@@ -3501,10 +3521,15 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingGeneratedFileGuardCommand", dashboard);
     Contains("Build Feature", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
+    Contains("RunCodingFeatureWorkContextCommand", dashboard);
     Contains("RunCodingFeatureIntentCommand", dashboard);
+    Contains("RunCodingBehaviorContractCommand", dashboard);
     Contains("RunCodingBehaviorTestsCommand", dashboard);
     Contains("RunCodingImplementationSlicesCommand", dashboard);
+    Contains("RunCodingPatchSlicesCommand", dashboard);
     Contains("RunCodingFeatureExecutionPacketCommand", dashboard);
+    Contains("RunCodingApplyGateCommand", dashboard);
+    Contains("RunCodingPostPatchValidationCommand", dashboard);
     Contains("RunCodingFeatureCompletionReceiptCommand", dashboard);
     Contains("RunCodingReadinessReportCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingNextBestActionCommand = CreateAsyncCommand", viewModel);
@@ -3513,10 +3538,15 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSymbolDiffAuditCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingBehaviorContractCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBehaviorTestsCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingImplementationSlicesCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatchSlicesCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingApplyGateCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPostPatchValidationCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureCompletionReceiptCommand = CreateAsyncCommand", viewModel);
     Contains("CompactCodingCockpitLines", viewModel);
     Contains("Use the cockpit row", viewModel);
