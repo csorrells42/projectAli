@@ -14340,6 +14340,7 @@ public sealed class LocalCodingToolService(
                                       VirtualizingPanel.VirtualizationMode="Recycling"
                                       ScrollViewer.CanContentScroll="True"
                                       ScrollViewer.IsDeferredScrollingEnabled="True"
+                                      local:DashboardSelectionBehavior.ScrollSelectedItemIntoView="True"
                                       RowDetailsVisibilityMode="VisibleWhenSelected"
                                       CanUserAddRows="False">
                                 <DataGrid.GroupStyle>
@@ -15314,6 +15315,7 @@ public sealed class LocalCodingToolService(
             using System.Threading.Tasks;
             using System.Windows;
             using System.Windows.Controls;
+            using System.Windows.Controls.Primitives;
             using System.Windows.Data;
             using System.Windows.Input;
             using System.Windows.Media;
@@ -16276,6 +16278,66 @@ public sealed class LocalCodingToolService(
                     {
                         element.Focus();
                     }
+                }
+            }
+
+            public static class DashboardSelectionBehavior
+            {
+                public static readonly DependencyProperty ScrollSelectedItemIntoViewProperty =
+                    DependencyProperty.RegisterAttached(
+                        "ScrollSelectedItemIntoView",
+                        typeof(bool),
+                        typeof(DashboardSelectionBehavior),
+                        new PropertyMetadata(false, OnScrollSelectedItemIntoViewChanged));
+
+                public static bool GetScrollSelectedItemIntoView(DependencyObject element) =>
+                    (bool)element.GetValue(ScrollSelectedItemIntoViewProperty);
+
+                public static void SetScrollSelectedItemIntoView(DependencyObject element, bool value) =>
+                    element.SetValue(ScrollSelectedItemIntoViewProperty, value);
+
+                private static void OnScrollSelectedItemIntoViewChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
+                {
+                    if (dependencyObject is not Selector selector)
+                    {
+                        return;
+                    }
+
+                    WeakEventManager<Selector, SelectionChangedEventArgs>.RemoveHandler(selector, nameof(selector.SelectionChanged), OnSelectionChanged);
+                    if (args.NewValue is true)
+                    {
+                        WeakEventManager<Selector, SelectionChangedEventArgs>.AddHandler(selector, nameof(selector.SelectionChanged), OnSelectionChanged);
+                        ScrollCurrentSelectionIntoView(selector);
+                    }
+                }
+
+                private static void OnSelectionChanged(object? sender, SelectionChangedEventArgs args)
+                {
+                    if (sender is Selector selector)
+                    {
+                        ScrollCurrentSelectionIntoView(selector);
+                    }
+                }
+
+                private static void ScrollCurrentSelectionIntoView(Selector selector)
+                {
+                    var item = selector.SelectedItem;
+                    if (item is null)
+                    {
+                        return;
+                    }
+
+                    selector.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (selector is DataGrid dataGrid)
+                        {
+                            dataGrid.ScrollIntoView(item);
+                        }
+                        else if (selector is ListBox listBox)
+                        {
+                            listBox.ScrollIntoView(item);
+                        }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
                 }
             }
 
