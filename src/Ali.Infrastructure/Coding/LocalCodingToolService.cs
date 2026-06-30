@@ -14389,7 +14389,9 @@ public sealed class LocalCodingToolService(
                                                     ContentTemplate="{StaticResource DashboardDetailTemplate}"
                                                     Margin="0,0,0,16" />
                                     <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
-                                    <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged}" Height="32" Margin="0,0,0,8" VerticalContentAlignment="Center" />
+                                    <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True}"
+                                             Style="{StaticResource DashboardInputTextBoxStyle}" />
+                                    <TextBlock Text="{Binding NewItemError}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,8" />
                                     <Button Content="Add Item" Command="{Binding AddItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
                                     <Separator Margin="0,16" />
                                     <TextBlock Text="Use the splitters to resize panes. The center grid virtualizes rows for larger data sets." TextWrapping="Wrap" />
@@ -14851,6 +14853,19 @@ public sealed class LocalCodingToolService(
                 </Style.Triggers>
             </Style>
 
+            <Style x:Key="DashboardInputTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Margin" Value="0,0,0,8" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Padding" Value="6,0" />
+                <Style.Triggers>
+                    <Trigger Property="Validation.HasError" Value="True">
+                        <Setter Property="BorderBrush" Value="#B42318" />
+                        <Setter Property="BorderThickness" Value="2" />
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
             <Style x:Key="DashboardPaneGroupBoxStyle" TargetType="GroupBox">
                 <Setter Property="Padding" Value="10" />
                 <Setter Property="Margin" Value="0" />
@@ -14874,6 +14889,8 @@ public sealed class LocalCodingToolService(
         return
             $$"""
             using System;
+            using System.Collections;
+            using System.Collections.Generic;
             using System.Collections.ObjectModel;
             using System.ComponentModel;
             using System.Runtime.CompilerServices;
@@ -14882,9 +14899,11 @@ public sealed class LocalCodingToolService(
             using System.Windows.Data;
             using System.Windows.Input;
 
-            {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged
+            {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
             {
+                private readonly Dictionary<string, List<string>> _errors = new();
                 private string _newItemName = string.Empty;
+                private string _newItemError = string.Empty;
                 private string _searchText = string.Empty;
                 private CancellationTokenSource? _refreshCancellation;
                 private bool _isBusy;
@@ -14905,6 +14924,8 @@ public sealed class LocalCodingToolService(
 
                 public event PropertyChangedEventHandler? PropertyChanged;
 
+                public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+
                 public ObservableCollection<DashboardItem> Items { get; } = new();
 
                 public ICollectionView ItemsView { get; }
@@ -14924,10 +14945,18 @@ public sealed class LocalCodingToolService(
                     {
                         if (SetField(ref _newItemName, value))
                         {
-                            ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                            ValidateNewItemName();
                         }
                     }
                 }
+
+                public string NewItemError
+                {
+                    get => _newItemError;
+                    private set => SetField(ref _newItemError, value);
+                }
+
+                public bool HasErrors => _errors.Count > 0;
 
                 public string SearchText
                 {
@@ -14955,6 +14984,7 @@ public sealed class LocalCodingToolService(
                         {
                             ((AsyncRelayCommand)RefreshCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)CancelRefreshCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
                         }
                     }
                 }
@@ -15022,7 +15052,25 @@ public sealed class LocalCodingToolService(
 
                 private void CancelRefresh() => _refreshCancellation?.Cancel();
 
-                private bool CanAddItem() => !string.IsNullOrWhiteSpace(NewItemName);
+                public IEnumerable GetErrors(string? propertyName)
+                {
+                    if (string.IsNullOrWhiteSpace(propertyName))
+                    {
+                        var allErrors = new List<string>();
+                        foreach (var errors in _errors.Values)
+                        {
+                            allErrors.AddRange(errors);
+                        }
+
+                        return allErrors;
+                    }
+
+                    return _errors.TryGetValue(propertyName, out var propertyErrors)
+                        ? propertyErrors
+                        : Array.Empty<string>();
+                }
+
+                private bool CanAddItem() => !IsBusy && !HasErrors && !string.IsNullOrWhiteSpace(NewItemName);
 
                 private void AddItem()
                 {
@@ -15033,6 +15081,13 @@ public sealed class LocalCodingToolService(
                         return;
                     }
 
+                    ValidateNewItemName();
+                    if (!CanAddItem())
+                    {
+                        StatusText = string.IsNullOrWhiteSpace(NewItemError) ? "Fix the item name first." : NewItemError;
+                        return;
+                    }
+
                     var item = new DashboardItem(name, "Owner", "New");
                     Items.Add(item);
                     ItemsView.Refresh();
@@ -15040,6 +15095,55 @@ public sealed class LocalCodingToolService(
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
                     StatusText = $"Added {name}";
+                }
+
+                private void ValidateNewItemName()
+                {
+                    var errors = new List<string>();
+                    var name = NewItemName.Trim();
+                    if (name.Length > 60)
+                    {
+                        errors.Add("Use 60 characters or fewer.");
+                    }
+
+                    if (name.Length > 0 && ContainsItemName(name))
+                    {
+                        errors.Add("An item with this name already exists.");
+                    }
+
+                    SetErrors(nameof(NewItemName), errors);
+                    NewItemError = errors.Count > 0 ? errors[0] : string.Empty;
+                    ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
+                }
+
+                private bool ContainsItemName(string name)
+                {
+                    foreach (var item in Items)
+                    {
+                        if (string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
+
+                private void SetErrors(string propertyName, IReadOnlyList<string> errors)
+                {
+                    var changed = errors.Count == 0
+                        ? _errors.Remove(propertyName)
+                        : true;
+                    if (errors.Count > 0)
+                    {
+                        _errors[propertyName] = new List<string>(errors);
+                    }
+
+                    if (changed)
+                    {
+                        ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasErrors)));
+                    }
                 }
 
                 private void ConfigureItemsView()

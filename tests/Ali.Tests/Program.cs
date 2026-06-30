@@ -5573,10 +5573,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         xamlPath,
         codeBehindPath,
         "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
-        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "BooleanToVisibilityConverter", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged}\"", "ItemsSource=\"{Binding ItemsView}\"", "DataGrid.GroupStyle", "GroupStyle.HeaderTemplate", "ProgressBar", "IsIndeterminate=\"{Binding IsBusy}\"", "Command=\"{Binding CancelRefreshCommand}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
+        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "BooleanToVisibilityConverter", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged}\"", "ItemsSource=\"{Binding ItemsView}\"", "DataGrid.GroupStyle", "GroupStyle.HeaderTemplate", "ProgressBar", "IsIndeterminate=\"{Binding IsBusy}\"", "Command=\"{Binding CancelRefreshCommand}\"", "ValidatesOnNotifyDataErrors=True", "DashboardInputTextBoxStyle", "NewItemError", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
         ["DataContext = new MainWindowViewModel();"],
         "MainWindowViewModel.cs",
-        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICollectionView ItemsView", "CollectionViewSource.GetDefaultView", "ConfigureItemsView", "SortDescriptions", "PropertyGroupDescription", "SearchText", "FilterItem", "FirstVisibleItem", "ICommand RefreshCommand", "CancelRefreshCommand", "IsBusy", "ProgressText", "CancellationTokenSource", "RefreshAsync", "Task.Delay", "DashboardItem? SelectedItem", "AsyncRelayCommand", "RelayCommand", "CanExecuteChanged"]);
+        ["INotifyPropertyChanged", "INotifyDataErrorInfo", "ObservableCollection<DashboardItem>", "ICollectionView ItemsView", "CollectionViewSource.GetDefaultView", "ConfigureItemsView", "SortDescriptions", "PropertyGroupDescription", "SearchText", "FilterItem", "FirstVisibleItem", "ICommand RefreshCommand", "CancelRefreshCommand", "IsBusy", "ProgressText", "CancellationTokenSource", "RefreshAsync", "Task.Delay", "NewItemError", "ErrorsChanged", "GetErrors", "ValidateNewItemName", "SetErrors", "DashboardItem? SelectedItem", "AsyncRelayCommand", "RelayCommand", "CanExecuteChanged"]);
     var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
     var detailCardPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml");
     var detailCardCodeBehindPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml.cs");
@@ -5592,6 +5592,8 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("ResourceDictionary", dashboardStyles);
     Contains("DashboardPrimaryButtonStyle", dashboardStyles);
     Contains("DashboardDetailCardStyle", dashboardStyles);
+    Contains("DashboardInputTextBoxStyle", dashboardStyles);
+    Contains("Validation.HasError", dashboardStyles);
     Contains("Style.Triggers", dashboardStyles);
     Contains("UserControl", detailCard);
     Contains("DashboardDetailCardStyle", detailCard);
