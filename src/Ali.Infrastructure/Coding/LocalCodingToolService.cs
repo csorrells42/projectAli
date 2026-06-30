@@ -130,6 +130,8 @@ public sealed class LocalCodingToolService(
     private CodingToolRequest? _lastDotNetRequest;
     private CodingToolResult? _lastDotNetResult;
     private CodingToolRequest? _lastPatchPreviewRequest;
+    private FeaturePatchSynthesis? _lastFeaturePatchSynthesis;
+    private string? _lastFeatureBuildGoal;
     private bool _pendingPatchPreviewLoaded;
     private CodingToolRequest? _lastRoadmapRequest;
     private bool _lastRoadmapApproved;
@@ -288,6 +290,9 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowPatchSlicePlan => await ShowPatchSlicePlanAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowApplyGate => await ShowApplyGateAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowFeaturePatchDraftPlan => await ShowFeaturePatchDraftPlanAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowExactPatchSynthesis => await ShowExactPatchSynthesisAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PreviewSynthesizedFeaturePatch => await PreviewSynthesizedFeaturePatchAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowAutonomousPatchLoop => await ShowAutonomousPatchLoopAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPlainEnglishFeatureBuilder => await ShowPlainEnglishFeatureBuilderAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8408,6 +8413,113 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature patch draft plan", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowExactPatchSynthesisAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var synthesis = await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(context.Goal, synthesis);
+        var lines = new List<string>
+        {
+            "Exact patch synthesis v1:",
+            "No files were changed.",
+            $"Goal: {context.Goal}",
+            $"Status: {synthesis.Status}",
+            $"Preview-ready edits: {synthesis.PreviewEdits.Count}",
+            "Guards:"
+        };
+        lines.AddRange(synthesis.GuardRows.Select(row => $"- {row}"));
+        lines.Add("Patch blocks:");
+        lines.AddRange(BuildFeaturePatchSynthesisBlockRows(synthesis));
+        lines.Add("Preview route:");
+        lines.Add(synthesis.PreviewReady
+            ? $"- preview synthesized feature patch {context.Goal}"
+            : "- Hold - implementation text is needed before a preview bundle can be produced.");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Exact patch synthesis", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> PreviewSynthesizedFeaturePatchAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var synthesis = await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(context.Goal, synthesis);
+        if (!synthesis.PreviewReady)
+        {
+            var lines = new List<string>
+            {
+                "Synthesized feature patch preview:",
+                "No files were changed.",
+                $"Goal: {context.Goal}",
+                $"Status: {synthesis.Status}",
+                "Preview blocked:"
+            };
+            lines.AddRange(synthesis.GuardRows.Select(row => $"- {row}"));
+            lines.Add("Patch blocks:");
+            lines.AddRange(BuildFeaturePatchSynthesisBlockRows(synthesis));
+            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Synthesized feature patch preview", Policy.WorkspaceRoot);
+        }
+
+        var previewRequest = new CodingToolRequest(
+            CodingToolAction.PreviewPatchBundle,
+            null,
+            ExplicitUserPath: true,
+            UserConfirmed: false,
+            Query: context.Goal,
+            PatchEdits: synthesis.PreviewEdits);
+        var preview = await PreviewPatchBundleAsync(previewRequest, cancellationToken).ConfigureAwait(false);
+        if (preview.Succeeded)
+        {
+            _lastPatchPreviewRequest = previewRequest;
+            SavePendingPatchPreview();
+        }
+
+        var prefix = string.Join(Environment.NewLine, new[]
+        {
+            "Synthesized feature patch preview:",
+            "No files were changed.",
+            $"Goal: {context.Goal}",
+            $"Status: {synthesis.Status}",
+            $"Preview-ready edits: {synthesis.PreviewEdits.Count}"
+        });
+        return preview with
+        {
+            Message = prefix + Environment.NewLine + preview.Message,
+            ToolName = "Synthesized feature patch preview"
+        };
+    }
+
+    private async Task<CodingToolResult> ShowAutonomousPatchLoopAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
+        var context = await BuildFeatureWorkContextAsync(request with { Query = goal }, cancellationToken).ConfigureAwait(false);
+        var synthesis = _lastFeaturePatchSynthesis is not null && string.Equals(_lastFeatureBuildGoal, goal, StringComparison.OrdinalIgnoreCase)
+            ? _lastFeaturePatchSynthesis
+            : await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(goal, synthesis);
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var stage = ClassifyAutonomousPatchLoopStage(synthesis, latestValidation);
+        var lines = new List<string>
+        {
+            "Autonomous patch loop v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            $"Stage: {stage}",
+            _lastPatchPreviewRequest is null ? "Pending preview: none" : $"Pending preview: {_lastPatchPreviewRequest.Action}",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            $"Git: {gitStatus.Summary}",
+            "Loop steps:"
+        };
+        lines.AddRange(BuildAutonomousPatchLoopRows(context, synthesis, latestValidation).Select(row => $"- {row}"));
+        lines.Add("Failure classifier:");
+        lines.AddRange(BuildFeatureFailureClassifierRows().Select(row => $"- {row}"));
+        lines.Add("Repair packet:");
+        lines.AddRange(BuildFeatureFailureRepairPacketRows(context).Select(row => $"- {row}"));
+        lines.Add($"Next command: {BuildAutonomousPatchLoopNextCommand(goal, synthesis, latestValidation)}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Autonomous patch loop", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowPostPatchValidationRouterAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
@@ -8786,6 +8898,421 @@ public sealed class LocalCodingToolService(
             $"First diagnostic: {TrimForChat(diagnostic, 180)}",
             "Repair route: inspect impacted symbol or binding, patch the smallest slice, then rerun the same validation command."
         ];
+    }
+
+    private void RememberFeaturePatchSynthesis(string goal, FeaturePatchSynthesis synthesis)
+    {
+        _lastFeatureBuildGoal = CleanGoal(goal, "current feature");
+        _lastFeaturePatchSynthesis = synthesis;
+    }
+
+    private async Task<FeaturePatchSynthesis> BuildFeaturePatchSynthesisAsync(
+        FeatureWorkContext context,
+        CancellationToken cancellationToken)
+    {
+        var candidates = new List<FeaturePatchSynthesisCandidate>();
+        var guardRows = new List<string>();
+        var hasTransform = TryParseMechanicalPatchTransform(context.Goal, out var oldValue, out var newValue);
+        guardRows.Add(hasTransform
+            ? $"Mechanical transform: replace {oldValue} with {newValue}."
+            : "Mechanical transform: none detected - exact anchors only until implementation text is supplied.");
+        var targetPaths = context.RankedTargets
+            .Select(target => ToAbsoluteWorkspacePath(target.RelativePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Concat(context.CandidateFiles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxPatchBundleEdits)
+            .ToList();
+        if (targetPaths.Count == 0)
+        {
+            guardRows.Add("Target guard: no file target was resolved.");
+        }
+
+        foreach (var fullPath in targetPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(fullPath))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "missing file",
+                    string.Empty,
+                    string.Empty,
+                    false,
+                    "Target file does not exist."));
+                continue;
+            }
+
+            var info = new FileInfo(fullPath);
+            if (info.Length > MaxReplaceFileCharacters)
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "file too large",
+                    string.Empty,
+                    string.Empty,
+                    false,
+                    $"File is too large for safe exact synthesis ({info.Length} bytes)."));
+                continue;
+            }
+
+            var content = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "empty file",
+                    string.Empty,
+                    string.Empty,
+                    false,
+                    "File is empty or whitespace only."));
+                continue;
+            }
+
+            if (hasTransform && TryBuildMechanicalPatchBlock(content, oldValue, newValue, out var oldText, out var newText, out var transformNote))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "mechanical transform",
+                    oldText,
+                    newText,
+                    true,
+                    transformNote));
+                continue;
+            }
+
+            if (TryBuildAnchorPatchBlock(content, context.GoalTerms, hasTransform ? oldValue : null, out var anchorText, out var anchorNote))
+            {
+                candidates.Add(new FeaturePatchSynthesisCandidate(
+                    RelativeToWorkspace(fullPath),
+                    fullPath,
+                    "exact anchor",
+                    anchorText,
+                    anchorText,
+                    false,
+                    hasTransform
+                        ? $"Transform text was not uniquely replaceable; {anchorNote}"
+                        : anchorNote));
+            }
+        }
+
+        var previewEdits = candidates
+            .Where(candidate => candidate.PreviewReady)
+            .Take(MaxPatchBundleEdits)
+            .Select(candidate => new CodingPatchEdit(candidate.FullPath, candidate.OldText, candidate.NewText))
+            .ToList();
+        guardRows.Add(previewEdits.Count > 0
+            ? $"Preview guard: {previewEdits.Count} exact edit(s) can be previewed through the normal patch bundle engine."
+            : "Preview guard: hold - no exact old/new edit is ready.");
+        guardRows.Add(context.RankedTargets.Count == 0
+            ? "Target guard: no ranked target; inspect files before applying."
+            : $"Target guard: {context.RankedTargets.First().RelativePath} is the top ranked target.");
+        guardRows.Add(string.IsNullOrWhiteSpace(context.TestTarget.Command)
+            ? "Validation guard: targeted test command is not resolved yet."
+            : $"Validation guard: {context.TestTarget.Command}.");
+        var status = previewEdits.Count > 0
+            ? "Preview-ready - exact old/new replacement blocks are available."
+            : candidates.Count > 0
+                ? "Anchored - exact old text found, implementation text still needed."
+                : "Hold - no usable target or anchor was found.";
+        return new FeaturePatchSynthesis(context.Goal, candidates, previewEdits, guardRows, previewEdits.Count > 0, status);
+    }
+
+    private static IReadOnlyList<string> BuildFeaturePatchSynthesisBlockRows(FeaturePatchSynthesis synthesis)
+    {
+        if (synthesis.Candidates.Count == 0)
+        {
+            return ["- none resolved"];
+        }
+
+        var lines = new List<string>();
+        foreach (var candidate in synthesis.Candidates.Take(4))
+        {
+            lines.Add($"- File: {candidate.RelativePath}");
+            lines.Add($"  Ready: {(candidate.PreviewReady ? "Yes" : "No")} - {candidate.Note}");
+            lines.Add($"  Anchor: {candidate.AnchorReason}");
+            if (!string.IsNullOrWhiteSpace(candidate.OldText))
+            {
+                lines.Add("  Old text:");
+                lines.AddRange(IndentBlock(candidate.OldText, "    "));
+                lines.Add("  New text:");
+                lines.AddRange(IndentBlock(candidate.NewText, "    "));
+            }
+        }
+
+        return lines;
+    }
+
+    private static bool TryParseMechanicalPatchTransform(string goal, out string oldValue, out string newValue)
+    {
+        oldValue = string.Empty;
+        newValue = string.Empty;
+        var patterns = new[]
+        {
+            """\b(?:replace|rename|change|swap)\s+["'](?<old>[^"']+)["']\s+(?:with|to)\s+["'](?<new>[^"']+)["']""",
+            """\b(?:replace|rename|change|swap)\s+(?<old>[A-Za-z_][\w.:-]*)\s+(?:with|to)\s+(?<new>[A-Za-z_][\w.:-]*)""",
+            """\b(?:change|rename)\s+from\s+["']?(?<old>[^"'\s]+)["']?\s+to\s+["']?(?<new>[^"'\s]+)["']?"""
+        };
+        foreach (var pattern in patterns)
+        {
+            var match = Regex.Match(goal, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            oldValue = match.Groups["old"].Value.Trim();
+            newValue = match.Groups["new"].Value.Trim();
+            return !string.IsNullOrWhiteSpace(oldValue)
+                && !string.IsNullOrWhiteSpace(newValue)
+                && !oldValue.Equals(newValue, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    private static bool TryBuildMechanicalPatchBlock(
+        string content,
+        string oldValue,
+        string newValue,
+        out string oldText,
+        out string newText,
+        out string note)
+    {
+        oldText = string.Empty;
+        newText = string.Empty;
+        note = string.Empty;
+        var count = CountOrdinalOccurrences(content, oldValue);
+        if (count == 1)
+        {
+            oldText = oldValue;
+            newText = newValue;
+            note = "Exact token occurs once in the file.";
+            return true;
+        }
+
+        var index = content.IndexOf(oldValue, StringComparison.Ordinal);
+        if (index >= 0 && TryBuildUniqueContextBlock(content, index, oldValue.Length, out var block))
+        {
+            oldText = block;
+            newText = block.Replace(oldValue, newValue, StringComparison.Ordinal);
+            if (!oldText.Equals(newText, StringComparison.Ordinal))
+            {
+                note = $"Exact token occurs {count} time(s); using a unique surrounding block.";
+                return true;
+            }
+        }
+
+        note = count == 0
+            ? "Transform source text was not found in this file."
+            : $"Transform source text occurs {count} time(s) and no unique block was resolved.";
+        return false;
+    }
+
+    private static bool TryBuildAnchorPatchBlock(
+        string content,
+        IReadOnlyList<string> goalTerms,
+        string? preferredTerm,
+        out string anchorText,
+        out string note)
+    {
+        anchorText = string.Empty;
+        note = string.Empty;
+        var terms = new List<string>();
+        if (!string.IsNullOrWhiteSpace(preferredTerm))
+        {
+            terms.Add(preferredTerm);
+        }
+
+        terms.AddRange(goalTerms.Where(term => term.Length > 2));
+        foreach (var term in terms.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var index = content.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0 && TryBuildUniqueContextBlock(content, index, term.Length, out anchorText))
+            {
+                note = $"Exact anchor around term {term}.";
+                return true;
+            }
+        }
+
+        var fallbackIndex = FindFallbackAnchorIndex(content);
+        if (fallbackIndex >= 0 && TryBuildUniqueContextBlock(content, fallbackIndex, 1, out anchorText))
+        {
+            note = "Exact fallback anchor from the first likely code block.";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int FindFallbackAnchorIndex(string content)
+    {
+        var markers = new[] { "class ", "record ", "interface ", "public ", "private ", "<Button", "Command=\"" };
+        foreach (var marker in markers)
+        {
+            var index = content.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                return index;
+            }
+        }
+
+        return content.TakeWhile(char.IsWhiteSpace).Count();
+    }
+
+    private static bool TryBuildUniqueContextBlock(string content, int index, int length, out string block)
+    {
+        block = string.Empty;
+        for (var radius = 0; radius <= 4; radius++)
+        {
+            var start = FindLineWindowStart(content, index, radius);
+            var end = FindLineWindowEnd(content, index + length, radius);
+            if (end <= start)
+            {
+                continue;
+            }
+
+            var candidate = content[start..end];
+            if (!string.IsNullOrWhiteSpace(candidate)
+                && CountOrdinalOccurrences(content, candidate) == 1)
+            {
+                block = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int FindLineWindowStart(string content, int index, int linesBefore)
+    {
+        var start = Math.Clamp(index, 0, content.Length);
+        for (var i = 0; i <= linesBefore; i++)
+        {
+            var previous = content.LastIndexOf('\n', Math.Max(0, start - 1));
+            if (previous < 0)
+            {
+                return 0;
+            }
+
+            start = previous;
+        }
+
+        return Math.Min(content.Length, start + 1);
+    }
+
+    private static int FindLineWindowEnd(string content, int index, int linesAfter)
+    {
+        var end = Math.Clamp(index, 0, content.Length);
+        for (var i = 0; i <= linesAfter; i++)
+        {
+            var next = content.IndexOf('\n', end);
+            if (next < 0)
+            {
+                return content.Length;
+            }
+
+            end = next + 1;
+        }
+
+        return end;
+    }
+
+    private static IReadOnlyList<string> IndentBlock(string value, string indent) =>
+        value.Split(["\r\n", "\n", "\r"], StringSplitOptions.None)
+            .Select(line => indent + line)
+            .ToList();
+
+    private string ClassifyAutonomousPatchLoopStage(FeaturePatchSynthesis synthesis, CodingReceipt? latestValidation)
+    {
+        if (_lastDotNetResult is { Succeeded: false } || latestValidation is { Succeeded: false })
+        {
+            return "Repair";
+        }
+
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "Awaiting approved apply";
+        }
+
+        return synthesis.PreviewReady
+            ? "Ready to preview synthesized patch"
+            : "Draft exact patch text";
+    }
+
+    private IReadOnlyList<string> BuildAutonomousPatchLoopRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation)
+    {
+        var validation = string.IsNullOrWhiteSpace(context.TestTarget.Command)
+            ? "resolve test target " + context.Goal
+            : context.TestTarget.Command;
+        return
+        [
+            $"1. Synthesize: {(synthesis.PreviewReady ? "Good - preview-ready patch exists" : "Review - exact implementation text still needed")}.",
+            _lastPatchPreviewRequest is null ? "2. Preview: Waiting - no pending preview." : "2. Preview: Good - pending preview exists.",
+            _lastPatchPreviewRequest is null ? "3. Apply: Waiting for preview." : "3. Apply: Waiting for owner confirmation.",
+            $"4. Validate: {validation}.",
+            latestValidation?.Succeeded == true ? "5. Repair: Not needed - latest validation passed." : "5. Repair: Ready if validation fails.",
+            "6. Retry budget: 0/2 automatic repair drafts used in this session.",
+            "7. Receipt: finish with feature completion receipt and safe commit check."
+        ];
+    }
+
+    private IReadOnlyList<string> BuildFeatureFailureClassifierRows()
+    {
+        if (_lastDotNetRequest is null || _lastDotNetResult is null)
+        {
+            return ["State: Waiting - no failed build/test result is loaded."];
+        }
+
+        if (_lastDotNetResult.Succeeded)
+        {
+            return [$"State: Good - {_lastDotNetRequest.Action} passed."];
+        }
+
+        var text = _lastDotNetResult.Message;
+        var category = text.Contains("CS0103", StringComparison.OrdinalIgnoreCase)
+            ? "Missing symbol/name"
+            : text.Contains("CS1002", StringComparison.OrdinalIgnoreCase) || text.Contains("CS1513", StringComparison.OrdinalIgnoreCase)
+                ? "Syntax or brace/semicolon"
+                : text.Contains("InitializeComponent", StringComparison.OrdinalIgnoreCase) || text.Contains("binding", StringComparison.OrdinalIgnoreCase)
+                    ? "XAML binding or generated UI glue"
+                    : text.Contains("Assert", StringComparison.OrdinalIgnoreCase) || text.Contains("Expected", StringComparison.OrdinalIgnoreCase)
+                        ? "Test assertion mismatch"
+                        : "General build/test failure";
+        return
+        [
+            $"State: Bad - {_lastDotNetRequest.Action} failed.",
+            $"Category: {category}.",
+            "Rule: repair the smallest active patch slice, then rerun the same validation command."
+        ];
+    }
+
+    private string BuildAutonomousPatchLoopNextCommand(
+        string goal,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation)
+    {
+        if (_lastDotNetResult is { Succeeded: false } || latestValidation is { Succeeded: false })
+        {
+            return "feature patch draft " + goal;
+        }
+
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "confirm apply last patch preview";
+        }
+
+        return synthesis.PreviewReady
+            ? "preview synthesized feature patch " + goal
+            : "exact patch synthesis " + goal;
     }
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)
@@ -15732,6 +16259,23 @@ public sealed class LocalCodingToolService(
         IReadOnlyList<string> PrioritizedTests,
         IReadOnlyList<string> CallChainImpact,
         IReadOnlyList<string> Notes);
+
+    private sealed record FeaturePatchSynthesis(
+        string Goal,
+        IReadOnlyList<FeaturePatchSynthesisCandidate> Candidates,
+        IReadOnlyList<CodingPatchEdit> PreviewEdits,
+        IReadOnlyList<string> GuardRows,
+        bool PreviewReady,
+        string Status);
+
+    private sealed record FeaturePatchSynthesisCandidate(
+        string RelativePath,
+        string FullPath,
+        string AnchorReason,
+        string OldText,
+        string NewText,
+        bool PreviewReady,
+        string Note);
 
     private sealed record FeatureWorkContext(
         string Goal,

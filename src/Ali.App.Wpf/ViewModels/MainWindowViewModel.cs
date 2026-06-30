@@ -283,7 +283,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingBehaviorTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior tests", "behavior test plan current feature", "Coding.BehaviorTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImplementationSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation slices", "implementation slice plan current feature", "Coding.ImplementationSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPatchSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch slices", "patch slice plan current feature", "Coding.PatchSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingExactPatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Exact patch", "exact patch synthesis current feature", "Coding.ExactPatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPatchIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch intelligence", "patch intelligence current feature", "Coding.PatchIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchLoopCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch loop", "autonomous patch loop current feature", "Coding.PatchLoop"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature execution packet", "feature execution packet current feature", "Coding.FeatureExecutionPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingApplyGateCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply gate", "apply gate current feature", "Coding.ApplyGate"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPostPatchValidationCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation router", "post patch validation current feature", "Coding.PostPatchValidation"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -751,7 +753,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingPatchSlicesCommand { get; }
 
+    public ICommand RunCodingExactPatchCommand { get; }
+
     public ICommand RunCodingPatchIntelligenceCommand { get; }
+
+    public ICommand RunCodingPatchLoopCommand { get; }
 
     public ICommand RunCodingFeatureExecutionPacketCommand { get; }
 
@@ -3570,6 +3576,12 @@ public sealed class MainWindowViewModel : ObservableObject
             "Builder runbook:",
             "Failure repair packet:",
             "Next command:",
+            "Preview-ready edits:",
+            "Patch blocks:",
+            "Preview route:",
+            "Loop steps:",
+            "Failure classifier:",
+            "Stage:",
             "Patch intelligence:",
             "Slice approval packet:",
             "Patch preview gate v3:",
@@ -3584,6 +3596,11 @@ public sealed class MainWindowViewModel : ObservableObject
             "- State:",
             "- Active slice:",
             "- Repair route:",
+            "- Preview guard:",
+            "- Mechanical transform:",
+            "- File:",
+            "- Ready:",
+            "- Category:",
             "- Input:",
             "- Expected result:",
             "- Failure behavior:",
@@ -6906,9 +6923,19 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingPatchSlices.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingExactPatchCommand is AsyncRelayCommand runCodingExactPatch)
+        {
+            runCodingExactPatch.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingPatchIntelligenceCommand is AsyncRelayCommand runCodingPatchIntelligence)
         {
             runCodingPatchIntelligence.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatchLoopCommand is AsyncRelayCommand runCodingPatchLoop)
+        {
+            runCodingPatchLoop.RaiseCanExecuteChanged();
         }
 
         if (RunCodingFeatureExecutionPacketCommand is AsyncRelayCommand runCodingFeatureExecutionPacket)

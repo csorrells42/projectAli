@@ -144,6 +144,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool reviews current changes", TestLocalCodingToolReviewsCurrentChanges),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
+    ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
     ("local coding tool rejects stale patch bundle", TestLocalCodingToolRejectsStalePatchBundle),
     ("local coding tool manages pending patch preview", TestLocalCodingToolManagesPendingPatchPreview),
@@ -800,6 +801,13 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("feature patch draft Save button", out var featurePatchDraftRequest));
     Equal(CodingToolAction.ShowFeaturePatchDraftPlan, featurePatchDraftRequest.Action);
     Equal("Save button", featurePatchDraftRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("exact patch synthesis replace Demo with Widget", out var exactPatchRequest));
+    Equal(CodingToolAction.ShowExactPatchSynthesis, exactPatchRequest.Action);
+    Equal("replace Demo with Widget", exactPatchRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("preview synthesized feature patch replace Demo with Widget", out var synthesizedPreviewRequest));
+    Equal(CodingToolAction.PreviewSynthesizedFeaturePatch, synthesizedPreviewRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("autonomous patch loop Save button", out var patchLoopRequest));
+    Equal(CodingToolAction.ShowAutonomousPatchLoop, patchLoopRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("post patch validation Save button", out var validationRouterRequest));
     Equal(CodingToolAction.ShowPostPatchValidationRouter, validationRouterRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("patch intelligence Save button", out var patchIntelligenceRequest));
@@ -3189,6 +3197,8 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var patchSlices = await service.TryHandleAsync("patch slice plan Save button", CancellationToken.None);
     var applyGate = await service.TryHandleAsync("apply gate", CancellationToken.None);
     var featurePatchDraft = await service.TryHandleAsync("feature patch draft Save button", CancellationToken.None);
+    var exactPatch = await service.TryHandleAsync("exact patch synthesis Save button", CancellationToken.None);
+    var patchLoop = await service.TryHandleAsync("autonomous patch loop Save button", CancellationToken.None);
     var validationRouter = await service.TryHandleAsync("post patch validation Save button", CancellationToken.None);
     var patchIntelligence = await service.TryHandleAsync("patch intelligence Save button", CancellationToken.None);
     var featureBuilder = await service.TryHandleAsync("feature builder Save button", CancellationToken.None);
@@ -3238,6 +3248,12 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Preview bundle candidates:", featurePatchDraft.Message);
     Contains("Before/after requirements:", featurePatchDraft.Message);
     Contains("Failure repair packet:", featurePatchDraft.Message);
+    Contains("Exact patch synthesis v1", exactPatch.Message);
+    Contains("Patch blocks:", exactPatch.Message);
+    Contains("Preview route:", exactPatch.Message);
+    Contains("Autonomous patch loop v1", patchLoop.Message);
+    Contains("Loop steps:", patchLoop.Message);
+    Contains("Failure classifier:", patchLoop.Message);
     Contains("Post-patch validation router", validationRouter.Message);
     Contains("Patch preview intelligence v1", patchIntelligence.Message);
     Contains("Slice approval packet:", patchIntelligence.Message);
@@ -3562,7 +3578,9 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingBehaviorTestsCommand", dashboard);
     Contains("RunCodingImplementationSlicesCommand", dashboard);
     Contains("RunCodingPatchSlicesCommand", dashboard);
+    Contains("RunCodingExactPatchCommand", dashboard);
     Contains("RunCodingPatchIntelligenceCommand", dashboard);
+    Contains("RunCodingPatchLoopCommand", dashboard);
     Contains("RunCodingFeatureExecutionPacketCommand", dashboard);
     Contains("RunCodingApplyGateCommand", dashboard);
     Contains("RunCodingPostPatchValidationCommand", dashboard);
@@ -3581,7 +3599,9 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingBehaviorTestsCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingImplementationSlicesCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchSlicesCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingExactPatchCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchIntelligenceCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatchLoopCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingApplyGateCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPostPatchValidationCommand = CreateAsyncCommand", viewModel);
@@ -4205,6 +4225,49 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Contains("Queued validation command packet:", applied.Message);
     Equal("class Widget { }", await File.ReadAllTextAsync(firstPath));
     Equal("class NewName { }", await File.ReadAllTextAsync(secondPath));
+}
+
+static async Task TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var filePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(filePath, "class Demo { }");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var synthesis = await service.TryHandleAsync("exact patch synthesis replace Demo with Widget", CancellationToken.None);
+    var preview = await service.TryHandleAsync("preview synthesized feature patch replace Demo with Widget", CancellationToken.None);
+    var loop = await service.TryHandleAsync("autonomous patch loop replace Demo with Widget", CancellationToken.None);
+
+    Equal(true, synthesis.Handled);
+    Equal(true, synthesis.Succeeded);
+    Contains("Exact patch synthesis v1", synthesis.Message);
+    Contains("Preview-ready edits: 1", synthesis.Message);
+    Contains("replace Demo with Widget", synthesis.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(filePath));
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Synthesized feature patch preview", preview.Message);
+    Contains("Patch bundle preview", preview.Message);
+    Contains("Edits: 1", preview.Message);
+    Contains("To apply this exact bundle", preview.Message);
+
+    Equal(true, loop.Handled);
+    Equal(true, loop.Succeeded);
+    Contains("Autonomous patch loop v1", loop.Message);
+    Contains("Stage: Awaiting approved apply", loop.Message);
+    Contains("Next command: confirm apply last patch preview", loop.Message);
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview bundle", applied.Message);
+    Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
 }
 
 static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()

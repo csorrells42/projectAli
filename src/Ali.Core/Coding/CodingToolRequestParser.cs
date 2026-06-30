@@ -688,6 +688,64 @@ public static class CodingToolRequestParser
         "plain english patch draft"
     ];
 
+    private static readonly string[] ExactPatchSynthesisPrefixes =
+    [
+        "exact patch synthesis ",
+        "synthesize exact patch ",
+        "synthesize patch ",
+        "exact feature patch ",
+        "draft exact patch ",
+        "make exact patch "
+    ];
+
+    private static readonly string[] ExactPatchSynthesisRequests =
+    [
+        "exact patch synthesis",
+        "synthesize exact patch",
+        "synthesize patch",
+        "exact feature patch",
+        "draft exact patch",
+        "make exact patch"
+    ];
+
+    private static readonly string[] PreviewSynthesizedFeaturePatchPrefixes =
+    [
+        "preview synthesized feature patch ",
+        "preview synthesized patch ",
+        "preview exact feature patch ",
+        "preview exact patch ",
+        "preview generated patch "
+    ];
+
+    private static readonly string[] PreviewSynthesizedFeaturePatchRequests =
+    [
+        "preview synthesized feature patch",
+        "preview synthesized patch",
+        "preview exact feature patch",
+        "preview exact patch",
+        "preview generated patch"
+    ];
+
+    private static readonly string[] AutonomousPatchLoopPrefixes =
+    [
+        "autonomous patch loop ",
+        "show autonomous patch loop ",
+        "feature patch loop ",
+        "show feature patch loop ",
+        "feature build loop ",
+        "show feature build loop "
+    ];
+
+    private static readonly string[] AutonomousPatchLoopRequests =
+    [
+        "autonomous patch loop",
+        "show autonomous patch loop",
+        "feature patch loop",
+        "show feature patch loop",
+        "feature build loop",
+        "show feature build loop"
+    ];
+
     private static readonly string[] PostPatchValidationRouterPrefixes =
     [
         "post patch validation ",
@@ -2683,6 +2741,15 @@ public static class CodingToolRequestParser
     private static bool IsFeaturePatchDraftPlanRequest(string text) =>
         FeaturePatchDraftPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsExactPatchSynthesisRequest(string text) =>
+        ExactPatchSynthesisRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPreviewSynthesizedFeaturePatchRequest(string text) =>
+        PreviewSynthesizedFeaturePatchRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsAutonomousPatchLoopRequest(string text) =>
+        AutonomousPatchLoopRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPostPatchValidationRouterRequest(string text) =>
         PostPatchValidationRouterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2846,6 +2913,9 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, PatchSlicePlanPrefixes, CodingToolAction.ShowPatchSlicePlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ApplyGatePrefixes, CodingToolAction.ShowApplyGate, userConfirmed, out request)
             || TryParsePrefixedQuery(text, FeaturePatchDraftPlanPrefixes, CodingToolAction.ShowFeaturePatchDraftPlan, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ExactPatchSynthesisPrefixes, CodingToolAction.ShowExactPatchSynthesis, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PreviewSynthesizedFeaturePatchPrefixes, CodingToolAction.PreviewSynthesizedFeaturePatch, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, AutonomousPatchLoopPrefixes, CodingToolAction.ShowAutonomousPatchLoop, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
@@ -2917,6 +2987,24 @@ public static class CodingToolRequestParser
         if (IsFeaturePatchDraftPlanRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFeaturePatchDraftPlan, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsExactPatchSynthesisRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowExactPatchSynthesis, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPreviewSynthesizedFeaturePatchRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.PreviewSynthesizedFeaturePatch, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsAutonomousPatchLoopRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowAutonomousPatchLoop, null, UserConfirmed: userConfirmed);
             return true;
         }
 
