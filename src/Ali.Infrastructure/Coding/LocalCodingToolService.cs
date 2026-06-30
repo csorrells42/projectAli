@@ -12867,6 +12867,20 @@ public sealed class LocalCodingToolService(
                     continue;
                 }
 
+                if (!hasTransform
+                    && TryBuildNewWpfAppPatchBlock(context.Goal, fullPath, out var newWpfAppText, out var newWpfAppNote))
+                {
+                    candidates.Add(new FeaturePatchSynthesisCandidate(
+                        RelativeToWorkspace(fullPath),
+                        fullPath,
+                        "deterministic WPF application entry recipe",
+                        string.Empty,
+                        newWpfAppText,
+                        true,
+                        newWpfAppNote));
+                    continue;
+                }
+
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
                     fullPath,
@@ -13068,6 +13082,8 @@ public sealed class LocalCodingToolService(
             {
                 AddIfEditableWpfSurface(targets, Path.Combine(primaryDirectory, "MainWindow.xaml"));
                 AddIfEditableWpfSurface(targets, Path.Combine(primaryDirectory, "MainWindow.xaml.cs"));
+                AddIfSafeNewWpfAppTarget(targets, Path.Combine(primaryDirectory, "App.xaml"));
+                AddIfSafeNewWpfAppTarget(targets, Path.Combine(primaryDirectory, "App.xaml.cs"));
                 if (IsWpfComplexWindowGoal(context.Goal))
                 {
                     AddIfSafeNewWpfViewModelTarget(targets, Path.Combine(primaryDirectory, "MainWindowViewModel.cs"));
@@ -13111,6 +13127,14 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private void AddIfSafeNewWpfAppTarget(List<string> targets, string path)
+    {
+        if (IsSafeNewWpfAppPath(path))
+        {
+            targets.Add(path);
+        }
+    }
+
     private bool IsEditableWpfSurfaceFile(string path) =>
         File.Exists(path)
         && IsSafeWpfSurfacePath(path);
@@ -13130,6 +13154,16 @@ public sealed class LocalCodingToolService(
         && Policy.IsInsideWorkspace(path)
         && !IsBuildArtifactPath(path)
         && !IsGeneratedOrDesignerFile(path);
+
+    private bool IsSafeNewWpfAppPath(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return (fileName.Equals("App.xaml", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("App.xaml.cs", StringComparison.OrdinalIgnoreCase))
+               && Policy.IsInsideWorkspace(path)
+               && !IsBuildArtifactPath(path)
+               && !IsGeneratedOrDesignerFile(path);
+    }
 
     private bool IsEditableProgramFile(string path) =>
         File.Exists(path)
@@ -14468,6 +14502,73 @@ public sealed class LocalCodingToolService(
         newText = BuildWpfComplexDashboardViewModel(namespaceName);
         note = "WPF complex-dashboard MainWindowViewModel.cs starter recipe.";
         return true;
+    }
+
+    private static bool TryBuildNewWpfAppPatchBlock(
+        string goal,
+        string fullPath,
+        out string newText,
+        out string note)
+    {
+        newText = string.Empty;
+        note = string.Empty;
+        if (!IsSimpleWpfProgramGoal(goal) || File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(fullPath);
+        if (!fileName.Equals("App.xaml", StringComparison.OrdinalIgnoreCase)
+            && !fileName.Equals("App.xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(fullPath);
+        var codeBehindPath = string.IsNullOrWhiteSpace(directory) ? null : Path.Combine(directory, "MainWindow.xaml.cs");
+        var namespaceName = codeBehindPath is null ? null : ExtractCSharpNamespaceName(SafeReadText(codeBehindPath));
+        if (fileName.Equals("App.xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            newText = BuildWpfAppXaml(namespaceName);
+            note = "WPF App.xaml entry-point starter recipe.";
+            return true;
+        }
+
+        newText = BuildWpfAppCodeBehind(namespaceName);
+        note = "WPF App.xaml.cs entry-point starter recipe.";
+        return true;
+    }
+
+    private static string BuildWpfAppXaml(string? namespaceName)
+    {
+        var appClass = string.IsNullOrWhiteSpace(namespaceName)
+            ? "App"
+            : namespaceName + ".App";
+        return
+            $$"""
+            <Application x:Class="{{appClass}}"
+                         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                         StartupUri="MainWindow.xaml">
+                <Application.Resources>
+                </Application.Resources>
+            </Application>
+            """;
+    }
+
+    private static string BuildWpfAppCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Windows;
+
+            {{namespaceLine}}public partial class App : Application
+            {
+            }
+            """;
     }
 
     private static string BuildWpfComplexDashboardViewModel(string? namespaceName)

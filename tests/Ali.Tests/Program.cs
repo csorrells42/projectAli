@@ -23,6 +23,8 @@ using Ali.Infrastructure.Installation;
 using Ali.Infrastructure.Sources;
 using Ali.Infrastructure.Storage;
 using Ali.Infrastructure.Voice;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 if (args.Contains("--real-runtime", StringComparer.OrdinalIgnoreCase))
 {
@@ -5535,6 +5537,16 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         counterGoal,
         ["CounterTextBlock", "IncrementButton_Click"],
         ["private int _count;", "_count++;", "CounterTextBlock.Text"]);
+    var appXamlPath = Path.Combine(projectDirectory, "App.xaml");
+    var appCodeBehindPath = Path.Combine(projectDirectory, "App.xaml.cs");
+    Equal(true, File.Exists(appXamlPath));
+    Equal(true, File.Exists(appCodeBehindPath));
+    var appXaml = await File.ReadAllTextAsync(appXamlPath);
+    var appCodeBehind = await File.ReadAllTextAsync(appCodeBehindPath);
+    AssertXamlWellFormed(appXaml);
+    AssertCSharpSyntaxClean(appCodeBehind, appCodeBehindPath);
+    Contains("StartupUri=\"MainWindow.xaml\"", appXaml);
+    Contains("partial class App : Application", appCodeBehind);
     await AssertWpfStarterAsync(
         service,
         xamlPath,
@@ -5621,6 +5633,8 @@ static async Task AssertWpfStarterAsync(
     Equal(true, applied.Succeeded);
     var xaml = await File.ReadAllTextAsync(xamlPath);
     var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
+    AssertXamlWellFormed(xaml);
+    AssertCSharpSyntaxClean(codeBehind, codeBehindPath);
     foreach (var expected in expectedXamlSnippets)
     {
         Contains(expected, xaml);
@@ -5635,10 +5649,57 @@ static async Task AssertWpfStarterAsync(
     {
         Equal(true, File.Exists(expectedCreatedPath));
         var created = await File.ReadAllTextAsync(expectedCreatedPath);
+        AssertCSharpSyntaxClean(created, expectedCreatedPath);
+        AssertCSharpCompilesWithPlatformReferences(created, Path.GetFileNameWithoutExtension(expectedCreatedPath));
         foreach (var expected in expectedCreatedFileSnippets ?? [])
         {
             Contains(expected, created);
         }
+    }
+}
+
+static void AssertXamlWellFormed(string xaml)
+{
+    try
+    {
+        System.Xml.Linq.XDocument.Parse(xaml);
+    }
+    catch (Exception ex) when (ex is System.Xml.XmlException or InvalidOperationException)
+    {
+        throw new InvalidOperationException("Generated XAML must be well-formed XML.", ex);
+    }
+}
+
+static void AssertCSharpSyntaxClean(string source, string path)
+{
+    var diagnostics = CSharpSyntaxTree.ParseText(source, path: path)
+        .GetDiagnostics()
+        .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+        .ToList();
+    if (diagnostics.Count > 0)
+    {
+        throw new InvalidOperationException("Generated C# must parse cleanly." + Environment.NewLine + string.Join(Environment.NewLine, diagnostics.Select(diagnostic => diagnostic.ToString())));
+    }
+}
+
+static void AssertCSharpCompilesWithPlatformReferences(string source, string assemblyName)
+{
+    var trustedPlatformAssemblies = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")) ?? string.Empty;
+    var references = trustedPlatformAssemblies
+        .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(path => MetadataReference.CreateFromFile(path))
+        .ToList();
+    var compilation = CSharpCompilation.Create(
+        assemblyName,
+        [CSharpSyntaxTree.ParseText(source)],
+        references,
+        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+    var diagnostics = compilation.GetDiagnostics()
+        .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+        .ToList();
+    if (diagnostics.Count > 0)
+    {
+        throw new InvalidOperationException("Generated C# must compile with platform references." + Environment.NewLine + string.Join(Environment.NewLine, diagnostics.Select(diagnostic => diagnostic.ToString())));
     }
 }
 
