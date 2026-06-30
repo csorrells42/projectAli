@@ -235,6 +235,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
         RunSelectedCommandExplorerCommand = CreateCommand(parameter => _ = RunCommandExplorerNodeSafelyAsync(parameter), parameter => CanRunCommandExplorerNode(parameter));
+        SendProgrammingNextCommand = CreateAsyncCommand(() => SendProgrammingShortcutAsync("continue current task"), () => !IsBusy && !IsRecording && !IsTranscribing);
         PlayVoiceSampleCommand = CreateAsyncCommand(PlayVoiceSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
         MarkCorrectionReviewedCommand = CreateAsyncCommand(MarkSelectedCorrectionReviewedAsync, () => SelectedCorrectionReviewItem is not null);
@@ -724,6 +725,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand ToggleCommandExplorerCommand { get; }
 
     public ICommand RunSelectedCommandExplorerCommand { get; }
+
+    public ICommand SendProgrammingNextCommand { get; }
 
     public ICommand PlayVoiceSampleCommand { get; }
 
@@ -2246,6 +2249,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var node = parameter as CommandExplorerNodeViewModel ?? SelectedCommandExplorerNode;
         return node is { IsCommand: true };
+    }
+
+    private async Task SendProgrammingShortcutAsync(string text)
+    {
+        if (IsBusy || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        ComposerText = string.Empty;
+        await SendTextAsync(text.Trim(), VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
     }
 
     private async Task SendTextAsync(

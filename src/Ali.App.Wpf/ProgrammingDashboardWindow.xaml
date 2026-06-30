@@ -1,278 +1,199 @@
 <Window x:Class="Ali.App.Wpf.ProgrammingDashboardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Ali.App.Wpf.ViewModels"
         Title="Programming"
-        Height="620"
-        MinHeight="520"
-        Width="980"
-        MinWidth="860"
+        Height="760"
+        MinHeight="620"
+        Width="1220"
+        MinWidth="940"
         Background="#0B0B0D"
         FontFamily="Segoe UI">
     <Window.Resources>
         <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B0B0D" />
         <SolidColorBrush x:Key="PanelBrush" Color="#18181B" />
         <SolidColorBrush x:Key="PanelAltBrush" Color="#202024" />
+        <SolidColorBrush x:Key="InputBrush" Color="#0F0F11" />
         <SolidColorBrush x:Key="BorderBrushDark" Color="#323236" />
         <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
         <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
         <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#00BEE6" />
         <Style TargetType="Button">
-            <Setter Property="Padding" Value="10,6" />
-            <Setter Property="Margin" Value="0,6,6,0" />
-            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="#2A2A2E" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="MinHeight" Value="34" />
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Padding" Value="8,5" />
-            <Setter Property="Background" Value="#101114" />
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="#46464D" />
             <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
-        </Style>
-        <Style x:Key="PanelCard" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="12" />
-            <Setter Property="Margin" Value="0,0,12,10" />
-        </Style>
-        <Style x:Key="FieldLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Margin" Value="0,0,10,0" />
-        </Style>
-        <Style x:Key="SectionHeading" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="FontSize" Value="17" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="MinHeight" Value="34" />
         </Style>
     </Window.Resources>
 
-    <Grid Background="{StaticResource AppBackgroundBrush}" Margin="16">
+    <Grid Background="{StaticResource AppBackgroundBrush}" Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" Margin="0,0,0,12">
-            <Button DockPanel.Dock="Right"
+        <Grid Grid.Row="0" Margin="0,0,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="132" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="116" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="82" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox Grid.Column="0"
+                     Text="{Binding CodingCurrentSolutionOrProjectPathText, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="Current .sln, .slnx, or .csproj Ali should work on." />
+            <Button Grid.Column="2"
+                    Content="Select Project"
+                    Command="{Binding BrowseCodingCurrentSolutionOrProjectCommand}" />
+            <Button Grid.Column="4"
+                    Content="New Project"
+                    Command="{Binding CreateCodingProjectCommand}" />
+            <Button Grid.Column="6"
                     Content="Close"
-                    Click="CloseButtonClick"
-                    MinWidth="82"
-                    Margin="12,0,0,0" />
-            <TextBlock Text="Programming"
-                       Foreground="{StaticResource TextBrush}"
-                       FontSize="24"
-                       FontWeight="SemiBold" />
-        </DockPanel>
+                    Click="CloseButtonClick" />
+        </Grid>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="0.94*" />
-                <ColumnDefinition Width="1.06*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="310" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
-                <StackPanel>
-                    <Border Style="{StaticResource PanelCard}">
+            <Border Grid.Column="0"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrushDark}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            Background="{StaticResource PanelAltBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10"
+                            Margin="0,0,0,12">
                         <StackPanel>
-                            <TextBlock Text="Project Target" Style="{StaticResource SectionHeading}" />
-                            <TextBlock Text="{Binding CodingDashboardCurrentTargetText}"
-                                       Foreground="{StaticResource SubtleTextBrush}"
+                            <TextBlock Text="Working Notes"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding StatusText}"
+                                       Foreground="{StaticResource TextBrush}"
                                        TextWrapping="Wrap"
-                                       Margin="0,5,0,0" />
-                            <TextBlock Text="{Binding CodingDashboardCurrentTaskText}"
+                                       Margin="0,4,0,0" />
+                            <TextBlock Text="{Binding MaintenanceStatusText}"
                                        Foreground="{StaticResource SubtleTextBrush}"
+                                       FontSize="12"
                                        TextWrapping="Wrap"
-                                       Margin="0,2,0,8" />
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="82" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="108" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="92" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Current" Style="{StaticResource FieldLabel}" />
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding CodingCurrentSolutionOrProjectPathText, UpdateSourceTrigger=PropertyChanged}"
-                                         ToolTip="Current .sln, .slnx, or .csproj" />
-                                <Button Grid.Column="3"
-                                        Content="Choose File"
-                                        Command="{Binding BrowseCodingCurrentSolutionOrProjectCommand}"
-                                        Margin="0"
-                                        Padding="8,5" />
-                                <Button Grid.Column="5"
-                                        Content="Save Path"
-                                        Command="{Binding SaveCodingPermissionsCommand}"
-                                        Margin="0"
-                                        Padding="8,5" />
-                            </Grid>
-                            <Grid Margin="0,8,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="82" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="118" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="96" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="New folder" Style="{StaticResource FieldLabel}" />
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding CodingWorkspaceRootText, UpdateSourceTrigger=PropertyChanged}"
-                                         ToolTip="Folder for new projects" />
-                                <Button Grid.Column="3"
-                                        Content="Choose Folder"
-                                        Command="{Binding BrowseCodingWorkspaceRootCommand}"
-                                        Margin="0"
-                                        Padding="8,5" />
-                                <Button Grid.Column="5"
-                                        Content="New Project"
-                                        Command="{Binding CreateCodingProjectCommand}"
-                                        Margin="0"
-                                        Padding="8,5" />
-                            </Grid>
+                                       MaxHeight="72"
+                                       Margin="0,6,0,0" />
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Coding Cockpit" Style="{StaticResource SectionHeading}" />
-                            <UniformGrid Columns="5" Margin="0,8,0,0">
-                                <StackPanel Margin="0,0,8,0">
-                                    <TextBlock Text="Next" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
-                                    <TextBlock Text="Action" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
-                                </StackPanel>
-                                <StackPanel Margin="0,0,8,0">
-                                    <TextBlock Text="Risk" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
-                                    <TextBlock Text="Guarded" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
-                                </StackPanel>
-                                <StackPanel Margin="0,0,8,0">
-                                    <TextBlock Text="Validation" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
-                                    <TextBlock Text="Queued" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
-                                </StackPanel>
-                                <StackPanel Margin="0,0,8,0">
-                                    <TextBlock Text="Patch" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
-                                    <TextBlock Text="Owner OK" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
-                                </StackPanel>
-                                <StackPanel>
-                                    <TextBlock Text="Commit" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
-                                    <TextBlock Text="Checked" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
-                                </StackPanel>
-                            </UniformGrid>
-                            <WrapPanel Margin="0,4,0,0">
-                                <Button Content="Start Session"
-                                        Command="{Binding StartCodingSessionCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Continue Task"
-                                        Command="{Binding ContinueCodingCurrentTaskCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Current Task"
-                                        Command="{Binding ShowCodingCurrentTaskCommand}" />
-                                <Button Content="Next Action"
-                                        Command="{Binding RunCodingNextBestActionCommand}" />
-                                <Button Content="Mini-Codex"
-                                        Command="{Binding RunCodingMiniCodexStatusCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
+                    <ScrollViewer x:Name="MessagesScrollViewer"
+                                  Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Messages}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
+                                    <StackPanel Margin="0,0,0,18"
+                                                MaxWidth="780"
+                                                HorizontalAlignment="{Binding MessageAlignment}">
+                                        <TextBlock Text="{Binding Text}"
+                                                   TextWrapping="Wrap"
+                                                   TextAlignment="{Binding MessageTextAlignment}"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   FontSize="15"
+                                                   LineHeight="22" />
+                                        <StackPanel Orientation="Horizontal"
+                                                    Margin="0,8,0,0"
+                                                    HorizontalAlignment="{Binding MessageAlignment}">
+                                            <Button Content="Flag as incorrect"
+                                                    Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Height="28"
+                                                    MinHeight="28"
+                                                    Padding="9,0"
+                                                    FontSize="12"
+                                                    Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                            <TextBlock Text="Flagged for correction"
+                                                       Margin="8,6,0,0"
+                                                       Foreground="#FBBF24"
+                                                       FontSize="12"
+                                                       Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
 
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Project" Style="{StaticResource SectionHeading}" />
-                            <WrapPanel Margin="0,4,0,0">
-                                <Button Content="Project Center"
-                                        Command="{Binding RunCodingProjectControlCenterCommand}" />
-                                <Button Content="Project Memory"
-                                        Command="{Binding RunCodingProjectMemoryCommand}" />
-                                <Button Content="Workspace"
-                                        Command="{Binding RunCodingWorkspaceDiagnosticCommand}" />
-                                <Button Content="Project Index"
-                                        Command="{Binding RunCodingProjectIndexCommand}" />
-                                <Button Content="Open Folder"
-                                        Command="{Binding OpenCodingCurrentProjectFolderCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Build Loop" Style="{StaticResource SectionHeading}" />
-                            <WrapPanel Margin="0,4,0,0">
-                                <Button Content="Build Current"
-                                        Command="{Binding RunCodingBuildCurrentCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Test Current"
-                                        Command="{Binding RunCodingTestCurrentCommand}"
-                                        BorderBrush="#1E6B49"
-                                        Background="#152A22" />
-                                <Button Content="Run Current"
-                                        Command="{Binding RunCodingRunCurrentCommand}" />
-                                <Button Content="Last Failure"
-                                        Command="{Binding RunCodingLastFailureCommand}" />
-                                <Button Content="Safe Commit"
-                                        Command="{Binding RunCodingSafeCommitCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource PanelCard}">
-                        <StackPanel>
-                            <TextBlock Text="Patch And Handoff" Style="{StaticResource SectionHeading}" />
-                            <WrapPanel Margin="0,4,0,0">
-                                <Button Content="Exact Patch"
-                                        Command="{Binding RunCodingExactPatchCommand}" />
-                                <Button Content="Patch Preview"
-                                        Command="{Binding RunCodingShowPatchPreviewCommand}" />
-                                <Button Content="Apply Preview"
-                                        Command="{Binding RunCodingApplyPreviewCommand}"
-                                        BorderBrush="#8A6A18"
-                                        Background="#2A2415" />
-                                <Button Content="Validation Queue"
-                                        Command="{Binding RunCodingValidationQueueCommand}" />
-                                <Button Content="Receipts"
-                                        Command="{Binding RunCodingReceiptsCommand}" />
-                            </WrapPanel>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-            </ScrollViewer>
-
-            <Border Grid.Column="1"
+            <Border Grid.Column="2"
                     Background="{StaticResource PanelAltBrush}"
                     BorderBrush="{StaticResource BorderBrushDark}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="14"
-                    VerticalAlignment="Top"
-                    MaxHeight="410">
+                    Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0"
-                               Text="Latest Programming Result"
+
+                    <TextBlock Text="Activity"
                                Foreground="{StaticResource TextBrush}"
                                FontSize="18"
-                               FontWeight="SemiBold"
-                               Margin="0,0,0,8" />
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="320">
+                               FontWeight="SemiBold" />
+                    <StackPanel Grid.Row="1" Margin="0,10,0,10">
+                        <TextBlock Text="{Binding CodingDashboardCurrentTargetText}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding CodingDashboardCurrentTaskText}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,3,0,0" />
+                        <TextBlock Text="{Binding StatusText}"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0" />
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <TextBlock Text="{Binding MaintenanceStatusText}"
                                    Foreground="{StaticResource TextBrush}"
-                                   TextWrapping="Wrap" />
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   LineHeight="18" />
                     </ScrollViewer>
-                    <TextBlock Grid.Row="2"
+                    <TextBlock Grid.Row="3"
                                Text="{Binding MaintenanceReceiptPath, StringFormat=Receipts: {0}}"
                                Foreground="{StaticResource SubtleTextBrush}"
                                FontSize="11"
@@ -280,6 +201,63 @@
                                Margin="0,12,0,0" />
                 </Grid>
             </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="92" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="#242426"
+                    BorderBrush="#38383D"
+                    BorderThickness="1"
+                    CornerRadius="24"
+                    Padding="6">
+                <TextBox x:Name="ProgrammingComposerTextBox"
+                         MinHeight="42"
+                         MaxHeight="130"
+                         VerticalScrollBarVisibility="Auto"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Padding="8,9"
+                         FontSize="15"
+                         Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
+                         PreviewKeyDown="ProgrammingComposerTextBox_OnPreviewKeyDown" />
+            </Border>
+            <Button Grid.Column="2"
+                    Content="{Binding SendButtonText}"
+                    Command="{Binding SendCommand}"
+                    ToolTip="{Binding SendButtonToolTip}"
+                    Background="{Binding SendButtonBackground}"
+                    BorderBrush="{Binding SendButtonBorderBrush}"
+                    MinHeight="48" />
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="128" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="128" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding AttachmentStatus}"
+                       Foreground="{StaticResource SubtleTextBrush}"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    Content="Cancel"
+                    Command="{Binding StopCommand}" />
+            <Button Grid.Column="3"
+                    Content="Next"
+                    Command="{Binding SendProgrammingNextCommand}"
+                    BorderBrush="#1E6B49"
+                    Background="#152A22" />
         </Grid>
     </Grid>
 </Window>
