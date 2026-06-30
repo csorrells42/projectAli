@@ -6622,7 +6622,7 @@ public sealed class LocalCodingToolService(
     }
 
     private static string BuildScoreExplainerLine() =>
-        "Score explainer: 98% means Ali can plan, preview, validate, audit, and repair local coding work with owner approval; remaining gap is deeper autonomous multi-file implementation and generated test authoring.";
+        "Score explainer: 99% means Ali can plan, preview, validate, audit, repair, and navigate local coding work from dashboard controls with owner approval; remaining gap is deeper autonomous multi-file implementation and generated test authoring.";
     private static IReadOnlyList<string> BuildFocusedTestRunnerRecommendations(
         IReadOnlyList<string> testCommands,
         IReadOnlyList<ProjectSummary> summaries)
@@ -7788,9 +7788,9 @@ public sealed class LocalCodingToolService(
             ("Patch safety", 91, "patch outcome classifier, symbol rollback hints, route repair packets, packet repair hints, exact patch preview, semantic validation hints, call-chain guards, pending patch ledger"),
             ("Validation/release", 93, "queued validation command packets, risk-aware test depth, release readiness score, session journal, failure repair packet v3, prioritized test recommendation, build order, safe commit and customer-friendly release notes"),
             ("Autonomous workflow", 91, "project-index refresh automation, queued command rows, packet repair hints, session journal, self-checking preflight, packet self-score, prerequisite gates, and receipts exist; still requires owner approval for writes and commands"),
-            ("Dashboard usability", 90, "command queue dashboard rows, status-only command rows, route diff repair packets, plus one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
+            ("Dashboard usability", 92, "coding cockpit lane, report-card buttons, command queue dashboard rows, status-only command rows, route diff repair packets, plus one-click project index, ownership, test-target, safe-edit, and self-scored packet controls")
         };
-        var overall = 98;
+        var overall = 99;
         var lines = new List<string>
         {
             "Mini-Codex status:",

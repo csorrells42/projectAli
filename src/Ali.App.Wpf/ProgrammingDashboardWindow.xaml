@@ -68,6 +68,53 @@
                 <UniformGrid Columns="1">
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
+                            <TextBlock Text="Coding Cockpit"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <UniformGrid Columns="5" Margin="0,8,0,2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Next" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
+                                    <TextBlock Text="Action" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Risk" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
+                                    <TextBlock Text="Guarded" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Validation" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
+                                    <TextBlock Text="Queued" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Patch" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
+                                    <TextBlock Text="Owner OK" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Commit" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" />
+                                    <TextBlock Text="Checked" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <WrapPanel Margin="0,6,0,0">
+                                <Button Content="Mini-Codex Readiness"
+                                        Command="{Binding RunCodingReadinessReportCommand}"
+                                        BorderBrush="#1E6B49"
+                                        Background="#152A22" />
+                                <Button Content="Next Best Coding Action"
+                                        Command="{Binding RunCodingNextBestActionCommand}" />
+                                <Button Content="Validation Queue"
+                                        Command="{Binding RunCodingValidationQueueCommand}" />
+                                <Button Content="Patch Batch"
+                                        Command="{Binding RunCodingPatchBatchCommand}" />
+                                <Button Content="Symbol Diff Audit"
+                                        Command="{Binding RunCodingSymbolDiffAuditCommand}" />
+                                <Button Content="Generated File Guard"
+                                        Command="{Binding RunCodingGeneratedFileGuardCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
                             <TextBlock Text="Workspace"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"

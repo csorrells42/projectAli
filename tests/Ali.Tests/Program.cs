@@ -128,6 +128,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows coding readiness helpers", TestLocalCodingToolShowsCodingReadinessHelpers),
     ("local coding tool shows advanced coding helpers", TestLocalCodingToolShowsAdvancedCodingHelpers),
     ("local coding tool shows full coding readiness scanners", TestLocalCodingToolShowsFullCodingReadinessScanners),
+    ("programming dashboard exposes cockpit commands", TestProgrammingDashboardExposesCockpitCommands),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
     ("local coding tool requires confirmation before build", TestLocalCodingToolRequiresConfirmationBeforeBuild),
@@ -3394,7 +3395,7 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Edit receipt timeline v2:", ledger.Message);
     Contains("Command queue dashboard rows:", ledger.Message);
     Contains("Mini-Codex status", miniCodex.Message);
-    Contains("Overall score: 98%", miniCodex.Message);
+    Contains("Overall score: 99%", miniCodex.Message);
     Contains("Score explainer:", miniCodex.Message);
     Contains("Project index refresh automation", miniCodex.Message);
     Contains("Capability scores:", miniCodex.Message);
@@ -3424,6 +3425,38 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Mini-Codex readiness report v2", reportCard.Message);
     Contains("Report card:", reportCard.Message);
     Contains("Endzone estimate: 86-88%", reportCard.Message);
+}
+
+static Task TestProgrammingDashboardExposesCockpitCommands()
+{
+    var repository = new DirectoryInfo(AppContext.BaseDirectory);
+    while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "Ali.sln")))
+    {
+        repository = repository.Parent;
+    }
+
+    NotNull(repository, "Repository root should be discoverable for programming dashboard scan.");
+    var dashboardPath = Path.Combine(repository!.FullName, "src", "Ali.App.Wpf", "ProgrammingDashboardWindow.xaml");
+    var viewModelPath = Path.Combine(repository.FullName, "src", "Ali.App.Wpf", "ViewModels", "MainWindowViewModel.cs");
+    var dashboard = File.ReadAllText(dashboardPath);
+    var viewModel = File.ReadAllText(viewModelPath);
+
+    Contains("Coding Cockpit", dashboard);
+    Contains("RunCodingReadinessReportCommand", dashboard);
+    Contains("RunCodingNextBestActionCommand", dashboard);
+    Contains("RunCodingValidationQueueCommand", dashboard);
+    Contains("RunCodingPatchBatchCommand", dashboard);
+    Contains("RunCodingSymbolDiffAuditCommand", dashboard);
+    Contains("RunCodingGeneratedFileGuardCommand", dashboard);
+    Contains("RunCodingReadinessReportCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingNextBestActionCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingValidationQueueCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatchBatchCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingSymbolDiffAuditCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
+    Contains("CompactCodingCockpitLines", viewModel);
+    Contains("Use the cockpit row", viewModel);
+    return Task.CompletedTask;
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()
 {

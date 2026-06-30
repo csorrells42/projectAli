@@ -269,6 +269,12 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingContextPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Context packet", "coding context packet current coding work", "Coding.ContextPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFullReadinessCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Full readiness", "full coding readiness", "Coding.FullReadiness"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingMiniCodexStatusCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Mini-Codex status", "mini codex status", "Coding.MiniCodexStatus"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingReadinessReportCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Mini-Codex readiness", "mini codex readiness report", "Coding.ReadinessReport"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingNextBestActionCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Next best coding action", "show coding next best action", "Coding.NextBestAction"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingValidationQueueCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation queue", "show validation queue runner", "Coding.ValidationQueue"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchBatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch batch", "show owner safe patch batch", "Coding.PatchBatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSymbolDiffAuditCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol diff audit", "show mandatory symbol diff audit", "Coding.SymbolDiffAudit"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingGeneratedFileGuardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Generated file guard", "show generated file guard", "Coding.GeneratedFileGuard"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolIndexCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol index", "show csharp symbol index", "Coding.SymbolIndex"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingCallGraphCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Call graph", "show call graph", "Coding.CallGraph"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingOwnershipMapCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Ownership map", "ownership map current coding work", "Coding.OwnershipMap"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -703,6 +709,18 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingFullReadinessCommand { get; }
 
     public ICommand RunCodingMiniCodexStatusCommand { get; }
+
+    public ICommand RunCodingReadinessReportCommand { get; }
+
+    public ICommand RunCodingNextBestActionCommand { get; }
+
+    public ICommand RunCodingValidationQueueCommand { get; }
+
+    public ICommand RunCodingPatchBatchCommand { get; }
+
+    public ICommand RunCodingSymbolDiffAuditCommand { get; }
+
+    public ICommand RunCodingGeneratedFileGuardCommand { get; }
 
     public ICommand RunCodingSymbolIndexCommand { get; }
 
@@ -3340,6 +3358,16 @@ public sealed class MainWindowViewModel : ObservableObject
             return CompactReceiptLines(lines);
         }
 
+        if (command.StartsWith("mini codex readiness report", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show coding next best action", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show validation queue runner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show owner safe patch batch", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show mandatory symbol diff audit", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show generated file guard", StringComparison.OrdinalIgnoreCase))
+        {
+            return CompactCodingCockpitLines(lines);
+        }
+
         return lines
             .Where(line => !LooksLikeMaintenanceBoilerplate(line))
             .Where(line => !LooksLikeCommandSuggestion(line))
@@ -3405,6 +3433,28 @@ public sealed class MainWindowViewModel : ObservableObject
             return "Next - Apply Preview only if the shown change is clearly right.";
         }
 
+        if (command.StartsWith("mini codex readiness report", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show coding next best action", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Use the cockpit row to run the next safe diagnostic.";
+        }
+
+        if (command.StartsWith("show validation queue runner", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Approve only the validation command you intend to run.";
+        }
+
+        if (command.StartsWith("show owner safe patch batch", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("show mandatory symbol diff audit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Review the patch and symbol rows before applying anything.";
+        }
+
+        if (command.StartsWith("show generated file guard", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Next - Avoid generated files unless the owner explicitly asked for them.";
+        }
+
         if (command.StartsWith("confirm apply last patch preview", StringComparison.OrdinalIgnoreCase))
         {
             return "Next - Run Validate, then Review changes.";
@@ -3413,6 +3463,44 @@ public sealed class MainWindowViewModel : ObservableObject
         return "Next - Pick the next coding diagnostic button as needed.";
     }
 
+
+    private static IReadOnlyList<string> CompactCodingCockpitLines(IReadOnlyList<string> lines)
+    {
+        var prefixes = new[]
+        {
+            "Overall score:",
+            "Status:",
+            "Next:",
+            "Mode:",
+            "Changed files:",
+            "Coverage:",
+            "Receipt enforcement:",
+            "Pending batch:",
+            "Report card:",
+            "Endzone estimate:",
+            "Validation:",
+            "Patch:",
+            "Git:",
+            "Latest validation:",
+            "- Codebase awareness:",
+            "- Edit planning:",
+            "- Patch safety:",
+            "- Validation/release:",
+            "- Autonomous workflow:",
+            "- Dashboard usability:",
+            "- 1.",
+            "- 2.",
+            "- 3.",
+            "- 4."
+        };
+        var compact = lines
+            .Where(line => prefixes.Any(prefix => line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            .Where(line => !LooksLikeCommandSuggestion(line))
+            .Select(line => ShortMaintenanceDetail(line.TrimStart('-', ' ')))
+            .Take(10)
+            .ToList();
+        return compact.Count > 0 ? compact : ["Cockpit - No summary rows returned"];
+    }
     private static IReadOnlyList<string> CompactReviewChangesLines(IReadOnlyList<string> lines)
     {
         var compact = lines
@@ -6626,6 +6714,36 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingMiniCodexStatusCommand is AsyncRelayCommand runCodingMiniCodexStatus)
         {
             runCodingMiniCodexStatus.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingReadinessReportCommand is AsyncRelayCommand runCodingReadinessReport)
+        {
+            runCodingReadinessReport.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingNextBestActionCommand is AsyncRelayCommand runCodingNextBestAction)
+        {
+            runCodingNextBestAction.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingValidationQueueCommand is AsyncRelayCommand runCodingValidationQueue)
+        {
+            runCodingValidationQueue.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatchBatchCommand is AsyncRelayCommand runCodingPatchBatch)
+        {
+            runCodingPatchBatch.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSymbolDiffAuditCommand is AsyncRelayCommand runCodingSymbolDiffAudit)
+        {
+            runCodingSymbolDiffAudit.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingGeneratedFileGuardCommand is AsyncRelayCommand runCodingGeneratedFileGuard)
+        {
+            runCodingGeneratedFileGuard.RaiseCanExecuteChanged();
         }
 
         if (RunCodingSymbolIndexCommand is AsyncRelayCommand runCodingSymbolIndex)
