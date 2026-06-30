@@ -5589,6 +5589,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("Data.MarkItemReadyCommand", generatedDashboardXaml);
     Contains("Data.MarkItemForReviewCommand", generatedDashboardXaml);
     Contains("PromoteRequested=\"DashboardDetailCard_PromoteRequested\"", generatedDashboardXaml);
+    Contains("Header=\"_Reset layout\"", generatedDashboardXaml);
+    Contains("Command=\"{Binding ResetLayoutCommand}\"", generatedDashboardXaml);
+    Contains("Width=\"{Binding NavigationColumnWidth, Mode=TwoWay}\"", generatedDashboardXaml);
+    Contains("Width=\"{Binding DetailsColumnWidth, Mode=TwoWay}\"", generatedDashboardXaml);
     Contains("DashboardDetailCard_PromoteRequested", generatedDashboardCodeBehind);
     Contains("viewModel.MarkItemReadyCommand.CanExecute(item)", generatedDashboardCodeBehind);
     Contains("viewModel.MarkItemReadyCommand.Execute(item)", generatedDashboardCodeBehind);
@@ -5600,6 +5604,14 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("DashboardThemePalette", generatedDashboardViewModel);
     Contains("Color.FromRgb", generatedDashboardViewModel);
     Contains("_themeService.ApplyTheme", generatedDashboardViewModel);
+    Contains("ResetLayoutCommand", generatedDashboardViewModel);
+    Contains("GridLength _navigationColumnWidth", generatedDashboardViewModel);
+    Contains("GridLength _detailsColumnWidth", generatedDashboardViewModel);
+    Contains("NavigationColumnWidth", generatedDashboardViewModel);
+    Contains("DetailsColumnWidth", generatedDashboardViewModel);
+    Contains("private void ResetLayout()", generatedDashboardViewModel);
+    Contains("new GridLength(220d)", generatedDashboardViewModel);
+    Contains("new GridLength(280d)", generatedDashboardViewModel);
     Contains("PropertyChangedEventManager.AddHandler", generatedDashboardViewModel);
     Contains("WeakEventManager<INotifyDataErrorInfo, DataErrorsChangedEventArgs>.AddHandler", generatedDashboardViewModel);
     Contains("OnOwnerPropertyChanged", generatedDashboardViewModel);

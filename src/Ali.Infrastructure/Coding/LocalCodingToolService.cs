@@ -14446,6 +14446,7 @@ public sealed class LocalCodingToolService(
                         <MenuItem Header="Activity" />
                         <Separator />
                         <MenuItem Header="_Toggle theme" Command="{Binding ToggleThemeCommand}" />
+                        <MenuItem Header="_Reset layout" Command="{Binding ResetLayoutCommand}" />
                         <Separator />
                         <MenuItem Header="_Focus details" Command="{x:Static local:MainWindow.FocusDetailsCommand}" />
                     </MenuItem>
@@ -14486,11 +14487,11 @@ public sealed class LocalCodingToolService(
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="220" MinWidth="160" />
+                            <ColumnDefinition Width="{Binding NavigationColumnWidth, Mode=TwoWay}" MinWidth="160" />
                             <ColumnDefinition Width="5" />
                             <ColumnDefinition Width="*" MinWidth="320" />
                             <ColumnDefinition Width="5" />
-                            <ColumnDefinition Width="280" MinWidth="220" />
+                            <ColumnDefinition Width="{Binding DetailsColumnWidth, Mode=TwoWay}" MinWidth="220" />
                         </Grid.ColumnDefinitions>
 
                         <GroupBox Header="Navigation" Style="{StaticResource DashboardPaneGroupBoxStyle}">
@@ -15341,6 +15342,8 @@ public sealed class LocalCodingToolService(
                 private string _statusText = "Ready";
                 private bool _isDarkTheme = true;
                 private string _themeButtonText = "Light Theme";
+                private GridLength _navigationColumnWidth = new(220d);
+                private GridLength _detailsColumnWidth = new(280d);
 
                 public MainWindowViewModel(IDashboardDialogService? dialogService = null, IDashboardThemeService? themeService = null)
                 {
@@ -15352,6 +15355,7 @@ public sealed class LocalCodingToolService(
                     RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     ToggleThemeCommand = new RelayCommand(_ => ToggleTheme());
+                    ResetLayoutCommand = new RelayCommand(_ => ResetLayout(), _ => !IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
                     ApplySelectedItemCommand = new RelayCommand(_ => ApplySelectedItem(), _ => CanApplySelectedItem());
                     MarkItemReadyCommand = new RelayCommand(parameter => MarkItemStatus(parameter, "Ready"), parameter => CanMarkItemStatus(parameter, "Ready"));
@@ -15394,6 +15398,8 @@ public sealed class LocalCodingToolService(
                 public ICommand CancelRefreshCommand { get; }
 
                 public ICommand ToggleThemeCommand { get; }
+
+                public ICommand ResetLayoutCommand { get; }
 
                 public ICommand AddItemCommand { get; }
 
@@ -15487,6 +15493,7 @@ public sealed class LocalCodingToolService(
                             ((RelayCommand)MarkItemReadyCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)MarkItemForReviewCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)RemoveSelectedItemCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)ResetLayoutCommand).RaiseCanExecuteChanged();
                         }
                     }
                 }
@@ -15569,6 +15576,18 @@ public sealed class LocalCodingToolService(
                 {
                     get => _themeButtonText;
                     private set => SetField(ref _themeButtonText, value);
+                }
+
+                public GridLength NavigationColumnWidth
+                {
+                    get => _navigationColumnWidth;
+                    set => SetField(ref _navigationColumnWidth, value);
+                }
+
+                public GridLength DetailsColumnWidth
+                {
+                    get => _detailsColumnWidth;
+                    set => SetField(ref _detailsColumnWidth, value);
                 }
 
                 private void SeedNavigation()
@@ -15701,6 +15720,14 @@ public sealed class LocalCodingToolService(
                     var themeName = IsDarkTheme ? "Dark" : "Light";
                     Activity.Insert(0, $"{themeName} theme applied.");
                     StatusText = $"{themeName} theme applied";
+                }
+
+                private void ResetLayout()
+                {
+                    NavigationColumnWidth = new GridLength(220d);
+                    DetailsColumnWidth = new GridLength(280d);
+                    Activity.Insert(0, "Layout reset.");
+                    StatusText = "Layout reset";
                 }
 
                 public IEnumerable GetErrors(string? propertyName)
