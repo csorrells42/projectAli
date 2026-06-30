@@ -14614,11 +14614,23 @@ public sealed class LocalCodingToolService(
 
                         <Border Grid.ColumnSpan="5"
                                 Panel.ZIndex="10"
-                                Background="#CCFFFFFF"
+                                Style="{StaticResource DashboardBusyOverlayStyle}"
                                 IsHitTestVisible="{Binding IsBusy}">
                             <Border.Visibility>
                                 <Binding Path="IsBusy" Converter="{StaticResource BooleanToVisibilityConverter}" />
                             </Border.Visibility>
+                            <Border.Triggers>
+                                <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                             From="0"
+                                                             To="1"
+                                                             Duration="0:0:0.18" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Border.Triggers>
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <ProgressBar Width="220"
                                              Height="18"
@@ -15190,6 +15202,11 @@ public sealed class LocalCodingToolService(
             <Style x:Key="DashboardPaneGroupBoxStyle" TargetType="GroupBox">
                 <Setter Property="Padding" Value="10" />
                 <Setter Property="Margin" Value="0" />
+            </Style>
+
+            <Style x:Key="DashboardBusyOverlayStyle" TargetType="Border">
+                <Setter Property="Background" Value="#CCFFFFFF" />
+                <Setter Property="Opacity" Value="0" />
             </Style>
 
             <Style x:Key="DashboardDetailCardStyle" TargetType="Border">
