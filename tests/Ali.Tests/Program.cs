@@ -4318,7 +4318,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("New Project", dashboard);
     Contains("BrowseCodingCurrentSolutionOrProjectCommand", dashboard);
     Contains("CreateCodingProjectCommand", dashboard);
-    Contains("Working Notes", dashboard);
+    Equal(false, dashboard.Contains("Working Notes", StringComparison.OrdinalIgnoreCase));
+    Contains("Activity", dashboard);
     Contains("StatusText", dashboard);
     Contains("MaintenanceStatusText", dashboard);
     Contains("ItemsSource=\"{Binding Messages}\"", dashboard);
@@ -4339,10 +4340,17 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("MessagesScrollViewer.ScrollToEnd", codeBehind);
     Contains("ProgrammingComposerTextBox_OnPreviewKeyDown", codeBehind);
     Contains("viewModel.SendAsync()", codeBehind);
+    Contains("SuspendVoiceFeaturesForProgramming", codeBehind);
+    Contains("RestoreVoiceFeaturesAfterProgramming", codeBehind);
 
     Contains("SendProgrammingNextCommand = CreateAsyncCommand", viewModel);
     Contains("SendProgrammingShortcutAsync", viewModel);
     Contains("continue current task", viewModel);
+    Contains("ProgrammingAudioSuspension", viewModel);
+    Contains("SuspendVoiceFeaturesForProgramming", viewModel);
+    Contains("RestoreVoiceFeaturesAfterProgramming", viewModel);
+    Contains("SetAssistantReadsRepliesOutLoudForProgramming", viewModel);
+    Contains("SetAutoSendVoiceTranscriptsForProgramming", viewModel);
     Contains("BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand", viewModel);
     Contains("CreateCodingProjectCommand = CreateAsyncCommand", viewModel);
     Contains("CodingCurrentSolutionOrProjectPathText", viewModel);

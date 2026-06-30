@@ -168,6 +168,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isAssigningPushToTalkKey;
     private bool _pushToTalkKeyDown;
     private bool _currentVoiceInputShouldAutoSend;
+    private ProgrammingAudioSuspension? _programmingAudioSuspension;
     private VoiceTurnMetadata? _lastVoiceMetadata;
     private CorrectionReviewItemViewModel? _selectedCorrectionReviewItem;
     private string _correctionReviewStatusText = "Correction queue not loaded yet.";
@@ -1594,6 +1595,67 @@ public sealed class MainWindowViewModel : ObservableObject
                     : "Push to Talk disabled.";
                 RaiseCommandStates();
             }
+        }
+    }
+
+    public void SuspendVoiceFeaturesForProgramming()
+    {
+        _programmingAudioSuspension ??= new ProgrammingAudioSuspension(
+            AssistantReadsRepliesOutLoud,
+            AutoSendVoiceTranscripts);
+
+        _currentVoiceInputShouldAutoSend = false;
+        if (_pushToTalkKeyDown)
+        {
+            _pushToTalkKeyDown = false;
+            OnPropertyChanged(nameof(IsPushToTalkActive));
+            OnPropertyChanged(nameof(PushToTalkKeyButtonText));
+        }
+
+        if (IsAssigningPushToTalkKey)
+        {
+            IsAssigningPushToTalkKey = false;
+        }
+
+        StopSpeaking();
+        SetAssistantReadsRepliesOutLoudForProgramming(false);
+        SetAutoSendVoiceTranscriptsForProgramming(false);
+        VoiceStatus = "Programming workspace open. Spoken replies and Push to Talk are paused.";
+    }
+
+    public void RestoreVoiceFeaturesAfterProgramming()
+    {
+        if (_programmingAudioSuspension is not { } suspension)
+        {
+            return;
+        }
+
+        _programmingAudioSuspension = null;
+        SetAssistantReadsRepliesOutLoudForProgramming(suspension.AssistantReadsRepliesOutLoud);
+        SetAutoSendVoiceTranscriptsForProgramming(suspension.AutoSendVoiceTranscripts);
+        VoiceStatus = "Programming workspace closed. Voice settings restored.";
+    }
+
+    private void SetAssistantReadsRepliesOutLoudForProgramming(bool value)
+    {
+        if (SetProperty(ref _assistantReadsRepliesOutLoud, value, nameof(AssistantReadsRepliesOutLoud)))
+        {
+            OnPropertyChanged(nameof(VoiceReadAloudToolTip));
+            if (!value)
+            {
+                StopSpeaking();
+            }
+        }
+    }
+
+    private void SetAutoSendVoiceTranscriptsForProgramming(bool value)
+    {
+        if (SetProperty(ref _autoSendVoiceTranscripts, value, nameof(AutoSendVoiceTranscripts)))
+        {
+            OnPropertyChanged(nameof(PushToTalkEnabledToolTip));
+            OnPropertyChanged(nameof(PushToTalkHintText));
+            OnPropertyChanged(nameof(PushToTalkKeyButtonText));
+            RaiseCommandStates();
         }
     }
 
@@ -9199,6 +9261,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         return int.TryParse(numberText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceNumber);
     }
+
+    private sealed record ProgrammingAudioSuspension(
+        bool AssistantReadsRepliesOutLoud,
+        bool AutoSendVoiceTranscripts);
 }
 
 internal sealed record TextToSpeechVoiceChoice(string Label, string Engine, string VoiceId, string ModelPath);

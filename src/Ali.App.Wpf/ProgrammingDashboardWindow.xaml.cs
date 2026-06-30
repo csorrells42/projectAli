@@ -30,6 +30,7 @@ public partial class ProgrammingDashboardWindow : Window
         {
             _viewModel = viewModel;
             viewModel.Messages.CollectionChanged += Messages_OnCollectionChanged;
+            viewModel.SuspendVoiceFeaturesForProgramming();
         }
 
         MessagesScrollViewer.ScrollToEnd();
@@ -41,6 +42,7 @@ public partial class ProgrammingDashboardWindow : Window
         if (_viewModel is not null)
         {
             _viewModel.Messages.CollectionChanged -= Messages_OnCollectionChanged;
+            _viewModel.RestoreVoiceFeaturesAfterProgramming();
             _viewModel = null;
         }
 

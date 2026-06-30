@@ -84,75 +84,42 @@
                     BorderThickness="1"
                     CornerRadius="8"
                     Padding="14">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0"
-                            Background="{StaticResource PanelAltBrush}"
-                            BorderBrush="{StaticResource BorderBrushDark}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="10"
-                            Margin="0,0,0,12">
-                        <StackPanel>
-                            <TextBlock Text="Working Notes"
-                                       Foreground="{StaticResource AccentBrush}"
-                                       FontSize="12"
-                                       FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding StatusText}"
-                                       Foreground="{StaticResource TextBrush}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,4,0,0" />
-                            <TextBlock Text="{Binding MaintenanceStatusText}"
-                                       Foreground="{StaticResource SubtleTextBrush}"
-                                       FontSize="12"
-                                       TextWrapping="Wrap"
-                                       MaxHeight="72"
-                                       Margin="0,6,0,0" />
-                        </StackPanel>
-                    </Border>
-
-                    <ScrollViewer x:Name="MessagesScrollViewer"
-                                  Grid.Row="1"
-                                  VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Messages}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
-                                    <StackPanel Margin="0,0,0,18"
-                                                MaxWidth="780"
+                <ScrollViewer x:Name="MessagesScrollViewer"
+                              VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Messages}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
+                                <StackPanel Margin="0,0,0,18"
+                                            MaxWidth="780"
+                                            HorizontalAlignment="{Binding MessageAlignment}">
+                                    <TextBlock Text="{Binding Text}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="{Binding MessageTextAlignment}"
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontSize="15"
+                                               LineHeight="22" />
+                                    <StackPanel Orientation="Horizontal"
+                                                Margin="0,8,0,0"
                                                 HorizontalAlignment="{Binding MessageAlignment}">
-                                        <TextBlock Text="{Binding Text}"
-                                                   TextWrapping="Wrap"
-                                                   TextAlignment="{Binding MessageTextAlignment}"
-                                                   Foreground="{StaticResource TextBrush}"
-                                                   FontSize="15"
-                                                   LineHeight="22" />
-                                        <StackPanel Orientation="Horizontal"
-                                                    Margin="0,8,0,0"
-                                                    HorizontalAlignment="{Binding MessageAlignment}">
-                                            <Button Content="Flag as incorrect"
-                                                    Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}"
-                                                    Height="28"
-                                                    MinHeight="28"
-                                                    Padding="9,0"
-                                                    FontSize="12"
-                                                    Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                            <TextBlock Text="Flagged for correction"
-                                                       Margin="8,6,0,0"
-                                                       Foreground="#FBBF24"
-                                                       FontSize="12"
-                                                       Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                        </StackPanel>
+                                        <Button Content="Flag as incorrect"
+                                                Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Height="28"
+                                                MinHeight="28"
+                                                Padding="9,0"
+                                                FontSize="12"
+                                                Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <TextBlock Text="Flagged for correction"
+                                                   Margin="8,6,0,0"
+                                                   Foreground="#FBBF24"
+                                                   FontSize="12"
+                                                   Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
                                     </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </Border>
 
             <Border Grid.Column="2"
