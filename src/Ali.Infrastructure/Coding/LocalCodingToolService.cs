@@ -8229,7 +8229,7 @@ public sealed class LocalCodingToolService(
             ("Edit planning", 97, "active workspace/project context, build-this front door, feature intake, pattern-copy planning, implementation planner, Roslyn insertion planner, concrete patch authoring, edit impact scoring, semantic edit targets, reference graph, impact radius, refactor safety hints"),
             ("Patch safety", 97, "owner-approved apply packet, patch outcome classifier, paired previews, patch synthesis v2, intent diff composer, patch body generator, confidence scoring, semantic diff summaries, symbol rollback hints, route repair packets, exact patch preview, call-chain guards"),
             ("Validation/release", 97, "validation minimizer, validation chain planner, queued validation command packets, risk-aware test depth, evidence pack, post-apply repair loop v2, release readiness score, session journal, prioritized test recommendation, build order, safe commit and release notes"),
-            ("Autonomous workflow", 97, "authoring sequence flow, build-this front door, feature orchestrator, slice preview, repeat failure memory, first diagnostic repair route, failure-to-patch v3, repair routing, project-index refresh automation, queued command rows, packet self-score, prerequisite gates"),
+            ("Autonomous workflow", 98, "authoring sequence flow, active task follow-ups, current-task context memory, build-this front door, feature orchestrator, slice preview, repeat failure memory, first diagnostic repair route, failure-to-patch v3, repair routing, project-index refresh automation, queued command rows, packet self-score, prerequisite gates"),
             ("Dashboard usability", 96, "active workspace button, apply-packet buttons, coding cockpit lane, build-this path, patch-author controls, v2 planner buttons, report-card buttons, command queue dashboard rows, status-only command rows, route diff repair packets, and one-click score v3")
         };
         var overall = 99;
@@ -8258,10 +8258,10 @@ public sealed class LocalCodingToolService(
         lines.Add(latestValidation?.Succeeded == true ? "- Validation: Good" : "- Validation: Needs build/test receipt");
         lines.Add(commandSurface.Succeeded ? "- Route drift: Good" : "- Route drift: Review command surface doctor");
         lines.Add($"- Project index refresh automation: {FormatInlineList(BuildProjectIndexRefreshRows(projectIndexStatus).Take(2))}");
-        lines.Add("- Next best upgrade: turn owner-approved apply packets into safer multi-step execution plans with persistent selected-project memory.");
+        lines.Add("- Next best upgrade: turn active task follow-ups into safer owner-approved multi-step execution plans with checkpoint receipts.");
         lines.Add("Next upgrade path:");
         lines.Add("- Raise codebase awareness toward 99 by persisting deeper symbol and route memory across sessions.");
-        lines.Add("- Raise autonomous workflow toward 98 by persisting selected project context and chaining approved packet slices with fewer manual prompts.");
+        lines.Add("- Raise autonomous workflow toward 99 by chaining active task slices with checkpoint receipts and fewer manual prompts.");
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Mini-Codex status", Policy.WorkspaceRoot);
     }
