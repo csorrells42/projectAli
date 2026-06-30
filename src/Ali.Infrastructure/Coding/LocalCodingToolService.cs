@@ -14317,6 +14317,23 @@ public sealed class LocalCodingToolService(
                                         </GroupStyle.HeaderTemplate>
                                     </GroupStyle>
                                 </DataGrid.GroupStyle>
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="{x:Type DataGridRow}">
+                                        <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=DataGrid} }" />
+                                        <Setter Property="ContextMenu">
+                                            <Setter.Value>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Mark Ready"
+                                                              Command="{Binding PlacementTarget.Tag.MarkItemReadyCommand, RelativeSource={RelativeSource AncestorType=ContextMenu} }"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu} }" />
+                                                    <MenuItem Header="Mark Review"
+                                                              Command="{Binding PlacementTarget.Tag.MarkItemForReviewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu} }"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu} }" />
+                                                </ContextMenu>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </DataGrid.RowStyle>
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
                                     <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="*" />
@@ -15049,6 +15066,8 @@ public sealed class LocalCodingToolService(
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
                     ApplySelectedItemCommand = new RelayCommand(_ => ApplySelectedItem(), _ => CanApplySelectedItem());
+                    MarkItemReadyCommand = new RelayCommand(parameter => MarkItemStatus(parameter, "Ready"), parameter => CanMarkItemStatus(parameter, "Ready"));
+                    MarkItemForReviewCommand = new RelayCommand(parameter => MarkItemStatus(parameter, "Review"), parameter => CanMarkItemStatus(parameter, "Review"));
                     RemoveSelectedItemCommand = new RelayCommand(_ => RemoveSelectedItem(), _ => CanRemoveSelectedItem());
                     OverviewView = new OverviewDashboardViewModel(this);
                     ActivityView = new ActivityDashboardViewModel(this);
@@ -15088,6 +15107,10 @@ public sealed class LocalCodingToolService(
                 public ICommand AddItemCommand { get; }
 
                 public ICommand ApplySelectedItemCommand { get; }
+
+                public ICommand MarkItemReadyCommand { get; }
+
+                public ICommand MarkItemForReviewCommand { get; }
 
                 public ICommand RemoveSelectedItemCommand { get; }
 
@@ -15170,6 +15193,8 @@ public sealed class LocalCodingToolService(
                             ((RelayCommand)CancelRefreshCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)AddItemCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)ApplySelectedItemCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)MarkItemReadyCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)MarkItemForReviewCommand).RaiseCanExecuteChanged();
                             ((RelayCommand)RemoveSelectedItemCommand).RaiseCanExecuteChanged();
                         }
                     }
@@ -15391,6 +15416,11 @@ public sealed class LocalCodingToolService(
                     && StatusOptions.Contains(SelectedItemStatus)
                     && ValidationSummary.Count == 0;
 
+                private bool CanMarkItemStatus(object? parameter, string status) =>
+                    !IsBusy
+                    && parameter is DashboardItem item
+                    && !item.Status.Equals(status, StringComparison.OrdinalIgnoreCase);
+
                 private bool CanRemoveSelectedItem() => !IsBusy && SelectedItem is not null;
 
                 private void AddItem()
@@ -15414,6 +15444,7 @@ public sealed class LocalCodingToolService(
                     ItemsView.Refresh();
                     UpdateMetrics();
                     SelectedItem = FilterItem(item) ? item : FirstVisibleItem();
+                    RaiseRowActionCanExecuteChanged();
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
                     StatusText = $"Added {name}";
@@ -15449,8 +15480,34 @@ public sealed class LocalCodingToolService(
                     ItemsView.Refresh();
                     UpdateMetrics();
                     SelectedItem = updated;
+                    RaiseRowActionCanExecuteChanged();
                     Activity.Insert(0, $"Updated {updated.Name}.");
                     StatusText = $"Updated {updated.Name}";
+                }
+
+                private void MarkItemStatus(object? parameter, string status)
+                {
+                    if (parameter is not DashboardItem item)
+                    {
+                        StatusText = "Choose a row first.";
+                        return;
+                    }
+
+                    var index = Items.IndexOf(item);
+                    if (index < 0)
+                    {
+                        StatusText = "That row is no longer available.";
+                        return;
+                    }
+
+                    var updated = item with { Status = status };
+                    Items[index] = updated;
+                    ItemsView.Refresh();
+                    UpdateMetrics();
+                    SelectedItem = updated;
+                    Activity.Insert(0, $"Marked {updated.Name} as {status}.");
+                    StatusText = $"Marked {updated.Name} as {status}";
+                    RaiseRowActionCanExecuteChanged();
                 }
 
                 private void RemoveSelectedItem()
@@ -15472,6 +15529,7 @@ public sealed class LocalCodingToolService(
                     ItemsView.Refresh();
                     UpdateMetrics();
                     SelectedItem = FirstVisibleItem();
+                    RaiseRowActionCanExecuteChanged();
                     Activity.Insert(0, $"Removed {item.Name}.");
                     StatusText = $"Removed {item.Name}";
                     ValidateNewItemName();
@@ -15577,6 +15635,12 @@ public sealed class LocalCodingToolService(
                     }
 
                     ((RelayCommand)ApplySelectedItemCommand).RaiseCanExecuteChanged();
+                }
+
+                private void RaiseRowActionCanExecuteChanged()
+                {
+                    ((RelayCommand)MarkItemReadyCommand).RaiseCanExecuteChanged();
+                    ((RelayCommand)MarkItemForReviewCommand).RaiseCanExecuteChanged();
                 }
 
                 private bool ContainsItemName(string name)
