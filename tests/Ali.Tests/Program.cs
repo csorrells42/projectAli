@@ -765,6 +765,27 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowGeneratedFileGuard, generatedGuardRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("mini codex readiness report", out var reportCardRequest));
     Equal(CodingToolAction.ShowMiniCodexReadinessReport, reportCardRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature intent packet Save button", out var featureIntentRequest));
+    Equal(CodingToolAction.BuildFeatureIntentPacket, featureIntentRequest.Action);
+    Equal("Save button", featureIntentRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("behavior test plan Save button", out var behaviorTestsRequest));
+    Equal(CodingToolAction.PlanBehaviorTests, behaviorTestsRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("implementation slice plan Save button", out var slicesRequest));
+    Equal(CodingToolAction.PlanImplementationSlices, slicesRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show patch bundle builder", out var patchBuilderRequest));
+    Equal(CodingToolAction.ShowPatchBundleBuilder, patchBuilderRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("test stub generator plan Save button", out var testStubRequest));
+    Equal(CodingToolAction.ShowTestStubGeneratorPlan, testStubRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show failure loop state", out var failureLoopRequest));
+    Equal(CodingToolAction.ShowFailureLoopState, failureLoopRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show stop condition detector", out var stopConditionRequest));
+    Equal(CodingToolAction.ShowStopConditionDetector, stopConditionRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show slice risk scoring", out var riskScoringRequest));
+    Equal(CodingToolAction.ShowSliceRiskScoring, riskScoringRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("feature completion receipt", out var completionReceiptRequest));
+    Equal(CodingToolAction.ShowFeatureCompletionReceipt, completionReceiptRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("show build feature lane", out var buildFeatureLaneRequest));
+    Equal(CodingToolAction.ShowBuildFeatureLane, buildFeatureLaneRequest.Action);
 
     Equal(true, CodingToolRequestParser.TryParse("show csharp symbol index", out var indexRequest));
     Equal(CodingToolAction.ShowCSharpSymbolIndex, indexRequest.Action);
@@ -3124,6 +3145,16 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var rollback = await service.TryHandleAsync("show rollback plan", CancellationToken.None);
     var timeline = await service.TryHandleAsync("show coding session timeline", CancellationToken.None);
     var checklist = await service.TryHandleAsync("ui change checklist settings panel", CancellationToken.None);
+    var featureIntent = await service.TryHandleAsync("feature intent packet Save button", CancellationToken.None);
+    var behaviorTests = await service.TryHandleAsync("behavior test plan Save button", CancellationToken.None);
+    var slices = await service.TryHandleAsync("implementation slice plan Save button", CancellationToken.None);
+    var patchBuilder = await service.TryHandleAsync("show patch bundle builder", CancellationToken.None);
+    var testStubs = await service.TryHandleAsync("test stub generator plan Save button", CancellationToken.None);
+    var failureLoop = await service.TryHandleAsync("show failure loop state", CancellationToken.None);
+    var stopCondition = await service.TryHandleAsync("show stop condition detector", CancellationToken.None);
+    var riskScoring = await service.TryHandleAsync("show slice risk scoring", CancellationToken.None);
+    var completionReceipt = await service.TryHandleAsync("feature completion receipt", CancellationToken.None);
+    var buildFeatureLane = await service.TryHandleAsync("show build feature lane", CancellationToken.None);
 
     Contains("Workspace health score", health.Message);
     Contains("Score:", health.Message);
@@ -3147,6 +3178,16 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Equal(true, File.Exists(Path.Combine(directory, "Coding", "coding-session-journal.json")));
     Contains("UI change checklist", checklist.Message);
     Contains("settings panel", checklist.Message);
+    Contains("Feature intent packet v1", featureIntent.Message);
+    Contains("Behavior-to-test plan v1", behaviorTests.Message);
+    Contains("Implementation slice planner v1", slices.Message);
+    Contains("Multi-file patch bundle builder v2", patchBuilder.Message);
+    Contains("Test stub generator plan v1", testStubs.Message);
+    Contains("Failure loop state machine", failureLoop.Message);
+    Contains("Stop condition detector", stopCondition.Message);
+    Contains("Confidence/risk scoring per slice", riskScoring.Message);
+    Contains("Feature completion receipt", completionReceipt.Message);
+    Contains("Build Feature lane", buildFeatureLane.Message);
 }
 
 static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
@@ -3448,12 +3489,23 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingPatchBatchCommand", dashboard);
     Contains("RunCodingSymbolDiffAuditCommand", dashboard);
     Contains("RunCodingGeneratedFileGuardCommand", dashboard);
+    Contains("Build Feature", dashboard);
+    Contains("RunCodingBuildFeatureLaneCommand", dashboard);
+    Contains("RunCodingFeatureIntentCommand", dashboard);
+    Contains("RunCodingBehaviorTestsCommand", dashboard);
+    Contains("RunCodingImplementationSlicesCommand", dashboard);
+    Contains("RunCodingFeatureCompletionReceiptCommand", dashboard);
     Contains("RunCodingReadinessReportCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingNextBestActionCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingValidationQueueCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchBatchCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingSymbolDiffAuditCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingBehaviorTestsCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingImplementationSlicesCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureCompletionReceiptCommand = CreateAsyncCommand", viewModel);
     Contains("CompactCodingCockpitLines", viewModel);
     Contains("Use the cockpit row", viewModel);
     return Task.CompletedTask;

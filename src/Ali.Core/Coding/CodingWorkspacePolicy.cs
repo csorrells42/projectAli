@@ -140,6 +140,16 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowOwnerSafePatchBatch
             or CodingToolAction.ShowGeneratedFileGuard
             or CodingToolAction.ShowMiniCodexReadinessReport
+            or CodingToolAction.BuildFeatureIntentPacket
+            or CodingToolAction.PlanBehaviorTests
+            or CodingToolAction.PlanImplementationSlices
+            or CodingToolAction.ShowPatchBundleBuilder
+            or CodingToolAction.ShowTestStubGeneratorPlan
+            or CodingToolAction.ShowFailureLoopState
+            or CodingToolAction.ShowStopConditionDetector
+            or CodingToolAction.ShowSliceRiskScoring
+            or CodingToolAction.ShowFeatureCompletionReceipt
+            or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowOwnershipMap
             or CodingToolAction.ShowCallGraph

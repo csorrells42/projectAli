@@ -515,6 +515,86 @@ public static class CodingToolRequestParser
         "mini codex report card",
         "show coding report card"
     ];
+
+    private static readonly string[] FeatureIntentPacketPrefixes =
+    [
+        "feature intent packet ",
+        "build feature intent ",
+        "plan feature intent ",
+        "intent packet "
+    ];
+
+    private static readonly string[] BehaviorTestPlanPrefixes =
+    [
+        "behavior test plan ",
+        "plan behavior tests ",
+        "feature test plan ",
+        "plan feature tests "
+    ];
+
+    private static readonly string[] ImplementationSlicePlanPrefixes =
+    [
+        "implementation slice plan ",
+        "plan implementation slices ",
+        "feature implementation slices ",
+        "slice feature "
+    ];
+
+    private static readonly string[] TestStubGeneratorPlanPrefixes =
+    [
+        "test stub generator plan ",
+        "plan test stubs ",
+        "preview test stubs ",
+        "test stub plan "
+    ];
+
+    private static readonly string[] PatchBundleBuilderRequests =
+    [
+        "show patch bundle builder",
+        "patch bundle builder",
+        "multi file patch bundle builder",
+        "multi-file patch bundle builder"
+    ];
+
+    private static readonly string[] FailureLoopStateRequests =
+    [
+        "show failure loop state",
+        "failure loop state",
+        "repair loop state",
+        "show repair loop state"
+    ];
+
+    private static readonly string[] StopConditionDetectorRequests =
+    [
+        "show stop condition detector",
+        "stop condition detector",
+        "when should ali stop editing",
+        "show coding stop conditions"
+    ];
+
+    private static readonly string[] SliceRiskScoringRequests =
+    [
+        "show slice risk scoring",
+        "slice risk scoring",
+        "risk score implementation slices",
+        "show implementation risk scores"
+    ];
+
+    private static readonly string[] FeatureCompletionReceiptRequests =
+    [
+        "feature completion receipt",
+        "show feature completion receipt",
+        "completion receipt",
+        "show completion receipt"
+    ];
+
+    private static readonly string[] BuildFeatureLaneRequests =
+    [
+        "show build feature lane",
+        "build feature lane",
+        "feature build lane",
+        "show feature build lane"
+    ];
     private static readonly string[] ApplyLastPatchPreviewRequests =
     [
         "apply last patch preview",
@@ -1778,6 +1858,11 @@ public static class CodingToolRequestParser
             request = new CodingToolRequest(CodingToolAction.ShowMiniCodexReadinessReport, null, UserConfirmed: userConfirmed);
             return true;
         }
+
+        if (TryParseFeatureBuildLaneCommand(trimmed, userConfirmed, out request))
+        {
+            return true;
+        }
         if (IsCSharpSymbolIndexRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowCSharpSymbolIndex, null, UserConfirmed: userConfirmed);
@@ -2369,6 +2454,24 @@ public static class CodingToolRequestParser
 
     private static bool IsMiniCodexReadinessReportRequest(string text) =>
         MiniCodexReadinessReportRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPatchBundleBuilderRequest(string text) =>
+        PatchBundleBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFailureLoopStateRequest(string text) =>
+        FailureLoopStateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsStopConditionDetectorRequest(string text) =>
+        StopConditionDetectorRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSliceRiskScoringRequest(string text) =>
+        SliceRiskScoringRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFeatureCompletionReceiptRequest(string text) =>
+        FeatureCompletionReceiptRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBuildFeatureLaneRequest(string text) =>
+        BuildFeatureLaneRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
     private static bool IsShowLastPatchPreviewRequest(string text) =>
         ShowLastPatchPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2507,6 +2610,55 @@ public static class CodingToolRequestParser
             UserConfirmed: userConfirmed,
             Query: string.IsNullOrWhiteSpace(query) ? null : query);
         return true;
+    }
+
+    private static bool TryParseFeatureBuildLaneCommand(string text, bool userConfirmed, out CodingToolRequest request)
+    {
+        if (TryParsePrefixedQuery(text, FeatureIntentPacketPrefixes, CodingToolAction.BuildFeatureIntentPacket, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, BehaviorTestPlanPrefixes, CodingToolAction.PlanBehaviorTests, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ImplementationSlicePlanPrefixes, CodingToolAction.PlanImplementationSlices, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, TestStubGeneratorPlanPrefixes, CodingToolAction.ShowTestStubGeneratorPlan, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsPatchBundleBuilderRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatchBundleBuilder, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFailureLoopStateRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFailureLoopState, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsStopConditionDetectorRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowStopConditionDetector, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsSliceRiskScoringRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowSliceRiskScoring, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeatureCompletionReceiptRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeatureCompletionReceipt, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBuildFeatureLaneRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBuildFeatureLane, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryParseBuilderPlanningCommand(string text, bool userConfirmed, out CodingToolRequest request)

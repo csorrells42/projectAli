@@ -115,6 +115,33 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
+                            <TextBlock Text="Build Feature"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="Intent, tests, slices, and closeout before code changes."
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,6" />
+                            <WrapPanel>
+                                <Button Content="Build Feature Lane"
+                                        Command="{Binding RunCodingBuildFeatureLaneCommand}"
+                                        BorderBrush="#1E6B49"
+                                        Background="#152A22" />
+                                <Button Content="Feature Intent"
+                                        Command="{Binding RunCodingFeatureIntentCommand}" />
+                                <Button Content="Behavior Tests"
+                                        Command="{Binding RunCodingBehaviorTestsCommand}" />
+                                <Button Content="Implementation Slices"
+                                        Command="{Binding RunCodingImplementationSlicesCommand}" />
+                                <Button Content="Completion Receipt"
+                                        Command="{Binding RunCodingFeatureCompletionReceiptCommand}" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource PanelCard}">
+                        <StackPanel>
                             <TextBlock Text="Workspace"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
