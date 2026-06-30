@@ -14272,15 +14272,34 @@ public sealed class LocalCodingToolService(
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <DockPanel Margin="0,0,0,8">
+                            <ItemsControl ItemsSource="{Binding Metrics}" Margin="0,0,0,10">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="3" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource DashboardMetricCardStyle}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Value}" FontSize="22" FontWeight="SemiBold" Margin="0,4,0,2" />
+                                                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <DockPanel Grid.Row="1" Margin="0,0,0,8">
                                 <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                                          VerticalContentAlignment="Center" />
                             </DockPanel>
                             <DataGrid x:Name="ItemsDataGrid"
-                                      Grid.Row="1"
+                                      Grid.Row="2"
                                       ItemsSource="{Binding ItemsView}"
                                       SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                                       AutoGenerateColumns="False"
@@ -14922,6 +14941,15 @@ public sealed class LocalCodingToolService(
                 </Style.Triggers>
             </Style>
 
+            <Style x:Key="DashboardMetricCardStyle" TargetType="Border">
+                <Setter Property="Padding" Value="10" />
+                <Setter Property="Margin" Value="0,0,8,0" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="#D0D7DE" />
+                <Setter Property="Background" Value="#F6F8FA" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+
             <Style x:Key="DashboardPaneGroupBoxStyle" TargetType="GroupBox">
                 <Setter Property="Padding" Value="10" />
                 <Setter Property="Margin" Value="0" />
@@ -14997,6 +15025,8 @@ public sealed class LocalCodingToolService(
                 public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
                 public ObservableCollection<DashboardItem> Items { get; } = new();
+
+                public ObservableCollection<DashboardMetric> Metrics { get; } = new();
 
                 public ICollectionView ItemsView { get; }
 
@@ -15078,6 +15108,7 @@ public sealed class LocalCodingToolService(
                         {
                             ItemsView.Refresh();
                             SelectedItem = FirstVisibleItem();
+                            UpdateMetrics();
                             StatusText = string.IsNullOrWhiteSpace(SearchText)
                                 ? $"Ready - {Items.Count} items loaded"
                                 : $"Filtered by \"{SearchText}\"";
@@ -15209,6 +15240,7 @@ public sealed class LocalCodingToolService(
                     Activity.Add("Three sample work items are ready for review.");
                     ItemsView.Refresh();
                     SelectedItem = FirstVisibleItem();
+                    UpdateMetrics();
                     StatusText = "Ready - 3 items loaded";
                 }
 
@@ -15223,6 +15255,7 @@ public sealed class LocalCodingToolService(
                         StatusText = "Refreshing dashboard";
                         await Task.Delay(250, cancellation.Token);
                         ItemsView.Refresh();
+                        UpdateMetrics();
                         Activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
                         ProgressText = "Refresh complete";
                         StatusText = "Dashboard refreshed";
@@ -15283,6 +15316,7 @@ public sealed class LocalCodingToolService(
                     var item = new DashboardItem(name, "Owner", "New");
                     Items.Add(item);
                     ItemsView.Refresh();
+                    UpdateMetrics();
                     SelectedItem = FilterItem(item) ? item : FirstVisibleItem();
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
@@ -15306,10 +15340,44 @@ public sealed class LocalCodingToolService(
 
                     Items.Remove(item);
                     ItemsView.Refresh();
+                    UpdateMetrics();
                     SelectedItem = FirstVisibleItem();
                     Activity.Insert(0, $"Removed {item.Name}.");
                     StatusText = $"Removed {item.Name}";
                     ValidateNewItemName();
+                }
+
+                private void UpdateMetrics()
+                {
+                    Metrics.Clear();
+                    Metrics.Add(new DashboardMetric("Total", Items.Count.ToString(CultureInfo.InvariantCulture), "All dashboard items"));
+                    Metrics.Add(new DashboardMetric("Visible", CountVisibleItems().ToString(CultureInfo.InvariantCulture), "Rows after search/filter"));
+                    Metrics.Add(new DashboardMetric("Review", CountItemsByStatus("Review").ToString(CultureInfo.InvariantCulture), "Items needing attention"));
+                }
+
+                private int CountVisibleItems()
+                {
+                    var count = 0;
+                    foreach (var _ in ItemsView)
+                    {
+                        count++;
+                    }
+
+                    return count;
+                }
+
+                private int CountItemsByStatus(string status)
+                {
+                    var count = 0;
+                    foreach (var item in Items)
+                    {
+                        if (item.Status.Equals(status, StringComparison.OrdinalIgnoreCase))
+                        {
+                            count++;
+                        }
+                    }
+
+                    return count;
                 }
 
                 private void ValidateNewItemName()
@@ -15413,6 +15481,8 @@ public sealed class LocalCodingToolService(
                 }
 
                 public sealed record DashboardItem(string Name, string Owner, string Status);
+
+                public sealed record DashboardMetric(string Label, string Value, string Detail);
 
                 public sealed class DashboardNavigationItem : INotifyPropertyChanged
                 {
@@ -15548,6 +15618,8 @@ public sealed class LocalCodingToolService(
                 public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
                 public ICollectionView ItemsView => _owner.ItemsView;
+
+                public ObservableCollection<MainWindowViewModel.DashboardMetric> Metrics => _owner.Metrics;
 
                 public string SearchText
                 {
