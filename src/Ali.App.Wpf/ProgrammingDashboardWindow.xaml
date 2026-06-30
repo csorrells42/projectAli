@@ -124,10 +124,12 @@
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Guided Build"
-                                        Command="{Binding RunCodingFeatureBuilderCommand}"
+                                <Button Content="Build This"
+                                        Command="{Binding RunCodingBuildThisCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Guided Build"
+                                        Command="{Binding RunCodingFeatureBuilderCommand}" />
                                 <Button Content="Paired Preview"
                                         Command="{Binding RunCodingGuidedBundlePreviewCommand}" />
                                 <Button Content="Impl Planner"
@@ -138,6 +140,20 @@
                                         Command="{Binding RunCodingFeatureOrchestratorCommand}" />
                                 <Button Content="Evidence Pack"
                                         Command="{Binding RunCodingEvidencePackCommand}" />
+                                <Button Content="Roslyn Plan"
+                                        Command="{Binding RunCodingRoslynPlannerCommand}" />
+                                <Button Content="Patch Synth v2"
+                                        Command="{Binding RunCodingPatchSynthesisV2Command}" />
+                                <Button Content="Pattern Copy"
+                                        Command="{Binding RunCodingPatternCopyCommand}" />
+                                <Button Content="Test Gen v2"
+                                        Command="{Binding RunCodingTestGeneratorV2Command}" />
+                                <Button Content="Slice State"
+                                        Command="{Binding RunCodingSliceStateCommand}" />
+                                <Button Content="Semantic Diff"
+                                        Command="{Binding RunCodingSemanticDiffCommand}" />
+                                <Button Content="Score v3"
+                                        Command="{Binding RunCodingScoreV3Command}" />
                                 <Button Content="Build Feature Lane"
                                         Command="{Binding RunCodingBuildFeatureLaneCommand}" />
                                 <Button Content="Work Context"

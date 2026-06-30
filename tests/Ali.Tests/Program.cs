@@ -588,9 +588,14 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("show visual studio integration", builderIndex);
     Contains("coding context packet", builderIndex);
     Contains("project index", builderIndex);
+    Contains("build this for me <goal>", builderIndex);
     Contains("feature intake <goal>", builderIndex);
     Contains("autonomous feature orchestrator <goal>", builderIndex);
+    Contains("roslyn edit planner <goal>", builderIndex);
+    Contains("multi-file patch synthesis <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
+    Contains("semantic diff summary <goal>", builderIndex);
+    Contains("mini codex score v3 <goal>", builderIndex);
     Contains("confirm run packet item N", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
@@ -600,7 +605,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("Here is how I can help", userGuide);
     Contains("For location-based weather", userGuide);
     Contains("Programming", userGuide);
-    Contains("feature intake", userGuide);
+    Contains("Roslyn targeting", userGuide);
     Contains("Context packet", userGuide);
     Contains("coding context packet", userGuide);
     Contains("PDF", userGuide);
@@ -856,6 +861,33 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("implementation evidence pack Save button", out var evidencePackRequest));
     Equal(CodingToolAction.ShowImplementationEvidencePack, evidencePackRequest.Action);
     Equal("Save button", evidencePackRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("build this for me Save button", out var buildThisRequest));
+    Equal(CodingToolAction.ShowBuildThisFeature, buildThisRequest.Action);
+    Equal("Save button", buildThisRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("roslyn edit planner Save button", out var roslynPlannerRequest));
+    Equal(CodingToolAction.ShowRoslynEditPlannerV2, roslynPlannerRequest.Action);
+    Equal("Save button", roslynPlannerRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("multi-file patch synthesis Save button", out var patchSynthesisV2Request));
+    Equal(CodingToolAction.ShowMultiFilePatchSynthesisV2, patchSynthesisV2Request.Action);
+    Equal("Save button", patchSynthesisV2Request.Query);
+    Equal(true, CodingToolRequestParser.TryParse("pattern copy Save button", out var patternCopyRequest));
+    Equal(CodingToolAction.ShowPatternCopyPlan, patternCopyRequest.Action);
+    Equal("Save button", patternCopyRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("behavior test generator Save button", out var behaviorGeneratorRequest));
+    Equal(CodingToolAction.ShowBehaviorTestGeneratorV2, behaviorGeneratorRequest.Action);
+    Equal("Save button", behaviorGeneratorRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("implementation slice state Save button", out var sliceStateRequest));
+    Equal(CodingToolAction.ShowImplementationSliceState, sliceStateRequest.Action);
+    Equal("Save button", sliceStateRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("post apply repair loop Save button", out var repairLoopRequest));
+    Equal(CodingToolAction.ShowPostApplyRepairLoopV2, repairLoopRequest.Action);
+    Equal("Save button", repairLoopRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("semantic diff summary Save button", out var semanticDiffRequest));
+    Equal(CodingToolAction.ShowSemanticDiffSummary, semanticDiffRequest.Action);
+    Equal("Save button", semanticDiffRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("mini codex score v3 Save button", out var scoreV3Request));
+    Equal(CodingToolAction.ShowMiniCodexScoreV3, scoreV3Request.Action);
+    Equal("Save button", scoreV3Request.Query);
     Equal(true, CodingToolRequestParser.TryParse("feature builder Save button", out var featureBuilderRequest));
     Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, featureBuilderRequest.Action);
     Equal("Save button", featureBuilderRequest.Query);
@@ -3601,8 +3633,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Guarded patterns:", generatedGuard.Message);
     Contains("Mini-Codex readiness report v2", reportCard.Message);
     Contains("Report card:", reportCard.Message);
-    Contains("Endzone estimate: 88-90%", reportCard.Message);
-    Contains("Autonomy layer: feature intake", reportCard.Message);
+    Contains("Endzone estimate: 91-93%", reportCard.Message);
+    Contains("Autonomy layer: build-this front door", reportCard.Message);
 }
 
 static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
@@ -3673,6 +3705,15 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     var intake = await service.TryHandleAsync("feature intake Save button", CancellationToken.None);
     var orchestrator = await service.TryHandleAsync("autonomous feature orchestrator Save button", CancellationToken.None);
     var evidence = await service.TryHandleAsync("implementation evidence pack Save button", CancellationToken.None);
+    var buildThis = await service.TryHandleAsync("build this for me Save button", CancellationToken.None);
+    var roslynPlanner = await service.TryHandleAsync("roslyn edit planner Save button", CancellationToken.None);
+    var patchSynthesisV2 = await service.TryHandleAsync("multi-file patch synthesis Save button", CancellationToken.None);
+    var patternCopy = await service.TryHandleAsync("pattern copy Save button", CancellationToken.None);
+    var testGenerator = await service.TryHandleAsync("behavior test generator Save button", CancellationToken.None);
+    var sliceState = await service.TryHandleAsync("implementation slice state Save button", CancellationToken.None);
+    var repairLoop = await service.TryHandleAsync("post apply repair loop Save button", CancellationToken.None);
+    var semanticDiff = await service.TryHandleAsync("semantic diff summary Save button", CancellationToken.None);
+    var scoreV3 = await service.TryHandleAsync("mini codex score v3 Save button", CancellationToken.None);
 
     Equal(true, workflow.Handled);
     Equal(true, workflow.Succeeded);
@@ -3719,6 +3760,63 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Contains("Proof checklist:", evidence.Message);
     Contains("Recent receipts:", evidence.Message);
     Contains("Risk and rollback:", evidence.Message);
+
+    Equal(true, buildThis.Handled);
+    Equal(true, buildThis.Succeeded);
+    Contains("Build this feature v1", buildThis.Message);
+    Contains("Front-door plan:", buildThis.Message);
+    Contains("Execution route:", buildThis.Message);
+    Contains("Repair route:", buildThis.Message);
+
+    Equal(true, roslynPlanner.Handled);
+    Equal(true, roslynPlanner.Succeeded);
+    Contains("Roslyn edit planner v2", roslynPlanner.Message);
+    Contains("Symbol targets:", roslynPlanner.Message);
+    Contains("Edit order:", roslynPlanner.Message);
+    Contains("Call and reference guard:", roslynPlanner.Message);
+
+    Equal(true, patchSynthesisV2.Handled);
+    Equal(true, patchSynthesisV2.Succeeded);
+    Contains("Multi-file patch synthesis v2", patchSynthesisV2.Message);
+    Contains("Bundle candidates:", patchSynthesisV2.Message);
+    Contains("Cross-file roles:", patchSynthesisV2.Message);
+    Contains("Preview route:", patchSynthesisV2.Message);
+
+    Equal(true, patternCopy.Handled);
+    Equal(true, patternCopy.Succeeded);
+    Contains("Pattern copy plan v1", patternCopy.Message);
+    Contains("Nearby patterns:", patternCopy.Message);
+    Contains("Copy rules:", patternCopy.Message);
+
+    Equal(true, testGenerator.Handled);
+    Equal(true, testGenerator.Succeeded);
+    Contains("Behavior test generator v2", testGenerator.Message);
+    Contains("Generated shape:", testGenerator.Message);
+    Contains("Assertion guidance:", testGenerator.Message);
+
+    Equal(true, sliceState.Handled);
+    Equal(true, sliceState.Succeeded);
+    Contains("Implementation slice state v1", sliceState.Message);
+    Contains("Slices:", sliceState.Message);
+    Contains("State memory:", sliceState.Message);
+
+    Equal(true, repairLoop.Handled);
+    Equal(true, repairLoop.Succeeded);
+    Contains("Post-apply repair loop v2", repairLoop.Message);
+    Contains("Repair route:", repairLoop.Message);
+    Contains("Likely scope:", repairLoop.Message);
+
+    Equal(true, semanticDiff.Handled);
+    Equal(true, semanticDiff.Succeeded);
+    Contains("Semantic diff summary v1", semanticDiff.Message);
+    Contains("Semantic changes:", semanticDiff.Message);
+    Contains("Patch checks:", semanticDiff.Message);
+
+    Equal(true, scoreV3.Handled);
+    Equal(true, scoreV3.Succeeded);
+    Contains("Mini-Codex score v3", scoreV3.Message);
+    Contains("Category scores:", scoreV3.Message);
+    Contains("Next score move:", scoreV3.Message);
 }
 
 static Task TestProgrammingDashboardExposesCockpitCommands()
@@ -3743,18 +3841,34 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSymbolDiffAuditCommand", dashboard);
     Contains("RunCodingGeneratedFileGuardCommand", dashboard);
     Contains("Build Feature", dashboard);
+    Contains("Build This", dashboard);
     Contains("Guided Build", dashboard);
     Contains("Paired Preview", dashboard);
     Contains("Impl Planner", dashboard);
     Contains("Intake", dashboard);
     Contains("Orchestrator", dashboard);
     Contains("Evidence Pack", dashboard);
+    Contains("Roslyn Plan", dashboard);
+    Contains("Patch Synth v2", dashboard);
+    Contains("Pattern Copy", dashboard);
+    Contains("Test Gen v2", dashboard);
+    Contains("Slice State", dashboard);
+    Contains("Semantic Diff", dashboard);
+    Contains("Score v3", dashboard);
+    Contains("RunCodingBuildThisCommand", dashboard);
     Contains("RunCodingFeatureBuilderCommand", dashboard);
     Contains("RunCodingGuidedBundlePreviewCommand", dashboard);
     Contains("RunCodingImplementationPlannerCommand", dashboard);
     Contains("RunCodingFeatureIntakeCommand", dashboard);
     Contains("RunCodingFeatureOrchestratorCommand", dashboard);
     Contains("RunCodingEvidencePackCommand", dashboard);
+    Contains("RunCodingRoslynPlannerCommand", dashboard);
+    Contains("RunCodingPatchSynthesisV2Command", dashboard);
+    Contains("RunCodingPatternCopyCommand", dashboard);
+    Contains("RunCodingTestGeneratorV2Command", dashboard);
+    Contains("RunCodingSliceStateCommand", dashboard);
+    Contains("RunCodingSemanticDiffCommand", dashboard);
+    Contains("RunCodingScoreV3Command", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
     Contains("RunCodingFeatureWorkContextCommand", dashboard);
     Contains("RunCodingFeatureIntentCommand", dashboard);
@@ -3779,6 +3893,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingPatchBatchCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingSymbolDiffAuditCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingBuildThisCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureBuilderCommand = CreateAsyncCommand", viewModel);
     Contains("guided feature workflow current feature", viewModel);
     Contains("RunCodingGuidedBundlePreviewCommand = CreateAsyncCommand", viewModel);
@@ -3786,6 +3901,13 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFeatureIntakeCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureOrchestratorCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingEvidencePackCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingRoslynPlannerCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatchSynthesisV2Command = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatternCopyCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingTestGeneratorV2Command = CreateAsyncCommand", viewModel);
+    Contains("RunCodingSliceStateCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingSemanticDiffCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingScoreV3Command = CreateAsyncCommand", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);

@@ -28,8 +28,11 @@ public static class CodingAbilityCatalog
     public static IReadOnlyList<string> FastBuilderPath { get; } =
     [
         "interpret build goal <goal>",
+        "build this for me <goal>",
         "feature intake <goal>",
         "autonomous feature orchestrator <goal>",
+        "roslyn edit planner <goal>",
+        "multi-file patch synthesis <goal>",
         "show architecture options <goal>",
         "write acceptance criteria <goal>",
         "suggest tests for <goal>",
@@ -39,7 +42,9 @@ public static class CodingAbilityCatalog
         "project index",
         "coding context packet",
         "show next coding action",
+        "semantic diff summary <goal>",
         "implementation evidence pack <goal>",
+        "mini codex score v3 <goal>",
         "show execution packet",
         "validation plan"
     ];
@@ -78,10 +83,15 @@ public static class CodingAbilityCatalog
             "Turn an idea into an owner-reviewable roadmap, tests, and file plan.",
             [
                 new("Roadmap", "draft implementation roadmap <goal>"),
+                new("Build this", "build this for me <goal>"),
                 new("Feature intake", "feature intake <goal>"),
                 new("Feature orchestrator", "autonomous feature orchestrator <goal>"),
+                new("Roslyn planner", "roslyn edit planner <goal>"),
+                new("Pattern copy", "pattern copy <goal>"),
                 new("Implementation planner", "feature implementation planner <goal>"),
+                new("Slice state", "implementation slice state <goal>"),
                 new("Evidence pack", "implementation evidence pack <goal>"),
+                new("Score v3", "mini codex score v3 <goal>"),
                 new("Acceptance criteria", "write acceptance criteria <goal>"),
                 new("Focused tests", "suggest tests for <goal>"),
                 new("Codebase patterns", "detect codebase patterns"),
@@ -93,6 +103,10 @@ public static class CodingAbilityCatalog
             "Apply reviewed edits and run approved work through Ali's normal confirmation gates.",
             [
                 new("Patch bundle", "preview patch bundle"),
+                new("Patch synthesis v2", "multi-file patch synthesis <goal>"),
+                new("Behavior test generator", "behavior test generator <goal>"),
+                new("Semantic diff", "semantic diff summary <goal>"),
+                new("Repair loop v2", "post apply repair loop <goal>"),
                 new("Typed patch", "compose typed patch <goal>"),
                 new("Apply patch", "confirm apply last patch preview", RequiresConfirmation: true),
                 new("File risk labels", "show file risk labels"),
@@ -403,7 +417,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask for feature intake, guarded build orchestration, code review, build/test validation, failure diagnosis, patch previews, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can run intake, Roslyn targeting, pattern-copy planning, patch/test previews, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");

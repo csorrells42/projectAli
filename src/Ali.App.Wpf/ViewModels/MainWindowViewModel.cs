@@ -275,12 +275,20 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingPatchBatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch batch", "show owner safe patch batch", "Coding.PatchBatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSymbolDiffAuditCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol diff audit", "show mandatory symbol diff audit", "Coding.SymbolDiffAudit"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGeneratedFileGuardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Generated file guard", "show generated file guard", "Coding.GeneratedFileGuard"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBuildThisCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build this feature", "build this for me current feature", "Coding.BuildThis"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureBuilderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Guided feature workflow", "guided feature workflow current feature", "Coding.FeatureBuilder"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGuidedBundlePreviewCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Paired feature preview", "preview guided feature bundle current feature", "Coding.GuidedBundlePreview"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImplementationPlannerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation planner", "feature implementation planner current feature", "Coding.ImplementationPlanner"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntakeCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intake", "feature intake current feature", "Coding.FeatureIntake"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureOrchestratorCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature orchestrator", "autonomous feature orchestrator current feature", "Coding.FeatureOrchestrator"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingEvidencePackCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Evidence pack", "implementation evidence pack current feature", "Coding.EvidencePack"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingRoslynPlannerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Roslyn edit planner", "roslyn edit planner current feature", "Coding.RoslynPlanner"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchSynthesisV2Command = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch synthesis v2", "multi-file patch synthesis current feature", "Coding.PatchSynthesisV2"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatternCopyCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Pattern copy", "pattern copy current feature", "Coding.PatternCopy"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingTestGeneratorV2Command = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior test generator", "behavior test generator current feature", "Coding.TestGeneratorV2"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSliceStateCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Slice state", "implementation slice state current feature", "Coding.SliceState"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSemanticDiffCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Semantic diff", "semantic diff summary current feature", "Coding.SemanticDiff"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingScoreV3Command = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Score v3", "mini codex score v3 current feature", "Coding.ScoreV3"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -746,6 +754,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand RunCodingGeneratedFileGuardCommand { get; }
 
+    public ICommand RunCodingBuildThisCommand { get; }
+
     public ICommand RunCodingFeatureBuilderCommand { get; }
 
     public ICommand RunCodingGuidedBundlePreviewCommand { get; }
@@ -757,6 +767,20 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingFeatureOrchestratorCommand { get; }
 
     public ICommand RunCodingEvidencePackCommand { get; }
+
+    public ICommand RunCodingRoslynPlannerCommand { get; }
+
+    public ICommand RunCodingPatchSynthesisV2Command { get; }
+
+    public ICommand RunCodingPatternCopyCommand { get; }
+
+    public ICommand RunCodingTestGeneratorV2Command { get; }
+
+    public ICommand RunCodingSliceStateCommand { get; }
+
+    public ICommand RunCodingSemanticDiffCommand { get; }
+
+    public ICommand RunCodingScoreV3Command { get; }
 
     public ICommand RunCodingBuildFeatureLaneCommand { get; }
 
@@ -3442,6 +3466,17 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature intake", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("autonomous feature orchestrator", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation evidence pack", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("build this for me", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("roslyn edit planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("multi-file patch synthesis", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("multi file patch synthesis", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("pattern copy", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("behavior test generator", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("implementation slice state", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("post apply repair loop", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("post-apply repair loop", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("semantic diff summary", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("mini codex score v3", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
@@ -3552,6 +3587,17 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature intake", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("autonomous feature orchestrator", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("implementation evidence pack", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("build this for me", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("roslyn edit planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("multi-file patch synthesis", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("multi file patch synthesis", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("pattern copy", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("behavior test generator", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("implementation slice state", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("post apply repair loop", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("post-apply repair loop", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("semantic diff summary", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("mini codex score v3", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
@@ -3570,6 +3616,17 @@ public sealed class MainWindowViewModel : ObservableObject
                 || command.StartsWith("feature intake", StringComparison.OrdinalIgnoreCase)
                 || command.StartsWith("autonomous feature orchestrator", StringComparison.OrdinalIgnoreCase)
                 || command.StartsWith("implementation evidence pack", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("build this for me", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("roslyn edit planner", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("multi-file patch synthesis", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("multi file patch synthesis", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("pattern copy", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("behavior test generator", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("implementation slice state", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("post apply repair loop", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("post-apply repair loop", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("semantic diff summary", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("mini codex score v3", StringComparison.OrdinalIgnoreCase)
                 ? "Next - Run the single next command shown by the workflow."
                 : "Next - Work the feature lane top to bottom before previewing a patch.";
         }
@@ -3635,6 +3692,34 @@ public sealed class MainWindowViewModel : ObservableObject
             "Proof checklist:",
             "Recent receipts:",
             "Risk and rollback:",
+            "Build this feature",
+            "Front-door plan:",
+            "Execution route:",
+            "Repair route:",
+            "Roslyn edit planner",
+            "Symbol targets:",
+            "Edit order:",
+            "Call and reference guard:",
+            "Multi-file patch synthesis",
+            "Bundle candidates:",
+            "Cross-file roles:",
+            "Pattern copy plan",
+            "Nearby patterns:",
+            "Copy rules:",
+            "Behavior test generator",
+            "Generated shape:",
+            "Assertion guidance:",
+            "Implementation slice state",
+            "Slices:",
+            "State memory:",
+            "Post-apply repair loop",
+            "Likely scope:",
+            "Semantic diff summary",
+            "Semantic changes:",
+            "Patch checks:",
+            "Mini-Codex score v3:",
+            "Category scores:",
+            "Next score move:",
             "Goal:",
             "Behavior test patch preview:",
             "Test file:",
@@ -3759,6 +3844,17 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Primary target:",
             "- Risk level:",
             "- Acceptance:",
+            "- Source edits:",
+            "- Exact preview edits:",
+            "- UI/ViewModel candidates:",
+            "- Bundle size guard:",
+            "- Pattern source:",
+            "- Copy naming",
+            "- Arrange",
+            "- Act",
+            "- Assert",
+            "- Goal memory:",
+            "- Recent receipts:",
             "- Test intent:",
             "- Code diff:",
             "- Review:",
@@ -7025,6 +7121,11 @@ public sealed class MainWindowViewModel : ObservableObject
             runCodingGeneratedFileGuard.RaiseCanExecuteChanged();
         }
 
+        if (RunCodingBuildThisCommand is AsyncRelayCommand runCodingBuildThis)
+        {
+            runCodingBuildThis.RaiseCanExecuteChanged();
+        }
+
         if (RunCodingFeatureBuilderCommand is AsyncRelayCommand runCodingFeatureBuilder)
         {
             runCodingFeatureBuilder.RaiseCanExecuteChanged();
@@ -7053,6 +7154,41 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingEvidencePackCommand is AsyncRelayCommand runCodingEvidencePack)
         {
             runCodingEvidencePack.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingRoslynPlannerCommand is AsyncRelayCommand runCodingRoslynPlanner)
+        {
+            runCodingRoslynPlanner.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatchSynthesisV2Command is AsyncRelayCommand runCodingPatchSynthesisV2)
+        {
+            runCodingPatchSynthesisV2.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatternCopyCommand is AsyncRelayCommand runCodingPatternCopy)
+        {
+            runCodingPatternCopy.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingTestGeneratorV2Command is AsyncRelayCommand runCodingTestGeneratorV2)
+        {
+            runCodingTestGeneratorV2.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSliceStateCommand is AsyncRelayCommand runCodingSliceState)
+        {
+            runCodingSliceState.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSemanticDiffCommand is AsyncRelayCommand runCodingSemanticDiff)
+        {
+            runCodingSemanticDiff.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingScoreV3Command is AsyncRelayCommand runCodingScoreV3)
+        {
+            runCodingScoreV3.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildFeatureLaneCommand is AsyncRelayCommand runCodingBuildFeatureLane)

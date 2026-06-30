@@ -170,6 +170,15 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFeatureIntakeNormalizer
             or CodingToolAction.ShowAutonomousFeatureOrchestrator
             or CodingToolAction.ShowImplementationEvidencePack
+            or CodingToolAction.ShowBuildThisFeature
+            or CodingToolAction.ShowRoslynEditPlannerV2
+            or CodingToolAction.ShowMultiFilePatchSynthesisV2
+            or CodingToolAction.ShowPatternCopyPlan
+            or CodingToolAction.ShowBehaviorTestGeneratorV2
+            or CodingToolAction.ShowImplementationSliceState
+            or CodingToolAction.ShowPostApplyRepairLoopV2
+            or CodingToolAction.ShowSemanticDiffSummary
+            or CodingToolAction.ShowMiniCodexScoreV3
             or CodingToolAction.ShowPlainEnglishFeatureBuilder
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex

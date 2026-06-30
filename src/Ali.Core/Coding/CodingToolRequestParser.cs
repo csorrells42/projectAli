@@ -993,6 +993,172 @@ public static class CodingToolRequestParser
         "evidence pack"
     ];
 
+    private static readonly string[] BuildThisFeaturePrefixes =
+    [
+        "build this for me ",
+        "build this feature ",
+        "mini codex build ",
+        "autonomous build ",
+        "drive the build ",
+        "build it for me "
+    ];
+
+    private static readonly string[] BuildThisFeatureRequests =
+    [
+        "build this for me",
+        "build this feature",
+        "mini codex build",
+        "autonomous build",
+        "drive the build",
+        "build it for me"
+    ];
+
+    private static readonly string[] RoslynEditPlannerV2Prefixes =
+    [
+        "roslyn edit planner ",
+        "roslyn edit planner v2 ",
+        "symbol edit planner ",
+        "targeted edit planner ",
+        "semantic edit planner v2 "
+    ];
+
+    private static readonly string[] RoslynEditPlannerV2Requests =
+    [
+        "roslyn edit planner",
+        "roslyn edit planner v2",
+        "symbol edit planner",
+        "targeted edit planner",
+        "semantic edit planner v2"
+    ];
+
+    private static readonly string[] MultiFilePatchSynthesisV2Prefixes =
+    [
+        "multi file patch synthesis ",
+        "multi-file patch synthesis ",
+        "patch synthesis v2 ",
+        "multi file patch synthesis v2 ",
+        "multi-file patch synthesis v2 ",
+        "source viewmodel xaml patch "
+    ];
+
+    private static readonly string[] MultiFilePatchSynthesisV2Requests =
+    [
+        "multi file patch synthesis",
+        "multi-file patch synthesis",
+        "patch synthesis v2",
+        "multi file patch synthesis v2",
+        "multi-file patch synthesis v2",
+        "source viewmodel xaml patch"
+    ];
+
+    private static readonly string[] PatternCopyPlanPrefixes =
+    [
+        "pattern copy ",
+        "pattern copier ",
+        "copy nearby pattern ",
+        "mirror existing pattern ",
+        "pattern copy plan "
+    ];
+
+    private static readonly string[] PatternCopyPlanRequests =
+    [
+        "pattern copy",
+        "pattern copier",
+        "copy nearby pattern",
+        "mirror existing pattern",
+        "pattern copy plan"
+    ];
+
+    private static readonly string[] BehaviorTestGeneratorV2Prefixes =
+    [
+        "behavior test generator ",
+        "behavior test generator v2 ",
+        "generate behavior test ",
+        "test generator v2 ",
+        "behavior spec test "
+    ];
+
+    private static readonly string[] BehaviorTestGeneratorV2Requests =
+    [
+        "behavior test generator",
+        "behavior test generator v2",
+        "generate behavior test",
+        "test generator v2",
+        "behavior spec test"
+    ];
+
+    private static readonly string[] ImplementationSliceStatePrefixes =
+    [
+        "implementation slice state ",
+        "slice state ",
+        "feature slice state ",
+        "slice tracker ",
+        "implementation tracker "
+    ];
+
+    private static readonly string[] ImplementationSliceStateRequests =
+    [
+        "implementation slice state",
+        "slice state",
+        "feature slice state",
+        "slice tracker",
+        "implementation tracker"
+    ];
+
+    private static readonly string[] PostApplyRepairLoopV2Prefixes =
+    [
+        "post apply repair loop ",
+        "post-apply repair loop ",
+        "repair loop v2 ",
+        "post apply repair loop v2 ",
+        "after apply repair "
+    ];
+
+    private static readonly string[] PostApplyRepairLoopV2Requests =
+    [
+        "post apply repair loop",
+        "post-apply repair loop",
+        "repair loop v2",
+        "post apply repair loop v2",
+        "after apply repair"
+    ];
+
+    private static readonly string[] SemanticDiffSummaryPrefixes =
+    [
+        "semantic diff summary ",
+        "semantic diff ",
+        "summarize semantic diff ",
+        "explain code changes ",
+        "symbol diff summary "
+    ];
+
+    private static readonly string[] SemanticDiffSummaryRequests =
+    [
+        "semantic diff summary",
+        "semantic diff",
+        "summarize semantic diff",
+        "explain code changes",
+        "symbol diff summary"
+    ];
+
+    private static readonly string[] MiniCodexScoreV3Prefixes =
+    [
+        "mini codex score v3 ",
+        "readiness score v3 ",
+        "score v3 ",
+        "mini codex percentages ",
+        "coding percentages "
+    ];
+
+    private static readonly string[] MiniCodexScoreV3Requests =
+    [
+        "mini codex score v3",
+        "readiness score v3",
+        "score v3",
+        "mini codex percentages",
+        "coding percentages"
+    ];
+
     private static readonly string[] PlainEnglishFeatureBuilderPrefixes =
     [
         "feature builder ",
@@ -2999,6 +3165,33 @@ public static class CodingToolRequestParser
     private static bool IsImplementationEvidencePackRequest(string text) =>
         ImplementationEvidencePackRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsBuildThisFeatureRequest(string text) =>
+        BuildThisFeatureRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRoslynEditPlannerV2Request(string text) =>
+        RoslynEditPlannerV2Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsMultiFilePatchSynthesisV2Request(string text) =>
+        MultiFilePatchSynthesisV2Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPatternCopyPlanRequest(string text) =>
+        PatternCopyPlanRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBehaviorTestGeneratorV2Request(string text) =>
+        BehaviorTestGeneratorV2Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsImplementationSliceStateRequest(string text) =>
+        ImplementationSliceStateRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPostApplyRepairLoopV2Request(string text) =>
+        PostApplyRepairLoopV2Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSemanticDiffSummaryRequest(string text) =>
+        SemanticDiffSummaryRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsMiniCodexScoreV3Request(string text) =>
+        MiniCodexScoreV3Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPlainEnglishFeatureBuilderRequest(string text) =>
         PlainEnglishFeatureBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -3171,6 +3364,15 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, FeatureIntakeNormalizerPrefixes, CodingToolAction.ShowFeatureIntakeNormalizer, userConfirmed, out request)
             || TryParsePrefixedQuery(text, AutonomousFeatureOrchestratorPrefixes, CodingToolAction.ShowAutonomousFeatureOrchestrator, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ImplementationEvidencePackPrefixes, CodingToolAction.ShowImplementationEvidencePack, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, BuildThisFeaturePrefixes, CodingToolAction.ShowBuildThisFeature, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, RoslynEditPlannerV2Prefixes, CodingToolAction.ShowRoslynEditPlannerV2, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, MultiFilePatchSynthesisV2Prefixes, CodingToolAction.ShowMultiFilePatchSynthesisV2, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PatternCopyPlanPrefixes, CodingToolAction.ShowPatternCopyPlan, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, BehaviorTestGeneratorV2Prefixes, CodingToolAction.ShowBehaviorTestGeneratorV2, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ImplementationSliceStatePrefixes, CodingToolAction.ShowImplementationSliceState, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PostApplyRepairLoopV2Prefixes, CodingToolAction.ShowPostApplyRepairLoopV2, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, SemanticDiffSummaryPrefixes, CodingToolAction.ShowSemanticDiffSummary, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, MiniCodexScoreV3Prefixes, CodingToolAction.ShowMiniCodexScoreV3, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
             || TryParsePlainEnglishBuildRequest(text, userConfirmed, out request))
         {
@@ -3330,6 +3532,60 @@ public static class CodingToolRequestParser
         if (IsImplementationEvidencePackRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowImplementationEvidencePack, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBuildThisFeatureRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBuildThisFeature, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRoslynEditPlannerV2Request(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRoslynEditPlannerV2, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsMultiFilePatchSynthesisV2Request(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowMultiFilePatchSynthesisV2, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPatternCopyPlanRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatternCopyPlan, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBehaviorTestGeneratorV2Request(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBehaviorTestGeneratorV2, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsImplementationSliceStateRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowImplementationSliceState, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPostApplyRepairLoopV2Request(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPostApplyRepairLoopV2, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsSemanticDiffSummaryRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowSemanticDiffSummary, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsMiniCodexScoreV3Request(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowMiniCodexScoreV3, null, UserConfirmed: userConfirmed);
             return true;
         }
 
