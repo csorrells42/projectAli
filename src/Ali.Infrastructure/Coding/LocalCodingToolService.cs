@@ -14266,6 +14266,7 @@ public sealed class LocalCodingToolService(
                     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
                     <local:DashboardStatusBrushConverter x:Key="DashboardStatusBrushConverter" />
                     <local:DashboardSelectionSummaryConverter x:Key="DashboardSelectionSummaryConverter" />
+                    <local:DashboardBindingProxy x:Key="DashboardCommandsProxy" Data="{Binding}" />
                     <DataTemplate x:Key="DashboardDetailTemplate">
                         <local:DashboardDetailCard Item="{Binding}" />
                     </DataTemplate>
@@ -14354,15 +14355,14 @@ public sealed class LocalCodingToolService(
                                 </DataGrid.GroupStyle>
                                 <DataGrid.RowStyle>
                                     <Style TargetType="{x:Type DataGridRow}">
-                                        <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=DataGrid} }" />
                                         <Setter Property="ContextMenu">
                                             <Setter.Value>
                                                 <ContextMenu>
                                                     <MenuItem Header="Mark Ready"
-                                                              Command="{Binding PlacementTarget.Tag.MarkItemReadyCommand, RelativeSource={RelativeSource AncestorType=ContextMenu} }"
+                                                              Command="{Binding Data.MarkItemReadyCommand, Source={StaticResource DashboardCommandsProxy} }"
                                                               CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu} }" />
                                                     <MenuItem Header="Mark Review"
-                                                              Command="{Binding PlacementTarget.Tag.MarkItemForReviewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu} }"
+                                                              Command="{Binding Data.MarkItemForReviewCommand, Source={StaticResource DashboardCommandsProxy} }"
                                                               CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu} }" />
                                                 </ContextMenu>
                                             </Setter.Value>
@@ -16306,6 +16306,20 @@ public sealed class LocalCodingToolService(
                 }
             }
 
+            public sealed class DashboardBindingProxy : Freezable
+            {
+                public static readonly DependencyProperty DataProperty =
+                    DependencyProperty.Register(nameof(Data), typeof(object), typeof(DashboardBindingProxy), new UIPropertyMetadata(null));
+
+                public object? Data
+                {
+                    get => GetValue(DataProperty);
+                    set => SetValue(DataProperty, value);
+                }
+
+                protected override Freezable CreateInstanceCore() => new DashboardBindingProxy();
+            }
+
             public sealed class OverviewDashboardViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
             {
                 private readonly MainWindowViewModel _owner;
@@ -16348,6 +16362,10 @@ public sealed class LocalCodingToolService(
                 public ICommand AddItemCommand => _owner.AddItemCommand;
 
                 public ICommand RemoveSelectedItemCommand => _owner.RemoveSelectedItemCommand;
+
+                public ICommand MarkItemReadyCommand => _owner.MarkItemReadyCommand;
+
+                public ICommand MarkItemForReviewCommand => _owner.MarkItemForReviewCommand;
 
                 public bool HasErrors => _owner.HasErrors;
 
