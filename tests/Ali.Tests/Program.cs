@@ -5573,17 +5573,29 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         xamlPath,
         codeBehindPath,
         "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
-        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardHeaderCardStyle", "NavigationTreeView", "ItemsSource=\"{Binding Items}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
+        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardDetailTemplate", "DashboardDetailCard", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "ItemsSource=\"{Binding Items}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
         ["DataContext = new MainWindowViewModel();"],
         "MainWindowViewModel.cs",
-        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICommand RefreshCommand", "RelayCommand", "CanExecuteChanged"]);
+        ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICommand RefreshCommand", "DashboardItem? SelectedItem", "RelayCommand", "CanExecuteChanged"]);
     var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
+    var detailCardPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml");
+    var detailCardCodeBehindPath = Path.Combine(projectDirectory, "DashboardDetailCard.xaml.cs");
     Equal(true, File.Exists(dashboardStylesPath));
+    Equal(true, File.Exists(detailCardPath));
+    Equal(true, File.Exists(detailCardCodeBehindPath));
     var dashboardStyles = await File.ReadAllTextAsync(dashboardStylesPath);
+    var detailCard = await File.ReadAllTextAsync(detailCardPath);
+    var detailCardCodeBehind = await File.ReadAllTextAsync(detailCardCodeBehindPath);
     AssertXamlWellFormed(dashboardStyles);
+    AssertXamlWellFormed(detailCard);
+    AssertCSharpSyntaxClean(detailCardCodeBehind, detailCardCodeBehindPath);
     Contains("ResourceDictionary", dashboardStyles);
     Contains("DashboardPrimaryButtonStyle", dashboardStyles);
+    Contains("DashboardDetailCardStyle", dashboardStyles);
     Contains("Style.Triggers", dashboardStyles);
+    Contains("UserControl", detailCard);
+    Contains("DashboardDetailCardStyle", detailCard);
+    Contains("partial class DashboardDetailCard : UserControl", detailCardCodeBehind);
 }
 
 static async Task AssertWpfStarterAsync(

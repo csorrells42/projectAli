@@ -12895,6 +12895,20 @@ public sealed class LocalCodingToolService(
                     continue;
                 }
 
+                if (!hasTransform
+                    && TryBuildNewWpfUserControlPatchBlock(context.Goal, fullPath, out var newWpfUserControlText, out var newWpfUserControlNote))
+                {
+                    candidates.Add(new FeaturePatchSynthesisCandidate(
+                        RelativeToWorkspace(fullPath),
+                        fullPath,
+                        "deterministic WPF UserControl recipe",
+                        string.Empty,
+                        newWpfUserControlText,
+                        true,
+                        newWpfUserControlNote));
+                    continue;
+                }
+
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
                     fullPath,
@@ -13102,6 +13116,8 @@ public sealed class LocalCodingToolService(
                 {
                     AddIfSafeNewWpfViewModelTarget(targets, Path.Combine(primaryDirectory, "MainWindowViewModel.cs"));
                     AddIfSafeNewWpfStylesTarget(targets, Path.Combine(primaryDirectory, "AliDashboardStyles.xaml"));
+                    AddIfSafeNewWpfUserControlTarget(targets, Path.Combine(primaryDirectory, "DashboardDetailCard.xaml"));
+                    AddIfSafeNewWpfUserControlTarget(targets, Path.Combine(primaryDirectory, "DashboardDetailCard.xaml.cs"));
                 }
             }
         }
@@ -13158,6 +13174,14 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private void AddIfSafeNewWpfUserControlTarget(List<string> targets, string path)
+    {
+        if (IsSafeNewWpfUserControlPath(path))
+        {
+            targets.Add(path);
+        }
+    }
+
     private bool IsEditableWpfSurfaceFile(string path) =>
         File.Exists(path)
         && IsSafeWpfSurfacePath(path);
@@ -13193,6 +13217,16 @@ public sealed class LocalCodingToolService(
         && Policy.IsInsideWorkspace(path)
         && !IsBuildArtifactPath(path)
         && !IsGeneratedOrDesignerFile(path);
+
+    private bool IsSafeNewWpfUserControlPath(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return (fileName.Equals("DashboardDetailCard.xaml", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("DashboardDetailCard.xaml.cs", StringComparison.OrdinalIgnoreCase))
+               && Policy.IsInsideWorkspace(path)
+               && !IsBuildArtifactPath(path)
+               && !IsGeneratedOrDesignerFile(path);
+    }
 
     private bool IsEditableProgramFile(string path) =>
         File.Exists(path)
@@ -14222,12 +14256,16 @@ public sealed class LocalCodingToolService(
         <Window x:Class="{{xamlClass}}"
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:local="{{BuildWpfLocalXmlNamespace(xamlClass)}}"
                 Title="Project Dashboard" Height="620" Width="980" MinHeight="520" MinWidth="760">
             <Window.Resources>
                 <ResourceDictionary>
                     <ResourceDictionary.MergedDictionaries>
                         <ResourceDictionary Source="AliDashboardStyles.xaml" />
                     </ResourceDictionary.MergedDictionaries>
+                    <DataTemplate x:Key="DashboardDetailTemplate">
+                        <local:DashboardDetailCard />
+                    </DataTemplate>
                 </ResourceDictionary>
             </Window.Resources>
 
@@ -14289,6 +14327,7 @@ public sealed class LocalCodingToolService(
                             <TabItem Header="Overview">
                                 <DataGrid x:Name="ItemsDataGrid"
                                           ItemsSource="{Binding Items}"
+                                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                                           AutoGenerateColumns="False"
                                           IsReadOnly="True"
                                           EnableRowVirtualization="True"
@@ -14310,6 +14349,9 @@ public sealed class LocalCodingToolService(
                         <GroupBox Grid.Column="4" Header="Details" Style="{StaticResource DashboardPaneGroupBoxStyle}">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel>
+                                    <ContentControl Content="{Binding SelectedItem}"
+                                                    ContentTemplate="{StaticResource DashboardDetailTemplate}"
+                                                    Margin="0,0,0,16" />
                                     <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
                                     <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged}" Height="32" Margin="0,0,0,8" VerticalContentAlignment="Center" />
                                     <Button Content="Add Item" Command="{Binding AddItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
@@ -14323,6 +14365,14 @@ public sealed class LocalCodingToolService(
             </DockPanel>
         </Window>
         """;
+
+    private static string BuildWpfLocalXmlNamespace(string xamlClass)
+    {
+        var lastDot = xamlClass.LastIndexOf('.');
+        return lastDot > 0
+            ? "clr-namespace:" + xamlClass[..lastDot]
+            : "clr-namespace:";
+    }
 
     private static string BuildWpfTodoWindowXaml(string xamlClass) =>
         $"""
@@ -14628,6 +14678,97 @@ public sealed class LocalCodingToolService(
         return true;
     }
 
+    private static bool TryBuildNewWpfUserControlPatchBlock(
+        string goal,
+        string fullPath,
+        out string newText,
+        out string note)
+    {
+        newText = string.Empty;
+        note = string.Empty;
+        if (!IsWpfComplexWindowGoal(goal) || File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(fullPath);
+        if (!fileName.Equals("DashboardDetailCard.xaml", StringComparison.OrdinalIgnoreCase)
+            && !fileName.Equals("DashboardDetailCard.xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(fullPath);
+        var codeBehindPath = string.IsNullOrWhiteSpace(directory) ? null : Path.Combine(directory, "MainWindow.xaml.cs");
+        var namespaceName = codeBehindPath is null ? null : ExtractCSharpNamespaceName(SafeReadText(codeBehindPath));
+        if (fileName.Equals("DashboardDetailCard.xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            newText = BuildWpfDashboardDetailCardXaml(namespaceName);
+            note = "WPF complex-dashboard DashboardDetailCard.xaml UserControl starter recipe.";
+            return true;
+        }
+
+        newText = BuildWpfDashboardDetailCardCodeBehind(namespaceName);
+        note = "WPF complex-dashboard DashboardDetailCard.xaml.cs UserControl starter recipe.";
+        return true;
+    }
+
+    private static string BuildWpfDashboardDetailCardXaml(string? namespaceName)
+    {
+        var controlClass = string.IsNullOrWhiteSpace(namespaceName)
+            ? "DashboardDetailCard"
+            : namespaceName + ".DashboardDetailCard";
+        return
+            $$"""
+            <UserControl x:Class="{{controlClass}}"
+                         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                         MinHeight="130">
+                <UserControl.Resources>
+                    <ResourceDictionary>
+                        <ResourceDictionary.MergedDictionaries>
+                            <ResourceDictionary Source="AliDashboardStyles.xaml" />
+                        </ResourceDictionary.MergedDictionaries>
+                    </ResourceDictionary>
+                </UserControl.Resources>
+
+                <Border Style="{StaticResource DashboardDetailCardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Selected item" FontWeight="SemiBold" Margin="0,0,0,8" />
+                        <TextBlock Text="{Binding Name, TargetNullValue=No item selected}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0">
+                            <Run Text="Owner: " />
+                            <Run Text="{Binding Owner, TargetNullValue=none}" />
+                        </TextBlock>
+                        <TextBlock Margin="0,4,0,0">
+                            <Run Text="Status: " />
+                            <Run Text="{Binding Status, TargetNullValue=none}" />
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+            </UserControl>
+            """;
+    }
+
+    private static string BuildWpfDashboardDetailCardCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Windows.Controls;
+
+            {{namespaceLine}}public partial class DashboardDetailCard : UserControl
+            {
+                public DashboardDetailCard()
+                {
+                    InitializeComponent();
+                }
+            }
+            """;
+    }
+
     private static string BuildWpfDashboardStylesXaml() =>
         """
         <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -14678,6 +14819,14 @@ public sealed class LocalCodingToolService(
                 <Setter Property="Padding" Value="10" />
                 <Setter Property="Margin" Value="0" />
             </Style>
+
+            <Style x:Key="DashboardDetailCardStyle" TargetType="Border">
+                <Setter Property="Padding" Value="12" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="#D0D7DE" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
         </ResourceDictionary>
         """;
 
@@ -14697,6 +14846,7 @@ public sealed class LocalCodingToolService(
             {{namespaceLine}}public sealed class MainWindowViewModel : INotifyPropertyChanged
             {
                 private string _newItemName = string.Empty;
+                private DashboardItem? _selectedItem;
                 private string _statusText = "Ready";
 
                 public MainWindowViewModel()
@@ -14728,6 +14878,12 @@ public sealed class LocalCodingToolService(
                     }
                 }
 
+                public DashboardItem? SelectedItem
+                {
+                    get => _selectedItem;
+                    set => SetField(ref _selectedItem, value);
+                }
+
                 public string StatusText
                 {
                     get => _statusText;
@@ -14744,6 +14900,7 @@ public sealed class LocalCodingToolService(
                     Activity.Clear();
                     Activity.Add("Dashboard loaded.");
                     Activity.Add("Three sample work items are ready for review.");
+                    SelectedItem = Items.Count > 0 ? Items[0] : null;
                     StatusText = "Ready - 3 items loaded";
                 }
 
@@ -14764,7 +14921,9 @@ public sealed class LocalCodingToolService(
                         return;
                     }
 
-                    Items.Add(new DashboardItem(name, "Owner", "New"));
+                    var item = new DashboardItem(name, "Owner", "New");
+                    Items.Add(item);
+                    SelectedItem = item;
                     Activity.Insert(0, $"Added {name}.");
                     NewItemName = string.Empty;
                     StatusText = $"Added {name}";
