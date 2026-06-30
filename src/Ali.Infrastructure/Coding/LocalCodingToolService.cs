@@ -14413,7 +14413,14 @@ public sealed class LocalCodingToolService(
             <Window.InputBindings>
                 <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
                 <KeyBinding Key="Escape" Command="{Binding CancelRefreshCommand}" />
+                <KeyBinding Key="D" Modifiers="Control" Command="{x:Static local:MainWindow.FocusDetailsCommand}" />
             </Window.InputBindings>
+
+            <Window.CommandBindings>
+                <CommandBinding Command="{x:Static local:MainWindow.FocusDetailsCommand}"
+                                Executed="FocusDetailsCommand_Executed"
+                                CanExecute="FocusDetailsCommand_CanExecute" />
+            </Window.CommandBindings>
 
             <DockPanel>
                 <Menu DockPanel.Dock="Top">
@@ -14428,6 +14435,8 @@ public sealed class LocalCodingToolService(
                     <MenuItem Header="_View">
                         <MenuItem Header="Overview" />
                         <MenuItem Header="Activity" />
+                        <Separator />
+                        <MenuItem Header="_Focus details" Command="{x:Static local:MainWindow.FocusDetailsCommand}" />
                     </MenuItem>
                 </Menu>
 
@@ -14506,7 +14515,11 @@ public sealed class LocalCodingToolService(
 
                         <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" />
 
-                        <GroupBox Grid.Column="4" Header="Details" Style="{StaticResource DashboardPaneGroupBoxStyle}">
+                        <GroupBox x:Name="DetailsPaneGroupBox"
+                                  Grid.Column="4"
+                                  Header="Details"
+                                  Focusable="True"
+                                  Style="{StaticResource DashboardPaneGroupBoxStyle}">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel>
                                     <ContentControl Content="{Binding SelectedItem}"
@@ -14714,13 +14727,32 @@ public sealed class LocalCodingToolService(
         return
             $$"""
             using System.Windows;
+            using System.Windows.Input;
 
             {{namespaceLine}}public partial class MainWindow : Window
             {
+                public static readonly RoutedUICommand FocusDetailsCommand = new(
+                    "Focus Details",
+                    nameof(FocusDetailsCommand),
+                    typeof(MainWindow),
+                    new InputGestureCollection { new KeyGesture(Key.D, ModifierKeys.Control) });
+
                 public MainWindow()
                 {
                     InitializeComponent();
                     DataContext = new MainWindowViewModel(new DashboardDialogService(this));
+                }
+
+                private void FocusDetailsCommand_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+                {
+                    e.CanExecute = DetailsPaneGroupBox is not null;
+                    e.Handled = true;
+                }
+
+                private void FocusDetailsCommand_Executed(object sender, ExecutedRoutedEventArgs e)
+                {
+                    DetailsPaneGroupBox.Focus();
+                    e.Handled = true;
                 }
             }
 
