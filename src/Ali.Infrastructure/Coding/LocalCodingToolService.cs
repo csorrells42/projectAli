@@ -12647,14 +12647,14 @@ public sealed class LocalCodingToolService(
 
     private IReadOnlyList<string> FindDeterministicFeaturePatchTargets(FeatureWorkContext context)
     {
-        if (IsSimpleConsoleProgramGoal(context.Goal))
-        {
-            return FindDeterministicConsolePatchTargets(context);
-        }
-
         if (IsSimpleWpfProgramGoal(context.Goal))
         {
             return FindDeterministicWpfPatchTargets(context);
+        }
+
+        if (IsSimpleConsoleProgramGoal(context.Goal))
+        {
+            return FindDeterministicConsolePatchTargets(context);
         }
 
         return [];
@@ -13599,26 +13599,64 @@ public sealed class LocalCodingToolService(
         {
             oldText = content;
             var xamlClass = ExtractXamlClassName(content) ?? "MainWindow";
-            newText = IsWpfCounterGoal(goal)
-                ? BuildWpfCounterWindowXaml(xamlClass)
-                : BuildWpfHelloWindowXaml(xamlClass);
-            note = IsWpfCounterGoal(goal)
-                ? "WPF counter MainWindow.xaml starter recipe."
-                : "WPF hello MainWindow.xaml starter recipe.";
+            newText = BuildWpfWindowXaml(goal, xamlClass);
+            note = ClassifyWpfStarterNote(goal, "MainWindow.xaml");
             return true;
         }
 
         if (fileName.Equals("MainWindow.xaml.cs", StringComparison.OrdinalIgnoreCase)
-            && IsWpfCounterGoal(goal)
+            && NeedsWpfCodeBehind(goal)
             && content.Contains("partial class MainWindow", StringComparison.OrdinalIgnoreCase))
         {
             oldText = content;
-            newText = BuildWpfCounterCodeBehind(ExtractCSharpNamespaceName(content));
-            note = "WPF counter MainWindow.xaml.cs starter recipe.";
+            newText = BuildWpfCodeBehind(goal, ExtractCSharpNamespaceName(content));
+            note = ClassifyWpfStarterNote(goal, "MainWindow.xaml.cs");
             return true;
         }
 
         return false;
+    }
+
+    private static string BuildWpfWindowXaml(string goal, string xamlClass)
+    {
+        if (IsWpfTodoGoal(goal))
+        {
+            return BuildWpfTodoWindowXaml(xamlClass);
+        }
+
+        if (IsWpfCalculatorGoal(goal))
+        {
+            return BuildWpfCalculatorWindowXaml(xamlClass);
+        }
+
+        if (IsWpfGreetingGoal(goal))
+        {
+            return BuildWpfGreetingWindowXaml(xamlClass);
+        }
+
+        return IsWpfCounterGoal(goal)
+            ? BuildWpfCounterWindowXaml(xamlClass)
+            : BuildWpfHelloWindowXaml(xamlClass);
+    }
+
+    private static string BuildWpfCodeBehind(string goal, string? namespaceName)
+    {
+        if (IsWpfTodoGoal(goal))
+        {
+            return BuildWpfTodoCodeBehind(namespaceName);
+        }
+
+        if (IsWpfCalculatorGoal(goal))
+        {
+            return BuildWpfCalculatorCodeBehind(namespaceName);
+        }
+
+        if (IsWpfGreetingGoal(goal))
+        {
+            return BuildWpfGreetingCodeBehind(namespaceName);
+        }
+
+        return BuildWpfCounterCodeBehind(namespaceName);
     }
 
     private static string BuildWpfCounterWindowXaml(string xamlClass) =>
@@ -13668,6 +13706,111 @@ public sealed class LocalCodingToolService(
         </Window>
         """;
 
+    private static string BuildWpfCalculatorWindowXaml(string xamlClass) =>
+        $"""
+        <Window x:Class="{xamlClass}"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Calculator" Height="360" Width="460">
+            <Grid Margin="24">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Calculator"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,16" />
+                    <TextBox x:Name="FirstNumberTextBox"
+                             Height="34"
+                             Margin="0,0,0,10"
+                             VerticalContentAlignment="Center" />
+                    <ComboBox x:Name="OperationComboBox"
+                              Height="34"
+                              SelectedIndex="0"
+                              Margin="0,0,0,10">
+                        <ComboBoxItem Content="Add" />
+                        <ComboBoxItem Content="Subtract" />
+                        <ComboBoxItem Content="Multiply" />
+                        <ComboBoxItem Content="Divide" />
+                    </ComboBox>
+                    <TextBox x:Name="SecondNumberTextBox"
+                             Height="34"
+                             Margin="0,0,0,16"
+                             VerticalContentAlignment="Center" />
+                    <Button Content="Calculate"
+                            Height="38"
+                            Click="CalculateButton_Click" />
+                    <TextBlock x:Name="ResultTextBlock"
+                               FontSize="18"
+                               Margin="0,18,0,0" />
+                </StackPanel>
+            </Grid>
+        </Window>
+        """;
+
+    private static string BuildWpfGreetingWindowXaml(string xamlClass) =>
+        $"""
+        <Window x:Class="{xamlClass}"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Greeting" Height="300" Width="440">
+            <Grid Margin="24">
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Greeting"
+                               FontSize="28"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,16" />
+                    <TextBox x:Name="NameTextBox"
+                             Height="34"
+                             Margin="0,0,0,12"
+                             VerticalContentAlignment="Center" />
+                    <Button Content="Say Hello"
+                            Height="38"
+                            Click="GreetButton_Click" />
+                    <TextBlock x:Name="GreetingTextBlock"
+                               FontSize="18"
+                               Margin="0,18,0,0" />
+                </StackPanel>
+            </Grid>
+        </Window>
+        """;
+
+    private static string BuildWpfTodoWindowXaml(string xamlClass) =>
+        $"""
+        <Window x:Class="{xamlClass}"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Todo List" Height="420" Width="500">
+            <Grid Margin="24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Todo List"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,16" />
+                <DockPanel Grid.Row="1" Margin="0,0,0,14">
+                    <Button Content="Add"
+                            Width="90"
+                            DockPanel.Dock="Right"
+                            Click="AddTaskButton_Click" />
+                    <TextBox x:Name="TaskTextBox"
+                             Height="34"
+                             Margin="0,0,10,0"
+                             VerticalContentAlignment="Center" />
+                </DockPanel>
+                <DockPanel Grid.Row="2">
+                    <Button Content="Remove Selected"
+                            Width="130"
+                            DockPanel.Dock="Bottom"
+                            Margin="0,12,0,0"
+                            Click="RemoveTaskButton_Click" />
+                    <ListBox x:Name="TasksListBox" />
+                </DockPanel>
+            </Grid>
+        </Window>
+        """;
+
     private static string BuildWpfCounterCodeBehind(string? namespaceName)
     {
         var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
@@ -13690,6 +13833,115 @@ public sealed class LocalCodingToolService(
                 {
                     _count++;
                     CounterTextBlock.Text = $"Count: {_count}";
+                }
+            }
+            """;
+    }
+
+    private static string BuildWpfCalculatorCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Windows;
+
+            {{namespaceLine}}public partial class MainWindow : Window
+            {
+                public MainWindow()
+                {
+                    InitializeComponent();
+                }
+
+                private void CalculateButton_Click(object sender, RoutedEventArgs e)
+                {
+                    if (!double.TryParse(FirstNumberTextBox.Text, out var firstNumber)
+                        || !double.TryParse(SecondNumberTextBox.Text, out var secondNumber))
+                    {
+                        ResultTextBlock.Text = "Enter two valid numbers.";
+                        return;
+                    }
+
+                    ResultTextBlock.Text = OperationComboBox.SelectedIndex switch
+                    {
+                        0 => $"{firstNumber} + {secondNumber} = {firstNumber + secondNumber}",
+                        1 => $"{firstNumber} - {secondNumber} = {firstNumber - secondNumber}",
+                        2 => $"{firstNumber} x {secondNumber} = {firstNumber * secondNumber}",
+                        3 when secondNumber != 0 => $"{firstNumber} / {secondNumber} = {firstNumber / secondNumber}",
+                        3 => "Cannot divide by zero.",
+                        _ => "Choose an operation."
+                    };
+                }
+            }
+            """;
+    }
+
+    private static string BuildWpfGreetingCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Windows;
+
+            {{namespaceLine}}public partial class MainWindow : Window
+            {
+                public MainWindow()
+                {
+                    InitializeComponent();
+                }
+
+                private void GreetButton_Click(object sender, RoutedEventArgs e)
+                {
+                    var name = string.IsNullOrWhiteSpace(NameTextBox.Text)
+                        ? "there"
+                        : NameTextBox.Text.Trim();
+                    GreetingTextBlock.Text = $"Hello, {name}!";
+                }
+            }
+            """;
+    }
+
+    private static string BuildWpfTodoCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Collections.ObjectModel;
+            using System.Windows;
+
+            {{namespaceLine}}public partial class MainWindow : Window
+            {
+                private readonly ObservableCollection<string> _tasks = new();
+
+                public MainWindow()
+                {
+                    InitializeComponent();
+                    TasksListBox.ItemsSource = _tasks;
+                }
+
+                private void AddTaskButton_Click(object sender, RoutedEventArgs e)
+                {
+                    var task = TaskTextBox.Text.Trim();
+                    if (task.Length == 0)
+                    {
+                        return;
+                    }
+
+                    _tasks.Add(task);
+                    TaskTextBox.Clear();
+                }
+
+                private void RemoveTaskButton_Click(object sender, RoutedEventArgs e)
+                {
+                    if (TasksListBox.SelectedItem is string selectedTask)
+                    {
+                        _tasks.Remove(selectedTask);
+                    }
                 }
             }
             """;
@@ -13721,12 +13973,50 @@ public sealed class LocalCodingToolService(
         }
 
         return MentionsAny(goal, "wpf", "xaml", "desktop window", "desktop app", "windowed app")
-               && (IsWpfCounterGoal(goal) || IsWpfHelloGoal(goal) || MentionsAny(goal, "button", "window", "screen"));
+               && (IsWpfCounterGoal(goal)
+                   || IsWpfCalculatorGoal(goal)
+                   || IsWpfGreetingGoal(goal)
+                   || IsWpfTodoGoal(goal)
+                   || IsWpfHelloGoal(goal)
+                   || MentionsAny(goal, "button", "window", "screen"));
+    }
+
+    private static bool NeedsWpfCodeBehind(string goal) =>
+        IsWpfCounterGoal(goal)
+        || IsWpfCalculatorGoal(goal)
+        || IsWpfGreetingGoal(goal)
+        || IsWpfTodoGoal(goal);
+
+    private static string ClassifyWpfStarterNote(string goal, string fileName)
+    {
+        var shape = IsWpfTodoGoal(goal)
+            ? "WPF todo-list"
+            : IsWpfCalculatorGoal(goal)
+                ? "WPF calculator"
+                : IsWpfGreetingGoal(goal)
+                    ? "WPF greeting-form"
+                    : IsWpfCounterGoal(goal)
+                        ? "WPF counter"
+                        : "WPF hello";
+        return $"{shape} {fileName} starter recipe.";
     }
 
     private static bool IsWpfCounterGoal(string goal) =>
         MentionsAny(goal, "counter", "count", "increment", "increase")
         && MentionsAny(goal, "button", "click", "press");
+
+    private static bool IsWpfCalculatorGoal(string goal) =>
+        MentionsAny(goal, "calculator", "calculate", "math", "arithmetic")
+        || (MentionsAny(goal, "add", "subtract", "multiply", "divide")
+            && MentionsAny(goal, "number", "numbers", "operation"));
+
+    private static bool IsWpfGreetingGoal(string goal) =>
+        MentionsAny(goal, "greeting", "say hello", "greeter", "ask for a name", "name textbox")
+        || (MentionsAny(goal, "hello") && MentionsAny(goal, "name", "textbox", "text box", "input"));
+
+    private static bool IsWpfTodoGoal(string goal) =>
+        MentionsAny(goal, "todo", "to-do", "task list", "tasks", "checklist")
+        && MentionsAny(goal, "add", "remove", "list", "selected", "button");
 
     private static bool IsWpfHelloGoal(string goal) =>
         MentionsAny(goal, "hello world", "hello-world", "says hello", "display hello");

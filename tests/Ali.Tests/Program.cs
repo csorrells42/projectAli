@@ -5417,7 +5417,70 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: projectPath);
 
-    var goal = "Build a simple WPF counter app with a button that increases the count on screen.";
+    await AssertWpfStarterAsync(
+        service,
+        xamlPath,
+        codeBehindPath,
+        "Build a simple WPF counter app with a button that increases the count on screen.",
+        ["CounterTextBlock", "IncrementButton_Click"],
+        ["private int _count;", "_count++;", "CounterTextBlock.Text"]);
+    await AssertWpfStarterAsync(
+        service,
+        xamlPath,
+        codeBehindPath,
+        "Build a simple WPF calculator app that can add, subtract, multiply, and divide two numbers.",
+        ["FirstNumberTextBox", "OperationComboBox", "CalculateButton_Click"],
+        ["CalculateButton_Click", "Cannot divide by zero.", "ResultTextBlock.Text"]);
+    await AssertWpfStarterAsync(
+        service,
+        xamlPath,
+        codeBehindPath,
+        "Build a simple WPF greeting app that asks for a name and says hello.",
+        ["NameTextBox", "GreetButton_Click", "GreetingTextBlock"],
+        ["GreetButton_Click", "Hello, {name}!", "GreetingTextBlock.Text"]);
+    await AssertWpfStarterAsync(
+        service,
+        xamlPath,
+        codeBehindPath,
+        "Build a simple WPF todo list app that can add tasks and remove the selected task.",
+        ["TaskTextBox", "TasksListBox", "RemoveTaskButton_Click"],
+        ["ObservableCollection<string>", "_tasks.Add", "_tasks.Remove"]);
+}
+
+static async Task AssertWpfStarterAsync(
+    LocalCodingToolService service,
+    string xamlPath,
+    string codeBehindPath,
+    string goal,
+    IReadOnlyList<string> expectedXamlSnippets,
+    IReadOnlyList<string> expectedCodeBehindSnippets)
+{
+    await File.WriteAllTextAsync(
+        xamlPath,
+        """
+        <Window x:Class="Demo.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="MainWindow" Height="450" Width="800">
+            <Grid />
+        </Window>
+        """);
+    await File.WriteAllTextAsync(
+        codeBehindPath,
+        """
+        using System.Windows;
+
+        namespace Demo;
+
+        public partial class MainWindow : Window
+        {
+            public MainWindow()
+            {
+                InitializeComponent();
+            }
+        }
+        """);
+
     var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
     Equal(true, preview.Handled);
     Equal(true, preview.Succeeded);
@@ -5428,11 +5491,15 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Equal(true, applied.Succeeded);
     var xaml = await File.ReadAllTextAsync(xamlPath);
     var codeBehind = await File.ReadAllTextAsync(codeBehindPath);
-    Contains("CounterTextBlock", xaml);
-    Contains("IncrementButton_Click", xaml);
-    Contains("private int _count;", codeBehind);
-    Contains("_count++;", codeBehind);
-    Contains("CounterTextBlock.Text", codeBehind);
+    foreach (var expected in expectedXamlSnippets)
+    {
+        Contains(expected, xaml);
+    }
+
+    foreach (var expected in expectedCodeBehindSnippets)
+    {
+        Contains(expected, codeBehind);
+    }
 }
 
 static async Task TestLocalCodingToolPreviewsBehaviorTestPatch()
