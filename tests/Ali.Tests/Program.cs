@@ -799,6 +799,11 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(CodingToolAction.ShowApplyGate, applyGateRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("post patch validation Save button", out var validationRouterRequest));
     Equal(CodingToolAction.ShowPostPatchValidationRouter, validationRouterRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("patch intelligence Save button", out var patchIntelligenceRequest));
+    Equal(CodingToolAction.ShowPatchPreviewIntelligence, patchIntelligenceRequest.Action);
+    Equal("Save button", patchIntelligenceRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("patch preview intelligence", out var barePatchIntelligenceRequest));
+    Equal(CodingToolAction.ShowPatchPreviewIntelligence, barePatchIntelligenceRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("show build feature lane", out var buildFeatureLaneRequest));
     Equal(CodingToolAction.ShowBuildFeatureLane, buildFeatureLaneRequest.Action);
 
@@ -3175,6 +3180,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     var patchSlices = await service.TryHandleAsync("patch slice plan Save button", CancellationToken.None);
     var applyGate = await service.TryHandleAsync("apply gate", CancellationToken.None);
     var validationRouter = await service.TryHandleAsync("post patch validation Save button", CancellationToken.None);
+    var patchIntelligence = await service.TryHandleAsync("patch intelligence Save button", CancellationToken.None);
     var buildFeatureLane = await service.TryHandleAsync("show build feature lane", CancellationToken.None);
 
     Contains("Workspace health score", health.Message);
@@ -3217,6 +3223,10 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Patch slice plan v1", patchSlices.Message);
     Contains("Apply gate v2", applyGate.Message);
     Contains("Post-patch validation router", validationRouter.Message);
+    Contains("Patch preview intelligence v1", patchIntelligence.Message);
+    Contains("Slice approval packet:", patchIntelligence.Message);
+    Contains("Patch preview gate v3:", patchIntelligence.Message);
+    Contains("Mini-Codex score audit:", patchIntelligence.Message);
     Contains("Build Feature lane", buildFeatureLane.Message);
 }
 
@@ -3527,6 +3537,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingBehaviorTestsCommand", dashboard);
     Contains("RunCodingImplementationSlicesCommand", dashboard);
     Contains("RunCodingPatchSlicesCommand", dashboard);
+    Contains("RunCodingPatchIntelligenceCommand", dashboard);
     Contains("RunCodingFeatureExecutionPacketCommand", dashboard);
     Contains("RunCodingApplyGateCommand", dashboard);
     Contains("RunCodingPostPatchValidationCommand", dashboard);
@@ -3544,6 +3555,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingBehaviorTestsCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingImplementationSlicesCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPatchSlicesCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatchIntelligenceCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingApplyGateCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingPostPatchValidationCommand = CreateAsyncCommand", viewModel);

@@ -684,6 +684,24 @@ public static class CodingToolRequestParser
         "validation router"
     ];
 
+    private static readonly string[] PatchPreviewIntelligencePrefixes =
+    [
+        "patch intelligence ",
+        "show patch intelligence ",
+        "patch preview intelligence ",
+        "show patch preview intelligence ",
+        "feature patch intelligence "
+    ];
+
+    private static readonly string[] PatchPreviewIntelligenceRequests =
+    [
+        "patch intelligence",
+        "show patch intelligence",
+        "patch preview intelligence",
+        "show patch preview intelligence",
+        "feature patch intelligence"
+    ];
+
     private static readonly string[] BuildFeatureLaneRequests =
     [
         "show build feature lane",
@@ -2584,6 +2602,9 @@ public static class CodingToolRequestParser
     private static bool IsPostPatchValidationRouterRequest(string text) =>
         PostPatchValidationRouterRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsPatchPreviewIntelligenceRequest(string text) =>
+        PatchPreviewIntelligenceRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsBuildFeatureLaneRequest(string text) =>
         BuildFeatureLaneRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
     private static bool IsShowLastPatchPreviewRequest(string text) =>
@@ -2737,7 +2758,8 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, BehaviorContractPrefixes, CodingToolAction.ShowBehaviorContract, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchSlicePlanPrefixes, CodingToolAction.ShowPatchSlicePlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ApplyGatePrefixes, CodingToolAction.ShowApplyGate, userConfirmed, out request)
-            || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request))
+            || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request))
         {
             return true;
         }
@@ -2805,6 +2827,12 @@ public static class CodingToolRequestParser
         if (IsPostPatchValidationRouterRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowPostPatchValidationRouter, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPatchPreviewIntelligenceRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatchPreviewIntelligence, null, UserConfirmed: userConfirmed);
             return true;
         }
 

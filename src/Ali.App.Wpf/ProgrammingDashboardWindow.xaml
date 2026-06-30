@@ -140,6 +140,8 @@
                                         Command="{Binding RunCodingImplementationSlicesCommand}" />
                                 <Button Content="Patch Slices"
                                         Command="{Binding RunCodingPatchSlicesCommand}" />
+                                <Button Content="Patch Intelligence"
+                                        Command="{Binding RunCodingPatchIntelligenceCommand}" />
                                 <Button Content="Execution Packet"
                                         Command="{Binding RunCodingFeatureExecutionPacketCommand}" />
                                 <Button Content="Apply Gate"

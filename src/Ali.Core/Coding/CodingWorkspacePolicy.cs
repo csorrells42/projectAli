@@ -155,6 +155,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowPatchSlicePlan
             or CodingToolAction.ShowApplyGate
             or CodingToolAction.ShowPostPatchValidationRouter
+            or CodingToolAction.ShowPatchPreviewIntelligence
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex
             or CodingToolAction.ShowOwnershipMap

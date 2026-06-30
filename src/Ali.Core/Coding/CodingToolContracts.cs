@@ -55,6 +55,7 @@ public enum CodingToolAction
     ShowPatchSlicePlan,
     ShowApplyGate,
     ShowPostPatchValidationRouter,
+    ShowPatchPreviewIntelligence,
     ShowBuildFeatureLane,
     ShowCSharpSymbolIndex,
     ShowOwnershipMap,

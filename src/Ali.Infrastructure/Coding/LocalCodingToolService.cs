@@ -288,6 +288,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowPatchSlicePlan => await ShowPatchSlicePlanAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowApplyGate => await ShowApplyGateAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowBuildFeatureLane => await ShowBuildFeatureLaneAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
             CodingToolAction.ShowOwnershipMap => await ShowOwnershipMapAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8398,6 +8399,37 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Post-patch validation router", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowPatchPreviewIntelligenceAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var lines = new List<string>
+        {
+            "Patch preview intelligence v1:",
+            "No files were changed.",
+            $"Goal: {context.Goal}",
+            $"Plan confidence: {context.ImpactScore.Score}/100 ({context.ImpactScore.Confidence})",
+            "Slice approval packet:"
+        };
+        lines.AddRange(BuildPatchSliceApprovalRows(context).Select(row => $"- {row}"));
+        lines.Add("Deterministic patch draft planner:");
+        lines.AddRange(BuildDeterministicPatchDraftRows(context).Select(row => $"- {row}"));
+        lines.Add("Route-aware patch templates:");
+        lines.AddRange(BuildRouteAwarePatchTemplateRows(context).Select(row => $"- {row}"));
+        lines.Add("Patch preview gate v3:");
+        lines.AddRange(BuildPatchPreviewGateRows(context).Select(row => $"- {row}"));
+        lines.Add("Test stub preview bundle:");
+        lines.AddRange(BuildTestStubRows(context).Take(4).Select(row => $"- {row}"));
+        lines.Add("Failure repair linkage:");
+        lines.AddRange(BuildFailureRepairLinkRows().Select(row => $"- {row}"));
+        lines.Add("Completion receipt v3:");
+        lines.AddRange(BuildCompletionReceiptV3Rows(context, latestValidation).Select(row => $"- {row}"));
+        lines.Add("Mini-Codex score audit:");
+        lines.AddRange(BuildMiniCodexScoreAuditRows(context, latestValidation, _lastPatchPreviewRequest is not null).Select(row => $"- {row}"));
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Patch preview intelligence", Policy.WorkspaceRoot);
+    }
+
     private static IReadOnlyList<string> BuildBehaviorContractRows(FeatureWorkContext context)
     {
         var topTarget = context.RankedTargets.FirstOrDefault();
@@ -8468,6 +8500,199 @@ public sealed class LocalCodingToolService(
             protectedReady ? "Protected files: Good - no generated/designer candidates." : $"Protected files: Review - {FormatInlineList(protectedFiles)}.",
             ready ? "Gate result: Ready for patch preview only." : "Gate result: Hold before patch preview/apply.",
             "Apply boundary: preview the patch bundle first; apply only after the visible diff matches the contract."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildPatchSliceApprovalRows(FeatureWorkContext context)
+    {
+        var rows = new List<string>();
+        rows.AddRange(BuildPatchSliceRows(context).Take(3));
+        rows.AddRange(BuildApplyGateRows(context)
+            .Where(row => row.StartsWith("Target confidence:", StringComparison.OrdinalIgnoreCase)
+                || row.StartsWith("Test target:", StringComparison.OrdinalIgnoreCase)
+                || row.StartsWith("Gate result:", StringComparison.OrdinalIgnoreCase))
+            .Take(3));
+        rows.Add("Approval boundary: owner reviews the visible patch preview before any apply step.");
+        return rows;
+    }
+
+    private static IReadOnlyList<string> BuildDeterministicPatchDraftRows(FeatureWorkContext context)
+    {
+        var rows = new List<string>();
+        var targets = context.RankedTargets.Count > 0
+            ? context.RankedTargets.Select(target => target.RelativePath).ToList()
+            : context.RelativeCandidateFiles.ToList();
+        foreach (var path in targets.Take(6))
+        {
+            rows.Add($"{path}: {ClassifyPatchDraftTemplate(path)}");
+        }
+
+        if (rows.Count == 0)
+        {
+            rows.Add("Hold - no file target is resolved yet; inspect workspace or project index first.");
+        }
+
+        rows.Add("Draft rule: produce exact before/after text only after target confidence and validation rows are present.");
+        return rows;
+    }
+
+    private static string ClassifyPatchDraftTemplate(string path)
+    {
+        if (path.Contains("CodingToolContracts", StringComparison.OrdinalIgnoreCase))
+        {
+            return "action enum draft";
+        }
+
+        if (path.Contains("CodingToolRequestParser", StringComparison.OrdinalIgnoreCase))
+        {
+            return "parser phrase draft";
+        }
+
+        if (path.Contains("CodingWorkspacePolicy", StringComparison.OrdinalIgnoreCase))
+        {
+            return "read-only/write policy draft";
+        }
+
+        if (path.Contains("LocalCodingToolService", StringComparison.OrdinalIgnoreCase))
+        {
+            return "service handler and output draft";
+        }
+
+        if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dashboard binding draft";
+        }
+
+        if (path.Contains("MainWindowViewModel", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ICommand and compact summary draft";
+        }
+
+        if (path.Contains("Tests", StringComparison.OrdinalIgnoreCase) || path.Contains("Program.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return "parser, service, and dashboard regression assertion draft";
+        }
+
+        return "source edit draft";
+    }
+
+    private static IReadOnlyList<string> BuildRouteAwarePatchTemplateRows(FeatureWorkContext context)
+    {
+        var paths = context.RelativeCandidateFiles;
+        var commandSurfaceLikely = paths.Any(path => path.Contains("CodingTool", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("LocalCodingToolService", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("ProgrammingDashboardWindow", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("MainWindowViewModel", StringComparison.OrdinalIgnoreCase));
+        if (!commandSurfaceLikely)
+        {
+            return
+            [
+                "1. Behavior: state the owner-facing result in one sentence.",
+                "2. Source: patch the smallest owning file first.",
+                "3. Tests: add or update the nearest behavior check.",
+                "4. Validation: run targeted test, build, then review changes.",
+                "5. Receipt: capture latest validation and commit readiness."
+            ];
+        }
+
+        return
+        [
+            "1. Contract: add or reuse CodingToolAction for the owner phrase.",
+            "2. Parser: route exact and prefixed phrases to that action.",
+            "3. Policy: mark planning/inspection as read-only or edits as confirmation-gated.",
+            "4. Service: add switch handler plus compact, plain-language rows.",
+            "5. Dashboard: add one button only when it reduces user friction.",
+            "6. Tests: parser action, service heading, dashboard command binding."
+        ];
+    }
+
+    private IReadOnlyList<string> BuildPatchPreviewGateRows(FeatureWorkContext context)
+    {
+        var rows = BuildApplyGateRows(context)
+            .Where(row => row.StartsWith("Target confidence:", StringComparison.OrdinalIgnoreCase)
+                || row.StartsWith("Test target:", StringComparison.OrdinalIgnoreCase)
+                || row.StartsWith("Protected files:", StringComparison.OrdinalIgnoreCase)
+                || row.StartsWith("Gate result:", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        rows.Add(_lastPatchPreviewRequest is null
+            ? "Pending preview: none - preview the exact patch bundle before apply."
+            : $"Pending preview: loaded - {_lastPatchPreviewRequest.Action} is waiting for review.");
+        rows.Add("Cycle guard: never apply a stale preview after new file changes or failed validation.");
+        return rows;
+    }
+
+    private IReadOnlyList<string> BuildFailureRepairLinkRows()
+    {
+        if (_lastDotNetRequest is null || _lastDotNetResult is null)
+        {
+            return
+            [
+                "Last validation: Waiting - no build/test result is loaded.",
+                "Repair route: run targeted validation after preview, then link failures back to the smallest patch slice."
+            ];
+        }
+
+        if (_lastDotNetResult.Succeeded)
+        {
+            return
+            [
+                $"Last validation: Good - {_lastDotNetRequest.Action} passed.",
+                "Repair route: no active validation failure."
+            ];
+        }
+
+        var diagnostic = _lastDotNetResult.Message
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(line => line.Contains("error", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("failed", StringComparison.OrdinalIgnoreCase))
+            ?? "failure details need inspection";
+        return
+        [
+            $"Last validation: Bad - {_lastDotNetRequest.Action} failed.",
+            $"First diagnostic: {TrimForChat(diagnostic, 180)}",
+            "Repair route: map the diagnostic to file, symbol, route, or dashboard binding before drafting another patch."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildCompletionReceiptV3Rows(FeatureWorkContext context, CodingReceipt? latestValidation)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault()?.RelativePath ?? "none resolved yet";
+        return
+        [
+            $"Goal: {context.Goal}",
+            $"Top target: {topTarget}",
+            $"Test command: {(string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "none resolved yet" : context.TestTarget.Command)}",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            $"Risk labels: {FormatInlineList(context.RiskLabels)}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildMiniCodexScoreAuditRows(
+        FeatureWorkContext context,
+        CodingReceipt? latestValidation,
+        bool hasPendingPreview)
+    {
+        var target = context.RankedTargets.FirstOrDefault();
+        var targetGood = target is not null && !target.Confidence.Equals("Low", StringComparison.OrdinalIgnoreCase);
+        var testGood = !string.IsNullOrWhiteSpace(context.TestTarget.Command);
+        var validationGood = latestValidation?.Succeeded == true;
+        var routeGood = context.RelativeCandidateFiles.Any(path => path.Contains("Coding", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("Wpf", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase));
+        var estimate = 90
+            + (targetGood ? 2 : 0)
+            + (testGood ? 2 : 0)
+            + (validationGood ? 2 : 0)
+            + (routeGood ? 1 : 0)
+            - (hasPendingPreview ? 1 : 0);
+        estimate = Math.Clamp(estimate, 88, 97);
+        return
+        [
+            targetGood ? $"Target confidence: Good - {target!.RelativePath} ({target.Confidence})." : "Target confidence: Review - resolve a medium/high target.",
+            testGood ? $"Test readiness: Good - {context.TestTarget.Command}." : "Test readiness: Review - targeted test command missing.",
+            validationGood ? "Validation receipt: Good - latest build/test passed." : "Validation receipt: Review - no passing build/test receipt in memory.",
+            routeGood ? "Route template: Good - command/dashboard pattern detected." : "Route template: Review - use generic source/test/receipt path.",
+            $"Score estimate: {estimate}% local mini-Codex readiness for this slice."
         ];
     }
 
@@ -8664,6 +8889,8 @@ public sealed class LocalCodingToolService(
         AddSelectedLines(lines, execution.Message, 6, "Plan confidence:", "Plan reasons:", "- High", "- Medium", "- Low", "- Test target:");
         lines.Add("Apply gate:");
         lines.AddRange(BuildApplyGateRows(context).Take(4).Select(row => $"- {row}"));
+        lines.Add("Patch intelligence:");
+        lines.AddRange(BuildPatchPreviewGateRows(context).Take(3).Select(row => $"- {row}"));
         lines.Add("Validation router:");
         lines.AddRange(BuildPostPatchValidationRows(context).Take(4).Select(row => $"- {row}"));
         AddSelectedLines(lines, stop.Message, 4, "Changed files:", "Latest validation:", "- Validation", "- File count", "- No generated");

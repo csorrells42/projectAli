@@ -282,6 +282,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingBehaviorTestsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Behavior tests", "behavior test plan current feature", "Coding.BehaviorTests"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingImplementationSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation slices", "implementation slice plan current feature", "Coding.ImplementationSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPatchSlicesCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch slices", "patch slice plan current feature", "Coding.PatchSlices"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch intelligence", "patch intelligence current feature", "Coding.PatchIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature execution packet", "feature execution packet current feature", "Coding.FeatureExecutionPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingApplyGateCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply gate", "apply gate current feature", "Coding.ApplyGate"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPostPatchValidationCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation router", "post patch validation current feature", "Coding.PostPatchValidation"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -746,6 +747,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingImplementationSlicesCommand { get; }
 
     public ICommand RunCodingPatchSlicesCommand { get; }
+
+    public ICommand RunCodingPatchIntelligenceCommand { get; }
 
     public ICommand RunCodingFeatureExecutionPacketCommand { get; }
 
@@ -3555,13 +3558,22 @@ public sealed class MainWindowViewModel : ObservableObject
             "Risk-aware test depth:",
             "Scores:",
             "Closeout checklist:",
+            "Patch intelligence:",
+            "Slice approval packet:",
+            "Patch preview gate v3:",
+            "Mini-Codex score audit:",
             "- Input:",
             "- Expected result:",
             "- Failure behavior:",
             "- Permission boundary:",
             "- Target confidence:",
+            "- Test readiness:",
+            "- Validation receipt:",
+            "- Route template:",
+            "- Score estimate:",
             "- Protected files:",
             "- Gate result:",
+            "- Pending preview:",
             "- Final:",
             "- Codebase awareness:",
             "- Edit planning:",
@@ -6865,6 +6877,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingPatchSlicesCommand is AsyncRelayCommand runCodingPatchSlices)
         {
             runCodingPatchSlices.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatchIntelligenceCommand is AsyncRelayCommand runCodingPatchIntelligence)
+        {
+            runCodingPatchIntelligence.RaiseCanExecuteChanged();
         }
 
         if (RunCodingFeatureExecutionPacketCommand is AsyncRelayCommand runCodingFeatureExecutionPacket)
