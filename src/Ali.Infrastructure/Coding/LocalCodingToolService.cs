@@ -14270,6 +14270,11 @@ public sealed class LocalCodingToolService(
                 </ResourceDictionary>
             </Window.Resources>
 
+            <Window.InputBindings>
+                <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
+                <KeyBinding Key="Escape" Command="{Binding CancelRefreshCommand}" />
+            </Window.InputBindings>
+
             <DockPanel>
                 <Menu DockPanel.Dock="Top">
                     <MenuItem Header="_File">
@@ -14310,7 +14315,7 @@ public sealed class LocalCodingToolService(
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="Project Dashboard" Style="{StaticResource DashboardHeaderTextStyle}" />
-                                <TextBlock Text="Navigation, tabs, data, details, and status in one resizable WPF shell." Style="{StaticResource DashboardSubtleTextStyle}" />
+                                <TextBlock Text="{Binding SelectedNavigationSummary}" Style="{StaticResource DashboardSubtleTextStyle}" />
                             </StackPanel>
                         </DockPanel>
                     </Border>
@@ -14325,18 +14330,24 @@ public sealed class LocalCodingToolService(
                         </Grid.ColumnDefinitions>
 
                         <GroupBox Header="Navigation" Style="{StaticResource DashboardPaneGroupBoxStyle}">
-                            <TreeView x:Name="NavigationTreeView">
-                                <TreeViewItem Header="Workspace" IsExpanded="True">
-                                    <TreeViewItem Header="Overview" />
-                                    <TreeViewItem Header="Activity" />
-                                    <TreeViewItem Header="Settings" />
-                                </TreeViewItem>
+                            <TreeView x:Name="NavigationTreeView" ItemsSource="{Binding NavigationItems}">
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                        <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                        <TextBlock Text="{Binding Header}" />
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
                             </TreeView>
                         </GroupBox>
 
                         <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" />
 
-                        <TabControl Grid.Column="2" Margin="10,0">
+                        <TabControl Grid.Column="2" Margin="10,0" SelectedIndex="{Binding SelectedViewIndex, Mode=TwoWay}">
                             <TabItem Header="Overview">
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -14908,6 +14919,10 @@ public sealed class LocalCodingToolService(
                 private CancellationTokenSource? _refreshCancellation;
                 private bool _isBusy;
                 private string _progressText = "Idle";
+                private DashboardNavigationItem? _selectedNavigation;
+                private string _selectedNavigationSummary = "Navigation, tabs, data, details, and status in one resizable WPF shell.";
+                private int _selectedViewIndex;
+                private bool _synchronizingNavigation;
                 private DashboardItem? _selectedItem;
                 private string _statusText = "Ready";
 
@@ -14919,6 +14934,7 @@ public sealed class LocalCodingToolService(
                     RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
                     CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
+                    SeedNavigation();
                     SeedDashboard();
                 }
 
@@ -14931,6 +14947,8 @@ public sealed class LocalCodingToolService(
                 public ICollectionView ItemsView { get; }
 
                 public ObservableCollection<string> Activity { get; } = new();
+
+                public ObservableCollection<DashboardNavigationItem> NavigationItems { get; } = new();
 
                 public ICommand RefreshCommand { get; }
 
@@ -14957,6 +14975,30 @@ public sealed class LocalCodingToolService(
                 }
 
                 public bool HasErrors => _errors.Count > 0;
+
+                public DashboardNavigationItem? SelectedNavigation
+                {
+                    get => _selectedNavigation;
+                    private set => SetField(ref _selectedNavigation, value);
+                }
+
+                public string SelectedNavigationSummary
+                {
+                    get => _selectedNavigationSummary;
+                    private set => SetField(ref _selectedNavigationSummary, value);
+                }
+
+                public int SelectedViewIndex
+                {
+                    get => _selectedViewIndex;
+                    set
+                    {
+                        if (SetField(ref _selectedViewIndex, value) && !_synchronizingNavigation)
+                        {
+                            SelectNavigationByViewIndex(value);
+                        }
+                    }
+                }
 
                 public string SearchText
                 {
@@ -15005,6 +15047,78 @@ public sealed class LocalCodingToolService(
                 {
                     get => _statusText;
                     private set => SetField(ref _statusText, value);
+                }
+
+                private void SeedNavigation()
+                {
+                    NavigationItems.Clear();
+                    var overview = CreateNavigationItem("Overview", "Review current dashboard items, filters, and selected detail records.", 0);
+                    var activity = CreateNavigationItem("Activity", "Inspect recent dashboard activity and refresh history.", 1);
+                    var settings = CreateNavigationItem("Settings", "Settings are represented as a navigation state until a dedicated settings view is added.", 0);
+                    var workspace = CreateNavigationItem("Workspace", "Project workspace navigation.", 0);
+                    workspace.IsExpanded = true;
+                    workspace.Children.Add(overview);
+                    workspace.Children.Add(activity);
+                    workspace.Children.Add(settings);
+                    NavigationItems.Add(workspace);
+                    overview.IsSelected = true;
+                }
+
+                private DashboardNavigationItem CreateNavigationItem(string header, string summary, int viewIndex) =>
+                    new(header, summary, viewIndex, SelectNavigationItem);
+
+                private void SelectNavigationByViewIndex(int viewIndex)
+                {
+                    var match = FindNavigationItemByViewIndex(NavigationItems, viewIndex);
+                    if (match is not null)
+                    {
+                        match.IsSelected = true;
+                    }
+                }
+
+                private DashboardNavigationItem? FindNavigationItemByViewIndex(IEnumerable<DashboardNavigationItem> items, int viewIndex)
+                {
+                    foreach (var item in items)
+                    {
+                        if (item.ViewIndex == viewIndex && item.Children.Count == 0)
+                        {
+                            return item;
+                        }
+
+                        var childMatch = FindNavigationItemByViewIndex(item.Children, viewIndex);
+                        if (childMatch is not null)
+                        {
+                            return childMatch;
+                        }
+                    }
+
+                    return null;
+                }
+
+                private void SelectNavigationItem(DashboardNavigationItem item)
+                {
+                    if (_synchronizingNavigation)
+                    {
+                        return;
+                    }
+
+                    _synchronizingNavigation = true;
+                    try
+                    {
+                        if (SelectedNavigation is not null && !ReferenceEquals(SelectedNavigation, item))
+                        {
+                            SelectedNavigation.IsSelected = false;
+                        }
+
+                        SelectedNavigation = item;
+                        SelectedNavigationSummary = item.Summary;
+                        SelectedViewIndex = item.ViewIndex;
+                        StatusText = $"View: {item.Header}";
+                    }
+                    finally
+                    {
+                        _synchronizingNavigation = false;
+                    }
                 }
 
                 private void SeedDashboard()
@@ -15198,6 +15312,61 @@ public sealed class LocalCodingToolService(
                 }
 
                 public sealed record DashboardItem(string Name, string Owner, string Status);
+
+                public sealed class DashboardNavigationItem : INotifyPropertyChanged
+                {
+                    private readonly Action<DashboardNavigationItem> _select;
+                    private bool _isExpanded;
+                    private bool _isSelected;
+
+                    public DashboardNavigationItem(string header, string summary, int viewIndex, Action<DashboardNavigationItem> select)
+                    {
+                        Header = header;
+                        Summary = summary;
+                        ViewIndex = viewIndex;
+                        _select = select;
+                    }
+
+                    public event PropertyChangedEventHandler? PropertyChanged;
+
+                    public string Header { get; }
+
+                    public string Summary { get; }
+
+                    public int ViewIndex { get; }
+
+                    public ObservableCollection<DashboardNavigationItem> Children { get; } = new();
+
+                    public bool IsExpanded
+                    {
+                        get => _isExpanded;
+                        set => SetField(ref _isExpanded, value);
+                    }
+
+                    public bool IsSelected
+                    {
+                        get => _isSelected;
+                        set
+                        {
+                            if (SetField(ref _isSelected, value) && value)
+                            {
+                                _select(this);
+                            }
+                        }
+                    }
+
+                    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+                    {
+                        if (Equals(field, value))
+                        {
+                            return false;
+                        }
+
+                        field = value;
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+                        return true;
+                    }
+                }
 
                 private sealed class AsyncRelayCommand : ICommand
                 {
