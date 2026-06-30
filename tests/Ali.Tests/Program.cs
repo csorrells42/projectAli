@@ -5573,10 +5573,17 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         xamlPath,
         codeBehindPath,
         "Build a WPF complex project dashboard window with navigation, tabs, a data grid, details pane, and status bar.",
-        ["NavigationTreeView", "ItemsSource=\"{Binding Items}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
+        ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "DashboardHeaderCardStyle", "NavigationTreeView", "ItemsSource=\"{Binding Items}\"", "GridSplitter", "StatusBar", "TabControl", "Command=\"{Binding AddItemCommand}\""],
         ["DataContext = new MainWindowViewModel();"],
         "MainWindowViewModel.cs",
         ["INotifyPropertyChanged", "ObservableCollection<DashboardItem>", "ICommand RefreshCommand", "RelayCommand", "CanExecuteChanged"]);
+    var dashboardStylesPath = Path.Combine(projectDirectory, "AliDashboardStyles.xaml");
+    Equal(true, File.Exists(dashboardStylesPath));
+    var dashboardStyles = await File.ReadAllTextAsync(dashboardStylesPath);
+    AssertXamlWellFormed(dashboardStyles);
+    Contains("ResourceDictionary", dashboardStyles);
+    Contains("DashboardPrimaryButtonStyle", dashboardStyles);
+    Contains("Style.Triggers", dashboardStyles);
 }
 
 static async Task AssertWpfStarterAsync(

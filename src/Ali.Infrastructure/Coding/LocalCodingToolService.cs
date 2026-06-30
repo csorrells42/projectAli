@@ -12881,6 +12881,20 @@ public sealed class LocalCodingToolService(
                     continue;
                 }
 
+                if (!hasTransform
+                    && TryBuildNewWpfStylesPatchBlock(context.Goal, fullPath, out var newWpfStylesText, out var newWpfStylesNote))
+                {
+                    candidates.Add(new FeaturePatchSynthesisCandidate(
+                        RelativeToWorkspace(fullPath),
+                        fullPath,
+                        "deterministic WPF ResourceDictionary recipe",
+                        string.Empty,
+                        newWpfStylesText,
+                        true,
+                        newWpfStylesNote));
+                    continue;
+                }
+
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
                     fullPath,
@@ -13087,6 +13101,7 @@ public sealed class LocalCodingToolService(
                 if (IsWpfComplexWindowGoal(context.Goal))
                 {
                     AddIfSafeNewWpfViewModelTarget(targets, Path.Combine(primaryDirectory, "MainWindowViewModel.cs"));
+                    AddIfSafeNewWpfStylesTarget(targets, Path.Combine(primaryDirectory, "AliDashboardStyles.xaml"));
                 }
             }
         }
@@ -13135,6 +13150,14 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private void AddIfSafeNewWpfStylesTarget(List<string> targets, string path)
+    {
+        if (IsSafeNewWpfStylesPath(path))
+        {
+            targets.Add(path);
+        }
+    }
+
     private bool IsEditableWpfSurfaceFile(string path) =>
         File.Exists(path)
         && IsSafeWpfSurfacePath(path);
@@ -13164,6 +13187,12 @@ public sealed class LocalCodingToolService(
                && !IsBuildArtifactPath(path)
                && !IsGeneratedOrDesignerFile(path);
     }
+
+    private bool IsSafeNewWpfStylesPath(string path) =>
+        Path.GetFileName(path).Equals("AliDashboardStyles.xaml", StringComparison.OrdinalIgnoreCase)
+        && Policy.IsInsideWorkspace(path)
+        && !IsBuildArtifactPath(path)
+        && !IsGeneratedOrDesignerFile(path);
 
     private bool IsEditableProgramFile(string path) =>
         File.Exists(path)
@@ -14194,6 +14223,14 @@ public sealed class LocalCodingToolService(
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                 Title="Project Dashboard" Height="620" Width="980" MinHeight="520" MinWidth="760">
+            <Window.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.MergedDictionaries>
+                        <ResourceDictionary Source="AliDashboardStyles.xaml" />
+                    </ResourceDictionary.MergedDictionaries>
+                </ResourceDictionary>
+            </Window.Resources>
+
             <DockPanel>
                 <Menu DockPanel.Dock="Top">
                     <MenuItem Header="_File">
@@ -14217,12 +14254,12 @@ public sealed class LocalCodingToolService(
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Border Padding="14" Margin="0,0,0,12" Background="#202A36" CornerRadius="4">
+                    <Border Style="{StaticResource DashboardHeaderCardStyle}">
                         <DockPanel>
-                            <Button Content="Refresh" Width="92" DockPanel.Dock="Right" Command="{Binding RefreshCommand}" />
+                            <Button Content="Refresh" DockPanel.Dock="Right" Command="{Binding RefreshCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
                             <StackPanel>
-                                <TextBlock Text="Project Dashboard" FontSize="24" FontWeight="SemiBold" Foreground="White" />
-                                <TextBlock Text="Navigation, tabs, data, details, and status in one resizable WPF shell." Foreground="#C8D2DF" />
+                                <TextBlock Text="Project Dashboard" Style="{StaticResource DashboardHeaderTextStyle}" />
+                                <TextBlock Text="Navigation, tabs, data, details, and status in one resizable WPF shell." Style="{StaticResource DashboardSubtleTextStyle}" />
                             </StackPanel>
                         </DockPanel>
                     </Border>
@@ -14236,7 +14273,7 @@ public sealed class LocalCodingToolService(
                             <ColumnDefinition Width="280" MinWidth="220" />
                         </Grid.ColumnDefinitions>
 
-                        <GroupBox Header="Navigation" Padding="8">
+                        <GroupBox Header="Navigation" Style="{StaticResource DashboardPaneGroupBoxStyle}">
                             <TreeView x:Name="NavigationTreeView">
                                 <TreeViewItem Header="Workspace" IsExpanded="True">
                                     <TreeViewItem Header="Overview" />
@@ -14270,12 +14307,12 @@ public sealed class LocalCodingToolService(
 
                         <GridSplitter Grid.Column="3" Width="5" HorizontalAlignment="Stretch" />
 
-                        <GroupBox Grid.Column="4" Header="Details" Padding="10">
+                        <GroupBox Grid.Column="4" Header="Details" Style="{StaticResource DashboardPaneGroupBoxStyle}">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel>
                                     <TextBlock Text="Add item" FontWeight="SemiBold" Margin="0,0,0,8" />
                                     <TextBox Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged}" Height="32" Margin="0,0,0,8" VerticalContentAlignment="Center" />
-                                    <Button Content="Add Item" Height="34" Command="{Binding AddItemCommand}" />
+                                    <Button Content="Add Item" Command="{Binding AddItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
                                     <Separator Margin="0,16" />
                                     <TextBlock Text="Use the splitters to resize panes. The center grid virtualizes rows for larger data sets." TextWrapping="Wrap" />
                                 </StackPanel>
@@ -14570,6 +14607,79 @@ public sealed class LocalCodingToolService(
             }
             """;
     }
+
+    private static bool TryBuildNewWpfStylesPatchBlock(
+        string goal,
+        string fullPath,
+        out string newText,
+        out string note)
+    {
+        newText = string.Empty;
+        note = string.Empty;
+        if (!IsWpfComplexWindowGoal(goal)
+            || !Path.GetFileName(fullPath).Equals("AliDashboardStyles.xaml", StringComparison.OrdinalIgnoreCase)
+            || File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        newText = BuildWpfDashboardStylesXaml();
+        note = "WPF complex-dashboard ResourceDictionary starter recipe.";
+        return true;
+    }
+
+    private static string BuildWpfDashboardStylesXaml() =>
+        """
+        <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <SolidColorBrush x:Key="DashboardHeaderBrush" Color="#202A36" />
+            <SolidColorBrush x:Key="DashboardHeaderForegroundBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="DashboardSubtleForegroundBrush" Color="#C8D2DF" />
+            <SolidColorBrush x:Key="DashboardAccentBrush" Color="#1F6FEB" />
+            <SolidColorBrush x:Key="DashboardAccentHoverBrush" Color="#2F81F7" />
+
+            <Style x:Key="DashboardHeaderCardStyle" TargetType="Border">
+                <Setter Property="Padding" Value="14" />
+                <Setter Property="Margin" Value="0,0,0,12" />
+                <Setter Property="Background" Value="{StaticResource DashboardHeaderBrush}" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+
+            <Style x:Key="DashboardHeaderTextStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="24" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{StaticResource DashboardHeaderForegroundBrush}" />
+            </Style>
+
+            <Style x:Key="DashboardSubtleTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource DashboardSubtleForegroundBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+
+            <Style x:Key="DashboardPrimaryButtonStyle" TargetType="Button">
+                <Setter Property="MinWidth" Value="92" />
+                <Setter Property="Height" Value="34" />
+                <Setter Property="Padding" Value="12,0" />
+                <Setter Property="Background" Value="{StaticResource DashboardAccentBrush}" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="{StaticResource DashboardAccentHoverBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.55" />
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="DashboardPaneGroupBoxStyle" TargetType="GroupBox">
+                <Setter Property="Padding" Value="10" />
+                <Setter Property="Margin" Value="0" />
+            </Style>
+        </ResourceDictionary>
+        """;
 
     private static string BuildWpfComplexDashboardViewModel(string? namespaceName)
     {
