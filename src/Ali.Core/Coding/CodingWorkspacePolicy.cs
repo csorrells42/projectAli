@@ -188,6 +188,17 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFailureToPatchV3
             or CodingToolAction.ShowSemanticChangeReceipt
             or CodingToolAction.ShowValidationChainPlanner
+            or CodingToolAction.ShowActiveWorkspaceProject
+            or CodingToolAction.ShowOwnerApprovedApplyPacket
+            or CodingToolAction.ShowRoslynInsertionPlanner
+            or CodingToolAction.ShowIntentDiffComposer
+            or CodingToolAction.ShowBehaviorSpecTestScaffold
+            or CodingToolAction.ShowRepeatFailureMemory
+            or CodingToolAction.ShowFirstDiagnosticRepairRoute
+            or CodingToolAction.ShowValidationCommandMinimizer
+            or CodingToolAction.ShowUiBindingRepairPlanner
+            or CodingToolAction.ShowAuthoringSequenceFlow
+            or CodingToolAction.ShowPlainEnglishCodingCapabilityCard
             or CodingToolAction.ShowPlainEnglishFeatureBuilder
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex

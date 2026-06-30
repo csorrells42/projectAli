@@ -1074,8 +1074,7 @@ public static class CodingToolRequestParser
         "behavior test generator ",
         "behavior test generator v2 ",
         "generate behavior test ",
-        "test generator v2 ",
-        "behavior spec test "
+        "test generator v2 "
     ];
 
     private static readonly string[] BehaviorTestGeneratorV2Requests =
@@ -1083,8 +1082,7 @@ public static class CodingToolRequestParser
         "behavior test generator",
         "behavior test generator v2",
         "generate behavior test",
-        "test generator v2",
-        "behavior spec test"
+        "test generator v2"
     ];
 
     private static readonly string[] ImplementationSliceStatePrefixes =
@@ -1319,6 +1317,205 @@ public static class CodingToolRequestParser
         "build test chain",
         "post patch validation chain",
         "validation order planner"
+    ];
+
+    private static readonly string[] ActiveWorkspaceProjectPrefixes =
+    [
+        "active workspace project ",
+        "active coding workspace ",
+        "current coding workspace ",
+        "current workspace project ",
+        "which project are we working on "
+    ];
+
+    private static readonly string[] ActiveWorkspaceProjectRequests =
+    [
+        "active workspace project",
+        "active coding workspace",
+        "current coding workspace",
+        "current workspace project",
+        "which project are we working on",
+        "how do you know the current project"
+    ];
+
+    private static readonly string[] OwnerApprovedApplyPacketPrefixes =
+    [
+        "owner approved apply packet ",
+        "apply packet ",
+        "owner apply packet ",
+        "review apply packet ",
+        "safe apply packet "
+    ];
+
+    private static readonly string[] OwnerApprovedApplyPacketRequests =
+    [
+        "owner approved apply packet",
+        "apply packet",
+        "owner apply packet",
+        "review apply packet",
+        "safe apply packet"
+    ];
+
+    private static readonly string[] RoslynInsertionPlannerPrefixes =
+    [
+        "roslyn insertion planner ",
+        "insertion planner ",
+        "method insertion planner ",
+        "property insertion planner ",
+        "class insertion planner "
+    ];
+
+    private static readonly string[] RoslynInsertionPlannerRequests =
+    [
+        "roslyn insertion planner",
+        "insertion planner",
+        "method insertion planner",
+        "property insertion planner",
+        "class insertion planner"
+    ];
+
+    private static readonly string[] IntentDiffComposerPrefixes =
+    [
+        "intent diff composer ",
+        "intent to diff ",
+        "compose intent diff ",
+        "multi file intent diff ",
+        "feature diff composer "
+    ];
+
+    private static readonly string[] IntentDiffComposerRequests =
+    [
+        "intent diff composer",
+        "intent to diff",
+        "compose intent diff",
+        "multi file intent diff",
+        "feature diff composer"
+    ];
+
+    private static readonly string[] BehaviorSpecTestScaffoldPrefixes =
+    [
+        "behavior spec test scaffold ",
+        "behavior spec tests ",
+        "spec test scaffold ",
+        "acceptance test scaffold ",
+        "test scaffold from behavior "
+    ];
+
+    private static readonly string[] BehaviorSpecTestScaffoldRequests =
+    [
+        "behavior spec test scaffold",
+        "behavior spec tests",
+        "spec test scaffold",
+        "acceptance test scaffold",
+        "test scaffold from behavior"
+    ];
+
+    private static readonly string[] RepeatFailureMemoryPrefixes =
+    [
+        "repeat failure memory ",
+        "recurring failure memory ",
+        "failure memory ",
+        "remembered failures ",
+        "build failure memory "
+    ];
+
+    private static readonly string[] RepeatFailureMemoryRequests =
+    [
+        "repeat failure memory",
+        "recurring failure memory",
+        "failure memory",
+        "remembered failures",
+        "build failure memory"
+    ];
+
+    private static readonly string[] FirstDiagnosticRepairRoutePrefixes =
+    [
+        "first diagnostic repair route ",
+        "diagnostic repair route ",
+        "first diagnostic route ",
+        "route first diagnostic ",
+        "repair route from diagnostic "
+    ];
+
+    private static readonly string[] FirstDiagnosticRepairRouteRequests =
+    [
+        "first diagnostic repair route",
+        "diagnostic repair route",
+        "first diagnostic route",
+        "route first diagnostic",
+        "repair route from diagnostic"
+    ];
+
+    private static readonly string[] ValidationCommandMinimizerPrefixes =
+    [
+        "validation command minimizer ",
+        "minimize validation command ",
+        "smallest validation command ",
+        "targeted validation minimizer ",
+        "validation minimizer "
+    ];
+
+    private static readonly string[] ValidationCommandMinimizerRequests =
+    [
+        "validation command minimizer",
+        "minimize validation command",
+        "smallest validation command",
+        "targeted validation minimizer",
+        "validation minimizer"
+    ];
+
+    private static readonly string[] UiBindingRepairPlannerPrefixes =
+    [
+        "ui binding repair planner ",
+        "binding repair planner ",
+        "xaml binding repair ",
+        "command binding repair ",
+        "ui command binding repair "
+    ];
+
+    private static readonly string[] UiBindingRepairPlannerRequests =
+    [
+        "ui binding repair planner",
+        "binding repair planner",
+        "xaml binding repair",
+        "command binding repair",
+        "ui command binding repair"
+    ];
+
+    private static readonly string[] AuthoringSequenceFlowPrefixes =
+    [
+        "authoring sequence flow ",
+        "patch authoring sequence ",
+        "coding authoring flow ",
+        "mini codex sequence ",
+        "apply packet sequence "
+    ];
+
+    private static readonly string[] AuthoringSequenceFlowRequests =
+    [
+        "authoring sequence flow",
+        "patch authoring sequence",
+        "coding authoring flow",
+        "mini codex sequence",
+        "apply packet sequence"
+    ];
+
+    private static readonly string[] PlainEnglishCodingCapabilityCardPrefixes =
+    [
+        "coding capability card ",
+        "plain english coding capability ",
+        "what can you do for coding ",
+        "explain coding abilities ",
+        "mini codex capability card "
+    ];
+
+    private static readonly string[] PlainEnglishCodingCapabilityCardRequests =
+    [
+        "coding capability card",
+        "plain english coding capability",
+        "what can you do for coding",
+        "explain coding abilities",
+        "mini codex capability card"
     ];
 
     private static readonly string[] PlainEnglishFeatureBuilderPrefixes =
@@ -3381,6 +3578,39 @@ public static class CodingToolRequestParser
     private static bool IsValidationChainPlannerRequest(string text) =>
         ValidationChainPlannerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsActiveWorkspaceProjectRequest(string text) =>
+        ActiveWorkspaceProjectRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsOwnerApprovedApplyPacketRequest(string text) =>
+        OwnerApprovedApplyPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRoslynInsertionPlannerRequest(string text) =>
+        RoslynInsertionPlannerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsIntentDiffComposerRequest(string text) =>
+        IntentDiffComposerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBehaviorSpecTestScaffoldRequest(string text) =>
+        BehaviorSpecTestScaffoldRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRepeatFailureMemoryRequest(string text) =>
+        RepeatFailureMemoryRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFirstDiagnosticRepairRouteRequest(string text) =>
+        FirstDiagnosticRepairRouteRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsValidationCommandMinimizerRequest(string text) =>
+        ValidationCommandMinimizerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsUiBindingRepairPlannerRequest(string text) =>
+        UiBindingRepairPlannerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsAuthoringSequenceFlowRequest(string text) =>
+        AuthoringSequenceFlowRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPlainEnglishCodingCapabilityCardRequest(string text) =>
+        PlainEnglishCodingCapabilityCardRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPlainEnglishFeatureBuilderRequest(string text) =>
         PlainEnglishFeatureBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -3571,6 +3801,17 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, FailureToPatchV3Prefixes, CodingToolAction.ShowFailureToPatchV3, userConfirmed, out request)
             || TryParsePrefixedQuery(text, SemanticChangeReceiptPrefixes, CodingToolAction.ShowSemanticChangeReceipt, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ValidationChainPlannerPrefixes, CodingToolAction.ShowValidationChainPlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ActiveWorkspaceProjectPrefixes, CodingToolAction.ShowActiveWorkspaceProject, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, OwnerApprovedApplyPacketPrefixes, CodingToolAction.ShowOwnerApprovedApplyPacket, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, RoslynInsertionPlannerPrefixes, CodingToolAction.ShowRoslynInsertionPlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, IntentDiffComposerPrefixes, CodingToolAction.ShowIntentDiffComposer, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, BehaviorSpecTestScaffoldPrefixes, CodingToolAction.ShowBehaviorSpecTestScaffold, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, RepeatFailureMemoryPrefixes, CodingToolAction.ShowRepeatFailureMemory, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FirstDiagnosticRepairRoutePrefixes, CodingToolAction.ShowFirstDiagnosticRepairRoute, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ValidationCommandMinimizerPrefixes, CodingToolAction.ShowValidationCommandMinimizer, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, UiBindingRepairPlannerPrefixes, CodingToolAction.ShowUiBindingRepairPlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, AuthoringSequenceFlowPrefixes, CodingToolAction.ShowAuthoringSequenceFlow, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PlainEnglishCodingCapabilityCardPrefixes, CodingToolAction.ShowPlainEnglishCodingCapabilityCard, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
             || TryParsePlainEnglishBuildRequest(text, userConfirmed, out request))
         {
@@ -3838,6 +4079,72 @@ public static class CodingToolRequestParser
         if (IsValidationChainPlannerRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowValidationChainPlanner, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsActiveWorkspaceProjectRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowActiveWorkspaceProject, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsOwnerApprovedApplyPacketRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowOwnerApprovedApplyPacket, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRoslynInsertionPlannerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRoslynInsertionPlanner, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsIntentDiffComposerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowIntentDiffComposer, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsBehaviorSpecTestScaffoldRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowBehaviorSpecTestScaffold, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsRepeatFailureMemoryRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowRepeatFailureMemory, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFirstDiagnosticRepairRouteRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFirstDiagnosticRepairRoute, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsValidationCommandMinimizerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowValidationCommandMinimizer, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsUiBindingRepairPlannerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowUiBindingRepairPlanner, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsAuthoringSequenceFlowRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowAuthoringSequenceFlow, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPlainEnglishCodingCapabilityCardRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPlainEnglishCodingCapabilityCard, null, UserConfirmed: userConfirmed);
             return true;
         }
 

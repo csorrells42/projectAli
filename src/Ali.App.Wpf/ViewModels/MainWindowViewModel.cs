@@ -298,6 +298,17 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingFailurePatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Failure patch", "failure to patch v3 current feature", "Coding.FailurePatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingChangeReceiptCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Change receipt", "semantic change receipt current feature", "Coding.ChangeReceipt"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingValidationChainCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation chain", "validation chain planner current feature", "Coding.ValidationChain"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingActiveWorkspaceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Active workspace", "active workspace project", "Coding.ActiveWorkspace"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingApplyPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply packet", "owner approved apply packet current feature", "Coding.ApplyPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingInsertionPlannerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Insertion plan", "roslyn insertion planner current feature", "Coding.InsertionPlanner"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingIntentDiffCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Intent diff", "intent diff composer current feature", "Coding.IntentDiff"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSpecScaffoldCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Spec scaffold", "behavior spec test scaffold current feature", "Coding.SpecScaffold"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFailureMemoryCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Failure memory", "repeat failure memory current feature", "Coding.FailureMemory"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingDiagnosticRouteCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Diagnostic route", "first diagnostic repair route current feature", "Coding.DiagnosticRoute"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingValidationMinimizerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Min validation", "validation command minimizer current feature", "Coding.ValidationMinimizer"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingBindingRepairCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Binding repair", "ui binding repair planner current feature", "Coding.BindingRepair"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingAuthoringFlowCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Author flow", "authoring sequence flow current feature", "Coding.AuthoringFlow"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingCapabilityCardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Capability card", "coding capability card current feature", "Coding.CapabilityCard"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -808,6 +819,28 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingChangeReceiptCommand { get; }
 
     public ICommand RunCodingValidationChainCommand { get; }
+
+    public ICommand RunCodingActiveWorkspaceCommand { get; }
+
+    public ICommand RunCodingApplyPacketCommand { get; }
+
+    public ICommand RunCodingInsertionPlannerCommand { get; }
+
+    public ICommand RunCodingIntentDiffCommand { get; }
+
+    public ICommand RunCodingSpecScaffoldCommand { get; }
+
+    public ICommand RunCodingFailureMemoryCommand { get; }
+
+    public ICommand RunCodingDiagnosticRouteCommand { get; }
+
+    public ICommand RunCodingValidationMinimizerCommand { get; }
+
+    public ICommand RunCodingBindingRepairCommand { get; }
+
+    public ICommand RunCodingAuthoringFlowCommand { get; }
+
+    public ICommand RunCodingCapabilityCardCommand { get; }
 
     public ICommand RunCodingBuildFeatureLaneCommand { get; }
 
@@ -3514,6 +3547,17 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("failure-to-patch v3", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("semantic change receipt", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("validation chain planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("active workspace project", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("owner approved apply packet", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("roslyn insertion planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("intent diff composer", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("behavior spec test scaffold", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("repeat failure memory", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("first diagnostic repair route", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("validation command minimizer", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("ui binding repair planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("authoring sequence flow", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("coding capability card", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
@@ -3645,6 +3689,17 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("failure-to-patch v3", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("semantic change receipt", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("validation chain planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("active workspace project", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("owner approved apply packet", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("roslyn insertion planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("intent diff composer", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("behavior spec test scaffold", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("repeat failure memory", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("first diagnostic repair route", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("validation command minimizer", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("ui binding repair planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("authoring sequence flow", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("coding capability card", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
@@ -3684,6 +3739,17 @@ public sealed class MainWindowViewModel : ObservableObject
                 || command.StartsWith("failure-to-patch v3", StringComparison.OrdinalIgnoreCase)
                 || command.StartsWith("semantic change receipt", StringComparison.OrdinalIgnoreCase)
                 || command.StartsWith("validation chain planner", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("active workspace project", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("owner approved apply packet", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("roslyn insertion planner", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("intent diff composer", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("behavior spec test scaffold", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("repeat failure memory", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("first diagnostic repair route", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("validation command minimizer", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("ui binding repair planner", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("authoring sequence flow", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("coding capability card", StringComparison.OrdinalIgnoreCase)
                 ? "Next - Run the single next command shown by the workflow."
                 : "Next - Work the feature lane top to bottom before previewing a patch.";
         }
@@ -3810,6 +3876,41 @@ public sealed class MainWindowViewModel : ObservableObject
             "Validation chain planner",
             "Validation order:",
             "Commands:",
+            "Active workspace/project",
+            "Workspace root:",
+            "Primary solution/project:",
+            "Project selection:",
+            "How Ali uses it:",
+            "Owner-approved apply packet",
+            "Packet confidence:",
+            "Packet rows:",
+            "Owner review:",
+            "Approval path:",
+            "Roslyn insertion planner",
+            "Insertion targets:",
+            "Insertion rules:",
+            "Intent diff composer",
+            "Diff intent:",
+            "Diff boundaries:",
+            "Behavior spec test scaffold",
+            "Spec rows:",
+            "Assertion plan:",
+            "Repeat failure memory",
+            "Failure memory:",
+            "Routing rule:",
+            "First diagnostic repair route",
+            "First diagnostic:",
+            "Validation command minimizer",
+            "Smallest useful commands:",
+            "Escalation rule:",
+            "UI binding repair planner",
+            "Binding state:",
+            "Authoring sequence flow",
+            "Sequence:",
+            "Plain-English coding capability card",
+            "What Ali can do:",
+            "How to ask:",
+            "Current target hints:",
             "Goal:",
             "Behavior test patch preview:",
             "Test file:",
@@ -3924,6 +4025,36 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Build command:",
             "- Full test command:",
             "- Repair command:",
+            "- Projects:",
+            "- Default target:",
+            "- App projects:",
+            "- Test projects:",
+            "- Ambiguity:",
+            "- Packet:",
+            "- Owner review:",
+            "- Approval:",
+            "- Insertion:",
+            "- User intent:",
+            "- Source targets:",
+            "- Affected projects:",
+            "- Code diff:",
+            "- Test diff:",
+            "- Build order:",
+            "- Given:",
+            "- When:",
+            "- Then:",
+            "- Test file:",
+            "- Test method:",
+            "- Remembered failure:",
+            "- Current failure:",
+            "- Routing:",
+            "- Smallest:",
+            "- Escalation:",
+            "- UI files:",
+            "- Command property:",
+            "- CanExecute:",
+            "- XAML binding:",
+            "- Repair proof:",
             "- Active slice:",
             "- First diagnostic:",
             "- Code:",
@@ -7359,6 +7490,61 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingValidationChainCommand is AsyncRelayCommand runCodingValidationChain)
         {
             runCodingValidationChain.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingActiveWorkspaceCommand is AsyncRelayCommand runCodingActiveWorkspace)
+        {
+            runCodingActiveWorkspace.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingApplyPacketCommand is AsyncRelayCommand runCodingApplyPacket)
+        {
+            runCodingApplyPacket.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingInsertionPlannerCommand is AsyncRelayCommand runCodingInsertionPlanner)
+        {
+            runCodingInsertionPlanner.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingIntentDiffCommand is AsyncRelayCommand runCodingIntentDiff)
+        {
+            runCodingIntentDiff.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSpecScaffoldCommand is AsyncRelayCommand runCodingSpecScaffold)
+        {
+            runCodingSpecScaffold.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFailureMemoryCommand is AsyncRelayCommand runCodingFailureMemory)
+        {
+            runCodingFailureMemory.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingDiagnosticRouteCommand is AsyncRelayCommand runCodingDiagnosticRoute)
+        {
+            runCodingDiagnosticRoute.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingValidationMinimizerCommand is AsyncRelayCommand runCodingValidationMinimizer)
+        {
+            runCodingValidationMinimizer.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingBindingRepairCommand is AsyncRelayCommand runCodingBindingRepair)
+        {
+            runCodingBindingRepair.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingAuthoringFlowCommand is AsyncRelayCommand runCodingAuthoringFlow)
+        {
+            runCodingAuthoringFlow.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingCapabilityCardCommand is AsyncRelayCommand runCodingCapabilityCard)
+        {
+            runCodingCapabilityCard.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildFeatureLaneCommand is AsyncRelayCommand runCodingBuildFeatureLane)

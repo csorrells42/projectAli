@@ -36,6 +36,10 @@ public static class CodingAbilityCatalog
         "concrete patch authoring <goal>",
         "patch body generator <goal>",
         "patch confidence score <goal>",
+        "active workspace project",
+        "owner approved apply packet <goal>",
+        "validation command minimizer <goal>",
+        "authoring sequence flow <goal>",
         "validation chain planner <goal>",
         "show architecture options <goal>",
         "write acceptance criteria <goal>",
@@ -96,13 +100,24 @@ public static class CodingAbilityCatalog
                 new("Slice state", "implementation slice state <goal>"),
                 new("Evidence pack", "implementation evidence pack <goal>"),
                 new("Score v3", "mini codex score v3 <goal>"),
+                new("Active workspace", "active workspace project"),
                 new("Patch authoring", "concrete patch authoring <goal>"),
                 new("Patch body", "patch body generator <goal>"),
                 new("Scaffolder", "pattern command scaffolder <goal>"),
                 new("UI bundle", "ui bundle planner <goal>"),
                 new("Confidence score", "patch confidence score <goal>"),
                 new("Slice preview", "slice executor preview <goal>"),
+                new("Insertion planner", "roslyn insertion planner <goal>"),
+                new("Intent diff", "intent diff composer <goal>"),
+                new("Spec scaffold", "behavior spec test scaffold <goal>"),
+                new("Apply packet", "owner approved apply packet <goal>"),
+                new("Validation minimizer", "validation command minimizer <goal>"),
+                new("Binding repair", "ui binding repair planner <goal>"),
+                new("Authoring flow", "authoring sequence flow <goal>"),
+                new("Capability card", "coding capability card <goal>"),
                 new("Failure to patch", "failure to patch v3 <goal>"),
+                new("Failure memory", "repeat failure memory <goal>"),
+                new("Diagnostic route", "first diagnostic repair route <goal>"),
                 new("Change receipt", "semantic change receipt <goal>"),
                 new("Validation chain", "validation chain planner <goal>"),
                 new("Acceptance criteria", "write acceptance criteria <goal>"),
@@ -120,7 +135,11 @@ public static class CodingAbilityCatalog
                 new("Concrete patch authoring", "concrete patch authoring <goal>"),
                 new("Patch body", "patch body generator <goal>"),
                 new("Patch confidence", "patch confidence score <goal>"),
+                new("Owner apply packet", "owner approved apply packet <goal>"),
+                new("Intent diff", "intent diff composer <goal>"),
+                new("Validation minimizer", "validation command minimizer <goal>"),
                 new("Behavior test generator", "behavior test generator <goal>"),
+                new("Spec scaffold", "behavior spec test scaffold <goal>"),
                 new("Semantic diff", "semantic diff summary <goal>"),
                 new("Validation chain", "validation chain planner <goal>"),
                 new("Semantic receipt", "semantic change receipt <goal>"),
@@ -435,7 +454,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, confidence scoring, patch/test previews, validation routing, semantic diff summaries, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");

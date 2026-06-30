@@ -596,6 +596,10 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("concrete patch authoring <goal>", builderIndex);
     Contains("patch body generator <goal>", builderIndex);
     Contains("patch confidence score <goal>", builderIndex);
+    Contains("active workspace project", builderIndex);
+    Contains("owner approved apply packet <goal>", builderIndex);
+    Contains("validation command minimizer <goal>", builderIndex);
+    Contains("authoring sequence flow <goal>", builderIndex);
     Contains("validation chain planner <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
     Contains("semantic diff summary <goal>", builderIndex);
@@ -610,6 +614,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("For location-based weather", userGuide);
     Contains("Programming", userGuide);
     Contains("Roslyn targeting", userGuide);
+    Contains("active workspace/project", userGuide);
+    Contains("owner apply packets", userGuide);
     Contains("concrete patch authoring", userGuide);
     Contains("confidence scoring", userGuide);
     Contains("Context packet", userGuide);
@@ -921,6 +927,38 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("validation chain planner Save button", out var validationChainRequest));
     Equal(CodingToolAction.ShowValidationChainPlanner, validationChainRequest.Action);
     Equal("Save button", validationChainRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("which project are we working on", out var activeWorkspaceRequest));
+    Equal(CodingToolAction.ShowActiveWorkspaceProject, activeWorkspaceRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("owner approved apply packet Save button", out var applyPacketRequest));
+    Equal(CodingToolAction.ShowOwnerApprovedApplyPacket, applyPacketRequest.Action);
+    Equal("Save button", applyPacketRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("roslyn insertion planner Save button", out var insertionPlannerRequest));
+    Equal(CodingToolAction.ShowRoslynInsertionPlanner, insertionPlannerRequest.Action);
+    Equal("Save button", insertionPlannerRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("intent diff composer Save button", out var intentDiffRequest));
+    Equal(CodingToolAction.ShowIntentDiffComposer, intentDiffRequest.Action);
+    Equal("Save button", intentDiffRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("behavior spec test scaffold Save button", out var specScaffoldRequest));
+    Equal(CodingToolAction.ShowBehaviorSpecTestScaffold, specScaffoldRequest.Action);
+    Equal("Save button", specScaffoldRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("repeat failure memory Save button", out var failureMemoryRequest));
+    Equal(CodingToolAction.ShowRepeatFailureMemory, failureMemoryRequest.Action);
+    Equal("Save button", failureMemoryRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("first diagnostic repair route Save button", out var diagnosticRouteRequest));
+    Equal(CodingToolAction.ShowFirstDiagnosticRepairRoute, diagnosticRouteRequest.Action);
+    Equal("Save button", diagnosticRouteRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("validation command minimizer Save button", out var validationMinimizerRequest));
+    Equal(CodingToolAction.ShowValidationCommandMinimizer, validationMinimizerRequest.Action);
+    Equal("Save button", validationMinimizerRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("ui binding repair planner Save button", out var bindingRepairRequest));
+    Equal(CodingToolAction.ShowUiBindingRepairPlanner, bindingRepairRequest.Action);
+    Equal("Save button", bindingRepairRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("authoring sequence flow Save button", out var authoringFlowRequest));
+    Equal(CodingToolAction.ShowAuthoringSequenceFlow, authoringFlowRequest.Action);
+    Equal("Save button", authoringFlowRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("coding capability card Save button", out var capabilityCardRequest));
+    Equal(CodingToolAction.ShowPlainEnglishCodingCapabilityCard, capabilityCardRequest.Action);
+    Equal("Save button", capabilityCardRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("feature builder Save button", out var featureBuilderRequest));
     Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, featureBuilderRequest.Action);
     Equal("Save button", featureBuilderRequest.Query);
@@ -3666,8 +3704,9 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Guarded patterns:", generatedGuard.Message);
     Contains("Mini-Codex readiness report v2", reportCard.Message);
     Contains("Report card:", reportCard.Message);
-    Contains("Endzone estimate: 94-95%", reportCard.Message);
-    Contains("concrete patch authoring", reportCard.Message);
+    Contains("Endzone estimate: 96-97%", reportCard.Message);
+    Contains("active workspace context", reportCard.Message);
+    Contains("owner apply packet", reportCard.Message);
 }
 
 static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
@@ -3756,6 +3795,17 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     var failurePatch = await service.TryHandleAsync("failure to patch v3 Save button", CancellationToken.None);
     var changeReceipt = await service.TryHandleAsync("semantic change receipt Save button", CancellationToken.None);
     var validationChain = await service.TryHandleAsync("validation chain planner Save button", CancellationToken.None);
+    var activeWorkspace = await service.TryHandleAsync("active workspace project", CancellationToken.None);
+    var applyPacket = await service.TryHandleAsync("owner approved apply packet Save button", CancellationToken.None);
+    var insertionPlanner = await service.TryHandleAsync("roslyn insertion planner Save button", CancellationToken.None);
+    var intentDiff = await service.TryHandleAsync("intent diff composer Save button", CancellationToken.None);
+    var specScaffold = await service.TryHandleAsync("behavior spec test scaffold Save button", CancellationToken.None);
+    var failureMemory = await service.TryHandleAsync("repeat failure memory Save button", CancellationToken.None);
+    var diagnosticRoute = await service.TryHandleAsync("first diagnostic repair route Save button", CancellationToken.None);
+    var validationMinimizer = await service.TryHandleAsync("validation command minimizer Save button", CancellationToken.None);
+    var bindingRepair = await service.TryHandleAsync("ui binding repair planner Save button", CancellationToken.None);
+    var authoringFlow = await service.TryHandleAsync("authoring sequence flow Save button", CancellationToken.None);
+    var capabilityCard = await service.TryHandleAsync("coding capability card Save button", CancellationToken.None);
 
     Equal(true, workflow.Handled);
     Equal(true, workflow.Succeeded);
@@ -3914,6 +3964,74 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Contains("Validation chain planner v1", validationChain.Message);
     Contains("Validation order:", validationChain.Message);
     Contains("Commands:", validationChain.Message);
+
+    Equal(true, activeWorkspace.Handled);
+    Equal(true, activeWorkspace.Succeeded);
+    Contains("Active workspace/project v1", activeWorkspace.Message);
+    Contains("Workspace root:", activeWorkspace.Message);
+    Contains("Primary solution/project:", activeWorkspace.Message);
+    Contains("Project selection:", activeWorkspace.Message);
+
+    Equal(true, applyPacket.Handled);
+    Equal(true, applyPacket.Succeeded);
+    Contains("Owner-approved apply packet v1", applyPacket.Message);
+    Contains("Primary solution/project:", applyPacket.Message);
+    Contains("Packet rows:", applyPacket.Message);
+    Contains("Approval path:", applyPacket.Message);
+
+    Equal(true, insertionPlanner.Handled);
+    Equal(true, insertionPlanner.Succeeded);
+    Contains("Roslyn insertion planner v1", insertionPlanner.Message);
+    Contains("Insertion targets:", insertionPlanner.Message);
+    Contains("Insertion rules:", insertionPlanner.Message);
+
+    Equal(true, intentDiff.Handled);
+    Equal(true, intentDiff.Succeeded);
+    Contains("Intent diff composer v1", intentDiff.Message);
+    Contains("Diff intent:", intentDiff.Message);
+    Contains("Diff boundaries:", intentDiff.Message);
+
+    Equal(true, specScaffold.Handled);
+    Equal(true, specScaffold.Succeeded);
+    Contains("Behavior spec test scaffold v1", specScaffold.Message);
+    Contains("Spec rows:", specScaffold.Message);
+    Contains("Assertion plan:", specScaffold.Message);
+
+    Equal(true, failureMemory.Handled);
+    Equal(true, failureMemory.Succeeded);
+    Contains("Repeat failure memory v1", failureMemory.Message);
+    Contains("Failure memory:", failureMemory.Message);
+    Contains("Routing rule:", failureMemory.Message);
+
+    Equal(true, diagnosticRoute.Handled);
+    Equal(true, diagnosticRoute.Succeeded);
+    Contains("First diagnostic repair route v1", diagnosticRoute.Message);
+    Contains("First diagnostic:", diagnosticRoute.Message);
+    Contains("Repair focus:", diagnosticRoute.Message);
+
+    Equal(true, validationMinimizer.Handled);
+    Equal(true, validationMinimizer.Succeeded);
+    Contains("Validation command minimizer v1", validationMinimizer.Message);
+    Contains("Smallest useful commands:", validationMinimizer.Message);
+    Contains("Escalation rule:", validationMinimizer.Message);
+
+    Equal(true, bindingRepair.Handled);
+    Equal(true, bindingRepair.Succeeded);
+    Contains("UI binding repair planner v1", bindingRepair.Message);
+    Contains("Binding state:", bindingRepair.Message);
+    Contains("Repair plan:", bindingRepair.Message);
+
+    Equal(true, authoringFlow.Handled);
+    Equal(true, authoringFlow.Succeeded);
+    Contains("Authoring sequence flow v1", authoringFlow.Message);
+    Contains("Primary solution/project:", authoringFlow.Message);
+    Contains("Sequence:", authoringFlow.Message);
+
+    Equal(true, capabilityCard.Handled);
+    Equal(true, capabilityCard.Succeeded);
+    Contains("Plain-English coding capability card v1", capabilityCard.Message);
+    Contains("Current workspace:", capabilityCard.Message);
+    Contains("What Ali can do:", capabilityCard.Message);
 }
 
 static Task TestProgrammingDashboardExposesCockpitCommands()
@@ -3961,6 +4079,17 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Failure Patch", dashboard);
     Contains("Change Receipt", dashboard);
     Contains("Validation Chain", dashboard);
+    Contains("Active Workspace", dashboard);
+    Contains("Apply Packet", dashboard);
+    Contains("Insert Plan", dashboard);
+    Contains("Intent Diff", dashboard);
+    Contains("Spec Scaffold", dashboard);
+    Contains("Failure Memory", dashboard);
+    Contains("Diagnostic Route", dashboard);
+    Contains("Min Validation", dashboard);
+    Contains("Binding Repair", dashboard);
+    Contains("Author Flow", dashboard);
+    Contains("Capability Card", dashboard);
     Contains("RunCodingBuildThisCommand", dashboard);
     Contains("RunCodingFeatureBuilderCommand", dashboard);
     Contains("RunCodingGuidedBundlePreviewCommand", dashboard);
@@ -3984,6 +4113,17 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFailurePatchCommand", dashboard);
     Contains("RunCodingChangeReceiptCommand", dashboard);
     Contains("RunCodingValidationChainCommand", dashboard);
+    Contains("RunCodingActiveWorkspaceCommand", dashboard);
+    Contains("RunCodingApplyPacketCommand", dashboard);
+    Contains("RunCodingInsertionPlannerCommand", dashboard);
+    Contains("RunCodingIntentDiffCommand", dashboard);
+    Contains("RunCodingSpecScaffoldCommand", dashboard);
+    Contains("RunCodingFailureMemoryCommand", dashboard);
+    Contains("RunCodingDiagnosticRouteCommand", dashboard);
+    Contains("RunCodingValidationMinimizerCommand", dashboard);
+    Contains("RunCodingBindingRepairCommand", dashboard);
+    Contains("RunCodingAuthoringFlowCommand", dashboard);
+    Contains("RunCodingCapabilityCardCommand", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
     Contains("RunCodingFeatureWorkContextCommand", dashboard);
     Contains("RunCodingFeatureIntentCommand", dashboard);
@@ -4041,6 +4181,28 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("semantic change receipt current feature", viewModel);
     Contains("RunCodingValidationChainCommand = CreateAsyncCommand", viewModel);
     Contains("validation chain planner current feature", viewModel);
+    Contains("RunCodingActiveWorkspaceCommand = CreateAsyncCommand", viewModel);
+    Contains("active workspace project", viewModel);
+    Contains("RunCodingApplyPacketCommand = CreateAsyncCommand", viewModel);
+    Contains("owner approved apply packet current feature", viewModel);
+    Contains("RunCodingInsertionPlannerCommand = CreateAsyncCommand", viewModel);
+    Contains("roslyn insertion planner current feature", viewModel);
+    Contains("RunCodingIntentDiffCommand = CreateAsyncCommand", viewModel);
+    Contains("intent diff composer current feature", viewModel);
+    Contains("RunCodingSpecScaffoldCommand = CreateAsyncCommand", viewModel);
+    Contains("behavior spec test scaffold current feature", viewModel);
+    Contains("RunCodingFailureMemoryCommand = CreateAsyncCommand", viewModel);
+    Contains("repeat failure memory current feature", viewModel);
+    Contains("RunCodingDiagnosticRouteCommand = CreateAsyncCommand", viewModel);
+    Contains("first diagnostic repair route current feature", viewModel);
+    Contains("RunCodingValidationMinimizerCommand = CreateAsyncCommand", viewModel);
+    Contains("validation command minimizer current feature", viewModel);
+    Contains("RunCodingBindingRepairCommand = CreateAsyncCommand", viewModel);
+    Contains("ui binding repair planner current feature", viewModel);
+    Contains("RunCodingAuthoringFlowCommand = CreateAsyncCommand", viewModel);
+    Contains("authoring sequence flow current feature", viewModel);
+    Contains("RunCodingCapabilityCardCommand = CreateAsyncCommand", viewModel);
+    Contains("coding capability card current feature", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
