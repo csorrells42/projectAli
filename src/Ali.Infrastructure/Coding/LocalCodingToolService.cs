@@ -15086,6 +15086,28 @@ public sealed class LocalCodingToolService(
                 <Setter Property="Margin" Value="0,0,0,8" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="Padding" Value="6,0" />
+                <Setter Property="Validation.ErrorTemplate">
+                    <Setter.Value>
+                        <ControlTemplate>
+                            <DockPanel LastChildFill="True">
+                                <Border Width="20"
+                                        Height="20"
+                                        Margin="6,0,0,0"
+                                        Background="#B42318"
+                                        CornerRadius="10"
+                                        DockPanel.Dock="Right">
+                                    <TextBlock Text="!"
+                                               Foreground="White"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <AdornedElementPlaceholder />
+                            </DockPanel>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Setter Property="ToolTip" Value="{Binding RelativeSource={RelativeSource Self}, Path=(Validation.Errors)[0].ErrorContent}" />
                 <Style.Triggers>
                     <Trigger Property="Validation.HasError" Value="True">
                         <Setter Property="BorderBrush" Value="#B42318" />

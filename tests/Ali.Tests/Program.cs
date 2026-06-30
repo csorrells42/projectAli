@@ -5596,6 +5596,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("DashboardInputTextBoxStyle", dashboardStyles);
     Contains("DashboardInputComboBoxStyle", dashboardStyles);
     Contains("DashboardMetricCardStyle", dashboardStyles);
+    Contains("Validation.ErrorTemplate", dashboardStyles);
+    Contains("ControlTemplate", dashboardStyles);
+    Contains("AdornedElementPlaceholder", dashboardStyles);
+    Contains("(Validation.Errors)[0].ErrorContent", dashboardStyles);
     Contains("Validation.HasError", dashboardStyles);
     Contains("Style.Triggers", dashboardStyles);
     Contains("UserControl", detailCard);
