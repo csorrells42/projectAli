@@ -14265,6 +14265,7 @@ public sealed class LocalCodingToolService(
                     </ResourceDictionary.MergedDictionaries>
                     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
                     <local:DashboardStatusBrushConverter x:Key="DashboardStatusBrushConverter" />
+                    <local:DashboardSelectionSummaryConverter x:Key="DashboardSelectionSummaryConverter" />
                     <DataTemplate x:Key="DashboardDetailTemplate">
                         <local:DashboardDetailCard Item="{Binding}" />
                     </DataTemplate>
@@ -14524,6 +14525,14 @@ public sealed class LocalCodingToolService(
                                 <StackPanel Grid.IsSharedSizeScope="True">
                                     <Expander Header="Selected item" IsExpanded="True" Margin="0,0,0,10">
                                         <StackPanel>
+                                            <TextBlock FontWeight="SemiBold" Margin="0,0,0,8">
+                                                <TextBlock.Text>
+                                                    <MultiBinding Converter="{StaticResource DashboardSelectionSummaryConverter}">
+                                                        <Binding Path="SelectedItemName" />
+                                                        <Binding Path="SelectedItemStatus" />
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
                                             <ContentControl Content="{Binding SelectedItem}"
                                                             ContentTemplate="{StaticResource DashboardDetailTemplate}"
                                                             Margin="0,0,0,16" />
@@ -16156,6 +16165,30 @@ public sealed class LocalCodingToolService(
             public sealed class NullDashboardDialogService : IDashboardDialogService
             {
                 public bool Confirm(DashboardDialogRequest request) => true;
+            }
+
+            public sealed class DashboardSelectionSummaryConverter : IMultiValueConverter
+            {
+                public object Convert(object[] values, Type targetType, object? parameter, CultureInfo culture)
+                {
+                    var name = values.Length > 0 ? values[0]?.ToString() : string.Empty;
+                    var status = values.Length > 1 ? values[1]?.ToString() : string.Empty;
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        return "No item selected";
+                    }
+
+                    return string.IsNullOrWhiteSpace(status)
+                        ? name
+                        : $"{name} - {status}";
+                }
+
+                public object[] ConvertBack(object? value, Type[] targetTypes, object? parameter, CultureInfo culture)
+                {
+                    var results = new object[targetTypes.Length];
+                    Array.Fill(results, Binding.DoNothing);
+                    return results;
+                }
             }
 
             public sealed class DashboardStatusBrushConverter : IValueConverter
