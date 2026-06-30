@@ -787,6 +787,8 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("feature execution packet Save button", out var executionPacketRequest));
     Equal(CodingToolAction.ShowFeatureExecutionPacket, executionPacketRequest.Action);
     Equal("Save button", executionPacketRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("feature execution packet", out var bareExecutionPacketRequest));
+    Equal(CodingToolAction.ShowFeatureExecutionPacket, bareExecutionPacketRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("show build feature lane", out var buildFeatureLaneRequest));
     Equal(CodingToolAction.ShowBuildFeatureLane, buildFeatureLaneRequest.Action);
 

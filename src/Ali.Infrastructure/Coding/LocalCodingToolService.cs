@@ -8154,10 +8154,15 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature intent packet", Policy.WorkspaceRoot);
     }
 
-    private async Task<CodingToolResult> PlanBehaviorTestsAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    private async Task<CodingToolResult> PlanBehaviorTestsAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken,
+        TestTargetRecommendation? precomputedTestTarget = null,
+        IReadOnlyList<string>? precomputedChangedFiles = null)
     {
         var goal = CleanGoal(request.Query, "current feature");
-        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var changedFiles = precomputedChangedFiles
+            ?? await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var files = changedFiles.Count > 0 ? changedFiles.Take(8).ToList() : SuggestLikelyFilesForGoal(goal).Take(8).ToList();
         var likelyTests = files
             .Where(IsTestFile)
@@ -8165,7 +8170,8 @@ public sealed class LocalCodingToolService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(6)
             .ToList();
-        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
+        var testTarget = precomputedTestTarget
+            ?? await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
         {
             "Behavior-to-test plan v1:",
@@ -8187,10 +8193,14 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Behavior test plan", Policy.WorkspaceRoot);
     }
 
-    private async Task<CodingToolResult> PlanImplementationSlicesAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    private async Task<CodingToolResult> PlanImplementationSlicesAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? precomputedChangedFiles = null)
     {
         var goal = CleanGoal(request.Query, "current feature");
-        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var changedFiles = precomputedChangedFiles
+            ?? await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var files = changedFiles.Count > 0 ? changedFiles.Take(10).ToList() : SuggestLikelyFilesForGoal(goal).Take(10).ToList();
         var lines = new List<string>
         {
@@ -8344,13 +8354,19 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature completion receipt", Policy.WorkspaceRoot);
     }
 
-    private async Task<CodingToolResult> ShowFeatureExecutionPacketAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    private async Task<CodingToolResult> ShowFeatureExecutionPacketAsync(
+        CodingToolRequest request,
+        CancellationToken cancellationToken,
+        TestTargetRecommendation? precomputedTestTarget = null,
+        IReadOnlyList<string>? precomputedChangedFiles = null,
+        SemanticReferenceGraph? precomputedGraph = null)
     {
         var goal = CleanGoal(request.Query, "current feature");
-        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
-        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
+        var changedFiles = precomputedChangedFiles
+            ?? await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
-        var graph = BuildSemanticReferenceGraph(goal, workspace, 100);
+        var graph = precomputedGraph
+            ?? BuildSemanticReferenceGraph(goal, BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000), 100);
         var hits = graph.Declarations
             .Concat(graph.References)
             .DistinctBy(hit => $"{hit.Display}|{hit.Path}|{hit.LineNumber}", StringComparer.Ordinal)
@@ -8375,7 +8391,8 @@ public sealed class LocalCodingToolService(
                 .ToList();
         }
 
-        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken).ConfigureAwait(false);
+        var testTarget = precomputedTestTarget
+            ?? await ResolveTestTargetRecommendationAsync(goal, cancellationToken, changedFiles, graph).ConfigureAwait(false);
         var rankedTargets = RankEditTargetCandidates(goalTerms, hits, candidateFiles, changedFiles);
         var impactScore = BuildEditImpactScore(rankedTargets, hits, candidateFiles, testTarget);
         var relativeCandidates = candidateFiles.Select(RelativeToWorkspace).ToList();
@@ -8406,10 +8423,13 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> ShowBuildFeatureLaneAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query, "current feature");
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var graph = BuildSemanticReferenceGraph(goal, BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000), 100);
+        var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken, changedFiles, graph).ConfigureAwait(false);
         var intent = BuildFeatureIntentPacket(new CodingToolRequest(CodingToolAction.BuildFeatureIntentPacket, null, Query: goal));
-        var tests = await PlanBehaviorTestsAsync(new CodingToolRequest(CodingToolAction.PlanBehaviorTests, null, Query: goal), cancellationToken).ConfigureAwait(false);
-        var slices = await PlanImplementationSlicesAsync(new CodingToolRequest(CodingToolAction.PlanImplementationSlices, null, Query: goal), cancellationToken).ConfigureAwait(false);
-        var execution = await ShowFeatureExecutionPacketAsync(new CodingToolRequest(CodingToolAction.ShowFeatureExecutionPacket, null, Query: goal), cancellationToken).ConfigureAwait(false);
+        var tests = await PlanBehaviorTestsAsync(new CodingToolRequest(CodingToolAction.PlanBehaviorTests, null, Query: goal), cancellationToken, testTarget, changedFiles).ConfigureAwait(false);
+        var slices = await PlanImplementationSlicesAsync(new CodingToolRequest(CodingToolAction.PlanImplementationSlices, null, Query: goal), cancellationToken, changedFiles).ConfigureAwait(false);
+        var execution = await ShowFeatureExecutionPacketAsync(new CodingToolRequest(CodingToolAction.ShowFeatureExecutionPacket, null, Query: goal), cancellationToken, testTarget, changedFiles, graph).ConfigureAwait(false);
         var stop = await ShowStopConditionDetectorAsync(cancellationToken).ConfigureAwait(false);
         var receipt = await ShowFeatureCompletionReceiptAsync(cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
@@ -8741,13 +8761,18 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, !string.IsNullOrWhiteSpace(recommendation.Command), string.Join(Environment.NewLine, lines), "Test target resolver", recommendation.TargetPath ?? Policy.WorkspaceRoot);
     }
 
-    private async Task<TestTargetRecommendation> ResolveTestTargetRecommendationAsync(string query, CancellationToken cancellationToken)
+    private async Task<TestTargetRecommendation> ResolveTestTargetRecommendationAsync(
+        string query,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? precomputedChangedFiles = null,
+        SemanticReferenceGraph? precomputedGraph = null)
     {
-        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
-        var workspace = BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000);
-        var graph = string.IsNullOrWhiteSpace(query)
-            ? new SemanticReferenceGraph(query, [], [], [], [], [], [])
-            : BuildSemanticReferenceGraph(query, workspace, 100);
+        var changedFiles = precomputedChangedFiles
+            ?? await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var graph = precomputedGraph
+            ?? (string.IsNullOrWhiteSpace(query)
+                ? new SemanticReferenceGraph(query, [], [], [], [], [], [])
+                : BuildSemanticReferenceGraph(query, BuildRoslynWorkspaceModel(GetCSharpFiles(), 2_000), 100));
         var semanticHits = graph.Declarations.Concat(graph.References).ToList();
         var sourceFiles = semanticHits
             .Select(hit => hit.Path)

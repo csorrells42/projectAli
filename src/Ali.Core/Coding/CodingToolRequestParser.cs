@@ -597,6 +597,15 @@ public static class CodingToolRequestParser
         "plain request execution packet "
     ];
 
+    private static readonly string[] FeatureExecutionPacketRequests =
+    [
+        "feature execution packet",
+        "show feature execution packet",
+        "build feature execution packet",
+        "feature safe execution packet",
+        "plain request execution packet"
+    ];
+
     private static readonly string[] BuildFeatureLaneRequests =
     [
         "show build feature lane",
@@ -2479,6 +2488,9 @@ public static class CodingToolRequestParser
     private static bool IsFeatureCompletionReceiptRequest(string text) =>
         FeatureCompletionReceiptRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsFeatureExecutionPacketRequest(string text) =>
+        FeatureExecutionPacketRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsBuildFeatureLaneRequest(string text) =>
         BuildFeatureLaneRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
     private static bool IsShowLastPatchPreviewRequest(string text) =>
@@ -2659,6 +2671,12 @@ public static class CodingToolRequestParser
         if (IsFeatureCompletionReceiptRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowFeatureCompletionReceipt, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeatureExecutionPacketRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeatureExecutionPacket, null, UserConfirmed: userConfirmed);
             return true;
         }
 
