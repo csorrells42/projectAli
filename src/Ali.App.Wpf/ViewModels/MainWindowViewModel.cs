@@ -176,6 +176,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
     private string _codingWorkspaceRootText = string.Empty;
     private string _codingCurrentSolutionOrProjectPathText = string.Empty;
+    private string _selectedCodingRecentSolutionOrProjectPath = string.Empty;
     private bool _codingAllowExplicitOutsideFileOpen = true;
     private string _codingWorkspaceAccessMode = CodingPermissionModes.Allowed;
     private string _codingExplicitOutsideFileOpenMode = CodingPermissionModes.Allowed;
@@ -250,6 +251,7 @@ public sealed class MainWindowViewModel : ObservableObject
         BrowseCodingWorkspaceRootCommand = CreateCommand(_ => BrowseCodingWorkspaceRoot());
         BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand(_ => BrowseCodingCurrentSolutionOrProject());
         CreateCodingProjectCommand = CreateAsyncCommand(CreateCodingProjectAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        UseSelectedCodingRecentSolutionCommand = CreateCommand(_ => UseSelectedCodingRecentSolution(), _ => !string.IsNullOrWhiteSpace(SelectedCodingRecentSolutionOrProjectPath));
         BrowseCodingPdfWorkspaceRootCommand = CreateCommand(_ => BrowseCodingPdfWorkspaceRoot());
         BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
@@ -304,6 +306,11 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingActiveWorkspaceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Active workspace", "active workspace project", "Coding.ActiveWorkspace"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectControlCenterCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project control center", "project control center", "Coding.ProjectControlCenter"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingProjectMemoryCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project memory", "show project memory", "Coding.ProjectMemory"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        StartCodingSessionCommand = CreateAsyncCommand(StartCodingSessionFromPromptAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
+        ShowCodingCurrentTaskCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Current coding task", "current coding task", "Coding.CurrentTask"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        ClearCodingCurrentTaskCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Clear coding task", "clear current coding task", "Coding.ClearCurrentTask"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingProjectDefaultsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Project defaults", "project command defaults", "Coding.ProjectDefaults"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        SaveCodingProjectDefaultsCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Save project defaults", "save project command defaults", "Coding.SaveProjectDefaults"), () => !IsBusy && !IsRecording && !IsTranscribing);
         PickCodingSolutionCommand = CreateCommand(_ => BrowseCodingCurrentSolutionOrProject());
         StartNewCodingProjectCommand = CreateAsyncCommand(CreateCodingProjectAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildCurrentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build current", BuildConfirmedDotNetCommand("build"), "Coding.BuildCurrent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -480,6 +487,19 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ReminderEntryViewModel> ReminderEntries { get; } = new();
 
     public ObservableCollection<string> CodingRecentSolutionOrProjectPaths { get; } = new();
+
+    public string SelectedCodingRecentSolutionOrProjectPath
+    {
+        get => _selectedCodingRecentSolutionOrProjectPath;
+        set
+        {
+            if (SetProperty(ref _selectedCodingRecentSolutionOrProjectPath, value)
+                && UseSelectedCodingRecentSolutionCommand is RelayCommand useSelected)
+            {
+                useSelected.RaiseCanExecuteChanged();
+            }
+        }
+    }
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
@@ -736,6 +756,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand CreateCodingProjectCommand { get; }
 
+    public ICommand UseSelectedCodingRecentSolutionCommand { get; }
+
     public ICommand BrowseCodingPdfWorkspaceRootCommand { get; }
 
     public ICommand BrowseNotepadPlusPlusPathCommand { get; }
@@ -843,6 +865,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingProjectControlCenterCommand { get; }
 
     public ICommand RunCodingProjectMemoryCommand { get; }
+
+    public ICommand StartCodingSessionCommand { get; }
+
+    public ICommand ShowCodingCurrentTaskCommand { get; }
+
+    public ICommand ClearCodingCurrentTaskCommand { get; }
+
+    public ICommand RunCodingProjectDefaultsCommand { get; }
+
+    public ICommand SaveCodingProjectDefaultsCommand { get; }
 
     public ICommand PickCodingSolutionCommand { get; }
 
@@ -3204,6 +3236,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private static string EscapeCodingCommandPath(string path)
         => path.Replace("\"", string.Empty, StringComparison.Ordinal);
 
+    private static string NormalizeCodingCommandQuery(string value) =>
+        Regex.Replace(value.Trim(), @"\s+", " ").Replace("\"", "'", StringComparison.Ordinal);
+
     private async Task RestoreUserDataAsync()
     {
         var startedAt = DateTimeOffset.Now;
@@ -3943,12 +3978,26 @@ public sealed class MainWindowViewModel : ObservableObject
             "How Ali uses it:",
             "Project control center",
             "Current target:",
+            "Current task:",
             "Target source:",
             "Fast actions:",
             "Wrong-project guard:",
             "Recent targets:",
             "Targeted validation:",
+            "Project command defaults:",
             "Project memory",
+            "Current coding task",
+            "Goal:",
+            "Status:",
+            "Started:",
+            "Likely files:",
+            "Likely tests:",
+            "Default commands:",
+            "Task-to-patch pipeline:",
+            "Project command defaults",
+            "Build:",
+            "Test:",
+            "Run:",
             "Notes:",
             "Owner-approved apply packet",
             "Packet confidence:",
@@ -4104,7 +4153,18 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Open Folder:",
             "- Context Packet:",
             "- Project Memory:",
+            "- Start Task:",
+            "- Current Task:",
             "- Recent target:",
+            "- Build:",
+            "- Test:",
+            "- Run:",
+            "- Plan:",
+            "- Candidate file:",
+            "- Patch preview:",
+            "- Owner approval:",
+            "- Validate:",
+            "- Closeout:",
             "- App projects:",
             "- Test projects:",
             "- Ambiguity:",
@@ -4791,6 +4851,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CodingWorkspaceRootText = settings.WorkspaceRoot;
         CodingCurrentSolutionOrProjectPathText = settings.CurrentSolutionOrProjectPath;
         ReplaceChoices(CodingRecentSolutionOrProjectPaths, settings.RecentSolutionOrProjectPaths);
+        SelectedCodingRecentSolutionOrProjectPath = CodingRecentSolutionOrProjectPaths.FirstOrDefault() ?? string.Empty;
         CodingWorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, settings.WorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false);
         CodingExplicitOutsideFileOpenMode = settings.AllowExplicitOutsideFileOpen
             ? PickChoice(CodingExplicitOutsideFileOpenModeChoices, settings.ExplicitOutsideFileOpenMode, CodingPermissionModes.Allowed, resetToSmallest: false)
@@ -4869,6 +4930,36 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         SetCurrentCodingSolutionOrProject(dialog.FileName, save: true);
+    }
+
+    private void UseSelectedCodingRecentSolution()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedCodingRecentSolutionOrProjectPath))
+        {
+            CodingPermissionsStatusText = "Select a recent solution/project first.";
+            return;
+        }
+
+        SetCurrentCodingSolutionOrProject(SelectedCodingRecentSolutionOrProjectPath, save: true);
+    }
+
+    private async Task StartCodingSessionFromPromptAsync()
+    {
+        var rawGoal = Microsoft.VisualBasic.Interaction.InputBox(
+            "What do you want Ali to build, fix, or change?",
+            "Start coding session",
+            "Build me ");
+        var goal = NormalizeCodingCommandQuery(rawGoal);
+        if (string.IsNullOrWhiteSpace(goal))
+        {
+            StatusText = "Coding session cancelled.";
+            return;
+        }
+
+        await RunCodingDiagnosticAsync(
+            "Start coding session",
+            $"start coding session {goal}",
+            "Coding.StartSession").ConfigureAwait(true);
     }
 
     private async Task CreateCodingProjectAsync()
@@ -7648,6 +7739,11 @@ public sealed class MainWindowViewModel : ObservableObject
             createCodingProject.RaiseCanExecuteChanged();
         }
 
+        if (UseSelectedCodingRecentSolutionCommand is RelayCommand useSelectedCodingRecentSolution)
+        {
+            useSelectedCodingRecentSolution.RaiseCanExecuteChanged();
+        }
+
         if (RunComputerHealthCheckCommand is AsyncRelayCommand runComputerHealthCheck)
         {
             runComputerHealthCheck.RaiseCanExecuteChanged();
@@ -7901,6 +7997,31 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingProjectMemoryCommand is AsyncRelayCommand runCodingProjectMemory)
         {
             runCodingProjectMemory.RaiseCanExecuteChanged();
+        }
+
+        if (StartCodingSessionCommand is AsyncRelayCommand startCodingSession)
+        {
+            startCodingSession.RaiseCanExecuteChanged();
+        }
+
+        if (ShowCodingCurrentTaskCommand is AsyncRelayCommand showCodingCurrentTask)
+        {
+            showCodingCurrentTask.RaiseCanExecuteChanged();
+        }
+
+        if (ClearCodingCurrentTaskCommand is AsyncRelayCommand clearCodingCurrentTask)
+        {
+            clearCodingCurrentTask.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingProjectDefaultsCommand is AsyncRelayCommand runCodingProjectDefaults)
+        {
+            runCodingProjectDefaults.RaiseCanExecuteChanged();
+        }
+
+        if (SaveCodingProjectDefaultsCommand is AsyncRelayCommand saveCodingProjectDefaults)
+        {
+            saveCodingProjectDefaults.RaiseCanExecuteChanged();
         }
 
         if (StartNewCodingProjectCommand is AsyncRelayCommand startNewCodingProject)

@@ -1336,9 +1336,22 @@
                                            Margin="0,0,0,10" />
 
                                 <TextBlock Text="Recent solution/project targets" Style="{StaticResource FieldLabel}" />
-                                <ListBox ItemsSource="{Binding CodingRecentSolutionOrProjectPaths}"
-                                         MaxHeight="96"
-                                         Margin="0,2,0,10" />
+                                <Grid Margin="0,2,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="112" />
+                                    </Grid.ColumnDefinitions>
+                                    <ListBox ItemsSource="{Binding CodingRecentSolutionOrProjectPaths}"
+                                             SelectedItem="{Binding SelectedCodingRecentSolutionOrProjectPath, Mode=TwoWay}"
+                                             MaxHeight="96"
+                                             Margin="0" />
+                                    <Button Grid.Column="2"
+                                            Content="Use Selected"
+                                            Command="{Binding UseSelectedCodingRecentSolutionCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                </Grid>
 
                                 <TextBlock Text="PDF workspace folder" Style="{StaticResource FieldLabel}" />
                                 <Grid Margin="0,2,0,4">

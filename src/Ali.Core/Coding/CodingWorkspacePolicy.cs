@@ -99,6 +99,11 @@ public sealed class CodingWorkspacePolicy
             return CodingToolPermissionKind.Allow.AsPermission("Saving a local note for the selected coding project is allowed.");
         }
 
+        if (request.Action == CodingToolAction.SaveCurrentProjectCommandDefaults)
+        {
+            return CodingToolPermissionKind.Allow.AsPermission("Saving local command defaults for the selected coding project is allowed.");
+        }
+
         if (request.Action == CodingToolAction.ListWorkspace)
         {
             return CodingToolPermissionKind.Allow.AsPermission("Listing the approved coding workspace is allowed.");
@@ -128,6 +133,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.DraftCommitMessage
             or CodingToolAction.DraftReleaseNotes
             or CodingToolAction.ShowCodingSessionTimeline
+            or CodingToolAction.StartCodingSession
+            or CodingToolAction.ShowCurrentCodingSession
+            or CodingToolAction.ClearCurrentCodingSession
+            or CodingToolAction.ShowCurrentProjectCommandDefaults
             or CodingToolAction.ShowRollbackPlan
             or CodingToolAction.ShowUiChangeChecklist
             or CodingToolAction.ComposeTypedPatch

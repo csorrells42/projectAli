@@ -1977,6 +1977,59 @@ public static class CodingToolRequestParser
         "morning session summary"
     ];
 
+    private static readonly string[] StartCodingSessionPrefixes =
+    [
+        "start coding session ",
+        "start coding task ",
+        "start current coding task ",
+        "begin coding session ",
+        "begin coding task ",
+        "launch coding session ",
+        "launch coding task "
+    ];
+
+    private static readonly string[] CurrentCodingSessionRequests =
+    [
+        "current coding task",
+        "show current coding task",
+        "current coding session",
+        "show current coding session",
+        "show task panel",
+        "task panel"
+    ];
+
+    private static readonly string[] ClearCurrentCodingSessionRequests =
+    [
+        "clear current coding task",
+        "clear current coding session",
+        "finish current coding session",
+        "discard current coding session"
+    ];
+
+    private static readonly string[] ProjectCommandDefaultsRequests =
+    [
+        "project command defaults",
+        "show project command defaults",
+        "current project command defaults",
+        "show current project command defaults"
+    ];
+
+    private static readonly string[] SaveProjectCommandDefaultsPrefixes =
+    [
+        "save project command defaults ",
+        "save current project command defaults ",
+        "set project command defaults ",
+        "set current project command defaults "
+    ];
+
+    private static readonly string[] SaveProjectCommandDefaultsRequests =
+    [
+        "save project command defaults",
+        "save current project command defaults",
+        "set project command defaults",
+        "set current project command defaults"
+    ];
+
     private static readonly string[] WindowsTroubleshootingToolkitRequests =
     [
         "show windows troubleshooting toolkit",
@@ -3282,6 +3335,40 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (TryParsePrefixedQuery(trimmed, StartCodingSessionPrefixes, CodingToolAction.StartCodingSession, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsCurrentCodingSessionRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCurrentCodingSession, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsClearCurrentCodingSessionRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ClearCurrentCodingSession, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsProjectCommandDefaultsRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowCurrentProjectCommandDefaults, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (TryParsePrefixedQuery(trimmed, SaveProjectCommandDefaultsPrefixes, CodingToolAction.SaveCurrentProjectCommandDefaults, userConfirmed, out request))
+        {
+            return true;
+        }
+
+        if (IsSaveProjectCommandDefaultsRequest(trimmed))
+        {
+            request = new CodingToolRequest(CodingToolAction.SaveCurrentProjectCommandDefaults, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsWindowsTroubleshootingToolkitRequest(trimmed))
         {
             request = new CodingToolRequest(CodingToolAction.ShowWindowsTroubleshootingToolkit, null, UserConfirmed: userConfirmed);
@@ -3753,6 +3840,18 @@ public static class CodingToolRequestParser
 
     private static bool IsCodingSessionSummaryRequest(string text) =>
         CodingSessionSummaryRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCurrentCodingSessionRequest(string text) =>
+        CurrentCodingSessionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsClearCurrentCodingSessionRequest(string text) =>
+        ClearCurrentCodingSessionRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsProjectCommandDefaultsRequest(string text) =>
+        ProjectCommandDefaultsRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSaveProjectCommandDefaultsRequest(string text) =>
+        SaveProjectCommandDefaultsRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsWindowsTroubleshootingToolkitRequest(string text) =>
         WindowsTroubleshootingToolkitRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));

@@ -130,6 +130,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows full coding readiness scanners", TestLocalCodingToolShowsFullCodingReadinessScanners),
     ("local coding tool shows guided feature workflow", TestLocalCodingToolShowsGuidedFeatureWorkflow),
     ("local coding tool shows project control center", TestLocalCodingToolShowsProjectControlCenter),
+    ("local coding tool manages current coding session", TestLocalCodingToolManagesCurrentCodingSession),
     ("programming dashboard exposes cockpit commands", TestProgrammingDashboardExposesCockpitCommands),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
     ("local coding tool lists package references", TestLocalCodingToolListsPackageReferences),
@@ -866,6 +867,18 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("guided feature workflow Save button", out var guidedWorkflowRequest));
     Equal(CodingToolAction.ShowGuidedFeatureWorkflow, guidedWorkflowRequest.Action);
     Equal("Save button", guidedWorkflowRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("start coding session add export button", out var startSessionRequest));
+    Equal(CodingToolAction.StartCodingSession, startSessionRequest.Action);
+    Equal("add export button", startSessionRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("current coding task", out var currentTaskRequest));
+    Equal(CodingToolAction.ShowCurrentCodingSession, currentTaskRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("clear current coding task", out var clearTaskRequest));
+    Equal(CodingToolAction.ClearCurrentCodingSession, clearTaskRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("project command defaults", out var defaultsRequest));
+    Equal(CodingToolAction.ShowCurrentProjectCommandDefaults, defaultsRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("save project command defaults build=dotnet build; test=dotnet test; run=dotnet run", out var saveDefaultsRequest));
+    Equal(CodingToolAction.SaveCurrentProjectCommandDefaults, saveDefaultsRequest.Action);
+    Equal("build=dotnet build; test=dotnet test; run=dotnet run", saveDefaultsRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("tell ali to build settings button", out var tellAliBuildRequest));
     Equal(CodingToolAction.ShowGuidedFeatureWorkflow, tellAliBuildRequest.Action);
     Equal("settings button", tellAliBuildRequest.Query);
@@ -4137,6 +4150,92 @@ static async Task TestLocalCodingToolShowsProjectControlCenter()
     Equal(appDirectory, launcher.Starts[0].Arguments[0]);
 }
 
+static async Task TestLocalCodingToolManagesCurrentCodingSession()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    var testDirectory = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(appDirectory);
+    Directory.CreateDirectory(testDirectory);
+    var appProject = Path.Combine(appDirectory, "Demo.App.csproj");
+    var testProject = Path.Combine(testDirectory, "Demo.Tests.csproj");
+    await File.WriteAllTextAsync(
+        appProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        testProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+            <IsTestProject>true</IsTestProject>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(appDirectory, "ButtonService.cs"), "namespace Demo.App; public sealed class ButtonService { }");
+    var runner = new FakeCodingCommandRunner(new CodingCommandRun(0, $"## main{Environment.NewLine} M Demo.App/ButtonService.cs", string.Empty, TimedOut: false));
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        runner,
+        configuredCurrentSolutionOrProjectPath: appProject,
+        configuredRecentSolutionOrProjectPaths: [appProject, testProject]);
+
+    var start = await service.TryHandleAsync("start coding session add export button", CancellationToken.None);
+    var current = await service.TryHandleAsync("current coding task", CancellationToken.None);
+    var defaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
+    var saveDefaults = await service.TryHandleAsync("save project command defaults build=custom build; test=custom test; run=custom run", CancellationToken.None);
+    var savedDefaults = await service.TryHandleAsync("project command defaults", CancellationToken.None);
+    var clear = await service.TryHandleAsync("clear current coding task", CancellationToken.None);
+    var empty = await service.TryHandleAsync("current coding task", CancellationToken.None);
+
+    Equal(true, start.Handled);
+    Equal(true, start.Succeeded);
+    Contains("Current coding task v1", start.Message);
+    Contains("Goal: add export button", start.Message);
+    Contains("Current target: Demo.App", start.Message);
+    Contains("Default commands:", start.Message);
+    Contains("Task-to-patch pipeline:", start.Message);
+    Contains("Wrong-project confirmation:", start.Message);
+    Contains("Next command: feature work context add export button", start.Message);
+
+    Equal(true, current.Handled);
+    Equal(true, current.Succeeded);
+    Contains("Goal: add export button", current.Message);
+    Contains("Likely files:", current.Message);
+
+    Equal(true, defaults.Handled);
+    Equal(true, defaults.Succeeded);
+    Contains("Project command defaults v1", defaults.Message);
+    Contains("Build: confirm dotnet build", defaults.Message);
+    Contains("Test: confirm dotnet test", defaults.Message);
+
+    Equal(true, saveDefaults.Handled);
+    Equal(true, saveDefaults.Succeeded);
+    Contains("Project command defaults saved.", saveDefaults.Message);
+    Equal(true, savedDefaults.Handled);
+    Equal(true, savedDefaults.Succeeded);
+    Contains("Build: custom build", savedDefaults.Message);
+    Contains("Test: custom test", savedDefaults.Message);
+    Contains("Run: custom run", savedDefaults.Message);
+
+    Equal(true, clear.Handled);
+    Equal(true, clear.Succeeded);
+    Contains("Current coding task cleared.", clear.Message);
+    Equal(true, empty.Handled);
+    Equal(false, empty.Succeeded);
+    Contains("Current coding task: none.", empty.Message);
+}
+
 static Task TestProgrammingDashboardExposesCockpitCommands()
 {
     var repository = new DirectoryInfo(AppContext.BaseDirectory);
@@ -4187,6 +4286,11 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Active Workspace", dashboard);
     Contains("Project Center", dashboard);
     Contains("Project Memory", dashboard);
+    Contains("Start Session", dashboard);
+    Contains("Current Task", dashboard);
+    Contains("Clear Task", dashboard);
+    Contains("Defaults", dashboard);
+    Contains("Save Defaults", dashboard);
     Contains("Pick Solution", dashboard);
     Contains("New Project", dashboard);
     Contains("Build Current", dashboard);
@@ -4230,6 +4334,11 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingActiveWorkspaceCommand", dashboard);
     Contains("RunCodingProjectControlCenterCommand", dashboard);
     Contains("RunCodingProjectMemoryCommand", dashboard);
+    Contains("StartCodingSessionCommand", dashboard);
+    Contains("ShowCodingCurrentTaskCommand", dashboard);
+    Contains("ClearCodingCurrentTaskCommand", dashboard);
+    Contains("RunCodingProjectDefaultsCommand", dashboard);
+    Contains("SaveCodingProjectDefaultsCommand", dashboard);
     Contains("PickCodingSolutionCommand", dashboard);
     Contains("StartNewCodingProjectCommand", dashboard);
     Contains("RunCodingBuildCurrentCommand", dashboard);
@@ -4310,7 +4419,14 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("project control center", viewModel);
     Contains("RunCodingProjectMemoryCommand = CreateAsyncCommand", viewModel);
     Contains("show project memory", viewModel);
+    Contains("StartCodingSessionCommand = CreateAsyncCommand", viewModel);
+    Contains("StartCodingSessionFromPromptAsync", viewModel);
+    Contains("ShowCodingCurrentTaskCommand = CreateAsyncCommand", viewModel);
+    Contains("ClearCodingCurrentTaskCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingProjectDefaultsCommand = CreateAsyncCommand", viewModel);
+    Contains("SaveCodingProjectDefaultsCommand = CreateAsyncCommand", viewModel);
     Contains("PickCodingSolutionCommand = CreateCommand", viewModel);
+    Contains("UseSelectedCodingRecentSolutionCommand = CreateCommand", viewModel);
     Contains("StartNewCodingProjectCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBuildCurrentCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingTestCurrentCommand = CreateAsyncCommand", viewModel);
@@ -4320,6 +4436,7 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand", viewModel);
     Contains("CreateCodingProjectCommand = CreateAsyncCommand", viewModel);
     Contains("CodingCurrentSolutionOrProjectPathText", viewModel);
+    Contains("SelectedCodingRecentSolutionOrProjectPath", viewModel);
     Contains("CurrentSolutionOrProjectPath", viewModel);
     Contains("RecentSolutionOrProjectPaths", viewModel);
     Contains("Project type: console, library, wpf, webapi, test, or solution", viewModel);
@@ -4366,6 +4483,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Current solution or project", settings);
     Contains("Recent solution/project targets", settings);
     Contains("CodingRecentSolutionOrProjectPaths", settings);
+    Contains("SelectedCodingRecentSolutionOrProjectPath", settings);
+    Contains("UseSelectedCodingRecentSolutionCommand", settings);
     Contains("CodingCurrentSolutionOrProjectPathText", settings);
     Contains("BrowseCodingCurrentSolutionOrProjectCommand", settings);
     Contains("CreateCodingProjectCommand", settings);

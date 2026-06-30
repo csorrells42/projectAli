@@ -128,6 +128,8 @@ public sealed class LocalCodingToolService(
     private readonly string _routeDiffTrackerPath = Path.Combine(dataRoot, "Coding", "route-diff-tracker.json");
     private readonly string _codingSessionJournalPath = Path.Combine(dataRoot, "Coding", "coding-session-journal.json");
     private readonly string _currentProjectMemoryPath = Path.Combine(dataRoot, "Coding", "current-project-memory.json");
+    private readonly string _currentCodingSessionPath = Path.Combine(dataRoot, "Coding", "current-coding-session.json");
+    private readonly string _projectCommandDefaultsPath = Path.Combine(dataRoot, "Coding", "project-command-defaults.json");
     private string _pdfWorkspaceRoot = string.IsNullOrWhiteSpace(pdfWorkspaceRoot)
         ? Path.Combine(dataRoot, "GeneratedDocuments")
         : Path.GetFullPath(pdfWorkspaceRoot.Trim().Trim('"'));
@@ -262,6 +264,11 @@ public sealed class LocalCodingToolService(
             CodingToolAction.DraftCommitMessage => await DraftCommitMessageAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.DraftReleaseNotes => await DraftReleaseNotesAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCodingSessionTimeline => ShowCodingSessionTimeline(),
+            CodingToolAction.StartCodingSession => await StartCodingSessionAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowCurrentCodingSession => ShowCurrentCodingSession(),
+            CodingToolAction.ClearCurrentCodingSession => ClearCurrentCodingSession(),
+            CodingToolAction.ShowCurrentProjectCommandDefaults => ShowCurrentProjectCommandDefaults(),
+            CodingToolAction.SaveCurrentProjectCommandDefaults => SaveCurrentProjectCommandDefaults(request),
             CodingToolAction.ShowRollbackPlan => await ShowRollbackPlanAsync(cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowUiChangeChecklist => ShowUiChangeChecklist(request),
             CodingToolAction.ComposeTypedPatch => await ComposeTypedPatchAsync(request, cancellationToken).ConfigureAwait(false),
@@ -2113,6 +2120,165 @@ public sealed class LocalCodingToolService(
         };
 
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Coding session summary", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> StartCodingSessionAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query, string.Empty);
+        if (string.IsNullOrWhiteSpace(goal))
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Start coding session needs a goal, for example: start coding session add export button.",
+                "Coding session",
+                Policy.WorkspaceRoot);
+        }
+
+        var currentTarget = GetPrimaryTarget();
+        var context = await BuildFeatureWorkContextAsync(
+            request with
+            {
+                Query = goal
+            },
+            cancellationToken).ConfigureAwait(false);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
+        var defaults = BuildProjectCommandDefaults(currentTarget, context.TestTarget.Command);
+        var state = new CurrentCodingSessionState(
+            goal,
+            currentTarget ?? string.Empty,
+            Policy.WorkspaceRoot,
+            DateTimeOffset.Now,
+            DateTimeOffset.Now,
+            "planning",
+            context.RelativeCandidateFiles.Take(10).ToList(),
+            context.TestTarget.TestFiles.Select(RelativeToWorkspace).Take(8).ToList(),
+            changedFiles.Take(12).ToList(),
+            defaults.BuildCommand,
+            defaults.TestCommand,
+            defaults.RunCommand,
+            BuildTaskPipelineRows(goal, context, defaults),
+            BuildWrongProjectGuardRows(currentTarget));
+        WriteCurrentCodingSession(state);
+        return BuildCurrentCodingSessionResult(state, gitStatus.Summary);
+    }
+
+    private CodingToolResult ShowCurrentCodingSession()
+    {
+        var state = ReadCurrentCodingSession();
+        if (state is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Current coding task: none. Start one with: start coding session <goal>.",
+                "Current coding task",
+                Policy.WorkspaceRoot);
+        }
+
+        return BuildCurrentCodingSessionResult(state, gitSummary: null);
+    }
+
+    private CodingToolResult ClearCurrentCodingSession()
+    {
+        if (File.Exists(_currentCodingSessionPath))
+        {
+            File.Delete(_currentCodingSessionPath);
+        }
+
+        return new CodingToolResult(
+            true,
+            true,
+            "Current coding task cleared. No project files were changed.",
+            "Current coding task",
+            Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult BuildCurrentCodingSessionResult(CurrentCodingSessionState state, string? gitSummary)
+    {
+        var target = string.IsNullOrWhiteSpace(state.ProjectPath)
+            ? null
+            : state.ProjectPath;
+        var lines = new List<string>
+        {
+            "Current coding task v1:",
+            "No files were changed.",
+            $"Goal: {state.Goal}",
+            string.IsNullOrWhiteSpace(target) ? "Current target: Review - pick a solution/project." : $"Current target: {FormatWorkspacePath(target)}",
+            $"Status: {state.Status}",
+            $"Started: {state.StartedAt.LocalDateTime:g}",
+            gitSummary is null ? "Git: not refreshed for this view." : $"Git: {gitSummary}",
+            "Likely files:"
+        };
+        lines.AddRange(FormatPanelRows(state.LikelyFiles, "- none yet"));
+        lines.Add("Likely tests:");
+        lines.AddRange(FormatPanelRows(state.LikelyTests, "- none yet"));
+        lines.Add("Changed files:");
+        lines.AddRange(FormatPanelRows(state.ChangedFiles, "- none"));
+        lines.Add("Default commands:");
+        lines.Add($"- Build: {state.BuildCommand}");
+        lines.Add($"- Test: {state.TestCommand}");
+        lines.Add($"- Run: {state.RunCommand}");
+        lines.Add("Wrong-project confirmation:");
+        lines.AddRange(state.WrongProjectGuardRows.Select(row => $"- {row}"));
+        lines.Add("Task-to-patch pipeline:");
+        lines.AddRange(state.PipelineRows.Select(row => $"- {row}"));
+        lines.Add("Next command: feature work context " + state.Goal);
+        return new CodingToolResult(
+            true,
+            true,
+            string.Join(Environment.NewLine, lines),
+            "Current coding task",
+            target ?? Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult ShowCurrentProjectCommandDefaults()
+    {
+        var currentTarget = GetPrimaryTarget();
+        var defaults = BuildProjectCommandDefaults(currentTarget, testCommand: string.Empty);
+        var lines = new List<string>
+        {
+            "Project command defaults v1:",
+            "No files were changed.",
+            currentTarget is null ? "Current target: Review - pick a solution/project." : $"Current target: {RelativeToWorkspace(currentTarget)}",
+            $"Build: {defaults.BuildCommand}",
+            $"Test: {defaults.TestCommand}",
+            $"Run: {defaults.RunCommand}",
+            "To save inferred defaults: save project command defaults",
+            "To override: save project command defaults build=<command>; test=<command>; run=<command>"
+        };
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Project command defaults", currentTarget ?? Policy.WorkspaceRoot);
+    }
+
+    private CodingToolResult SaveCurrentProjectCommandDefaults(CodingToolRequest request)
+    {
+        var currentTarget = GetPrimaryTarget();
+        if (currentTarget is null)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Project command defaults need a selected solution/project first.",
+                "Project command defaults",
+                Policy.WorkspaceRoot);
+        }
+
+        var inferred = BuildProjectCommandDefaults(currentTarget, testCommand: string.Empty);
+        var parsed = ParseProjectCommandDefaults(request.Query, inferred);
+        var store = ReadProjectCommandDefaultsStore();
+        var key = NormalizeProjectMemoryKey(currentTarget);
+        store.Entries.RemoveAll(entry => string.Equals(NormalizeProjectMemoryKey(entry.ProjectPath), key, StringComparison.OrdinalIgnoreCase));
+        store.Entries.Add(new ProjectCommandDefaultsEntry(currentTarget, parsed.BuildCommand, parsed.TestCommand, parsed.RunCommand, DateTimeOffset.Now));
+        store = new ProjectCommandDefaultsStore(store.Entries.OrderBy(entry => entry.ProjectPath, StringComparer.OrdinalIgnoreCase).TakeLast(200).ToList());
+        WriteProjectCommandDefaultsStore(store);
+
+        return new CodingToolResult(
+            true,
+            true,
+            $"Project command defaults saved.{Environment.NewLine}Current target: {RelativeToWorkspace(currentTarget)}{Environment.NewLine}Build: {parsed.BuildCommand}{Environment.NewLine}Test: {parsed.TestCommand}{Environment.NewLine}Run: {parsed.RunCommand}",
+            "Project command defaults",
+            currentTarget);
     }
 
     private CodingToolResult ShowComputerAssistantStatus()
@@ -9615,6 +9781,8 @@ public sealed class LocalCodingToolService(
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
         var testTarget = await ResolveTestTargetRecommendationAsync("current project", cancellationToken).ConfigureAwait(false);
         var memoryEntries = ReadCurrentProjectMemoryEntries(currentTarget);
+        var session = ReadCurrentCodingSession();
+        var defaults = BuildProjectCommandDefaults(currentTarget, testTarget.Command);
 
         var lines = new List<string>
         {
@@ -9626,7 +9794,8 @@ public sealed class LocalCodingToolService(
             $"Git: {gitStatus.Summary}",
             $"Changed files: {changedFiles.Count}",
             $"Projects detected: {summaries.Count}",
-            $"Project memory notes: {memoryEntries.Count}"
+            $"Project memory notes: {memoryEntries.Count}",
+            session is null ? "Current task: none" : $"Current task: {session.Goal} ({session.Status})"
         };
 
         lines.Add("Fast actions:");
@@ -9647,7 +9816,14 @@ public sealed class LocalCodingToolService(
             lines.Add("- Open Folder: open current project folder");
             lines.Add("- Context Packet: coding context packet current project");
             lines.Add("- Project Memory: show project memory");
+            lines.Add("- Start Task: start coding session <goal>");
+            lines.Add("- Current Task: current coding task");
         }
+
+        lines.Add("Project command defaults:");
+        lines.Add($"- Build: {defaults.BuildCommand}");
+        lines.Add($"- Test: {defaults.TestCommand}");
+        lines.Add($"- Run: {defaults.RunCommand}");
 
         lines.Add("Wrong-project guard:");
         lines.Add(currentTarget is null
@@ -10890,6 +11066,14 @@ public sealed class LocalCodingToolService(
     private static string EscapeCommandPath(string path) =>
         path.Replace("\"", string.Empty, StringComparison.Ordinal);
 
+    private string FormatWorkspacePath(string path) =>
+        Policy.IsInsideWorkspace(path) ? RelativeToWorkspace(path) : path;
+
+    private static IReadOnlyList<string> FormatPanelRows(IReadOnlyList<string> rows, string emptyRow) =>
+        rows.Count == 0
+            ? [emptyRow]
+            : rows.Take(10).Select(row => "- " + row).ToList();
+
     private IReadOnlyList<string> BuildActiveProjectSelectionRows(
         IReadOnlyList<ProjectSummary> summaries,
         string? primaryTarget,
@@ -10980,6 +11164,168 @@ public sealed class LocalCodingToolService(
         CodingWorkspacePolicy.TryNormalizePath(path, out var normalized)
             ? normalized
             : path.Trim();
+
+    private CurrentCodingSessionState? ReadCurrentCodingSession()
+    {
+        if (!File.Exists(_currentCodingSessionPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_currentCodingSessionPath);
+            return JsonSerializer.Deserialize<CurrentCodingSessionState>(stream, RoadmapJsonOptions);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private void WriteCurrentCodingSession(CurrentCodingSessionState state)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_currentCodingSessionPath)!);
+        using var stream = File.Create(_currentCodingSessionPath);
+        JsonSerializer.Serialize(stream, state, RoadmapJsonOptions);
+    }
+
+    private ProjectCommandDefaultsStore ReadProjectCommandDefaultsStore()
+    {
+        if (!File.Exists(_projectCommandDefaultsPath))
+        {
+            return new ProjectCommandDefaultsStore([]);
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_projectCommandDefaultsPath);
+            return JsonSerializer.Deserialize<ProjectCommandDefaultsStore>(stream, RoadmapJsonOptions)
+                   ?? new ProjectCommandDefaultsStore([]);
+        }
+        catch (IOException)
+        {
+            return new ProjectCommandDefaultsStore([]);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new ProjectCommandDefaultsStore([]);
+        }
+        catch (JsonException)
+        {
+            return new ProjectCommandDefaultsStore([]);
+        }
+    }
+
+    private void WriteProjectCommandDefaultsStore(ProjectCommandDefaultsStore store)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_projectCommandDefaultsPath)!);
+        using var stream = File.Create(_projectCommandDefaultsPath);
+        JsonSerializer.Serialize(stream, store, RoadmapJsonOptions);
+    }
+
+    private ProjectCommandDefaultsEntry BuildProjectCommandDefaults(string? currentTarget, string? testCommand)
+    {
+        if (!string.IsNullOrWhiteSpace(currentTarget))
+        {
+            var key = NormalizeProjectMemoryKey(currentTarget);
+            var saved = ReadProjectCommandDefaultsStore().Entries
+                .LastOrDefault(entry => string.Equals(NormalizeProjectMemoryKey(entry.ProjectPath), key, StringComparison.OrdinalIgnoreCase));
+            if (saved is not null)
+            {
+                return saved;
+            }
+        }
+
+        var target = currentTarget ?? Policy.WorkspaceRoot;
+        var quoted = QuoteForOwnerCommand(target);
+        var build = $"confirm dotnet build {quoted}";
+        var test = string.IsNullOrWhiteSpace(testCommand)
+            ? $"confirm dotnet test {quoted}"
+            : testCommand;
+        var run = target.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            ? $"confirm dotnet run {quoted}"
+            : "Review - pick an app .csproj before running.";
+        return new ProjectCommandDefaultsEntry(target, build, test, run, DateTimeOffset.Now);
+    }
+
+    private static ProjectCommandDefaultsEntry ParseProjectCommandDefaults(
+        string? query,
+        ProjectCommandDefaultsEntry fallback)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return fallback;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in query.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var index = segment.IndexOf('=', StringComparison.Ordinal);
+            if (index <= 0)
+            {
+                continue;
+            }
+
+            var key = segment[..index].Trim();
+            var value = segment[(index + 1)..].Trim().Trim('"');
+            if (key.Length > 0 && value.Length > 0)
+            {
+                values[key] = value;
+            }
+        }
+
+        return fallback with
+        {
+            BuildCommand = values.GetValueOrDefault("build", fallback.BuildCommand),
+            TestCommand = values.GetValueOrDefault("test", fallback.TestCommand),
+            RunCommand = values.GetValueOrDefault("run", fallback.RunCommand),
+            UpdatedAt = DateTimeOffset.Now
+        };
+    }
+
+    private IReadOnlyList<string> BuildTaskPipelineRows(
+        string goal,
+        FeatureWorkContext context,
+        ProjectCommandDefaultsEntry defaults)
+    {
+        var firstTarget = context.RankedTargets.FirstOrDefault()?.RelativePath
+            ?? context.RelativeCandidateFiles.FirstOrDefault()
+            ?? "Review - no candidate file yet.";
+        return
+        [
+            $"Plan: feature work context {goal}",
+            $"Candidate file: {firstTarget}",
+            $"Patch preview: exact patch synthesis {goal}",
+            "Owner approval: show pending patch preview, then confirm apply last patch preview.",
+            $"Validate: {defaults.TestCommand}",
+            $"Build: {defaults.BuildCommand}",
+            "Closeout: semantic change receipt " + goal
+        ];
+    }
+
+    private IReadOnlyList<string> BuildWrongProjectGuardRows(string? currentTarget)
+    {
+        if (string.IsNullOrWhiteSpace(currentTarget))
+        {
+            return ["Review - no current project is selected; ask the user to pick one before edits/build/test."];
+        }
+
+        return
+        [
+            $"Current target: {FormatWorkspacePath(currentTarget)}",
+            "Before edits/build/test, repeat this target in the response.",
+            "If the user's request names another project, stop and ask whether to switch."
+        ];
+    }
 
     private static IReadOnlyList<string> BuildOwnerApprovedApplyPacketRows(
         FeatureWorkContext context,
@@ -16729,7 +17075,7 @@ public sealed class LocalCodingToolService(
         var result = new CodingToolResult(
             true,
             run.ExitCode == 0 && !run.TimedOut,
-            $"{status}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{outputBlock}",
+            $"{status}{Environment.NewLine}Current target: {FormatWorkspacePath(targetPath)}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{outputBlock}",
             "dotnet",
             targetPath,
             ExitCode: run.ExitCode);
@@ -20078,6 +20424,32 @@ public sealed class LocalCodingToolService(
         string ProjectPath,
         string Note,
         DateTimeOffset CreatedAt);
+
+    private sealed record CurrentCodingSessionState(
+        string Goal,
+        string ProjectPath,
+        string WorkspaceRoot,
+        DateTimeOffset StartedAt,
+        DateTimeOffset UpdatedAt,
+        string Status,
+        IReadOnlyList<string> LikelyFiles,
+        IReadOnlyList<string> LikelyTests,
+        IReadOnlyList<string> ChangedFiles,
+        string BuildCommand,
+        string TestCommand,
+        string RunCommand,
+        IReadOnlyList<string> PipelineRows,
+        IReadOnlyList<string> WrongProjectGuardRows);
+
+    private sealed record ProjectCommandDefaultsStore(
+        List<ProjectCommandDefaultsEntry> Entries);
+
+    private sealed record ProjectCommandDefaultsEntry(
+        string ProjectPath,
+        string BuildCommand,
+        string TestCommand,
+        string RunCommand,
+        DateTimeOffset UpdatedAt);
 
     private sealed record NormalizedPatchEdit(
         string FullPath,
