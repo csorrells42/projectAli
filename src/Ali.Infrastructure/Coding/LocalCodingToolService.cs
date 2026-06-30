@@ -35,7 +35,7 @@ public sealed class LocalCodingToolService(
     private const int MaxContextSearchMatches = 14;
     private const int MaxReceiptEntries = 12;
     private const int MaxDiagnosticLines = 12;
-    private const int MaxEditContentCharacters = 32_000;
+    private const int MaxEditContentCharacters = 48_000;
     private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
     private const int MaxPatchBundleEdits = 8;
@@ -14325,6 +14325,7 @@ public sealed class LocalCodingToolService(
                             <DockPanel Grid.Row="1" Margin="0,0,0,8">
                                 <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         local:DashboardFocusBehavior.FocusOnLoaded="True"
                                          VerticalContentAlignment="Center" />
                             </DockPanel>
                             <DataGrid x:Name="ItemsDataGrid"
@@ -16087,6 +16088,44 @@ public sealed class LocalCodingToolService(
                     }
 
                     return DefaultTemplate ?? base.SelectTemplate(item, container);
+                }
+            }
+
+            public static class DashboardFocusBehavior
+            {
+                public static readonly DependencyProperty FocusOnLoadedProperty =
+                    DependencyProperty.RegisterAttached(
+                        "FocusOnLoaded",
+                        typeof(bool),
+                        typeof(DashboardFocusBehavior),
+                        new PropertyMetadata(false, OnFocusOnLoadedChanged));
+
+                public static bool GetFocusOnLoaded(DependencyObject element) =>
+                    (bool)element.GetValue(FocusOnLoadedProperty);
+
+                public static void SetFocusOnLoaded(DependencyObject element, bool value) =>
+                    element.SetValue(FocusOnLoadedProperty, value);
+
+                private static void OnFocusOnLoadedChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
+                {
+                    if (dependencyObject is not FrameworkElement element)
+                    {
+                        return;
+                    }
+
+                    element.Loaded -= FocusElementOnLoaded;
+                    if (args.NewValue is true)
+                    {
+                        element.Loaded += FocusElementOnLoaded;
+                    }
+                }
+
+                private static void FocusElementOnLoaded(object sender, RoutedEventArgs args)
+                {
+                    if (sender is FrameworkElement element)
+                    {
+                        element.Focus();
+                    }
                 }
             }
 
