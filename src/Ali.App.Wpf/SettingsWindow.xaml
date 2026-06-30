@@ -1307,6 +1307,34 @@
                                            Foreground="{StaticResource SubtleTextBrush}"
                                            Margin="0,0,0,10" />
 
+                                <TextBlock Text="Current solution or project" Style="{StaticResource FieldLabel}" />
+                                <Grid Margin="0,2,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="112" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="112" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding CodingCurrentSolutionOrProjectPathText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0" />
+                                    <Button Grid.Column="2"
+                                            Content="Choose File"
+                                            Command="{Binding BrowseCodingCurrentSolutionOrProjectCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                    <Button Grid.Column="4"
+                                            Content="New Project"
+                                            Command="{Binding CreateCodingProjectCommand}"
+                                            Margin="0"
+                                            Padding="8,5" />
+                                </Grid>
+                                <TextBlock Text="Pick a .sln, .slnx, or .csproj. This becomes Ali's current coding target inside the workspace."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,10" />
+
                                 <TextBlock Text="PDF workspace folder" Style="{StaticResource FieldLabel}" />
                                 <Grid Margin="0,2,0,4">
                                     <Grid.ColumnDefinitions>

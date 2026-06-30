@@ -19,6 +19,7 @@ public sealed class LocalCodingToolService(
     ICodingCommandRunner? commandRunner = null,
     string? configuredNotepadPlusPlusPath = null,
     string? configuredVisualStudioPath = null,
+    string? configuredCurrentSolutionOrProjectPath = null,
     string? pdfWorkspaceRoot = null) : ILocalCodingTool
 {
     private static readonly JsonSerializerOptions RoadmapJsonOptions = new(JsonSerializerDefaults.Web)
@@ -144,6 +145,7 @@ public sealed class LocalCodingToolService(
     private ApprovedRoadmapExecutionPacket? _approvedPacket;
     private string? _configuredNotepadPlusPlusPath = configuredNotepadPlusPlusPath;
     private string? _configuredVisualStudioPath = configuredVisualStudioPath;
+    private string? _configuredCurrentSolutionOrProjectPath = configuredCurrentSolutionOrProjectPath;
 
     public CodingWorkspacePolicy Policy { get; private set; } = policy;
 
@@ -157,6 +159,7 @@ public sealed class LocalCodingToolService(
         Policy = settings.ToPolicy();
         _configuredNotepadPlusPlusPath = settings.NotepadPlusPlusPath;
         _configuredVisualStudioPath = settings.VisualStudioPath;
+        _configuredCurrentSolutionOrProjectPath = settings.CurrentSolutionOrProjectPath;
         _pdfWorkspaceRoot = settings.ResolvePdfWorkspaceRoot(dataRoot);
     }
 
@@ -4558,10 +4561,39 @@ public sealed class LocalCodingToolService(
         lines.Add("- Test recommendation: resolve impacted tests first; run build after targeted tests when source behavior changed.");
         return lines;
     }
-    private string? GetPrimaryTarget() =>
-        Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
+    private string? GetPrimaryTarget()
+    {
+        if (TryGetConfiguredCurrentTarget(out var configuredTarget))
+        {
+            return configuredTarget;
+        }
+
+        return Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
             : null;
+    }
+
+    private bool TryGetConfiguredCurrentTarget([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? targetPath)
+    {
+        targetPath = null;
+        if (string.IsNullOrWhiteSpace(_configuredCurrentSolutionOrProjectPath)
+            || !CodingWorkspacePolicy.TryNormalizePath(_configuredCurrentSolutionOrProjectPath, out var normalized)
+            || !Policy.IsInsideWorkspace(normalized))
+        {
+            return false;
+        }
+
+        if (!File.Exists(normalized)
+            || (!normalized.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+                && !normalized.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+                && !normalized.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        targetPath = normalized;
+        return true;
+    }
 
     private IReadOnlyList<ProjectSummary> GetWorkspaceProjectSummaries()
     {
@@ -9531,6 +9563,7 @@ public sealed class LocalCodingToolService(
     {
         var summaries = GetWorkspaceProjectSummaries();
         var primaryTarget = GetPrimaryTarget();
+        var hasSelectedTarget = TryGetConfiguredCurrentTarget(out var selectedTarget);
         var indexStatus = GetProjectIndexStatus();
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var changedFiles = await ReadChangedFilesAsync(cancellationToken).ConfigureAwait(false);
@@ -9539,13 +9572,14 @@ public sealed class LocalCodingToolService(
             "Active workspace/project v1:",
             "No files were changed.",
             $"Workspace root: {Policy.WorkspaceRoot}",
+            selectedTarget is null ? "Selected solution/project: Review - none saved or saved path is unavailable." : $"Selected solution/project: {RelativeToWorkspace(selectedTarget)}",
             primaryTarget is null ? "Primary solution/project: Review - not found." : $"Primary solution/project: {RelativeToWorkspace(primaryTarget)}",
             $"Project index: {indexStatus.Summary}",
             $"Git: {gitStatus.Summary}",
             $"Changed files: {changedFiles.Count}",
             "Project selection:"
         };
-        lines.AddRange(BuildActiveProjectSelectionRows(summaries, primaryTarget).Select(row => $"- {row}"));
+        lines.AddRange(BuildActiveProjectSelectionRows(summaries, primaryTarget, hasSelectedTarget).Select(row => $"- {row}"));
         lines.Add("How Ali uses it:");
         lines.Add("- The configured coding workspace is the boundary for search, project index, Git checks, patch previews, and validation planning.");
         lines.Add("- The detected primary solution/project is a default target, not a license to guess inside ambiguous multi-project workspaces.");
@@ -10663,20 +10697,22 @@ public sealed class LocalCodingToolService(
 
     private IReadOnlyList<string> BuildActiveProjectSelectionRows(
         IReadOnlyList<ProjectSummary> summaries,
-        string? primaryTarget)
+        string? primaryTarget,
+        bool hasSelectedTarget)
     {
         var rows = new List<string>
         {
             summaries.Count == 0 ? "Projects: Review - no .csproj files detected." : $"Projects: Good - {summaries.Count} project(s) detected.",
+            hasSelectedTarget ? "Selection source: saved picker value." : "Selection source: inferred fallback.",
             primaryTarget is null ? "Default target: Review - no solution/project detected." : $"Default target: {RelativeToWorkspace(primaryTarget)}."
         };
         var appProjects = summaries.Where(summary => summary.ProjectRole.Contains("app", StringComparison.OrdinalIgnoreCase)).Take(4).Select(summary => summary.RelativePath).ToList();
         var testProjects = summaries.Where(summary => summary.ProjectRole.Contains("test", StringComparison.OrdinalIgnoreCase)).Take(4).Select(summary => summary.RelativePath).ToList();
         rows.Add(appProjects.Count == 0 ? "App projects: Review - none classified." : $"App projects: {FormatInlineList(appProjects)}");
         rows.Add(testProjects.Count == 0 ? "Test projects: Review - none classified." : $"Test projects: {FormatInlineList(testProjects)}");
-        rows.Add(summaries.Count > 1
-            ? "Ambiguity: Review - include the project name when the workspace has multiple projects."
-            : "Ambiguity: Good - single project workspace or primary target is clear.");
+        rows.Add(summaries.Count > 1 && !hasSelectedTarget
+            ? "Ambiguity: Review - pick a current solution/project or include the project name."
+            : "Ambiguity: Good - current project target is explicit or simple.");
         return rows;
     }
 

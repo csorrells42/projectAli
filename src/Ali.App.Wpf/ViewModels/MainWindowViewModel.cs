@@ -175,6 +175,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private ReminderEntryViewModel? _selectedReminderEntry;
     private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
     private string _codingWorkspaceRootText = string.Empty;
+    private string _codingCurrentSolutionOrProjectPathText = string.Empty;
     private bool _codingAllowExplicitOutsideFileOpen = true;
     private string _codingWorkspaceAccessMode = CodingPermissionModes.Allowed;
     private string _codingExplicitOutsideFileOpenMode = CodingPermissionModes.Allowed;
@@ -247,6 +248,8 @@ public sealed class MainWindowViewModel : ObservableObject
         SaveCodingPermissionsCommand = CreateCommand(_ => SaveCodingPermissions());
         ResetCodingPermissionsCommand = CreateCommand(_ => ResetCodingPermissionsToDefault());
         BrowseCodingWorkspaceRootCommand = CreateCommand(_ => BrowseCodingWorkspaceRoot());
+        BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand(_ => BrowseCodingCurrentSolutionOrProject());
+        CreateCodingProjectCommand = CreateAsyncCommand(CreateCodingProjectAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         BrowseCodingPdfWorkspaceRootCommand = CreateCommand(_ => BrowseCodingPdfWorkspaceRoot());
         BrowseNotepadPlusPlusPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose notepad++.exe", "Notepad++ (notepad++.exe)|notepad++.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingNotepadPlusPlusPathText = path));
         BrowseVisualStudioPathCommand = CreateCommand(_ => BrowseCodingToolPath("Choose Visual Studio devenv.exe", "Visual Studio (devenv.exe)|devenv.exe|Executable files (*.exe)|*.exe|All files (*.*)|*.*", path => CodingVisualStudioPathText = path));
@@ -299,6 +302,8 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingChangeReceiptCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Change receipt", "semantic change receipt current feature", "Coding.ChangeReceipt"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingValidationChainCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation chain", "validation chain planner current feature", "Coding.ValidationChain"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingActiveWorkspaceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Active workspace", "active workspace project", "Coding.ActiveWorkspace"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        PickCodingSolutionCommand = CreateCommand(_ => BrowseCodingCurrentSolutionOrProject());
+        StartNewCodingProjectCommand = CreateAsyncCommand(CreateCodingProjectAsync, () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingApplyPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply packet", "owner approved apply packet current feature", "Coding.ApplyPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingInsertionPlannerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Insertion plan", "roslyn insertion planner current feature", "Coding.InsertionPlanner"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingIntentDiffCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Intent diff", "intent diff composer current feature", "Coding.IntentDiff"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -718,6 +723,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand BrowseCodingWorkspaceRootCommand { get; }
 
+    public ICommand BrowseCodingCurrentSolutionOrProjectCommand { get; }
+
+    public ICommand CreateCodingProjectCommand { get; }
+
     public ICommand BrowseCodingPdfWorkspaceRootCommand { get; }
 
     public ICommand BrowseNotepadPlusPlusPathCommand { get; }
@@ -821,6 +830,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingValidationChainCommand { get; }
 
     public ICommand RunCodingActiveWorkspaceCommand { get; }
+
+    public ICommand PickCodingSolutionCommand { get; }
+
+    public ICommand StartNewCodingProjectCommand { get; }
 
     public ICommand RunCodingApplyPacketCommand { get; }
 
@@ -954,6 +967,18 @@ public sealed class MainWindowViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _codingWorkspaceRootText, value))
+            {
+                OnPropertyChanged(nameof(CodingPermissionSummaryText));
+            }
+        }
+    }
+
+    public string CodingCurrentSolutionOrProjectPathText
+    {
+        get => _codingCurrentSolutionOrProjectPathText;
+        set
+        {
+            if (SetProperty(ref _codingCurrentSolutionOrProjectPathText, value))
             {
                 OnPropertyChanged(nameof(CodingPermissionSummaryText));
             }
@@ -1133,6 +1158,7 @@ public sealed class MainWindowViewModel : ObservableObject
             Environment.NewLine,
             [
                 $"Workspace domain: {CodingWorkspaceRootText}",
+                $"Current solution/project: {DescribeConfiguredToolPath(CodingCurrentSolutionOrProjectPathText)}",
                 $"Notepad++: {DescribeConfiguredToolPath(CodingNotepadPlusPlusPathText)}",
                 $"Visual Studio: {DescribeConfiguredToolPath(CodingVisualStudioPathText)}",
                 $"Read/open/search inside workspace: {CodingWorkspaceAccessMode}.",
@@ -2691,6 +2717,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var settings = new CodingToolSettings
         {
             WorkspaceRoot = workspaceRoot,
+            CurrentSolutionOrProjectPath = NormalizeOptionalCodingToolPath(CodingCurrentSolutionOrProjectPathText),
             AllowExplicitOutsideFileOpen = !CodingPermissionModes.IsDisabled(explicitOutsideFileOpenMode),
             WorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, CodingWorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false),
             ExplicitOutsideFileOpenMode = explicitOutsideFileOpenMode,
@@ -2713,7 +2740,7 @@ public sealed class MainWindowViewModel : ObservableObject
         };
         _services.SaveCodingToolSettings(settings);
         ApplyCodingToolSettings(settings);
-        CodingPermissionsStatusText = $"Saved coding permissions. Workspace: {workspaceRoot}. PDF workspace: {pdfWorkspaceRoot}";
+        CodingPermissionsStatusText = $"Saved coding permissions. Workspace: {workspaceRoot}. Current project: {DescribeConfiguredToolPath(settings.CurrentSolutionOrProjectPath)}. PDF workspace: {pdfWorkspaceRoot}";
     }
 
     private void ResetCodingPermissionsToDefault()
@@ -3878,6 +3905,7 @@ public sealed class MainWindowViewModel : ObservableObject
             "Commands:",
             "Active workspace/project",
             "Workspace root:",
+            "Selected solution/project:",
             "Primary solution/project:",
             "Project selection:",
             "How Ali uses it:",
@@ -4027,6 +4055,7 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Repair command:",
             "- Projects:",
             "- Default target:",
+            "- Selection source:",
             "- App projects:",
             "- Test projects:",
             "- Ambiguity:",
@@ -4711,6 +4740,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private void ApplyCodingToolSettings(CodingToolSettings settings)
     {
         CodingWorkspaceRootText = settings.WorkspaceRoot;
+        CodingCurrentSolutionOrProjectPathText = settings.CurrentSolutionOrProjectPath;
         CodingWorkspaceAccessMode = PickChoice(CodingWorkspaceAccessModeChoices, settings.WorkspaceAccessMode, CodingPermissionModes.Allowed, resetToSmallest: false);
         CodingExplicitOutsideFileOpenMode = settings.AllowExplicitOutsideFileOpen
             ? PickChoice(CodingExplicitOutsideFileOpenModeChoices, settings.ExplicitOutsideFileOpenMode, CodingPermissionModes.Allowed, resetToSmallest: false)
@@ -4764,6 +4794,146 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             CodingWorkspaceRootText = dialog.SelectedPath;
         }
+    }
+
+    private void BrowseCodingCurrentSolutionOrProject()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose current solution or project",
+            Filter = "Solution or project (*.sln;*.slnx;*.csproj)|*.sln;*.slnx;*.csproj|Solution files (*.sln;*.slnx)|*.sln;*.slnx|Project files (*.csproj)|*.csproj|All files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+            InitialDirectory = Directory.Exists(CodingWorkspaceRootText)
+                ? CodingWorkspaceRootText
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+        };
+
+        var owner = System.Windows.Application.Current?.Windows
+            .OfType<Window>()
+            .FirstOrDefault(window => window.DataContext == this && window.IsActive)
+            ?? System.Windows.Application.Current?.MainWindow;
+        if (dialog.ShowDialog(owner) != true)
+        {
+            return;
+        }
+
+        SetCurrentCodingSolutionOrProject(dialog.FileName, save: true);
+    }
+
+    private async Task CreateCodingProjectAsync()
+    {
+        var rawName = Microsoft.VisualBasic.Interaction.InputBox(
+            "New project name",
+            "Start new coding project",
+            "AliProject");
+        var safeName = BuildSafeCodingProjectName(rawName);
+        if (string.IsNullOrWhiteSpace(safeName))
+        {
+            CodingPermissionsStatusText = "New project cancelled.";
+            return;
+        }
+
+        if (!CodingWorkspacePolicy.TryNormalizePath(CodingWorkspaceRootText, out var workspaceRoot))
+        {
+            CodingPermissionsStatusText = "Choose a valid coding workspace before creating a project.";
+            return;
+        }
+
+        var projectDirectory = Path.Combine(workspaceRoot, safeName);
+        var projectPath = Path.Combine(projectDirectory, safeName + ".csproj");
+        if (Directory.Exists(projectDirectory) || File.Exists(projectPath))
+        {
+            CodingPermissionsStatusText = $"New project blocked: {projectDirectory} already exists.";
+            return;
+        }
+
+        Directory.CreateDirectory(projectDirectory);
+        await File.WriteAllTextAsync(
+            projectPath,
+            """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+            </Project>
+            """).ConfigureAwait(true);
+        await File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "ProjectAnchor.cs"),
+            $$"""
+            namespace AliProjects;
+
+            public sealed class ProjectAnchor
+            {
+                public string ProjectName => "{{safeName}}";
+            }
+            """).ConfigureAwait(true);
+        await File.WriteAllTextAsync(
+            Path.Combine(projectDirectory, "README.md"),
+            $"# {safeName}{Environment.NewLine}{Environment.NewLine}Created by Ali as the current coding project.{Environment.NewLine}").ConfigureAwait(true);
+
+        SetCurrentCodingSolutionOrProject(projectPath, save: true);
+        StatusText = $"Created and selected coding project: {safeName}.";
+    }
+
+    private void SetCurrentCodingSolutionOrProject(string selectedPath, bool save)
+    {
+        if (!CodingWorkspacePolicy.TryNormalizePath(selectedPath, out var normalizedPath)
+            || !File.Exists(normalizedPath)
+            || !IsSolutionOrProjectPath(normalizedPath))
+        {
+            CodingPermissionsStatusText = "Choose a .sln, .slnx, or .csproj file.";
+            return;
+        }
+
+        var workspaceRoot = FindCodingWorkspaceRootForSelectedTarget(normalizedPath);
+        CodingWorkspaceRootText = workspaceRoot;
+        CodingCurrentSolutionOrProjectPathText = normalizedPath;
+        CodingPermissionsStatusText = $"Selected current coding project: {normalizedPath}";
+        if (save)
+        {
+            SaveCodingPermissions();
+        }
+    }
+
+    private static string FindCodingWorkspaceRootForSelectedTarget(string selectedPath)
+    {
+        var directory = Path.GetDirectoryName(selectedPath) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var current = new DirectoryInfo(directory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, ".git")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return directory;
+    }
+
+    private static bool IsSolutionOrProjectPath(string path) =>
+        path.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildSafeCodingProjectName(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName))
+        {
+            return string.Empty;
+        }
+
+        var compact = Regex.Replace(rawName.Trim(), @"[^A-Za-z0-9_]+", string.Empty);
+        if (compact.Length == 0 || !char.IsLetter(compact[0]))
+        {
+            compact = "AliProject" + compact;
+        }
+
+        return compact.Length > 60 ? compact[..60] : compact;
     }
 
     private void BrowseCodingPdfWorkspaceRoot()
@@ -7252,6 +7422,11 @@ public sealed class MainWindowViewModel : ObservableObject
             backupUserData.RaiseCanExecuteChanged();
         }
 
+        if (CreateCodingProjectCommand is AsyncRelayCommand createCodingProject)
+        {
+            createCodingProject.RaiseCanExecuteChanged();
+        }
+
         if (RunComputerHealthCheckCommand is AsyncRelayCommand runComputerHealthCheck)
         {
             runComputerHealthCheck.RaiseCanExecuteChanged();
@@ -7495,6 +7670,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingActiveWorkspaceCommand is AsyncRelayCommand runCodingActiveWorkspace)
         {
             runCodingActiveWorkspace.RaiseCanExecuteChanged();
+        }
+
+        if (StartNewCodingProjectCommand is AsyncRelayCommand startNewCodingProject)
+        {
+            startNewCodingProject.RaiseCanExecuteChanged();
         }
 
         if (RunCodingApplyPacketCommand is AsyncRelayCommand runCodingApplyPacket)

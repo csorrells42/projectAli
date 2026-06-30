@@ -7,6 +7,8 @@ public sealed record CodingToolSettings
 {
     public string WorkspaceRoot { get; init; } = CodingWorkspacePolicy.CreateDefault().WorkspaceRoot;
 
+    public string CurrentSolutionOrProjectPath { get; init; } = string.Empty;
+
     public string PdfWorkspaceRoot { get; init; } = string.Empty;
 
     public bool AllowExplicitOutsideFileOpen { get; init; } = true;

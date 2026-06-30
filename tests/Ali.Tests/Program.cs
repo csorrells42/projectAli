@@ -518,12 +518,14 @@ static Task TestCodingSettingsSaveAndLoad()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Projects");
+    var currentProject = Path.Combine(workspace, "Demo", "Demo.csproj");
     var pdfWorkspace = Path.Combine(directory, "Pdfs");
     var notepadPlusPlus = Path.Combine(directory, "Tools", "Notepad++", "notepad++.exe");
     var visualStudio = Path.Combine(directory, "VS", "Common7", "IDE", "devenv.exe");
     var settings = new CodingToolSettings
     {
         WorkspaceRoot = workspace,
+        CurrentSolutionOrProjectPath = currentProject,
         PdfWorkspaceRoot = pdfWorkspace,
         AllowExplicitOutsideFileOpen = true,
         WorkspaceAccessMode = CodingPermissionModes.Allowed,
@@ -549,6 +551,7 @@ static Task TestCodingSettingsSaveAndLoad()
     var loaded = CodingToolSettingsStore.LoadOrDefault(directory);
 
     Equal(workspace, loaded.WorkspaceRoot);
+    Equal(currentProject, loaded.CurrentSolutionOrProjectPath);
     Equal(pdfWorkspace, loaded.PdfWorkspaceRoot);
     Equal(true, loaded.AllowExplicitOutsideFileOpen);
     Equal(CodingPermissionModes.Allowed, loaded.WorkspaceAccessMode);
@@ -3770,7 +3773,8 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
         new CodingWorkspacePolicy(workspace),
         directory,
         new FakeCodingProcessLauncher(),
-        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)));
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: Path.Combine(sourceProject, "Demo.csproj"));
 
     var workflow = await service.TryHandleAsync("guided feature workflow Save button", CancellationToken.None);
     var planner = await service.TryHandleAsync("feature implementation planner Save button", CancellationToken.None);
@@ -3969,7 +3973,9 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Equal(true, activeWorkspace.Succeeded);
     Contains("Active workspace/project v1", activeWorkspace.Message);
     Contains("Workspace root:", activeWorkspace.Message);
+    Contains("Selected solution/project:", activeWorkspace.Message);
     Contains("Primary solution/project:", activeWorkspace.Message);
+    Contains("Selection source: saved picker value", activeWorkspace.Message);
     Contains("Project selection:", activeWorkspace.Message);
 
     Equal(true, applyPacket.Handled);
@@ -4045,8 +4051,10 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     NotNull(repository, "Repository root should be discoverable for programming dashboard scan.");
     var dashboardPath = Path.Combine(repository!.FullName, "src", "Ali.App.Wpf", "ProgrammingDashboardWindow.xaml");
     var viewModelPath = Path.Combine(repository.FullName, "src", "Ali.App.Wpf", "ViewModels", "MainWindowViewModel.cs");
+    var settingsPath = Path.Combine(repository.FullName, "src", "Ali.App.Wpf", "SettingsWindow.xaml");
     var dashboard = File.ReadAllText(dashboardPath);
     var viewModel = File.ReadAllText(viewModelPath);
+    var settings = File.ReadAllText(settingsPath);
 
     Contains("Coding Cockpit", dashboard);
     Contains("RunCodingReadinessReportCommand", dashboard);
@@ -4080,6 +4088,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Change Receipt", dashboard);
     Contains("Validation Chain", dashboard);
     Contains("Active Workspace", dashboard);
+    Contains("Pick Solution", dashboard);
+    Contains("New Project", dashboard);
     Contains("Apply Packet", dashboard);
     Contains("Insert Plan", dashboard);
     Contains("Intent Diff", dashboard);
@@ -4114,6 +4124,8 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingChangeReceiptCommand", dashboard);
     Contains("RunCodingValidationChainCommand", dashboard);
     Contains("RunCodingActiveWorkspaceCommand", dashboard);
+    Contains("PickCodingSolutionCommand", dashboard);
+    Contains("StartNewCodingProjectCommand", dashboard);
     Contains("RunCodingApplyPacketCommand", dashboard);
     Contains("RunCodingInsertionPlannerCommand", dashboard);
     Contains("RunCodingIntentDiffCommand", dashboard);
@@ -4183,6 +4195,12 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("validation chain planner current feature", viewModel);
     Contains("RunCodingActiveWorkspaceCommand = CreateAsyncCommand", viewModel);
     Contains("active workspace project", viewModel);
+    Contains("PickCodingSolutionCommand = CreateCommand", viewModel);
+    Contains("StartNewCodingProjectCommand = CreateAsyncCommand", viewModel);
+    Contains("BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand", viewModel);
+    Contains("CreateCodingProjectCommand = CreateAsyncCommand", viewModel);
+    Contains("CodingCurrentSolutionOrProjectPathText", viewModel);
+    Contains("CurrentSolutionOrProjectPath", viewModel);
     Contains("RunCodingApplyPacketCommand = CreateAsyncCommand", viewModel);
     Contains("owner approved apply packet current feature", viewModel);
     Contains("RunCodingInsertionPlannerCommand = CreateAsyncCommand", viewModel);
@@ -4223,6 +4241,10 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingFeatureCompletionReceiptCommand = CreateAsyncCommand", viewModel);
     Contains("CompactCodingCockpitLines", viewModel);
     Contains("Use the cockpit row", viewModel);
+    Contains("Current solution or project", settings);
+    Contains("CodingCurrentSolutionOrProjectPathText", settings);
+    Contains("BrowseCodingCurrentSolutionOrProjectCommand", settings);
+    Contains("CreateCodingProjectCommand", settings);
     return Task.CompletedTask;
 }
 static async Task TestLocalCodingToolAnalyzesSolutionArchitecture()

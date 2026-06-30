@@ -176,6 +176,14 @@
                                         Command="{Binding RunCodingActiveWorkspaceCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Pick Solution"
+                                        Command="{Binding PickCodingSolutionCommand}"
+                                        BorderBrush="#1E6B49"
+                                        Background="#152A22" />
+                                <Button Content="New Project"
+                                        Command="{Binding StartNewCodingProjectCommand}"
+                                        BorderBrush="#1E6B49"
+                                        Background="#152A22" />
                                 <Button Content="Apply Packet"
                                         Command="{Binding RunCodingApplyPacketCommand}" />
                                 <Button Content="Insert Plan"
