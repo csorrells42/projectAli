@@ -179,6 +179,15 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowPostApplyRepairLoopV2
             or CodingToolAction.ShowSemanticDiffSummary
             or CodingToolAction.ShowMiniCodexScoreV3
+            or CodingToolAction.ShowConcretePatchAuthoring
+            or CodingToolAction.ShowPatchBodyGenerator
+            or CodingToolAction.ShowPatternCommandScaffolder
+            or CodingToolAction.ShowUiBundlePlanner
+            or CodingToolAction.ShowPatchConfidenceScore
+            or CodingToolAction.ShowSliceExecutorPreview
+            or CodingToolAction.ShowFailureToPatchV3
+            or CodingToolAction.ShowSemanticChangeReceipt
+            or CodingToolAction.ShowValidationChainPlanner
             or CodingToolAction.ShowPlainEnglishFeatureBuilder
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex

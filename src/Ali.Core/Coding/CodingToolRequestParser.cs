@@ -1159,6 +1159,168 @@ public static class CodingToolRequestParser
         "coding percentages"
     ];
 
+    private static readonly string[] ConcretePatchAuthoringPrefixes =
+    [
+        "concrete patch authoring ",
+        "patch authoring ",
+        "author concrete patch ",
+        "draft concrete patch ",
+        "implementation patch authoring "
+    ];
+
+    private static readonly string[] ConcretePatchAuthoringRequests =
+    [
+        "concrete patch authoring",
+        "patch authoring",
+        "author concrete patch",
+        "draft concrete patch",
+        "implementation patch authoring"
+    ];
+
+    private static readonly string[] PatchBodyGeneratorPrefixes =
+    [
+        "patch body generator ",
+        "generate patch body ",
+        "patch body ",
+        "draft patch body ",
+        "exact patch body "
+    ];
+
+    private static readonly string[] PatchBodyGeneratorRequests =
+    [
+        "patch body generator",
+        "generate patch body",
+        "patch body",
+        "draft patch body",
+        "exact patch body"
+    ];
+
+    private static readonly string[] PatternCommandScaffolderPrefixes =
+    [
+        "pattern command scaffolder ",
+        "command scaffolder ",
+        "scaffold command pattern ",
+        "scaffold parser service dashboard test ",
+        "parser service dashboard test scaffold "
+    ];
+
+    private static readonly string[] PatternCommandScaffolderRequests =
+    [
+        "pattern command scaffolder",
+        "command scaffolder",
+        "scaffold command pattern",
+        "scaffold parser service dashboard test",
+        "parser service dashboard test scaffold"
+    ];
+
+    private static readonly string[] UiBundlePlannerPrefixes =
+    [
+        "ui bundle planner ",
+        "source viewmodel xaml bundle ",
+        "viewmodel xaml bundle ",
+        "dashboard bundle planner ",
+        "ui patch bundle "
+    ];
+
+    private static readonly string[] UiBundlePlannerRequests =
+    [
+        "ui bundle planner",
+        "source viewmodel xaml bundle",
+        "viewmodel xaml bundle",
+        "dashboard bundle planner",
+        "ui patch bundle"
+    ];
+
+    private static readonly string[] PatchConfidenceScorePrefixes =
+    [
+        "patch confidence score ",
+        "score patch confidence ",
+        "patch confidence ",
+        "edit confidence score ",
+        "confidence score "
+    ];
+
+    private static readonly string[] PatchConfidenceScoreRequests =
+    [
+        "patch confidence score",
+        "score patch confidence",
+        "patch confidence",
+        "edit confidence score",
+        "confidence score"
+    ];
+
+    private static readonly string[] SliceExecutorPreviewPrefixes =
+    [
+        "slice executor preview ",
+        "slice preview ",
+        "preview implementation slice ",
+        "slice 1 preview ",
+        "slice apply preview "
+    ];
+
+    private static readonly string[] SliceExecutorPreviewRequests =
+    [
+        "slice executor preview",
+        "slice preview",
+        "preview implementation slice",
+        "slice 1 preview",
+        "slice apply preview"
+    ];
+
+    private static readonly string[] FailureToPatchV3Prefixes =
+    [
+        "failure to patch v3 ",
+        "failure-to-patch v3 ",
+        "failure to patch ",
+        "build failure to patch ",
+        "test failure to patch "
+    ];
+
+    private static readonly string[] FailureToPatchV3Requests =
+    [
+        "failure to patch v3",
+        "failure-to-patch v3",
+        "failure to patch",
+        "build failure to patch",
+        "test failure to patch"
+    ];
+
+    private static readonly string[] SemanticChangeReceiptPrefixes =
+    [
+        "semantic change receipt ",
+        "change receipt ",
+        "human change receipt ",
+        "implementation receipt ",
+        "semantic receipt "
+    ];
+
+    private static readonly string[] SemanticChangeReceiptRequests =
+    [
+        "semantic change receipt",
+        "change receipt",
+        "human change receipt",
+        "implementation receipt",
+        "semantic receipt"
+    ];
+
+    private static readonly string[] ValidationChainPlannerPrefixes =
+    [
+        "validation chain planner ",
+        "validation chain ",
+        "build test chain ",
+        "post patch validation chain ",
+        "validation order planner "
+    ];
+
+    private static readonly string[] ValidationChainPlannerRequests =
+    [
+        "validation chain planner",
+        "validation chain",
+        "build test chain",
+        "post patch validation chain",
+        "validation order planner"
+    ];
+
     private static readonly string[] PlainEnglishFeatureBuilderPrefixes =
     [
         "feature builder ",
@@ -3192,6 +3354,33 @@ public static class CodingToolRequestParser
     private static bool IsMiniCodexScoreV3Request(string text) =>
         MiniCodexScoreV3Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsConcretePatchAuthoringRequest(string text) =>
+        ConcretePatchAuthoringRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPatchBodyGeneratorRequest(string text) =>
+        PatchBodyGeneratorRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPatternCommandScaffolderRequest(string text) =>
+        PatternCommandScaffolderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsUiBundlePlannerRequest(string text) =>
+        UiBundlePlannerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPatchConfidenceScoreRequest(string text) =>
+        PatchConfidenceScoreRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSliceExecutorPreviewRequest(string text) =>
+        SliceExecutorPreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFailureToPatchV3Request(string text) =>
+        FailureToPatchV3Requests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSemanticChangeReceiptRequest(string text) =>
+        SemanticChangeReceiptRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsValidationChainPlannerRequest(string text) =>
+        ValidationChainPlannerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsPlainEnglishFeatureBuilderRequest(string text) =>
         PlainEnglishFeatureBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -3373,6 +3562,15 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, PostApplyRepairLoopV2Prefixes, CodingToolAction.ShowPostApplyRepairLoopV2, userConfirmed, out request)
             || TryParsePrefixedQuery(text, SemanticDiffSummaryPrefixes, CodingToolAction.ShowSemanticDiffSummary, userConfirmed, out request)
             || TryParsePrefixedQuery(text, MiniCodexScoreV3Prefixes, CodingToolAction.ShowMiniCodexScoreV3, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ConcretePatchAuthoringPrefixes, CodingToolAction.ShowConcretePatchAuthoring, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PatchBodyGeneratorPrefixes, CodingToolAction.ShowPatchBodyGenerator, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PatternCommandScaffolderPrefixes, CodingToolAction.ShowPatternCommandScaffolder, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, UiBundlePlannerPrefixes, CodingToolAction.ShowUiBundlePlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, PatchConfidenceScorePrefixes, CodingToolAction.ShowPatchConfidenceScore, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, SliceExecutorPreviewPrefixes, CodingToolAction.ShowSliceExecutorPreview, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FailureToPatchV3Prefixes, CodingToolAction.ShowFailureToPatchV3, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, SemanticChangeReceiptPrefixes, CodingToolAction.ShowSemanticChangeReceipt, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ValidationChainPlannerPrefixes, CodingToolAction.ShowValidationChainPlanner, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
             || TryParsePlainEnglishBuildRequest(text, userConfirmed, out request))
         {
@@ -3586,6 +3784,60 @@ public static class CodingToolRequestParser
         if (IsMiniCodexScoreV3Request(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowMiniCodexScoreV3, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsConcretePatchAuthoringRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowConcretePatchAuthoring, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPatchBodyGeneratorRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatchBodyGenerator, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPatternCommandScaffolderRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatternCommandScaffolder, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsUiBundlePlannerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowUiBundlePlanner, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsPatchConfidenceScoreRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowPatchConfidenceScore, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsSliceExecutorPreviewRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowSliceExecutorPreview, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFailureToPatchV3Request(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFailureToPatchV3, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsSemanticChangeReceiptRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowSemanticChangeReceipt, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsValidationChainPlannerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowValidationChainPlanner, null, UserConfirmed: userConfirmed);
             return true;
         }
 

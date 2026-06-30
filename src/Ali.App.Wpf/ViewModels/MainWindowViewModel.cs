@@ -289,6 +289,15 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingSliceStateCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Slice state", "implementation slice state current feature", "Coding.SliceState"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingSemanticDiffCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Semantic diff", "semantic diff summary current feature", "Coding.SemanticDiff"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingScoreV3Command = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Score v3", "mini codex score v3 current feature", "Coding.ScoreV3"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchAuthorCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch author", "concrete patch authoring current feature", "Coding.PatchAuthor"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingPatchBodyCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch body", "patch body generator current feature", "Coding.PatchBody"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingScaffolderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Scaffolder", "pattern command scaffolder current feature", "Coding.Scaffolder"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingUiBundleCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("UI bundle", "ui bundle planner current feature", "Coding.UiBundle"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingConfidenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Confidence", "patch confidence score current feature", "Coding.Confidence"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingSlicePreviewCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Slice preview", "slice executor preview current feature", "Coding.SlicePreview"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFailurePatchCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Failure patch", "failure to patch v3 current feature", "Coding.FailurePatch"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingChangeReceiptCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Change receipt", "semantic change receipt current feature", "Coding.ChangeReceipt"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingValidationChainCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation chain", "validation chain planner current feature", "Coding.ValidationChain"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -781,6 +790,24 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingSemanticDiffCommand { get; }
 
     public ICommand RunCodingScoreV3Command { get; }
+
+    public ICommand RunCodingPatchAuthorCommand { get; }
+
+    public ICommand RunCodingPatchBodyCommand { get; }
+
+    public ICommand RunCodingScaffolderCommand { get; }
+
+    public ICommand RunCodingUiBundleCommand { get; }
+
+    public ICommand RunCodingConfidenceCommand { get; }
+
+    public ICommand RunCodingSlicePreviewCommand { get; }
+
+    public ICommand RunCodingFailurePatchCommand { get; }
+
+    public ICommand RunCodingChangeReceiptCommand { get; }
+
+    public ICommand RunCodingValidationChainCommand { get; }
 
     public ICommand RunCodingBuildFeatureLaneCommand { get; }
 
@@ -3477,6 +3504,16 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("post-apply repair loop", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("semantic diff summary", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("mini codex score v3", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("concrete patch authoring", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("patch body generator", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("pattern command scaffolder", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("ui bundle planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("patch confidence score", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("slice executor preview", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("failure to patch v3", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("failure-to-patch v3", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("semantic change receipt", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("validation chain planner", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
@@ -3598,6 +3635,16 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("post-apply repair loop", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("semantic diff summary", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("mini codex score v3", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("concrete patch authoring", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("patch body generator", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("pattern command scaffolder", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("ui bundle planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("patch confidence score", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("slice executor preview", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("failure to patch v3", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("failure-to-patch v3", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("semantic change receipt", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("validation chain planner", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
@@ -3627,6 +3674,16 @@ public sealed class MainWindowViewModel : ObservableObject
                 || command.StartsWith("post-apply repair loop", StringComparison.OrdinalIgnoreCase)
                 || command.StartsWith("semantic diff summary", StringComparison.OrdinalIgnoreCase)
                 || command.StartsWith("mini codex score v3", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("concrete patch authoring", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("patch body generator", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("pattern command scaffolder", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("ui bundle planner", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("patch confidence score", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("slice executor preview", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("failure to patch v3", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("failure-to-patch v3", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("semantic change receipt", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("validation chain planner", StringComparison.OrdinalIgnoreCase)
                 ? "Next - Run the single next command shown by the workflow."
                 : "Next - Work the feature lane top to bottom before previewing a patch.";
         }
@@ -3720,6 +3777,39 @@ public sealed class MainWindowViewModel : ObservableObject
             "Mini-Codex score v3:",
             "Category scores:",
             "Next score move:",
+            "Concrete patch authoring",
+            "Authoring confidence:",
+            "Authoring pipeline:",
+            "Patch body readiness:",
+            "Review gates:",
+            "Patch body generator",
+            "Body status:",
+            "Candidate patch bodies:",
+            "Exact anchors:",
+            "Patch guards:",
+            "Pattern command scaffolder",
+            "Scaffold roles:",
+            "Pattern sources:",
+            "Route checklist:",
+            "UI bundle planner",
+            "Bundle roles:",
+            "UI binding checks:",
+            "Patch confidence score",
+            "Confidence:",
+            "Confidence rows:",
+            "Risk gates:",
+            "Slice executor preview",
+            "Preview slices:",
+            "Apply boundaries:",
+            "Failure-to-patch v3",
+            "Failure state:",
+            "Patch route:",
+            "Semantic change receipt",
+            "Receipt rows:",
+            "Closeout:",
+            "Validation chain planner",
+            "Validation order:",
+            "Commands:",
             "Goal:",
             "Behavior test patch preview:",
             "Test file:",
@@ -3799,6 +3889,41 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Apply:",
             "- Closeout:",
             "- Validation route:",
+            "- Authoring:",
+            "- Patch body:",
+            "- Patch anchor:",
+            "- Parser route:",
+            "- Policy row:",
+            "- Service handler:",
+            "- Dashboard binding:",
+            "- Test route:",
+            "- View:",
+            "- ViewModel:",
+            "- Command:",
+            "- Confidence:",
+            "- Target confidence:",
+            "- Patch body confidence:",
+            "- Test confidence:",
+            "- Edit receipt:",
+            "- Validation receipt:",
+            "- Git confidence:",
+            "- File risk:",
+            "- Exactness gate:",
+            "- Proof gate:",
+            "- Failure gate:",
+            "- Working tree:",
+            "- Slice",
+            "- Pending preview:",
+            "- Failure status:",
+            "- Route:",
+            "- Changed files:",
+            "- Latest edit:",
+            "- Latest git receipt:",
+            "- Closeout status:",
+            "- Targeted test:",
+            "- Build command:",
+            "- Full test command:",
+            "- Repair command:",
             "- Active slice:",
             "- First diagnostic:",
             "- Code:",
@@ -7189,6 +7314,51 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingScoreV3Command is AsyncRelayCommand runCodingScoreV3)
         {
             runCodingScoreV3.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatchAuthorCommand is AsyncRelayCommand runCodingPatchAuthor)
+        {
+            runCodingPatchAuthor.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingPatchBodyCommand is AsyncRelayCommand runCodingPatchBody)
+        {
+            runCodingPatchBody.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingScaffolderCommand is AsyncRelayCommand runCodingScaffolder)
+        {
+            runCodingScaffolder.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingUiBundleCommand is AsyncRelayCommand runCodingUiBundle)
+        {
+            runCodingUiBundle.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingConfidenceCommand is AsyncRelayCommand runCodingConfidence)
+        {
+            runCodingConfidence.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingSlicePreviewCommand is AsyncRelayCommand runCodingSlicePreview)
+        {
+            runCodingSlicePreview.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFailurePatchCommand is AsyncRelayCommand runCodingFailurePatch)
+        {
+            runCodingFailurePatch.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingChangeReceiptCommand is AsyncRelayCommand runCodingChangeReceipt)
+        {
+            runCodingChangeReceipt.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingValidationChainCommand is AsyncRelayCommand runCodingValidationChain)
+        {
+            runCodingValidationChain.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildFeatureLaneCommand is AsyncRelayCommand runCodingBuildFeatureLane)

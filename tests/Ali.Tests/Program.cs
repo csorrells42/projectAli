@@ -593,6 +593,10 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("autonomous feature orchestrator <goal>", builderIndex);
     Contains("roslyn edit planner <goal>", builderIndex);
     Contains("multi-file patch synthesis <goal>", builderIndex);
+    Contains("concrete patch authoring <goal>", builderIndex);
+    Contains("patch body generator <goal>", builderIndex);
+    Contains("patch confidence score <goal>", builderIndex);
+    Contains("validation chain planner <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
     Contains("semantic diff summary <goal>", builderIndex);
     Contains("mini codex score v3 <goal>", builderIndex);
@@ -606,6 +610,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("For location-based weather", userGuide);
     Contains("Programming", userGuide);
     Contains("Roslyn targeting", userGuide);
+    Contains("concrete patch authoring", userGuide);
+    Contains("confidence scoring", userGuide);
     Contains("Context packet", userGuide);
     Contains("coding context packet", userGuide);
     Contains("PDF", userGuide);
@@ -888,6 +894,33 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("mini codex score v3 Save button", out var scoreV3Request));
     Equal(CodingToolAction.ShowMiniCodexScoreV3, scoreV3Request.Action);
     Equal("Save button", scoreV3Request.Query);
+    Equal(true, CodingToolRequestParser.TryParse("concrete patch authoring Save button", out var concretePatchRequest));
+    Equal(CodingToolAction.ShowConcretePatchAuthoring, concretePatchRequest.Action);
+    Equal("Save button", concretePatchRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("patch body generator Save button", out var patchBodyRequest));
+    Equal(CodingToolAction.ShowPatchBodyGenerator, patchBodyRequest.Action);
+    Equal("Save button", patchBodyRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("pattern command scaffolder Save button", out var commandScaffoldRequest));
+    Equal(CodingToolAction.ShowPatternCommandScaffolder, commandScaffoldRequest.Action);
+    Equal("Save button", commandScaffoldRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("ui bundle planner Save button", out var uiBundleRequest));
+    Equal(CodingToolAction.ShowUiBundlePlanner, uiBundleRequest.Action);
+    Equal("Save button", uiBundleRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("patch confidence score Save button", out var confidenceRequest));
+    Equal(CodingToolAction.ShowPatchConfidenceScore, confidenceRequest.Action);
+    Equal("Save button", confidenceRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("slice executor preview Save button", out var slicePreviewRequest));
+    Equal(CodingToolAction.ShowSliceExecutorPreview, slicePreviewRequest.Action);
+    Equal("Save button", slicePreviewRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("failure to patch v3 Save button", out var failurePatchRequest));
+    Equal(CodingToolAction.ShowFailureToPatchV3, failurePatchRequest.Action);
+    Equal("Save button", failurePatchRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("semantic change receipt Save button", out var changeReceiptRequest));
+    Equal(CodingToolAction.ShowSemanticChangeReceipt, changeReceiptRequest.Action);
+    Equal("Save button", changeReceiptRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("validation chain planner Save button", out var validationChainRequest));
+    Equal(CodingToolAction.ShowValidationChainPlanner, validationChainRequest.Action);
+    Equal("Save button", validationChainRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("feature builder Save button", out var featureBuilderRequest));
     Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, featureBuilderRequest.Action);
     Equal("Save button", featureBuilderRequest.Query);
@@ -3633,8 +3666,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Guarded patterns:", generatedGuard.Message);
     Contains("Mini-Codex readiness report v2", reportCard.Message);
     Contains("Report card:", reportCard.Message);
-    Contains("Endzone estimate: 91-93%", reportCard.Message);
-    Contains("Autonomy layer: build-this front door", reportCard.Message);
+    Contains("Endzone estimate: 94-95%", reportCard.Message);
+    Contains("concrete patch authoring", reportCard.Message);
 }
 
 static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
@@ -3714,6 +3747,15 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     var repairLoop = await service.TryHandleAsync("post apply repair loop Save button", CancellationToken.None);
     var semanticDiff = await service.TryHandleAsync("semantic diff summary Save button", CancellationToken.None);
     var scoreV3 = await service.TryHandleAsync("mini codex score v3 Save button", CancellationToken.None);
+    var concreteAuthor = await service.TryHandleAsync("concrete patch authoring Save button", CancellationToken.None);
+    var patchBody = await service.TryHandleAsync("patch body generator Save button", CancellationToken.None);
+    var scaffolder = await service.TryHandleAsync("pattern command scaffolder Save button", CancellationToken.None);
+    var uiBundle = await service.TryHandleAsync("ui bundle planner Save button", CancellationToken.None);
+    var confidence = await service.TryHandleAsync("patch confidence score Save button", CancellationToken.None);
+    var slicePreview = await service.TryHandleAsync("slice executor preview Save button", CancellationToken.None);
+    var failurePatch = await service.TryHandleAsync("failure to patch v3 Save button", CancellationToken.None);
+    var changeReceipt = await service.TryHandleAsync("semantic change receipt Save button", CancellationToken.None);
+    var validationChain = await service.TryHandleAsync("validation chain planner Save button", CancellationToken.None);
 
     Equal(true, workflow.Handled);
     Equal(true, workflow.Succeeded);
@@ -3817,6 +3859,61 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Contains("Mini-Codex score v3", scoreV3.Message);
     Contains("Category scores:", scoreV3.Message);
     Contains("Next score move:", scoreV3.Message);
+
+    Equal(true, concreteAuthor.Handled);
+    Equal(true, concreteAuthor.Succeeded);
+    Contains("Concrete patch authoring v1", concreteAuthor.Message);
+    Contains("Authoring pipeline:", concreteAuthor.Message);
+    Contains("Patch body readiness:", concreteAuthor.Message);
+    Contains("Review gates:", concreteAuthor.Message);
+
+    Equal(true, patchBody.Handled);
+    Equal(true, patchBody.Succeeded);
+    Contains("Patch body generator v1", patchBody.Message);
+    Contains("Candidate patch bodies:", patchBody.Message);
+    Contains("Exact anchors:", patchBody.Message);
+
+    Equal(true, scaffolder.Handled);
+    Equal(true, scaffolder.Succeeded);
+    Contains("Pattern command scaffolder v1", scaffolder.Message);
+    Contains("Scaffold roles:", scaffolder.Message);
+    Contains("Route checklist:", scaffolder.Message);
+
+    Equal(true, uiBundle.Handled);
+    Equal(true, uiBundle.Succeeded);
+    Contains("UI bundle planner v1", uiBundle.Message);
+    Contains("Bundle roles:", uiBundle.Message);
+    Contains("Validation route:", uiBundle.Message);
+
+    Equal(true, confidence.Handled);
+    Equal(true, confidence.Succeeded);
+    Contains("Patch confidence score v1", confidence.Message);
+    Contains("Confidence rows:", confidence.Message);
+    Contains("Risk gates:", confidence.Message);
+
+    Equal(true, slicePreview.Handled);
+    Equal(true, slicePreview.Succeeded);
+    Contains("Slice executor preview v1", slicePreview.Message);
+    Contains("Preview slices:", slicePreview.Message);
+    Contains("Apply boundaries:", slicePreview.Message);
+
+    Equal(true, failurePatch.Handled);
+    Equal(true, failurePatch.Succeeded);
+    Contains("Failure-to-patch v3", failurePatch.Message);
+    Contains("Failure state:", failurePatch.Message);
+    Contains("Patch route:", failurePatch.Message);
+
+    Equal(true, changeReceipt.Handled);
+    Equal(true, changeReceipt.Succeeded);
+    Contains("Semantic change receipt v1", changeReceipt.Message);
+    Contains("Receipt rows:", changeReceipt.Message);
+    Contains("Closeout:", changeReceipt.Message);
+
+    Equal(true, validationChain.Handled);
+    Equal(true, validationChain.Succeeded);
+    Contains("Validation chain planner v1", validationChain.Message);
+    Contains("Validation order:", validationChain.Message);
+    Contains("Commands:", validationChain.Message);
 }
 
 static Task TestProgrammingDashboardExposesCockpitCommands()
@@ -3855,6 +3952,15 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("Slice State", dashboard);
     Contains("Semantic Diff", dashboard);
     Contains("Score v3", dashboard);
+    Contains("Patch Author", dashboard);
+    Contains("Patch Body", dashboard);
+    Contains("Scaffold", dashboard);
+    Contains("UI Bundle", dashboard);
+    Contains("Confidence", dashboard);
+    Contains("Slice Preview", dashboard);
+    Contains("Failure Patch", dashboard);
+    Contains("Change Receipt", dashboard);
+    Contains("Validation Chain", dashboard);
     Contains("RunCodingBuildThisCommand", dashboard);
     Contains("RunCodingFeatureBuilderCommand", dashboard);
     Contains("RunCodingGuidedBundlePreviewCommand", dashboard);
@@ -3869,6 +3975,15 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSliceStateCommand", dashboard);
     Contains("RunCodingSemanticDiffCommand", dashboard);
     Contains("RunCodingScoreV3Command", dashboard);
+    Contains("RunCodingPatchAuthorCommand", dashboard);
+    Contains("RunCodingPatchBodyCommand", dashboard);
+    Contains("RunCodingScaffolderCommand", dashboard);
+    Contains("RunCodingUiBundleCommand", dashboard);
+    Contains("RunCodingConfidenceCommand", dashboard);
+    Contains("RunCodingSlicePreviewCommand", dashboard);
+    Contains("RunCodingFailurePatchCommand", dashboard);
+    Contains("RunCodingChangeReceiptCommand", dashboard);
+    Contains("RunCodingValidationChainCommand", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
     Contains("RunCodingFeatureWorkContextCommand", dashboard);
     Contains("RunCodingFeatureIntentCommand", dashboard);
@@ -3908,6 +4023,24 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingSliceStateCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingSemanticDiffCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingScoreV3Command = CreateAsyncCommand", viewModel);
+    Contains("RunCodingPatchAuthorCommand = CreateAsyncCommand", viewModel);
+    Contains("concrete patch authoring current feature", viewModel);
+    Contains("RunCodingPatchBodyCommand = CreateAsyncCommand", viewModel);
+    Contains("patch body generator current feature", viewModel);
+    Contains("RunCodingScaffolderCommand = CreateAsyncCommand", viewModel);
+    Contains("pattern command scaffolder current feature", viewModel);
+    Contains("RunCodingUiBundleCommand = CreateAsyncCommand", viewModel);
+    Contains("ui bundle planner current feature", viewModel);
+    Contains("RunCodingConfidenceCommand = CreateAsyncCommand", viewModel);
+    Contains("patch confidence score current feature", viewModel);
+    Contains("RunCodingSlicePreviewCommand = CreateAsyncCommand", viewModel);
+    Contains("slice executor preview current feature", viewModel);
+    Contains("RunCodingFailurePatchCommand = CreateAsyncCommand", viewModel);
+    Contains("failure to patch v3 current feature", viewModel);
+    Contains("RunCodingChangeReceiptCommand = CreateAsyncCommand", viewModel);
+    Contains("semantic change receipt current feature", viewModel);
+    Contains("RunCodingValidationChainCommand = CreateAsyncCommand", viewModel);
+    Contains("validation chain planner current feature", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);

@@ -33,6 +33,10 @@ public static class CodingAbilityCatalog
         "autonomous feature orchestrator <goal>",
         "roslyn edit planner <goal>",
         "multi-file patch synthesis <goal>",
+        "concrete patch authoring <goal>",
+        "patch body generator <goal>",
+        "patch confidence score <goal>",
+        "validation chain planner <goal>",
         "show architecture options <goal>",
         "write acceptance criteria <goal>",
         "suggest tests for <goal>",
@@ -92,6 +96,15 @@ public static class CodingAbilityCatalog
                 new("Slice state", "implementation slice state <goal>"),
                 new("Evidence pack", "implementation evidence pack <goal>"),
                 new("Score v3", "mini codex score v3 <goal>"),
+                new("Patch authoring", "concrete patch authoring <goal>"),
+                new("Patch body", "patch body generator <goal>"),
+                new("Scaffolder", "pattern command scaffolder <goal>"),
+                new("UI bundle", "ui bundle planner <goal>"),
+                new("Confidence score", "patch confidence score <goal>"),
+                new("Slice preview", "slice executor preview <goal>"),
+                new("Failure to patch", "failure to patch v3 <goal>"),
+                new("Change receipt", "semantic change receipt <goal>"),
+                new("Validation chain", "validation chain planner <goal>"),
                 new("Acceptance criteria", "write acceptance criteria <goal>"),
                 new("Focused tests", "suggest tests for <goal>"),
                 new("Codebase patterns", "detect codebase patterns"),
@@ -104,8 +117,13 @@ public static class CodingAbilityCatalog
             [
                 new("Patch bundle", "preview patch bundle"),
                 new("Patch synthesis v2", "multi-file patch synthesis <goal>"),
+                new("Concrete patch authoring", "concrete patch authoring <goal>"),
+                new("Patch body", "patch body generator <goal>"),
+                new("Patch confidence", "patch confidence score <goal>"),
                 new("Behavior test generator", "behavior test generator <goal>"),
                 new("Semantic diff", "semantic diff summary <goal>"),
+                new("Validation chain", "validation chain planner <goal>"),
+                new("Semantic receipt", "semantic change receipt <goal>"),
                 new("Repair loop v2", "post apply repair loop <goal>"),
                 new("Typed patch", "compose typed patch <goal>"),
                 new("Apply patch", "confirm apply last patch preview", RequiresConfirmation: true),
@@ -417,7 +435,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can run intake, Roslyn targeting, pattern-copy planning, patch/test previews, validation routing, semantic diff summaries, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, confidence scoring, patch/test previews, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");
