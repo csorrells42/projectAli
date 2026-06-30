@@ -14263,6 +14263,7 @@ public sealed class LocalCodingToolService(
                     <ResourceDictionary.MergedDictionaries>
                         <ResourceDictionary Source="AliDashboardStyles.xaml" />
                     </ResourceDictionary.MergedDictionaries>
+                    <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
                     <DataTemplate x:Key="DashboardDetailTemplate">
                         <local:DashboardDetailCard />
                     </DataTemplate>
@@ -14284,6 +14285,15 @@ public sealed class LocalCodingToolService(
 
                 <StatusBar DockPanel.Dock="Bottom">
                     <TextBlock Text="{Binding StatusText}" />
+                    <Separator />
+                    <ProgressBar Width="120"
+                                 Height="14"
+                                 IsIndeterminate="{Binding IsBusy}">
+                        <ProgressBar.Visibility>
+                            <Binding Path="IsBusy" Converter="{StaticResource BooleanToVisibilityConverter}" />
+                        </ProgressBar.Visibility>
+                    </ProgressBar>
+                    <TextBlock Text="{Binding ProgressText}" Margin="8,0,0,0" />
                 </StatusBar>
 
                 <Grid Margin="12">
@@ -14294,7 +14304,10 @@ public sealed class LocalCodingToolService(
 
                     <Border Style="{StaticResource DashboardHeaderCardStyle}">
                         <DockPanel>
-                            <Button Content="Refresh" DockPanel.Dock="Right" Command="{Binding RefreshCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="Refresh" Command="{Binding RefreshCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
+                                <Button Content="Cancel" Margin="8,0,0,0" Command="{Binding CancelRefreshCommand}" />
+                            </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="Project Dashboard" Style="{StaticResource DashboardHeaderTextStyle}" />
                                 <TextBlock Text="Navigation, tabs, data, details, and status in one resizable WPF shell." Style="{StaticResource DashboardSubtleTextStyle}" />
@@ -14864,6 +14877,8 @@ public sealed class LocalCodingToolService(
             using System.Collections.ObjectModel;
             using System.ComponentModel;
             using System.Runtime.CompilerServices;
+            using System.Threading;
+            using System.Threading.Tasks;
             using System.Windows.Data;
             using System.Windows.Input;
 
@@ -14871,6 +14886,9 @@ public sealed class LocalCodingToolService(
             {
                 private string _newItemName = string.Empty;
                 private string _searchText = string.Empty;
+                private CancellationTokenSource? _refreshCancellation;
+                private bool _isBusy;
+                private string _progressText = "Idle";
                 private DashboardItem? _selectedItem;
                 private string _statusText = "Ready";
 
@@ -14879,7 +14897,8 @@ public sealed class LocalCodingToolService(
                     ItemsView = CollectionViewSource.GetDefaultView(Items);
                     ItemsView.Filter = FilterItem;
                     ConfigureItemsView();
-                    RefreshCommand = new RelayCommand(_ => Refresh());
+                    RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync(), _ => !IsBusy);
+                    CancelRefreshCommand = new RelayCommand(_ => CancelRefresh(), _ => IsBusy);
                     AddItemCommand = new RelayCommand(_ => AddItem(), _ => CanAddItem());
                     SeedDashboard();
                 }
@@ -14893,6 +14912,8 @@ public sealed class LocalCodingToolService(
                 public ObservableCollection<string> Activity { get; } = new();
 
                 public ICommand RefreshCommand { get; }
+
+                public ICommand CancelRefreshCommand { get; }
 
                 public ICommand AddItemCommand { get; }
 
@@ -14925,6 +14946,25 @@ public sealed class LocalCodingToolService(
                     }
                 }
 
+                public bool IsBusy
+                {
+                    get => _isBusy;
+                    private set
+                    {
+                        if (SetField(ref _isBusy, value))
+                        {
+                            ((AsyncRelayCommand)RefreshCommand).RaiseCanExecuteChanged();
+                            ((RelayCommand)CancelRefreshCommand).RaiseCanExecuteChanged();
+                        }
+                    }
+                }
+
+                public string ProgressText
+                {
+                    get => _progressText;
+                    private set => SetField(ref _progressText, value);
+                }
+
                 public DashboardItem? SelectedItem
                 {
                     get => _selectedItem;
@@ -14952,12 +14992,35 @@ public sealed class LocalCodingToolService(
                     StatusText = "Ready - 3 items loaded";
                 }
 
-                private void Refresh()
+                private async Task RefreshAsync()
                 {
-                    Activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
-                    ItemsView.Refresh();
-                    StatusText = "Dashboard refreshed";
+                    using var cancellation = new CancellationTokenSource();
+                    _refreshCancellation = cancellation;
+                    try
+                    {
+                        IsBusy = true;
+                        ProgressText = "Refreshing data...";
+                        StatusText = "Refreshing dashboard";
+                        await Task.Delay(250, cancellation.Token);
+                        ItemsView.Refresh();
+                        Activity.Insert(0, $"Refreshed at {DateTime.Now:t}.");
+                        ProgressText = "Refresh complete";
+                        StatusText = "Dashboard refreshed";
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Activity.Insert(0, "Refresh canceled.");
+                        ProgressText = "Refresh canceled";
+                        StatusText = "Refresh canceled";
+                    }
+                    finally
+                    {
+                        _refreshCancellation = null;
+                        IsBusy = false;
+                    }
                 }
+
+                private void CancelRefresh() => _refreshCancellation?.Cancel();
 
                 private bool CanAddItem() => !string.IsNullOrWhiteSpace(NewItemName);
 
@@ -15031,6 +15094,45 @@ public sealed class LocalCodingToolService(
                 }
 
                 public sealed record DashboardItem(string Name, string Owner, string Status);
+
+                private sealed class AsyncRelayCommand : ICommand
+                {
+                    private readonly Func<object?, Task> _execute;
+                    private readonly Predicate<object?>? _canExecute;
+                    private bool _isExecuting;
+
+                    public AsyncRelayCommand(Func<object?, Task> execute, Predicate<object?>? canExecute = null)
+                    {
+                        _execute = execute;
+                        _canExecute = canExecute;
+                    }
+
+                    public event EventHandler? CanExecuteChanged;
+
+                    public bool CanExecute(object? parameter) => !_isExecuting && (_canExecute?.Invoke(parameter) ?? true);
+
+                    public async void Execute(object? parameter)
+                    {
+                        if (!CanExecute(parameter))
+                        {
+                            return;
+                        }
+
+                        try
+                        {
+                            _isExecuting = true;
+                            RaiseCanExecuteChanged();
+                            await _execute(parameter);
+                        }
+                        finally
+                        {
+                            _isExecuting = false;
+                            RaiseCanExecuteChanged();
+                        }
+                    }
+
+                    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+                }
 
                 private sealed class RelayCommand : ICommand
                 {
