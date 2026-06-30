@@ -297,6 +297,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowAutonomousPatchLoop => await ShowAutonomousPatchLoopAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowFeatureSessionLedger => await ShowFeatureSessionLedgerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationRepairRunner => await ShowValidationRepairRunnerAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFeatureRunController => await ShowFeatureRunControllerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPlainEnglishFeatureBuilder => await ShowPlainEnglishFeatureBuilderAsync(request, cancellationToken).ConfigureAwait(false),
@@ -8665,6 +8666,49 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation repair runner", absolutePath ?? _lastDotNetResult.TargetPath ?? Policy.WorkspaceRoot, parsed.LineNumber);
     }
 
+    private async Task<CodingToolResult> ShowFeatureRunControllerAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
+        var context = await BuildFeatureWorkContextAsync(request with { Query = goal }, cancellationToken).ConfigureAwait(false);
+        var synthesis = _lastFeaturePatchSynthesis is not null && string.Equals(_lastFeatureBuildGoal, goal, StringComparison.OrdinalIgnoreCase)
+            ? _lastFeaturePatchSynthesis
+            : await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(goal, synthesis);
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(IsFeatureEditReceipt);
+        var latestGit = receipts.LastOrDefault(IsFeatureGitReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var phase = ClassifyFeatureRunControllerPhase(context, synthesis, latestValidation, latestEdit, gitStatus);
+        var nextCommand = BuildFeatureRunControllerNextCommand(goal, context, synthesis, latestValidation, latestEdit, gitStatus);
+        var lines = new List<string>
+        {
+            "Feature run controller v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            $"Phase: {phase}",
+            $"Go/no-go: {BuildFeatureRunGoNoGo(context, synthesis, latestValidation, latestEdit, gitStatus)}",
+            $"Controller score: {BuildFeatureRunControllerScore(context, synthesis, latestValidation, latestEdit, gitStatus)}/100",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            latestEdit is null ? "Latest edit: none" : FormatReceiptSummary("Latest edit", latestEdit),
+            latestGit is null ? "Latest git check: none" : FormatReceiptSummary("Latest git check", latestGit),
+            $"Git: {gitStatus.Summary}",
+            "Run state:"
+        };
+        lines.AddRange(BuildFeatureRunStateRows(context, synthesis, latestValidation, latestEdit).Select(row => $"- {row}"));
+        lines.Add("Stop gates:");
+        lines.AddRange(BuildFeatureRunStopGateRows(context, latestValidation, gitStatus).Select(row => $"- {row}"));
+        lines.Add("Owner controls:");
+        lines.Add("- Preview: show pending patch preview or preview synthesized feature patch.");
+        lines.Add("- Apply: confirm apply last patch preview only after the visible diff is right.");
+        lines.Add("- Validate: run the validation router or targeted build/test command.");
+        lines.Add("- Repair: use validation repair runner if validation fails.");
+        lines.Add("- Closeout: feature completion receipt, review current changes, then safe commit check.");
+        lines.Add($"Next command: {nextCommand}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature run controller", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowPostPatchValidationRouterAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
@@ -9821,6 +9865,228 @@ public sealed class LocalCodingToolService(
 
     private static string QuoteForOwnerCommand(string value) =>
         "\"" + value.Trim().Trim('"').Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+
+    private string ClassifyFeatureRunControllerPhase(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus)
+    {
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "Awaiting owner apply";
+        }
+
+        if (_lastDotNetResult is { Succeeded: false } || latestValidation is { Succeeded: false })
+        {
+            return "Repair failed validation";
+        }
+
+        if ((latestEdit is not null || context.ChangedFiles.Count > 0) && latestValidation?.Succeeded != true)
+        {
+            return "Validate applied change";
+        }
+
+        if ((latestEdit is not null || context.ChangedFiles.Count > 0) && latestValidation?.Succeeded == true)
+        {
+            return gitStatus.HasUncommittedChanges ? "Closeout review" : "Completion receipt";
+        }
+
+        if (synthesis.PreviewReady)
+        {
+            return "Preview synthesized patch";
+        }
+
+        if (context.RankedTargets.Count == 0)
+        {
+            return "Resolve feature target";
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            return "Resolve validation target";
+        }
+
+        return "Draft exact patch";
+    }
+
+    private string BuildFeatureRunGoNoGo(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus)
+    {
+        if (_lastDotNetResult is { Succeeded: false } || latestValidation is { Succeeded: false })
+        {
+            return "No-go - repair the failed validation first.";
+        }
+
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "Hold - owner must review and approve the pending preview.";
+        }
+
+        if ((latestEdit is not null || context.ChangedFiles.Count > 0) && latestValidation?.Succeeded != true)
+        {
+            return "No-go - changed files need validation.";
+        }
+
+        if ((latestEdit is not null || context.ChangedFiles.Count > 0) && latestValidation?.Succeeded == true)
+        {
+            return gitStatus.HasUncommittedChanges ? "Go - ready for review and safe commit check." : "Go - ready for completion receipt.";
+        }
+
+        if (synthesis.PreviewReady)
+        {
+            return "Go - preview-only patch is ready.";
+        }
+
+        if (context.RankedTargets.Count == 0 || string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            return "Hold - resolve target and validation route first.";
+        }
+
+        return "Go - draft the exact patch block.";
+    }
+
+    private int BuildFeatureRunControllerScore(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus)
+    {
+        var score = 0;
+        score += context.Goal.Equals("current feature", StringComparison.OrdinalIgnoreCase) ? 5 : 10;
+        score += context.RankedTargets.Count > 0 ? 15 : 0;
+        score += string.IsNullOrWhiteSpace(context.TestTarget.Command) ? 0 : 15;
+        score += synthesis.PreviewReady ? 15 : synthesis.Candidates.Count > 0 ? 8 : 0;
+        score += _lastPatchPreviewRequest is not null ? 10 : 0;
+        score += latestEdit is not null || context.ChangedFiles.Count > 0 ? 10 : 0;
+        score += latestValidation?.Succeeded == true ? 20 : latestValidation?.Succeeded == false ? -15 : 0;
+        score += gitStatus.Available ? 5 : 0;
+        score += gitStatus.Clean && latestValidation?.Succeeded == true ? 10 : 0;
+        return Math.Clamp(score, 0, 100);
+    }
+
+    private IReadOnlyList<string> BuildFeatureRunStateRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit)
+    {
+        return
+        [
+            _lastPatchPreviewRequest is null
+                ? synthesis.PreviewReady ? "Preview: Ready - synthesized preview can be shown." : "Preview: Waiting - no pending preview."
+                : $"Preview: Pending - {_lastPatchPreviewRequest.Action}.",
+            latestEdit is null && context.ChangedFiles.Count == 0
+                ? "Apply: Waiting - no applied edit or changed file evidence."
+                : $"Apply: Review - {Math.Max(context.ChangedFiles.Count, latestEdit is null ? 0 : 1)} edit signal(s) present.",
+            latestValidation?.Succeeded == true
+                ? "Validation: Good - latest build/test receipt passed."
+                : latestValidation?.Succeeded == false
+                    ? "Validation: Bad - repair runner should go next."
+                    : "Validation: Waiting - no build/test receipt for this run.",
+            _lastDotNetResult is { Succeeded: false }
+                ? "Repair: Active - failed validation is loaded."
+                : "Repair: Clear - no active failed validation loaded.",
+            context.RankedTargets.Count == 0
+                ? "Target: Review - no ranked edit target."
+                : $"Target: Good - {context.RankedTargets.First().RelativePath} ({context.RankedTargets.First().Confidence}).",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? "Validation route: Review - no targeted command resolved."
+                : $"Validation route: Good - {context.TestTarget.Command}."
+        ];
+    }
+
+    private IReadOnlyList<string> BuildFeatureRunStopGateRows(
+        FeatureWorkContext context,
+        CodingReceipt? latestValidation,
+        GitWorkingTreeStatus gitStatus)
+    {
+        var rows = new List<string>();
+        if (_lastPatchPreviewRequest is not null)
+        {
+            rows.Add("Pending preview must be reviewed, applied, or discarded before validation/commit.");
+        }
+
+        if (_lastDotNetResult is { Succeeded: false } || latestValidation is { Succeeded: false })
+        {
+            rows.Add("Latest validation is failed; run repair before closeout.");
+        }
+
+        if (context.ChangedFiles.Count > 0 && latestValidation?.Succeeded != true)
+        {
+            rows.Add("Changed files exist without passing validation.");
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            rows.Add("Targeted validation command is unresolved.");
+        }
+
+        if (context.RiskLabels.Any(label => label.StartsWith("Protected", StringComparison.OrdinalIgnoreCase)
+            || label.StartsWith("High", StringComparison.OrdinalIgnoreCase)))
+        {
+            rows.Add("High-risk/protected file signal requires explicit owner review.");
+        }
+
+        if (!gitStatus.Available)
+        {
+            rows.Add("Git status is unavailable.");
+        }
+
+        return rows.Count == 0 ? ["None - controller has no active stop gate."] : rows;
+    }
+
+    private string BuildFeatureRunControllerNextCommand(
+        string goal,
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus)
+    {
+        if (_lastPatchPreviewRequest is not null)
+        {
+            return "confirm apply last patch preview";
+        }
+
+        if (_lastDotNetResult is { Succeeded: false } || latestValidation is { Succeeded: false })
+        {
+            return "validation repair runner " + goal;
+        }
+
+        if ((latestEdit is not null || context.ChangedFiles.Count > 0) && latestValidation?.Succeeded != true)
+        {
+            return "post patch validation " + goal;
+        }
+
+        if ((latestEdit is not null || context.ChangedFiles.Count > 0) && latestValidation?.Succeeded == true)
+        {
+            return gitStatus.HasUncommittedChanges ? "can i safely commit" : "feature completion receipt";
+        }
+
+        if (synthesis.PreviewReady)
+        {
+            return "preview synthesized feature patch " + goal;
+        }
+
+        if (context.RankedTargets.Count == 0)
+        {
+            return "feature work context " + goal;
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            return "resolve test target " + goal;
+        }
+
+        return "exact patch synthesis " + goal;
+    }
 
     private static IReadOnlyList<string> BuildPatchSliceRows(FeatureWorkContext context)
     {

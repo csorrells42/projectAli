@@ -160,6 +160,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowAutonomousPatchLoop
             or CodingToolAction.ShowFeatureSessionLedger
             or CodingToolAction.ShowValidationRepairRunner
+            or CodingToolAction.ShowFeatureRunController
             or CodingToolAction.ShowPostPatchValidationRouter
             or CodingToolAction.ShowPatchPreviewIntelligence
             or CodingToolAction.ShowPlainEnglishFeatureBuilder

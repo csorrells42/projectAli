@@ -60,6 +60,7 @@ public enum CodingToolAction
     ShowAutonomousPatchLoop,
     ShowFeatureSessionLedger,
     ShowValidationRepairRunner,
+    ShowFeatureRunController,
     ShowPostPatchValidationRouter,
     ShowPatchPreviewIntelligence,
     ShowPlainEnglishFeatureBuilder,

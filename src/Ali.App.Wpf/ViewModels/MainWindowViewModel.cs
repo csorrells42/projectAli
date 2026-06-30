@@ -287,6 +287,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingPatchIntelligenceCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch intelligence", "patch intelligence current feature", "Coding.PatchIntelligence"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPatchLoopCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Patch loop", "autonomous patch loop current feature", "Coding.PatchLoop"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureSessionLedgerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Session ledger", "feature session ledger current feature", "Coding.FeatureSessionLedger"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureRunControllerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Run controller", "feature run controller current feature", "Coding.FeatureRunController"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureExecutionPacketCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature execution packet", "feature execution packet current feature", "Coding.FeatureExecutionPacket"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingApplyGateCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Apply gate", "apply gate current feature", "Coding.ApplyGate"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingPostPatchValidationCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Validation router", "post patch validation current feature", "Coding.PostPatchValidation"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -762,6 +763,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingPatchLoopCommand { get; }
 
     public ICommand RunCodingFeatureSessionLedgerCommand { get; }
+
+    public ICommand RunCodingFeatureRunControllerCommand { get; }
 
     public ICommand RunCodingFeatureExecutionPacketCommand { get; }
 
@@ -3590,6 +3593,9 @@ public sealed class MainWindowViewModel : ObservableObject
             "Stage:",
             "Current stage:",
             "Session score:",
+            "Phase:",
+            "Go/no-go:",
+            "Controller score:",
             "Failure type:",
             "Failed action:",
             "Failed target:",
@@ -3601,6 +3607,9 @@ public sealed class MainWindowViewModel : ObservableObject
             "Likely fix candidates:",
             "Repair steps:",
             "Preview attempt:",
+            "Run state:",
+            "Stop gates:",
+            "Owner controls:",
             "Patch intelligence:",
             "Slice approval packet:",
             "Patch preview gate v3:",
@@ -3626,6 +3635,7 @@ public sealed class MainWindowViewModel : ObservableObject
             "- Preview:",
             "- Apply:",
             "- Closeout:",
+            "- Validation route:",
             "- Active slice:",
             "- First diagnostic:",
             "- Code:",
@@ -6972,6 +6982,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingFeatureSessionLedgerCommand is AsyncRelayCommand runCodingFeatureSessionLedger)
         {
             runCodingFeatureSessionLedger.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFeatureRunControllerCommand is AsyncRelayCommand runCodingFeatureRunController)
+        {
+            runCodingFeatureRunController.RaiseCanExecuteChanged();
         }
 
         if (RunCodingFeatureExecutionPacketCommand is AsyncRelayCommand runCodingFeatureExecutionPacket)

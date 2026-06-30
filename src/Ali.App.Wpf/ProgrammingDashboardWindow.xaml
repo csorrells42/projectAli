@@ -150,6 +150,8 @@
                                         Command="{Binding RunCodingPatchLoopCommand}" />
                                 <Button Content="Session Ledger"
                                         Command="{Binding RunCodingFeatureSessionLedgerCommand}" />
+                                <Button Content="Run Controller"
+                                        Command="{Binding RunCodingFeatureRunControllerCommand}" />
                                 <Button Content="Execution Packet"
                                         Command="{Binding RunCodingFeatureExecutionPacketCommand}" />
                                 <Button Content="Apply Gate"
