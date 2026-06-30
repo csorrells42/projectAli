@@ -571,6 +571,8 @@ public sealed class LocalCodingToolService(
             lines.AddRange(relevantFiles.Select(path => $"- {path}"));
         }
 
+        await AddPatchAuthoringFileExcerptsAsync(lines, contextGoal, currentTarget, cancellationToken).ConfigureAwait(false);
+
         if (_lastDotNetRequest is not null && _lastDotNetResult is { Succeeded: false } lastDotNetResult)
         {
             AddContextSection(
@@ -631,6 +633,303 @@ public sealed class LocalCodingToolService(
         lines.Add($"- Run command: {state.RunCommand}");
         lines.Add($"- Pipeline: {FormatInlineList(state.PipelineRows.Take(5))}");
         lines.Add("- Continue command: continue current task");
+    }
+
+    private async Task AddPatchAuthoringFileExcerptsAsync(
+        List<string> lines,
+        string goal,
+        string? currentTarget,
+        CancellationToken cancellationToken)
+    {
+        if (!MentionsAny(
+                goal,
+                "add",
+                "build",
+                "change",
+                "create",
+                "edit",
+                "fix",
+                "implement",
+                "instead",
+                "make",
+                "modify",
+                "program",
+                "replace",
+                "update",
+                "write"))
+        {
+            return;
+        }
+
+        var files = ResolvePatchAuthoringContextFiles(goal, currentTarget);
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        lines.Add("Editable file excerpts for patch planning:");
+        lines.Add("Use only these exact excerpts for oldText in patch previews. Prefer full absolute paths when returning edits.");
+        var remainingCharacters = 12_000;
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (remainingCharacters <= 0)
+            {
+                break;
+            }
+
+            string text;
+            try
+            {
+                var fileInfo = new FileInfo(file);
+                if (!fileInfo.Exists || fileInfo.Length > 40_000)
+                {
+                    continue;
+                }
+
+                text = await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var excerpt = TrimForChat(text, Math.Min(remainingCharacters, 6_000));
+            remainingCharacters -= excerpt.Length;
+            lines.Add($"FILE: {RelativeToWorkspace(file)}");
+            lines.Add($"ABSOLUTE PATH: {file}");
+            lines.Add("```text");
+            lines.Add(excerpt);
+            lines.Add("```");
+        }
+    }
+
+    private IReadOnlyList<string> ResolvePatchAuthoringContextFiles(string goal, string? currentTarget)
+    {
+        var files = new List<string>();
+        AddPatchContextCandidate(files, currentTarget);
+
+        var targetDirectory = ResolvePrimaryTargetDirectory(currentTarget);
+        if (!string.IsNullOrWhiteSpace(targetDirectory) && Directory.Exists(targetDirectory))
+        {
+            AddPatchContextCandidate(files, Path.Combine(targetDirectory, "Program.cs"));
+            AddPatchContextCandidate(files, Path.Combine(targetDirectory, "App.xaml"));
+            AddPatchContextCandidate(files, Path.Combine(targetDirectory, "MainWindow.xaml"));
+            AddPatchContextCandidate(files, Path.Combine(targetDirectory, "MainWindow.xaml.cs"));
+
+            foreach (var file in EnumerateFilesUnderDirectory(targetDirectory)
+                         .Where(IsContextRelevantFile)
+                         .Where(file => !IsGeneratedOrDesignerFile(file))
+                         .OrderByDescending(file => ScoresPatchContextFile(file, goal))
+                         .ThenBy(file => RelativeToWorkspace(file), StringComparer.OrdinalIgnoreCase)
+                         .Take(8))
+            {
+                AddPatchContextCandidate(files, file);
+            }
+        }
+
+        if (files.Count < 4)
+        {
+            foreach (var file in EnumerateWorkspaceFiles()
+                         .Where(IsContextRelevantFile)
+                         .Where(file => !IsGeneratedOrDesignerFile(file))
+                         .OrderByDescending(file => ScoresPatchContextFile(file, goal))
+                         .ThenBy(file => RelativeToWorkspace(file), StringComparer.OrdinalIgnoreCase)
+                         .Take(8))
+            {
+                AddPatchContextCandidate(files, file);
+            }
+        }
+
+        return files
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+    }
+
+    private void AddPatchContextCandidate(List<string> files, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(path.Trim().Trim('"'));
+        }
+        catch
+        {
+            return;
+        }
+
+        if (!Policy.IsInsideWorkspace(fullPath)
+            || !File.Exists(fullPath)
+            || ShouldSkipPath(fullPath)
+            || !LooksTextReadable(fullPath)
+            || IsGeneratedOrDesignerFile(fullPath)
+            || files.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        files.Add(fullPath);
+    }
+
+    private static IEnumerable<string> EnumerateFilesUnderDirectory(string directory)
+    {
+        var pending = new Queue<string>();
+        pending.Enqueue(directory);
+        while (pending.Count > 0)
+        {
+            var current = pending.Dequeue();
+            IEnumerable<string> childDirectories;
+            IEnumerable<string> files;
+            try
+            {
+                childDirectories = Directory.EnumerateDirectories(current);
+                files = Directory.EnumerateFiles(current);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var childDirectory in childDirectories)
+            {
+                if (!ShouldSkipPath(childDirectory))
+                {
+                    pending.Enqueue(childDirectory);
+                }
+            }
+
+            foreach (var file in files)
+            {
+                if (!ShouldSkipPath(file))
+                {
+                    yield return file;
+                }
+            }
+        }
+    }
+
+    private string? ResolvePrimaryTargetDirectory(string? currentTarget)
+    {
+        if (string.IsNullOrWhiteSpace(currentTarget))
+        {
+            return Directory.Exists(Policy.WorkspaceRoot) ? Policy.WorkspaceRoot : null;
+        }
+
+        if (Directory.Exists(currentTarget))
+        {
+            return currentTarget;
+        }
+
+        return File.Exists(currentTarget)
+            ? Path.GetDirectoryName(currentTarget)
+            : null;
+    }
+
+    private int ScoresPatchContextFile(string file, string goal)
+    {
+        var score = 0;
+        var name = Path.GetFileName(file);
+        if (name.Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 40;
+        }
+
+        if (file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 30;
+        }
+
+        if (name.Contains("MainWindow", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("App.", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 20;
+        }
+
+        foreach (var term in ExtractContextSearchTerms(goal))
+        {
+            if (Path.GetFileNameWithoutExtension(file).Contains(term, StringComparison.OrdinalIgnoreCase)
+                || RelativeToWorkspace(file).Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 8;
+            }
+        }
+
+        return score;
+    }
+
+    private string? ResolveModelPatchPath(string path, bool createsFile)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var trimmed = path.Trim().Trim('"');
+        var targetDirectory = ResolvePrimaryTargetDirectory(GetPrimaryTarget());
+        var candidates = new List<string>();
+        if (Path.IsPathFullyQualified(trimmed))
+        {
+            candidates.Add(trimmed);
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(targetDirectory)
+                && !trimmed.Contains(Path.DirectorySeparatorChar)
+                && !trimmed.Contains(Path.AltDirectorySeparatorChar))
+            {
+                candidates.Add(Path.Combine(targetDirectory, trimmed));
+            }
+
+            candidates.Add(Path.Combine(Policy.WorkspaceRoot, trimmed));
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                candidates.Add(Path.Combine(targetDirectory, trimmed));
+            }
+        }
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(candidate);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!Policy.IsInsideWorkspace(fullPath) || !LooksTextReadable(fullPath))
+            {
+                continue;
+            }
+
+            if (createsFile || File.Exists(fullPath))
+            {
+                return fullPath;
+            }
+        }
+
+        return null;
     }
 
     public Task<CodingTaskPlan> BuildTaskPlanAsync(
@@ -737,6 +1036,73 @@ public sealed class LocalCodingToolService(
             true,
             string.Join(Environment.NewLine, lines),
             requiresConfirmation));
+    }
+
+    public async Task<CodingToolResult> PreviewPatchBundleAsync(
+        string goal,
+        IReadOnlyList<CodingPatchEdit> edits,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (edits.Count == 0)
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "Model patch planner did not return any edits.",
+                "Model patch preview",
+                Policy.WorkspaceRoot);
+        }
+
+        var resolvedEdits = new List<CodingPatchEdit>();
+        foreach (var edit in edits)
+        {
+            var resolvedPath = ResolveModelPatchPath(edit.Path, edit.OldText.Length == 0);
+            if (string.IsNullOrWhiteSpace(resolvedPath))
+            {
+                return new CodingToolResult(
+                    true,
+                    false,
+                    $"Model patch preview blocked: could not resolve target path inside the approved workspace: {edit.Path}",
+                    "Model patch preview",
+                    Policy.WorkspaceRoot);
+            }
+
+            resolvedEdits.Add(new CodingPatchEdit(resolvedPath, edit.OldText, edit.NewText));
+        }
+
+        var request = new CodingToolRequest(
+            CodingToolAction.PreviewPatchBundle,
+            null,
+            ExplicitUserPath: true,
+            UserConfirmed: false,
+            Query: CleanGoal(goal, "model-authored coding change"),
+            PatchEdits: resolvedEdits);
+        var result = await PreviewPatchBundleAsync(request, cancellationToken).ConfigureAwait(false);
+        StoreLastPatchPreview(request, result);
+        await AppendLogAsync(
+            request,
+            result,
+            new CodingToolPermission(CodingToolPermissionKind.Allow, "Model-authored patch preview is read-only and limited to the approved coding workspace."),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Succeeded)
+        {
+            return result with { ToolName = "Model patch preview" };
+        }
+
+        var prefix = string.Join(
+            Environment.NewLine,
+            "Model patch preview:",
+            "No files were changed.",
+            $"Goal: {CleanGoal(goal, "coding change")}",
+            $"Patch edits: {resolvedEdits.Count}",
+            "Next command: confirm apply last patch preview");
+        return result with
+        {
+            ToolName = "Model patch preview",
+            Message = $"{prefix}{Environment.NewLine}{result.Message}"
+        };
     }
 
     private async Task<CodingToolResult> PlanTaskAsync(
@@ -20261,7 +20627,22 @@ public sealed class LocalCodingToolService(
         }
 
         var tokens = ExtractContextSearchTerms(text);
-        return tokens.Any(token => CodingContextTerms.Contains(token));
+        return tokens.Any(token => CodingContextTerms.Contains(token))
+               || MentionsAny(
+                   text,
+                   "add",
+                   "change",
+                   "create",
+                   "edit",
+                   "fix",
+                   "implement",
+                   "instead",
+                   "make",
+                   "modify",
+                   "program",
+                   "replace",
+                   "update",
+                   "write");
     }
 
     private static bool MentionsLastFailureFollowUp(string text)

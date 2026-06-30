@@ -297,11 +297,29 @@ public sealed record CodingActionPlan(
     public static CodingActionPlan NoAction { get; } = new(false, string.Empty, string.Empty, 0);
 }
 
+public sealed record CodingPatchPlan(
+    bool HasPatch,
+    IReadOnlyList<CodingPatchEdit> Edits,
+    string Summary,
+    double Confidence = 0,
+    string? StopReason = null)
+{
+    public static CodingPatchPlan NoPatch { get; } = new(false, [], string.Empty, 0);
+}
+
 public interface ICodingActionPlanner
 {
     Task<CodingActionPlan> PlanAsync(
         string userText,
         IReadOnlyList<Ali.Core.Runtime.ChatMessage> history,
+        CancellationToken cancellationToken);
+}
+
+public interface ICodingPatchPlanner
+{
+    Task<CodingPatchPlan> PlanPatchAsync(
+        string userText,
+        CodingContextPack contextPack,
         CancellationToken cancellationToken);
 }
 
@@ -320,5 +338,10 @@ public interface ILocalCodingTool
     Task<CodingTaskPlan> BuildTaskPlanAsync(
         string userText,
         CodingContextPack contextPack,
+        CancellationToken cancellationToken);
+
+    Task<CodingToolResult> PreviewPatchBundleAsync(
+        string goal,
+        IReadOnlyList<CodingPatchEdit> edits,
         CancellationToken cancellationToken);
 }

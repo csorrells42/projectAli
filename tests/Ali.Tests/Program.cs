@@ -165,6 +165,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator keeps next step after feature patch draft", TestOrchestratorKeepsNextStepAfterFeaturePatchDraft),
     ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
     ("orchestrator falls back to build lane in programming mode", TestOrchestratorFallsBackToBuildLaneInProgrammingMode),
+    ("orchestrator previews model-authored programming patch", TestOrchestratorPreviewsModelAuthoredProgrammingPatch),
+    ("orchestrator rejects stale programming planner command", TestOrchestratorRejectsStaleProgrammingPlannerCommand),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
     ("orchestrator injects active coding task followup context", TestOrchestratorInjectsActiveCodingTaskFollowupContext),
     ("orchestrator injects last build failure context", TestOrchestratorInjectsLastBuildFailureContext),
@@ -5834,6 +5836,143 @@ static async Task TestOrchestratorFallsBackToBuildLaneInProgrammingMode()
     Equal(false, answer.Contains("Front-door plan:", StringComparison.OrdinalIgnoreCase));
 }
 
+static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var programPath = Path.Combine(workspace, "Program.cs");
+    var initialProgram = string.Join(
+        Environment.NewLine,
+        "Console.WriteLine(\"Hello, World!\");",
+        "Console.WriteLine(\"Press any key to exit...\");",
+        "Console.ReadKey(intercept: true);",
+        string.Empty);
+    var factorialProgram = string.Join(
+        Environment.NewLine,
+        "Console.Write(\"Enter an integer between 1 and 9: \");",
+        "var input = Console.ReadLine();",
+        "if (!int.TryParse(input, out var number) || number < 1 || number > 9)",
+        "{",
+        "    Console.WriteLine(\"Please enter a whole number from 1 to 9.\");",
+        "}",
+        "else",
+        "{",
+        "    var factorial = 1;",
+        "    for (var value = 2; value <= number; value++)",
+        "    {",
+        "        factorial *= value;",
+        "    }",
+        string.Empty,
+        "    Console.WriteLine($\"{number}! = {factorial}\");",
+        "}",
+        string.Empty,
+        "Console.WriteLine(\"Press any key to exit...\");",
+        "Console.ReadKey(intercept: true);",
+        string.Empty);
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(programPath, initialProgram);
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        summary = "Update Program.cs to read an integer and print its factorial.",
+        confidence = 0.91,
+        edits = new[]
+        {
+            new
+            {
+                path = programPath,
+                oldText = initialProgram,
+                newText = factorialProgram
+            }
+        }
+    });
+    var runtime = new FixedSequenceRuntime(patchJson);
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Can you make the hello world program instead ask the user for an integer between 1 and 9 and return the factorial of that number?",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("Console.WriteLine(\"Hello, World!\");", runtime.LastRequest.History[0].Text);
+    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Status: No files changed yet.", answer);
+    Equal(initialProgram, await File.ReadAllTextAsync(programPath));
+
+    var apply = await codingTool.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, apply.Succeeded);
+    Contains("factorial", await File.ReadAllTextAsync(programPath));
+}
+
+static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "Console.WriteLine(\"Hello, World!\");");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedSequenceRuntime(
+        "{\"has_patch\":false,\"summary\":\"No exact patch available.\",\"confidence\":0.2,\"edits\":[]}",
+        "{\"use_coding_tool\":true,\"command\":\"post patch validation add export button\",\"summary\":\"Validate stale export work.\",\"confidence\":0.9}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Change the program to calculate a factorial.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(2, runtime.Requests.Count);
+    Equal("coding_patch_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_action_plan", runtime.Requests[1].ConversationId);
+    Contains("Next:", answer);
+    Equal(false, answer.Contains("add export button", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("post patch validation add export button", StringComparison.OrdinalIgnoreCase));
+}
+
 static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -11169,6 +11308,36 @@ internal sealed class FixedTextRuntime(string text) : ILocalModelRuntime
         Task.FromResult(new RuntimeHealthCheck(
             Succeeded: true,
             Summary: "Fixed text runtime is available.",
+            CheckedAt: DateTimeOffset.UtcNow,
+            Elapsed: TimeSpan.Zero));
+}
+
+internal sealed class FixedSequenceRuntime(params string[] texts) : ILocalModelRuntime
+{
+    private readonly Queue<string> _texts = new(texts);
+
+    public ModelProfile ActiveProfile { get; } = ModelProfile.UnconfiguredFactorySafe();
+
+    public List<ChatRequest> Requests { get; } = new();
+
+    public ChatRequest? LastRequest => Requests.LastOrDefault();
+
+    public async IAsyncEnumerable<ModelToken> StreamChatAsync(
+        ChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Requests.Add(request);
+        await Task.Yield();
+        yield return new ModelToken(
+            _texts.Count > 0 ? _texts.Dequeue() : string.Empty,
+            EvidenceStatus.Unverified);
+    }
+
+    public Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(new RuntimeHealthCheck(
+            Succeeded: true,
+            Summary: "Fixed sequence runtime is available.",
             CheckedAt: DateTimeOffset.UtcNow,
             Elapsed: TimeSpan.Zero));
 }

@@ -31,11 +31,14 @@ public sealed class ConversationOrchestrator(
     ISourceQueryPlanner? sourceQueryPlanner = null,
     IMemoryStore? memoryStore = null,
     ILocalCodingTool? localCodingTool = null,
-    ICodingActionPlanner? codingActionPlanner = null)
+    ICodingActionPlanner? codingActionPlanner = null,
+    ICodingPatchPlanner? codingPatchPlanner = null)
 {
     private const int MaxPromptMemories = 20;
     private static readonly char[] MemoryRelevanceTokenSeparators =
         [' ', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_', '(', ')', '[', ']', '"', '\''];
+    private static readonly char[] ProgrammingTokenSeparators =
+        [' ', '\t', '\r', '\n', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_', '(', ')', '[', ']', '{', '}', '"', '\'', '`'];
     private static readonly HashSet<string> MemoryRelevanceTerms = new(StringComparer.OrdinalIgnoreCase)
     {
         "here",
@@ -54,6 +57,42 @@ public sealed class ConversationOrchestrator(
     {
         "weather",
         "local_app"
+    };
+    private static readonly HashSet<string> ProgrammingStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "about",
+        "after",
+        "again",
+        "also",
+        "and",
+        "are",
+        "before",
+        "between",
+        "can",
+        "could",
+        "does",
+        "for",
+        "from",
+        "have",
+        "help",
+        "how",
+        "into",
+        "just",
+        "like",
+        "make",
+        "need",
+        "please",
+        "should",
+        "that",
+        "the",
+        "this",
+        "user",
+        "what",
+        "when",
+        "where",
+        "with",
+        "would",
+        "you"
     };
     private static readonly Regex SourcesCheckedRegex = new(
         @"(?:\r?\n){0,2}\s*Sources checked:\s*.*\z",
@@ -90,6 +129,10 @@ public sealed class ConversationOrchestrator(
     public ICodingActionPlanner? CodingPlanner { get; } = localCodingTool is null
         ? null
         : codingActionPlanner ?? new ModelCodingActionPlanner(runtime);
+
+    public ICodingPatchPlanner? CodingPatchPlanner { get; } = localCodingTool is null
+        ? null
+        : codingPatchPlanner ?? new ModelCodingPatchPlanner(runtime);
 
     public async IAsyncEnumerable<AssistantStreamChunk> StreamAnswerAsync(
         string conversationId,
@@ -290,10 +333,32 @@ public sealed class ConversationOrchestrator(
             yield break;
         }
 
+        if (CodingPatchPlanner is not null && ShouldAttemptModelPatch(userText))
+        {
+            var patchContext = await LocalCodingTool.BuildContextPackAsync(userText, cancellationToken).ConfigureAwait(false);
+            var patchPlan = await CodingPatchPlanner.PlanPatchAsync(userText, patchContext, cancellationToken).ConfigureAwait(false);
+            if (patchPlan.HasPatch && patchPlan.Edits.Count > 0)
+            {
+                var previewResult = await LocalCodingTool.PreviewPatchBundleAsync(userText, patchPlan.Edits, cancellationToken).ConfigureAwait(false);
+                if (previewResult.Handled && previewResult.Succeeded)
+                {
+                    yield return new AssistantStreamChunk(
+                        conversationId,
+                        userMessageId,
+                        assistantMessageId,
+                        BuildProgrammingToolMessage(previewResult),
+                        EvidenceStatus.Verified);
+                    yield break;
+                }
+            }
+        }
+
         var plan = CodingPlanner is null
             ? CodingActionPlan.NoAction
             : await CodingPlanner.PlanAsync(userText, history, cancellationToken).ConfigureAwait(false);
-        var command = plan.UseCodingTool ? plan.Command : string.Empty;
+        var command = plan.UseCodingTool && IsProgrammingPlanRelevant(userText, plan.Command)
+            ? plan.Command
+            : string.Empty;
         var result = string.IsNullOrWhiteSpace(command)
             ? CodingToolResult.NotHandled
             : await LocalCodingTool.TryHandleAsync(command, cancellationToken).ConfigureAwait(false);
@@ -333,6 +398,137 @@ public sealed class ConversationOrchestrator(
 
     private static string BuildDefaultProgrammingCommand(string userText) =>
         $"build this for me {NormalizeProgrammingGoal(userText)}";
+
+    private static bool ShouldAttemptModelPatch(string userText)
+    {
+        if (IsContinuationProgrammingRequest(userText))
+        {
+            return false;
+        }
+
+        return MentionsAny(
+            userText,
+            "add",
+            "build",
+            "change",
+            "create",
+            "edit",
+            "fix",
+            "implement",
+            "instead",
+            "make",
+            "modify",
+            "program",
+            "replace",
+            "update",
+            "write");
+    }
+
+    private static bool IsProgrammingPlanRelevant(string userText, string command)
+    {
+        if (string.IsNullOrWhiteSpace(command) || IsContinuationProgrammingRequest(userText))
+        {
+            return true;
+        }
+
+        var userTerms = ExtractProgrammingTerms(userText);
+        if (userTerms.Count == 0)
+        {
+            return true;
+        }
+
+        var commandTerms = ExtractProgrammingTerms(command)
+            .Where(term => !IsCodingCommandScaffoldTerm(term))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return commandTerms.Count == 0 || userTerms.Overlaps(commandTerms);
+    }
+
+    private static bool IsCodingCommandScaffoldTerm(string term) =>
+        term is "action"
+            or "apply"
+            or "authoring"
+            or "build"
+            or "bundle"
+            or "coding"
+            or "concrete"
+            or "current"
+            or "draft"
+            or "exact"
+            or "feature"
+            or "implementation"
+            or "last"
+            or "patch"
+            or "plan"
+            or "planner"
+            or "post"
+            or "preview"
+            or "synthesis"
+            or "validation";
+
+    private static HashSet<string> ExtractProgrammingTerms(string text) =>
+        text.Split(ProgrammingTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => new string(token.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant())
+            .Where(token => token.Length >= 3)
+            .Where(token => !ProgrammingStopWords.Contains(token))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsContinuationProgrammingRequest(string userText)
+    {
+        var normalized = userText.ReplaceLineEndings(" ").Trim();
+        if (normalized.Length > 80)
+        {
+            return false;
+        }
+
+        if (MentionsAny(
+                normalized,
+                "add",
+                "change",
+                "create",
+                "edit",
+                "fix",
+                "implement",
+                "make",
+                "modify",
+                "replace",
+                "update",
+                "write"))
+        {
+            return false;
+        }
+
+        var lower = normalized.ToLowerInvariant();
+        var tokens = lower
+            .Split(ProgrammingTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        if (tokens.Count <= 3 && tokens.Any(token => token is "next" or "continue" or "proceed"))
+        {
+            return true;
+        }
+
+        return lower is "keep going"
+            or "go ahead"
+            or "do it"
+            or "green light"
+            or "greenlight"
+            or "apply"
+            or "confirm"
+            || lower.StartsWith("confirm apply", StringComparison.Ordinal)
+            || lower.StartsWith("apply last patch", StringComparison.Ordinal);
+    }
+
+    private static bool MentionsAny(string text, params string[] terms)
+    {
+        foreach (var term in terms)
+        {
+            if (text.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string NormalizeProgrammingGoal(string userText)
     {
