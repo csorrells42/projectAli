@@ -14473,9 +14473,9 @@ public sealed class LocalCodingToolService(
                     <Border Style="{StaticResource DashboardHeaderCardStyle}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <Button Content="{Binding ThemeButtonText}" Command="{Binding ToggleThemeCommand}" Margin="0,0,8,0" />
+                                <Button Content="{Binding ThemeButtonText}" Command="{Binding ToggleThemeCommand}" Style="{StaticResource DashboardSecondaryButtonStyle}" Margin="0,0,8,0" />
                                 <Button Content="Refresh" Command="{Binding RefreshCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
-                                <Button Content="Cancel" Margin="8,0,0,0" Command="{Binding CancelRefreshCommand}" />
+                                <Button Content="Cancel" Margin="8,0,0,0" Command="{Binding CancelRefreshCommand}" Style="{StaticResource DashboardSecondaryButtonStyle}" />
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock Text="Project Dashboard" Style="{StaticResource DashboardHeaderTextStyle}" />
@@ -14583,7 +14583,7 @@ public sealed class LocalCodingToolService(
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
                                             <Button Content="Apply Selected" Command="{Binding ApplySelectedItemCommand}" Style="{StaticResource DashboardPrimaryButtonStyle}" />
-                                            <Button Content="Remove Selected" Command="{Binding RemoveSelectedItemCommand}" Margin="0,8,0,0" />
+                                            <Button Content="Remove Selected" Command="{Binding RemoveSelectedItemCommand}" Style="{StaticResource DashboardSecondaryButtonStyle}" Margin="0,8,0,0" />
                                         </StackPanel>
                                     </Expander>
 
@@ -15153,20 +15153,37 @@ public sealed class LocalCodingToolService(
                 <Setter Property="Margin" Value="0,0,0,4" />
             </Style>
 
-            <Style x:Key="DashboardPrimaryButtonStyle" TargetType="Button">
+            <Style x:Key="DashboardButtonBaseStyle" TargetType="Button">
                 <Setter Property="MinWidth" Value="92" />
                 <Setter Property="Height" Value="34" />
                 <Setter Property="Padding" Value="12,0" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Style.Triggers>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.55" />
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="DashboardPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource DashboardButtonBaseStyle}">
                 <Setter Property="Background" Value="{DynamicResource DashboardAccentBrush}" />
                 <Setter Property="Foreground" Value="White" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="FontWeight" Value="SemiBold" />
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
                         <Setter Property="Background" Value="{DynamicResource DashboardAccentHoverBrush}" />
                     </Trigger>
-                    <Trigger Property="IsEnabled" Value="False">
-                        <Setter Property="Opacity" Value="0.55" />
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="DashboardSecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource DashboardButtonBaseStyle}">
+                <Setter Property="Background" Value="#FFFFFF" />
+                <Setter Property="Foreground" Value="#1F2328" />
+                <Setter Property="BorderBrush" Value="#D0D7DE" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="#F6F8FA" />
                     </Trigger>
                 </Style.Triggers>
             </Style>

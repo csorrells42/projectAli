@@ -5582,6 +5582,7 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     Contains("Header=\"_Toggle theme\"", generatedDashboardXaml);
     Contains("Content=\"{Binding ThemeButtonText}\"", generatedDashboardXaml);
     Contains("Command=\"{Binding ToggleThemeCommand}\"", generatedDashboardXaml);
+    Contains("DashboardSecondaryButtonStyle", generatedDashboardXaml);
     Contains("ToggleThemeCommand", generatedDashboardViewModel);
     Contains("ThemeButtonText", generatedDashboardViewModel);
     Contains("IsDarkTheme", generatedDashboardViewModel);
@@ -5607,7 +5608,10 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
     AssertXamlWellFormed(detailCard);
     AssertCSharpSyntaxClean(detailCardCodeBehind, detailCardCodeBehindPath);
     Contains("ResourceDictionary", dashboardStyles);
+    Contains("DashboardButtonBaseStyle", dashboardStyles);
     Contains("DashboardPrimaryButtonStyle", dashboardStyles);
+    Contains("DashboardSecondaryButtonStyle", dashboardStyles);
+    Contains("BasedOn=\"{StaticResource DashboardButtonBaseStyle}\"", dashboardStyles);
     Contains("DashboardDetailCardStyle", dashboardStyles);
     Contains("DashboardFormLabelStyle", dashboardStyles);
     Contains("DashboardInputTextBoxStyle", dashboardStyles);
