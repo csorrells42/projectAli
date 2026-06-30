@@ -8883,6 +8883,7 @@ public sealed class LocalCodingToolService(
         lines.AddRange(BuildFeaturePatchValidationHandshakeRows(context, latestValidation).Select(row => $"- {row}"));
         lines.Add("Failure repair packet:");
         lines.AddRange(BuildFeatureFailureRepairPacketRows(context).Select(row => $"- {row}"));
+        lines.Add($"Next command: exact patch synthesis {context.Goal}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature patch draft plan", Policy.WorkspaceRoot);
     }
 
@@ -8907,6 +8908,7 @@ public sealed class LocalCodingToolService(
         lines.Add(synthesis.PreviewReady
             ? $"- preview synthesized feature patch {context.Goal}"
             : "- Hold - implementation text is needed before a preview bundle can be produced.");
+        lines.Add($"Next command: {(synthesis.PreviewReady ? "preview synthesized feature patch " : "feature implementation planner ")}{context.Goal}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Exact patch synthesis", Policy.WorkspaceRoot);
     }
 
@@ -8928,6 +8930,7 @@ public sealed class LocalCodingToolService(
             lines.AddRange(synthesis.GuardRows.Select(row => $"- {row}"));
             lines.Add("Patch blocks:");
             lines.AddRange(BuildFeaturePatchSynthesisBlockRows(synthesis));
+            lines.Add($"Next command: feature implementation planner {context.Goal}");
             return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Synthesized feature patch preview", Policy.WorkspaceRoot);
         }
 
@@ -8951,7 +8954,8 @@ public sealed class LocalCodingToolService(
             "No files were changed.",
             $"Goal: {context.Goal}",
             $"Status: {synthesis.Status}",
-            $"Preview-ready edits: {synthesis.PreviewEdits.Count}"
+            $"Preview-ready edits: {synthesis.PreviewEdits.Count}",
+            "Next command: confirm apply last patch preview"
         });
         return preview with
         {
@@ -14253,6 +14257,7 @@ public sealed class LocalCodingToolService(
         AddSelectedLines(lines, stop.Message, 4, "Changed files:", "Latest validation:", "- Validation", "- File count", "- No generated");
         AddSelectedLines(lines, receipt.Message, 3, "Git:", "Status:");
         lines.Add("Next: work context, contract, patch slices, apply gate, then validation router before any patch preview.");
+        lines.Add($"Next command: feature work context {goal}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Build Feature lane", Policy.WorkspaceRoot);
     }
 

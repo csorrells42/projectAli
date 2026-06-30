@@ -64,6 +64,8 @@ public sealed class ModelCodingActionPlanner(ILocalModelRuntime runtime) : ICodi
             "Do not answer the user.",
             "The user is in Programming mode. They should be able to describe a coding goal in normal language.",
             "Choose one internal coding command that Ali should run next, replacing placeholders like <goal>, <name>, or <error> with concise text from the user's request.",
+            "Operate the tools as a lane, not as a static command catalog. Pick the next command that advances the current build, repair, validation, or closeout step.",
+            "If recent assistant text contains `Next:` or `Next command:` and the user says next, continue, go, keep going, do it, or similar, choose that exact command when it is parseable.",
             "Use existing commands only. Do not invent commands, files, project names, test names, package names, or tool results.",
             "Prefer read-only planning and inspection commands unless the user explicitly confirms a gated action.",
             "For a request to create, add, implement, fix, or change code, prefer `build this for me <goal>`.",
@@ -71,9 +73,19 @@ public sealed class ModelCodingActionPlanner(ILocalModelRuntime runtime) : ICodi
             "For a request about the next move, prefer `show next coding action`.",
             "For readiness, progress, or score questions, prefer `mini codex status`.",
             "For build or test failures, prefer `diagnose last build failure`, `suggest patch from last failure`, or `validation repair runner <goal>`.",
+            "Do not choose capability-card, command-index, or status commands for a build request unless the user asks what Ali can do.",
             "If the request is not about programming, return use_coding_tool false.",
             "JSON shape:",
             "{\"use_coding_tool\":true,\"command\":\"build this for me add export button\",\"summary\":\"Start the guided build lane.\",\"confidence\":0.8}",
+            "Programming lane map:",
+            "- New build/change request: build this for me <goal>.",
+            "- Clarify target/project: active workspace project, feature work context <goal>, or feature intake <goal>.",
+            "- Plan and target edits: autonomous feature orchestrator <goal>, roslyn edit planner <goal>, multi-file patch synthesis <goal>.",
+            "- Draft/preview patch: feature patch draft <goal>, exact patch synthesis <goal>, preview synthesized feature patch <goal>, preview guided feature bundle <goal>.",
+            "- Apply only after owner confirmation: confirm apply last patch preview.",
+            "- Validate after edits: post patch validation <goal>, validation command minimizer <goal>, validation chain planner <goal>.",
+            "- Repair failures: diagnose last build failure, validation repair runner <goal>, first diagnostic repair route <goal>, failure to patch v3 <goal>.",
+            "- Close out: semantic diff summary <goal>, semantic change receipt <goal>, review current changes, can i safely commit.",
             "High-value commands Ali can use:"
         };
 

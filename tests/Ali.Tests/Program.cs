@@ -160,6 +160,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
     ("orchestrator uses coding planner in programming mode", TestOrchestratorUsesCodingPlannerInProgrammingMode),
+    ("orchestrator keeps next step after feature patch draft", TestOrchestratorKeepsNextStepAfterFeaturePatchDraft),
     ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
     ("orchestrator falls back to build lane in programming mode", TestOrchestratorFallsBackToBuildLaneInProgrammingMode),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
@@ -262,6 +263,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model source planner guards current president for sources", TestModelSourcePlannerGuardsCurrentPresidentForSources),
     ("model source planner guards current vice president for sources", TestModelSourcePlannerGuardsCurrentVicePresidentForSources),
     ("model source planner guards local documents for sources", TestModelSourcePlannerGuardsLocalDocumentsForSources),
+    ("model coding planner includes tool lane map", TestModelCodingPlannerIncludesToolLaneMap),
     ("curated source retriever uses planned weather topic", TestCuratedSourceRetrieverUsesPlannedWeatherTopic),
     ("curated source retriever fetches NWS point forecast", TestCuratedSourceRetrieverFetchesNwsPointForecast),
     ("curated source retriever selects Tullahoma NWS point forecast", TestCuratedSourceRetrieverSelectsTullahomaNwsPointForecast),
@@ -3433,9 +3435,11 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Preview bundle candidates:", featurePatchDraft.Message);
     Contains("Before/after requirements:", featurePatchDraft.Message);
     Contains("Failure repair packet:", featurePatchDraft.Message);
+    Contains("Next command: exact patch synthesis Save button", featurePatchDraft.Message);
     Contains("Exact patch synthesis v1", exactPatch.Message);
     Contains("Patch blocks:", exactPatch.Message);
     Contains("Preview route:", exactPatch.Message);
+    Contains("Next command:", exactPatch.Message);
     Contains("Autonomous patch loop v1", patchLoop.Message);
     Contains("Loop steps:", patchLoop.Message);
     Contains("Failure classifier:", patchLoop.Message);
@@ -3466,6 +3470,7 @@ static async Task TestLocalCodingToolShowsCodingReadinessHelpers()
     Contains("Failure repair packet:", featureBuilder.Message);
     Contains("Next command:", featureBuilder.Message);
     Contains("Build Feature lane", buildFeatureLane.Message);
+    Contains("Next command: feature work context", buildFeatureLane.Message);
 }
 
 static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
@@ -5069,6 +5074,7 @@ static async Task TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch()
     Contains("Exact patch synthesis v1", synthesis.Message);
     Contains("Preview-ready edits: 1", synthesis.Message);
     Contains("replace Demo with Widget", synthesis.Message);
+    Contains("Next command: preview synthesized feature patch replace Demo with Widget", synthesis.Message);
     Equal("class Demo { }", await File.ReadAllTextAsync(filePath));
 
     Equal(true, preview.Handled);
@@ -5077,6 +5083,7 @@ static async Task TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch()
     Contains("Patch bundle preview", preview.Message);
     Contains("Edits: 1", preview.Message);
     Contains("To apply this exact bundle", preview.Message);
+    Contains("Next command: confirm apply last patch preview", preview.Message);
 
     Equal(true, loop.Handled);
     Equal(true, loop.Succeeded);
@@ -5577,6 +5584,50 @@ static async Task TestOrchestratorUsesCodingPlannerInProgrammingMode()
     Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Front-door plan:", StringComparison.OrdinalIgnoreCase));
+    Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
+}
+
+static async Task TestOrchestratorKeepsNextStepAfterFeaturePatchDraft()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "Console.WriteLine(\"Hello\");");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedTextRuntime(
+        "{\"use_coding_tool\":true,\"command\":\"feature patch draft create a hello world console app\",\"summary\":\"Draft the first safe patch step.\",\"confidence\":0.9}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Build a hello world console app.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Contains("Next: exact patch synthesis create a hello world console app", answer);
+    Contains("Use Next to run that step.", answer);
+    Equal(false, answer.Contains("Next: no queued step", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
     Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
 }
 
@@ -7998,6 +8049,39 @@ static async Task TestModelSourcePlannerIncludesSavedMemoryContext()
     NotNull(runtime.LastRequest, "Planner runtime request should be captured.");
     Contains("SavedMemory:", runtime.LastRequest!.History[0].Text);
     Contains("We are in Andalusia, AL.", runtime.LastRequest.History[0].Text);
+}
+
+static async Task TestModelCodingPlannerIncludesToolLaneMap()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"command":"build this for me add export button","summary":"Start the guided build lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+    var history = new[]
+    {
+        new ChatMessage(
+            "msg_previous_step",
+            ChatRole.Assistant,
+            "Next: feature patch draft add export button\nStatus: No files changed yet.\nUse Next to run that step.",
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Verified)
+    };
+
+    var plan = await planner.PlanAsync("keep going", history, CancellationToken.None);
+
+    Equal(true, plan.UseCodingTool);
+    NotNull(runtime.LastRequest, "Coding planner runtime request should be captured.");
+    var instruction = runtime.LastRequest!.History[0].Text;
+    Contains("Programming lane map:", instruction);
+    Contains("If recent assistant text contains `Next:` or `Next command:`", instruction);
+    Contains("feature patch draft <goal>", instruction);
+    Contains("exact patch synthesis <goal>", instruction);
+    Contains("preview synthesized feature patch <goal>", instruction);
+    Contains("confirm apply last patch preview", instruction);
+    Contains("post patch validation <goal>", instruction);
+    Contains("semantic change receipt <goal>", instruction);
+    Contains("Assistant: Next: feature patch draft add export button", instruction);
 }
 
 static async Task TestModelSourcePlannerGuardsWeatherForecastsForSources()
