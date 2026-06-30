@@ -128,6 +128,16 @@
                                         Command="{Binding RunCodingFeatureBuilderCommand}"
                                         BorderBrush="#1E6B49"
                                         Background="#152A22" />
+                                <Button Content="Paired Preview"
+                                        Command="{Binding RunCodingGuidedBundlePreviewCommand}" />
+                                <Button Content="Impl Planner"
+                                        Command="{Binding RunCodingImplementationPlannerCommand}" />
+                                <Button Content="Intake"
+                                        Command="{Binding RunCodingFeatureIntakeCommand}" />
+                                <Button Content="Orchestrator"
+                                        Command="{Binding RunCodingFeatureOrchestratorCommand}" />
+                                <Button Content="Evidence Pack"
+                                        Command="{Binding RunCodingEvidencePackCommand}" />
                                 <Button Content="Build Feature Lane"
                                         Command="{Binding RunCodingBuildFeatureLaneCommand}" />
                                 <Button Content="Work Context"

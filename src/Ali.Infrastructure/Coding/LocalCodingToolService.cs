@@ -295,6 +295,7 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowFeaturePatchDraftPlan => await ShowFeaturePatchDraftPlanAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowExactPatchSynthesis => await ShowExactPatchSynthesisAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.PreviewSynthesizedFeaturePatch => await PreviewSynthesizedFeaturePatchAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.PreviewGuidedFeatureBundle => await PreviewGuidedFeatureBundleAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowAutonomousPatchLoop => await ShowAutonomousPatchLoopAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowFeatureSessionLedger => await ShowFeatureSessionLedgerAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowValidationRepairRunner => await ShowValidationRepairRunnerAsync(request, cancellationToken).ConfigureAwait(false),
@@ -302,6 +303,10 @@ public sealed class LocalCodingToolService(
             CodingToolAction.ShowPostPatchValidationRouter => await ShowPostPatchValidationRouterAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPatchPreviewIntelligence => await ShowPatchPreviewIntelligenceAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowGuidedFeatureWorkflow => await ShowGuidedFeatureWorkflowAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFeatureImplementationPlanner => await ShowFeatureImplementationPlannerAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowFeatureIntakeNormalizer => await ShowFeatureIntakeNormalizerAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowAutonomousFeatureOrchestrator => await ShowAutonomousFeatureOrchestratorAsync(request, cancellationToken).ConfigureAwait(false),
+            CodingToolAction.ShowImplementationEvidencePack => await ShowImplementationEvidencePackAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowPlainEnglishFeatureBuilder => await ShowPlainEnglishFeatureBuilderAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowBuildFeatureLane => await ShowBuildFeatureLaneAsync(request, cancellationToken).ConfigureAwait(false),
             CodingToolAction.ShowCSharpSymbolIndex => ShowCSharpSymbolIndex(),
@@ -8132,7 +8137,8 @@ public sealed class LocalCodingToolService(
             "- Validation/release: A",
             "- Autonomous workflow: A-",
             "- Dashboard usability: A-",
-            "Endzone estimate: 86-88% of the way to the local mini-Codex target.",
+            "Endzone estimate: 88-90% of the way to the local mini-Codex target.",
+            "Autonomy layer: feature intake, implementation planner, paired preview, orchestrator, and evidence pack are available.",
             "Next best action:"
         };
         AddSelectedLines(lines, next.Message, 4, "Next:", "Pending patch:", "Latest validation:", "Git:");
@@ -8268,53 +8274,21 @@ public sealed class LocalCodingToolService(
     private async Task<CodingToolResult> PreviewBehaviorTestPatchAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
-        var targetFile = ResolveBehaviorTestPatchTarget(context);
-        if (string.IsNullOrWhiteSpace(targetFile))
+        var edit = await BuildBehaviorTestPatchPreviewEditAsync(context, cancellationToken).ConfigureAwait(false);
+        if (!edit.Ready)
         {
             var lines = new List<string>
             {
                 "Behavior test patch preview:",
                 "No files were changed.",
                 $"Goal: {context.Goal}",
-                "Preview blocked: no existing C# test file target was resolved.",
+                $"Preview blocked: {edit.Status}",
                 "Candidate test files:"
             };
             var candidates = GetCSharpFiles().Where(IsTestFile).Take(6).Select(file => $"- {RelativeToWorkspace(file)}").ToList();
             lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates);
             lines.Add("Next command: identify or create the intended test file, then run preview behavior test patch again.");
-            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", Policy.WorkspaceRoot);
-        }
-
-        var content = await File.ReadAllTextAsync(targetFile, cancellationToken).ConfigureAwait(false);
-        var framework = ResolveBehaviorTestFramework(targetFile, content);
-        if (framework is null)
-        {
-            var lines = new[]
-            {
-                "Behavior test patch preview:",
-                "No files were changed.",
-                $"Goal: {context.Goal}",
-                $"Test file: {RelativeToWorkspace(targetFile)}",
-                "Preview blocked: test framework could not be detected as xUnit, NUnit, or MSTest."
-            };
-            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", targetFile);
-        }
-
-        var methodName = BuildBehaviorTestMethodName(context.Goal, content);
-        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var testMethod = BuildBehaviorTestMethod(context.Goal, methodName, framework, newline);
-        if (!TryBuildBehaviorTestInsertionBlock(content, testMethod, out var oldText, out var newText, out var blockReason))
-        {
-            var lines = new[]
-            {
-                "Behavior test patch preview:",
-                "No files were changed.",
-                $"Goal: {context.Goal}",
-                $"Test file: {RelativeToWorkspace(targetFile)}",
-                $"Framework: {framework.Name}",
-                $"Preview blocked: {blockReason}"
-            };
-            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", targetFile);
+            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Behavior test patch preview", edit.FullPath ?? Policy.WorkspaceRoot);
         }
 
         var previewRequest = new CodingToolRequest(
@@ -8323,7 +8297,7 @@ public sealed class LocalCodingToolService(
             ExplicitUserPath: true,
             UserConfirmed: false,
             Query: context.Goal,
-            PatchEdits: [new CodingPatchEdit(targetFile, oldText, newText)]);
+            PatchEdits: [edit.Edit!]);
         var preview = await PreviewPatchBundleAsync(previewRequest, cancellationToken).ConfigureAwait(false);
         if (preview.Succeeded)
         {
@@ -8336,18 +8310,18 @@ public sealed class LocalCodingToolService(
             "Behavior test patch preview:",
             "No files were changed.",
             $"Goal: {context.Goal}",
-            $"Test file: {RelativeToWorkspace(targetFile)}",
-            $"Framework: {framework.Name}",
-            $"Generated test: {methodName}",
+            $"Test file: {edit.RelativePath}",
+            $"Framework: {edit.FrameworkName}",
+            $"Generated test: {edit.MethodName}",
             "Intent: preview a red placeholder behavior test; complete the assertion before relying on it.",
-            $"Anchor: {blockReason}",
+            $"Anchor: {edit.AnchorReason}",
             "Next command: confirm apply last patch preview"
         });
         return preview with
         {
             Message = prefix + Environment.NewLine + preview.Message,
             ToolName = "Behavior test patch preview",
-            TargetPath = targetFile
+            TargetPath = edit.FullPath
         };
     }
 
@@ -8580,6 +8554,93 @@ public sealed class LocalCodingToolService(
         };
     }
 
+    private async Task<CodingToolResult> PreviewGuidedFeatureBundleAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var synthesis = await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(context.Goal, synthesis);
+        var testEdit = await BuildBehaviorTestPatchPreviewEditAsync(context, cancellationToken).ConfigureAwait(false);
+        var edits = new List<CodingPatchEdit>();
+        if (testEdit.Ready && testEdit.Edit is not null)
+        {
+            edits.Add(testEdit.Edit);
+        }
+
+        var codeEdits = BuildGuidedFeatureCodePreviewEdits(synthesis, testEdit, Math.Max(0, MaxPatchBundleEdits - edits.Count));
+        edits.AddRange(codeEdits);
+
+        if (edits.Count == 0)
+        {
+            var lines = new List<string>
+            {
+                "Guided feature bundle preview:",
+                "No files were changed.",
+                $"Goal: {context.Goal}",
+                "Preview blocked: no deterministic behavior-test or code patch edit is ready.",
+                $"Behavior test: {testEdit.Status}",
+                $"Code patch: {synthesis.Status}",
+                "Next command: guided feature workflow " + context.Goal
+            };
+            lines.Add("Patch blocks:");
+            lines.AddRange(BuildFeaturePatchSynthesisBlockRows(synthesis));
+            return new CodingToolResult(true, false, string.Join(Environment.NewLine, lines), "Guided feature bundle preview", Policy.WorkspaceRoot);
+        }
+
+        var previewRequest = new CodingToolRequest(
+            CodingToolAction.PreviewPatchBundle,
+            null,
+            ExplicitUserPath: true,
+            UserConfirmed: false,
+            Query: context.Goal,
+            PatchEdits: edits);
+        var preview = await PreviewPatchBundleAsync(previewRequest, cancellationToken).ConfigureAwait(false);
+        if (preview.Succeeded)
+        {
+            _lastPatchPreviewRequest = previewRequest;
+            SavePendingPatchPreview();
+        }
+
+        var prefix = string.Join(Environment.NewLine, new[]
+        {
+            "Guided feature bundle preview:",
+            "No files were changed.",
+            $"Goal: {context.Goal}",
+            $"Behavior test edit: {(testEdit.Ready ? $"Ready - {testEdit.RelativePath} ({testEdit.FrameworkName})" : "Not included - " + testEdit.Status)}",
+            $"Code edits: {codeEdits.Count.ToString(CultureInfo.InvariantCulture)} preview-ready",
+            $"Bundle edits: {edits.Count}",
+            "Pairing rule: review test intent and code behavior together before apply.",
+            "Next command: confirm apply last patch preview"
+        });
+        return preview with
+        {
+            Message = prefix + Environment.NewLine + preview.Message,
+            ToolName = "Guided feature bundle preview"
+        };
+    }
+
+    private static IReadOnlyList<CodingPatchEdit> BuildGuidedFeatureCodePreviewEdits(
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchPreviewEdit testEdit,
+        int maxCount)
+    {
+        if (!synthesis.PreviewReady || maxCount <= 0)
+        {
+            return [];
+        }
+
+        var testPath = testEdit.FullPath;
+        var candidates = synthesis.PreviewEdits;
+        if (testEdit.Ready)
+        {
+            candidates = candidates
+                .Where(edit => !edit.Path.Equals(testPath, StringComparison.OrdinalIgnoreCase)
+                    && !IsTestFile(edit.Path))
+                .ToList();
+        }
+
+        return candidates.Take(maxCount).ToList();
+    }
+
     private async Task<CodingToolResult> ShowAutonomousPatchLoopAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
@@ -8748,6 +8809,8 @@ public sealed class LocalCodingToolService(
         lines.AddRange(candidates.Count == 0 ? ["- none found"] : candidates.Select(FormatDiagnosticFixCandidate));
         lines.Add("Repair steps:");
         lines.AddRange(BuildValidationRepairStepRows(failureType, primaryDiagnostic, retryCommand).Select(row => $"- {row}"));
+        lines.Add("Repair routing v2:");
+        lines.AddRange(BuildValidationRepairRoutingRows(failureType, candidates, testTarget, context, retryCommand).Select(row => $"- {row}"));
         lines.Add("Preview attempt:");
         lines.AddRange(previewRows.Count == 0 ? ["- Not attempted - no deterministic preview candidate or a preview is already pending."] : previewRows.Select(row => $"- {row}"));
         lines.Add($"Next command: {BuildValidationRepairNextCommand(failureType, primaryDiagnostic, retryCommand)}");
@@ -8885,6 +8948,125 @@ public sealed class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Guided feature workflow", Policy.WorkspaceRoot);
     }
 
+    private async Task<CodingToolResult> ShowFeatureImplementationPlannerAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var synthesis = await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        var testPreview = await BuildBehaviorTestPatchReadinessAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(context.Goal, synthesis);
+        var lines = new List<string>
+        {
+            "Feature implementation planner v1:",
+            "No files were changed.",
+            $"Goal: {context.Goal}",
+            $"Plan confidence: {context.ImpactScore.Score}/100 ({context.ImpactScore.Confidence})",
+            "Implementation order:"
+        };
+        lines.AddRange(BuildFeatureImplementationOrderRows(context, synthesis, testPreview).Select(row => $"- {row}"));
+        lines.Add("Files by role:");
+        lines.AddRange(BuildFeatureImplementationFileRoleRows(context).Select(row => $"- {row}"));
+        lines.Add("Roslyn targeting:");
+        lines.AddRange(BuildFeatureRoslynTargetingRows(context).Select(row => $"- {row}"));
+        lines.Add("Validation matrix:");
+        lines.AddRange(BuildFeatureValidationMatrixRows(context, synthesis, testPreview).Select(row => $"- {row}"));
+        lines.Add("Rollback and stop plan:");
+        lines.AddRange(BuildFeatureRollbackStopRows(context, synthesis).Select(row => $"- {row}"));
+        lines.Add($"Next command: {BuildGuidedFeatureImplementationNextCommand(context, synthesis, testPreview)}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature implementation planner", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowFeatureIntakeNormalizerAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
+        var featureType = ClassifyPlainEnglishFeatureType(context);
+        var testPreview = await BuildBehaviorTestPatchReadinessAsync(context, cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Feature intake normalizer v1:",
+            "No files were changed.",
+            $"Request: {context.Goal}",
+            "Normalized brief:"
+        };
+        lines.AddRange(BuildFeatureIntakeBriefRows(context, featureType).Select(row => $"- {row}"));
+        lines.Add("Ambiguity check:");
+        lines.AddRange(BuildFeatureIntakeAmbiguityRows(context).Select(row => $"- {row}"));
+        lines.Add("Acceptance checks:");
+        lines.AddRange(BuildFeatureIntakeAcceptanceRows(context, featureType).Select(row => $"- {row}"));
+        lines.Add("Starting route:");
+        lines.AddRange(BuildFeatureIntakeRouteRows(context, testPreview).Select(row => $"- {row}"));
+        lines.Add($"Next command: autonomous feature orchestrator {context.Goal}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Feature intake normalizer", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowAutonomousFeatureOrchestratorAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
+        var context = await BuildFeatureWorkContextAsync(request with { Query = goal }, cancellationToken).ConfigureAwait(false);
+        var synthesis = _lastFeaturePatchSynthesis is not null && string.Equals(_lastFeatureBuildGoal, goal, StringComparison.OrdinalIgnoreCase)
+            ? _lastFeaturePatchSynthesis
+            : await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(goal, synthesis);
+        var testPreview = await BuildBehaviorTestPatchReadinessAsync(context, cancellationToken).ConfigureAwait(false);
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(IsFeatureEditReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var stage = ClassifyGuidedFeatureWorkflowStage(context, synthesis, testPreview, latestValidation, latestEdit, gitStatus);
+        var score = BuildAutonomousFeatureOrchestratorScore(context, synthesis, testPreview, latestValidation, latestEdit, gitStatus, _lastPatchPreviewRequest is not null);
+        var nextCommand = BuildGuidedFeatureWorkflowNextCommand(goal, context, synthesis, testPreview, latestValidation, latestEdit, gitStatus);
+        var lines = new List<string>
+        {
+            "Autonomous feature orchestrator v1:",
+            "No files were changed.",
+            $"Request: {goal}",
+            $"Stage: {stage}",
+            $"Readiness score: {score}/100",
+            _lastPatchPreviewRequest is null ? "Pending preview: none" : $"Pending preview: {_lastPatchPreviewRequest.Action}",
+            latestValidation is null ? "Latest validation: none" : FormatReceiptSummary("Latest validation", latestValidation),
+            $"Git: {gitStatus.Summary}",
+            "12-cycle board:"
+        };
+        lines.AddRange(BuildAutonomousFeatureCycleRows(context, synthesis, testPreview, latestValidation, latestEdit, gitStatus, _lastPatchPreviewRequest is not null).Select(row => $"- {row}"));
+        lines.Add("Stop rules:");
+        lines.AddRange(BuildAutonomousFeatureStopRows(context, latestValidation, gitStatus, _lastPatchPreviewRequest is not null).Select(row => $"- {row}"));
+        lines.Add($"Next command: {nextCommand}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Autonomous feature orchestrator", Policy.WorkspaceRoot);
+    }
+
+    private async Task<CodingToolResult> ShowImplementationEvidencePackAsync(CodingToolRequest request, CancellationToken cancellationToken)
+    {
+        var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
+        var context = await BuildFeatureWorkContextAsync(request with { Query = goal }, cancellationToken).ConfigureAwait(false);
+        var synthesis = _lastFeaturePatchSynthesis is not null && string.Equals(_lastFeatureBuildGoal, goal, StringComparison.OrdinalIgnoreCase)
+            ? _lastFeaturePatchSynthesis
+            : await BuildFeaturePatchSynthesisAsync(context, cancellationToken).ConfigureAwait(false);
+        RememberFeaturePatchSynthesis(goal, synthesis);
+        var testPreview = await BuildBehaviorTestPatchReadinessAsync(context, cancellationToken).ConfigureAwait(false);
+        LoadPendingPatchPreviewIfNeeded();
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestEdit = receipts.LastOrDefault(IsFeatureEditReceipt);
+        var latestGit = receipts.LastOrDefault(IsFeatureGitReceipt);
+        var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        var lines = new List<string>
+        {
+            "Implementation evidence pack v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Evidence status:"
+        };
+        lines.AddRange(BuildImplementationEvidenceStatusRows(context, synthesis, testPreview, latestValidation, latestEdit, gitStatus, _lastPatchPreviewRequest is not null).Select(row => $"- {row}"));
+        lines.Add("Proof checklist:");
+        lines.AddRange(BuildImplementationProofChecklistRows(context, synthesis, testPreview, latestValidation, gitStatus).Select(row => $"- {row}"));
+        lines.Add("Recent receipts:");
+        lines.AddRange(BuildImplementationReceiptRows(latestValidation, latestEdit, latestGit).Select(row => $"- {row}"));
+        lines.Add("Risk and rollback:");
+        lines.AddRange(BuildImplementationRiskRollbackRows(context, synthesis).Select(row => $"- {row}"));
+        lines.Add($"Next command: {BuildImplementationEvidenceNextCommand(goal, latestValidation, latestEdit, gitStatus, _lastPatchPreviewRequest is not null)}");
+        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Implementation evidence pack", Policy.WorkspaceRoot);
+    }
+
     private async Task<CodingToolResult> ShowPlainEnglishFeatureBuilderAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
@@ -8914,6 +9096,284 @@ public sealed class LocalCodingToolService(
         lines.AddRange(BuildFeatureFailureRepairPacketRows(context).Select(row => $"- {row}"));
         lines.Add($"Next command: feature patch draft {context.Goal}");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Plain-English feature builder", Policy.WorkspaceRoot);
+    }
+
+    private static IReadOnlyList<string> BuildFeatureIntakeBriefRows(FeatureWorkContext context, string featureType)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault();
+        return
+        [
+            $"Feature type: {featureType}.",
+            $"Intent: {BuildPlainEnglishUserResult(context.Goal, featureType)}.",
+            $"Primary target: {(topTarget is null ? "Review - none resolved yet." : $"Good - {topTarget.RelativePath} ({topTarget.Confidence}).")}",
+            $"Validation route: {(string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "Review - no command resolved." : "Good - " + context.TestTarget.Command + ".")}",
+            $"Risk level: {FormatInlineList(context.RiskLabels)}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeatureIntakeAmbiguityRows(FeatureWorkContext context)
+    {
+        var rows = new List<string>();
+        if (context.Goal.Equals("current feature", StringComparison.OrdinalIgnoreCase))
+        {
+            rows.Add("Review - request is still generic; owner should name the behavior.");
+        }
+
+        if (context.RankedTargets.Count == 0)
+        {
+            rows.Add("Review - primary file is not resolved.");
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            rows.Add("Review - validation command is not resolved.");
+        }
+
+        if (context.RiskLabels.Any(label => label.StartsWith("Protected", StringComparison.OrdinalIgnoreCase)
+            || label.StartsWith("High", StringComparison.OrdinalIgnoreCase)))
+        {
+            rows.Add("Review - protected or high-risk files may be involved.");
+        }
+
+        return rows.Count == 0 ? ["Good - request, target, and validation route are clear enough to plan."] : rows;
+    }
+
+    private static IReadOnlyList<string> BuildFeatureIntakeAcceptanceRows(FeatureWorkContext context, string featureType)
+    {
+        return
+        [
+            $"User can trigger {context.Goal} and see the expected result.",
+            $"Behavior matches the {featureType} path without changing unrelated workflows.",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? "Targeted validation is identified before apply."
+                : $"Targeted validation passes: {context.TestTarget.Command}.",
+            "Patch preview is visible before any apply step.",
+            "Closeout includes validation evidence and safe commit check."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeatureIntakeRouteRows(
+        FeatureWorkContext context,
+        BehaviorTestPatchReadiness testPreview)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault();
+        return
+        [
+            topTarget is null ? "Target: Review - inspect workspace or symbol map first." : $"Target: Good - start with {topTarget.RelativePath}.",
+            testPreview.Ready ? $"Behavior test: Good - {testPreview.Command}." : $"Behavior test: Review - {testPreview.Status}",
+            $"Implementation planner: feature implementation planner {context.Goal}",
+            $"Guided path: guided feature workflow {context.Goal}"
+        ];
+    }
+
+    private static int BuildAutonomousFeatureOrchestratorScore(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus,
+        bool hasPendingPreview)
+    {
+        var score = 20;
+        if (context.RankedTargets.Count > 0)
+        {
+            score += 10;
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            score += 10;
+        }
+
+        if (testPreview.Ready)
+        {
+            score += 10;
+        }
+
+        if (synthesis.PreviewReady)
+        {
+            score += 10;
+        }
+
+        if (hasPendingPreview)
+        {
+            score += 5;
+        }
+
+        if (latestEdit is not null)
+        {
+            score += 5;
+        }
+
+        if (latestValidation?.Succeeded == true)
+        {
+            score += 15;
+        }
+
+        if (gitStatus.Available)
+        {
+            score += 5;
+        }
+
+        if (!gitStatus.HasUncommittedChanges && latestValidation?.Succeeded == true)
+        {
+            score += 10;
+        }
+
+        return Math.Clamp(score, 0, 100);
+    }
+
+    private static IReadOnlyList<string> BuildAutonomousFeatureCycleRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus,
+        bool hasPendingPreview)
+    {
+        var topTarget = context.RankedTargets.FirstOrDefault();
+        return
+        [
+            $"1. Intake: Good - request captured as {context.Goal}.",
+            topTarget is null ? "2. Target map: Review - no primary target yet." : $"2. Target map: Good - {topTarget.RelativePath}.",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "3. Validation route: Review - no command resolved." : $"3. Validation route: Good - {context.TestTarget.Command}.",
+            testPreview.Ready ? $"4. Behavior test: Good - {testPreview.Command}." : $"4. Behavior test: Review - {testPreview.Status}",
+            synthesis.PreviewReady ? $"5. Code patch: Good - {synthesis.PreviewEdits.Count} exact edit(s) ready." : $"5. Code patch: Review - {synthesis.Status}",
+            testPreview.Ready && synthesis.PreviewReady ? "6. Paired preview: Good - code and behavior-test previews can be reviewed together." : "6. Paired preview: Review - needs both code and behavior-test readiness.",
+            hasPendingPreview ? "7. Apply gate: Review - owner must accept or discard pending preview." : "7. Apply gate: Good - no pending preview is blocking planning.",
+            latestEdit is null ? "8. Edit receipt: Waiting - no applied edit receipt yet." : "8. Edit receipt: Good - an edit receipt exists.",
+            latestValidation?.Succeeded == true ? "9. Validation receipt: Good - latest validation passed." : "9. Validation receipt: Waiting - pass targeted validation after apply.",
+            gitStatus.Available ? $"10. Git state: Good - {gitStatus.Summary}" : "10. Git state: Review - Git status unavailable.",
+            context.RiskLabels.Any(label => label.StartsWith("Protected", StringComparison.OrdinalIgnoreCase) || label.StartsWith("High", StringComparison.OrdinalIgnoreCase))
+                ? "11. Risk gate: Review - protected/high-risk paths need owner review."
+                : "11. Risk gate: Good - no protected/high-risk path flagged.",
+            latestValidation?.Succeeded == true && !gitStatus.HasUncommittedChanges
+                ? "12. Closeout: Good - no uncommitted validated work remains."
+                : "12. Closeout: Waiting - finish validation, review, and safe commit check."
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildAutonomousFeatureStopRows(
+        FeatureWorkContext context,
+        CodingReceipt? latestValidation,
+        GitWorkingTreeStatus gitStatus,
+        bool hasPendingPreview)
+    {
+        var rows = new List<string>();
+        if (hasPendingPreview)
+        {
+            rows.Add("Stop - pending preview needs owner apply or discard.");
+        }
+
+        if (latestValidation is { Succeeded: false })
+        {
+            rows.Add("Stop - latest validation failed; repair before another patch.");
+        }
+
+        if (!gitStatus.Available)
+        {
+            rows.Add("Stop - Git status unavailable; owner should verify working tree.");
+        }
+
+        if (context.RiskLabels.Any(label => label.StartsWith("Protected", StringComparison.OrdinalIgnoreCase)
+            || label.StartsWith("High", StringComparison.OrdinalIgnoreCase)))
+        {
+            rows.Add("Stop - protected/high-risk file label needs owner review.");
+        }
+
+        return rows.Count == 0 ? ["Good - no hard stop detected for the next planning command."] : rows;
+    }
+
+    private static IReadOnlyList<string> BuildImplementationEvidenceStatusRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus,
+        bool hasPendingPreview)
+    {
+        return
+        [
+            context.RankedTargets.Count == 0 ? "Target: Review - none resolved." : $"Target: Good - {context.RankedTargets[0].RelativePath}.",
+            testPreview.Ready ? $"Behavior proof: Ready - {testPreview.TargetFile}." : $"Behavior proof: Review - {testPreview.Status}",
+            synthesis.PreviewReady ? $"Patch proof: Ready - {synthesis.PreviewEdits.Count} preview edit(s)." : $"Patch proof: Review - {synthesis.Status}",
+            hasPendingPreview ? "Preview proof: Waiting - owner decision pending." : "Preview proof: none pending.",
+            latestEdit is null ? "Edit proof: Waiting - no applied edit receipt." : FormatReceiptSummary("Edit proof", latestEdit),
+            latestValidation?.Succeeded == true ? FormatReceiptSummary("Validation proof", latestValidation) : "Validation proof: Waiting - no passing validation receipt.",
+            gitStatus.HasUncommittedChanges ? "Git proof: Review - uncommitted changes remain." : $"Git proof: Good - {gitStatus.Summary}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildImplementationProofChecklistRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview,
+        CodingReceipt? latestValidation,
+        GitWorkingTreeStatus gitStatus)
+    {
+        return
+        [
+            $"Acceptance: {context.Goal}.",
+            testPreview.Ready ? "Test intent: drafted or draftable." : "Test intent: needs target or framework.",
+            synthesis.PreviewReady ? "Code diff: deterministic preview exists." : "Code diff: exact old/new text still needed.",
+            latestValidation?.Succeeded == true ? "Validation: passed." : "Validation: still required after apply.",
+            gitStatus.HasUncommittedChanges ? "Review: current changes must be reviewed before commit." : "Review: working tree clean or no review needed yet.",
+            $"Risk-aware depth: {ClassifyRiskAwareTestDepth(context.RelativeCandidateFiles)}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildImplementationReceiptRows(
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        CodingReceipt? latestGit)
+    {
+        return
+        [
+            latestEdit is null ? "Latest edit: none." : FormatReceiptSummary("Latest edit", latestEdit),
+            latestValidation is null ? "Latest validation: none." : FormatReceiptSummary("Latest validation", latestValidation),
+            latestGit is null ? "Latest git check: none." : FormatReceiptSummary("Latest git check", latestGit)
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildImplementationRiskRollbackRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis)
+    {
+        return
+        [
+            $"Risk labels: {FormatInlineList(context.RiskLabels)}",
+            synthesis.PreviewReady ? "Rollback: discard pending preview or revert only the reviewed edit files." : "Rollback: no patch has been previewed by this tool.",
+            "Stop gate: do not commit without a passing validation receipt.",
+            "Stop gate: do not edit generated/protected files unless the owner explicitly asks."
+        ];
+    }
+
+    private static string BuildImplementationEvidenceNextCommand(
+        string goal,
+        CodingReceipt? latestValidation,
+        CodingReceipt? latestEdit,
+        GitWorkingTreeStatus gitStatus,
+        bool hasPendingPreview)
+    {
+        if (hasPendingPreview)
+        {
+            return "show pending patch preview";
+        }
+
+        if (latestEdit is not null && latestValidation?.Succeeded != true)
+        {
+            return "post patch validation " + goal;
+        }
+
+        if (latestValidation?.Succeeded == true && gitStatus.HasUncommittedChanges)
+        {
+            return "can i safely commit";
+        }
+
+        return "autonomous feature orchestrator " + goal;
     }
 
     private static IReadOnlyList<string> BuildBehaviorContractRows(FeatureWorkContext context)
@@ -9917,6 +10377,53 @@ public sealed class LocalCodingToolService(
         ];
     }
 
+    private IReadOnlyList<string> BuildValidationRepairRoutingRows(
+        string failureType,
+        IReadOnlyList<DiagnosticFixCandidate> candidates,
+        TestTargetRecommendation testTarget,
+        FeatureWorkContext context,
+        string retryCommand)
+    {
+        var topCandidate = candidates.OrderByDescending(candidate => candidate.Score).FirstOrDefault();
+        var rows = new List<string>
+        {
+            topCandidate is null
+                ? "Candidate route: Review - no deterministic fix candidate was ranked."
+                : $"Candidate route: {topCandidate.Confidence} - {topCandidate.Target}; {topCandidate.NextStep}.",
+            string.IsNullOrWhiteSpace(testTarget.Command)
+                ? "Retry route: Review - no targeted test command resolved from the diagnostic."
+                : $"Retry route: Good - {testTarget.Command}.",
+            $"Fallback retry: {retryCommand}.",
+            context.RankedTargets.Count == 0
+                ? "Slice route: Review - no active implementation slice is tied to this failure."
+                : $"Slice route: {context.RankedTargets.First().RelativePath} ({context.RankedTargets.First().Confidence})."
+        };
+
+        if (failureType.Equals("test", StringComparison.OrdinalIgnoreCase))
+        {
+            rows.Add("Behavior route: compare expected vs actual before changing source; prefer a failing behavior test preview first.");
+        }
+        else if (failureType.Equals("compiler", StringComparison.OrdinalIgnoreCase))
+        {
+            rows.Add("Compiler route: map diagnostic to nearest symbol, preview the smallest literal repair, then rerun the same target.");
+        }
+        else if (failureType.Equals("restore/package", StringComparison.OrdinalIgnoreCase)
+            || failureType.Equals("missing sdk/tool", StringComparison.OrdinalIgnoreCase))
+        {
+            rows.Add("Setup route: stop before package/tool changes unless owner confirms the exact restore/install action.");
+        }
+        else if (failureType.Equals("locked file", StringComparison.OrdinalIgnoreCase))
+        {
+            rows.Add("Lock route: collect process evidence before stopping anything.");
+        }
+        else
+        {
+            rows.Add("Unknown route: keep changes behind preview and ask for owner review if the first diagnostic is unclear.");
+        }
+
+        return rows;
+    }
+
     private string BuildValidationRepairNextCommand(string failureType, string primaryDiagnostic, string retryCommand)
     {
         if (_lastPatchPreviewRequest is not null)
@@ -10214,39 +10721,187 @@ public sealed class LocalCodingToolService(
         return "exact patch synthesis " + goal;
     }
 
+    private IReadOnlyList<string> BuildFeatureImplementationOrderRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview)
+    {
+        var rows = new List<string>
+        {
+            "1. Intake - freeze request, expected result, failure behavior, and confirmation boundary.",
+            context.RankedTargets.Count == 0
+                ? "2. Targeting - inspect more before editing; no ranked file target is ready."
+                : $"2. Targeting - primary file {context.RankedTargets.First().RelativePath} ({context.RankedTargets.First().Confidence}).",
+            testPreview.Ready
+                ? $"3. Test preview - {testPreview.Command}."
+                : $"3. Test preview - hold; {testPreview.Status}",
+            synthesis.PreviewReady
+                ? $"4. Code preview - preview synthesized feature patch {context.Goal}."
+                : "4. Code preview - draft exact before/after text before preview.",
+            testPreview.Ready && synthesis.PreviewReady
+                ? $"5. Paired bundle - preview guided feature bundle {context.Goal}."
+                : "5. Paired bundle - wait until both behavior test and code preview are ready.",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? "6. Validation - resolve targeted test command before apply."
+                : $"6. Validation - {context.TestTarget.Command}.",
+            "7. Closeout - review current changes, validation receipt, repair runner if failed, then safe commit check."
+        };
+        return rows;
+    }
+
+    private IReadOnlyList<string> BuildFeatureImplementationFileRoleRows(FeatureWorkContext context)
+    {
+        var rows = new List<string>();
+        foreach (var target in context.RankedTargets.Take(6))
+        {
+            rows.Add($"{target.RelativePath}: {ClassifyFeatureImplementationRole(target.RelativePath)}; confidence {target.Confidence}; risk {target.Risk}; reason {FormatInlineList(target.Reasons.Take(2))}");
+        }
+
+        foreach (var file in context.RelativeCandidateFiles.Except(context.RankedTargets.Select(target => target.RelativePath), StringComparer.OrdinalIgnoreCase).Take(6))
+        {
+            rows.Add($"{file}: {ClassifyFeatureImplementationRole(file)}; risk {ClassifyFileRisk(file)}.");
+        }
+
+        return rows.Count == 0 ? ["none resolved yet"] : rows;
+    }
+
+    private static string ClassifyFeatureImplementationRole(string path)
+    {
+        if (IsTestFile(path))
+        {
+            return "test proof";
+        }
+
+        if (path.Contains("RequestParser", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("Contracts", StringComparison.OrdinalIgnoreCase))
+        {
+            return "command surface";
+        }
+
+        if (path.Contains("LocalCodingToolService", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("Infrastructure", StringComparison.OrdinalIgnoreCase))
+        {
+            return "execution/service behavior";
+        }
+
+        if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+        {
+            return "dashboard/UI binding";
+        }
+
+        if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase))
+        {
+            return "project/dependency metadata";
+        }
+
+        return "source behavior";
+    }
+
+    private IReadOnlyList<string> BuildFeatureRoslynTargetingRows(FeatureWorkContext context)
+    {
+        var declarations = context.Graph.Declarations.Take(5).Select(hit => $"{hit.Kind} {hit.Display} at {RelativeToWorkspace(hit.Path)}:{hit.LineNumber}").ToList();
+        var references = context.Graph.References.Take(5).Select(hit => $"{hit.Kind} {hit.Display} at {RelativeToWorkspace(hit.Path)}:{hit.LineNumber}").ToList();
+        var calls = context.Graph.InboundCalls
+            .Concat(context.Graph.OutboundCalls)
+            .Take(5)
+            .Select(edge => $"{edge.Caller} -> {edge.Callee} at {RelativeToWorkspace(edge.Path)}:{edge.LineNumber}")
+            .ToList();
+        return
+        [
+            $"Declarations: {FormatInlineList(declarations)}",
+            $"References: {FormatInlineList(references)}",
+            $"Call impact: {FormatInlineList(calls)}",
+            $"Reference files: {FormatInlineList(context.Graph.ReferenceFiles.Take(8))}",
+            $"Likely test symbols: {FormatInlineList(context.Graph.TestSymbols.Take(8))}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeatureValidationMatrixRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview)
+    {
+        return
+        [
+            string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? "Targeted tests: Review - no command resolved."
+                : $"Targeted tests: Good - {context.TestTarget.Command}.",
+            testPreview.Ready
+                ? $"Behavior test preview: Good - {testPreview.TargetFile} ({testPreview.FrameworkName})."
+                : $"Behavior test preview: Review - {testPreview.Status}",
+            synthesis.PreviewReady
+                ? $"Code patch preview: Good - {synthesis.PreviewEdits.Count} edit(s) ready."
+                : $"Code patch preview: Review - {synthesis.Status}",
+            $"Risk-aware depth: {ClassifyRiskAwareTestDepth(context.RelativeCandidateFiles)}",
+            $"Build order: {FormatInlineList(context.TestTarget.BuildOrderProjects)}"
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildFeatureRollbackStopRows(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis)
+    {
+        var rows = new List<string>
+        {
+            "Rollback: discard pending preview if the visible diff does not match the request.",
+            "Rollback: use review current changes before commit; revert only owner-approved files.",
+            synthesis.PreviewReady ? "Stop gate: preview-ready code exists; apply only after owner reviews the bundle." : "Stop gate: no code preview yet; keep work in planning.",
+            context.RankedTargets.Count == 0 || context.RankedTargets.First().Confidence.Equals("Low", StringComparison.OrdinalIgnoreCase)
+                ? "Stop gate: target confidence is not strong enough for autonomous editing."
+                : "Stop gate: target confidence is acceptable for preview-only drafting.",
+            string.IsNullOrWhiteSpace(context.TestTarget.Command)
+                ? "Stop gate: validation target unresolved."
+                : "Stop gate: validation target resolved; run only through confirmation."
+        };
+        rows.AddRange(context.RiskLabels
+            .Where(label => label.StartsWith("Protected", StringComparison.OrdinalIgnoreCase)
+                || label.StartsWith("High", StringComparison.OrdinalIgnoreCase))
+            .Take(3)
+            .Select(label => "Stop gate: " + label));
+        return rows;
+    }
+
+    private static string BuildGuidedFeatureImplementationNextCommand(
+        FeatureWorkContext context,
+        FeaturePatchSynthesis synthesis,
+        BehaviorTestPatchReadiness testPreview)
+    {
+        if (context.RankedTargets.Count == 0)
+        {
+            return "feature work context " + context.Goal;
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
+        {
+            return "resolve test target " + context.Goal;
+        }
+
+        if (testPreview.Ready && synthesis.PreviewReady)
+        {
+            return "preview guided feature bundle " + context.Goal;
+        }
+
+        if (testPreview.Ready)
+        {
+            return testPreview.Command;
+        }
+
+        return synthesis.PreviewReady ? "preview synthesized feature patch " + context.Goal : "exact patch synthesis " + context.Goal;
+    }
+
     private async Task<BehaviorTestPatchReadiness> BuildBehaviorTestPatchReadinessAsync(
         FeatureWorkContext context,
         CancellationToken cancellationToken)
     {
-        var targetFile = ResolveBehaviorTestPatchTarget(context);
-        if (string.IsNullOrWhiteSpace(targetFile))
-        {
-            return new BehaviorTestPatchReadiness(
-                false,
-                "Review - no existing C# test file target was resolved.",
-                null,
-                null,
-                "behavior test plan " + context.Goal);
-        }
-
-        var content = await File.ReadAllTextAsync(targetFile, cancellationToken).ConfigureAwait(false);
-        var framework = ResolveBehaviorTestFramework(targetFile, content);
-        if (framework is null)
-        {
-            return new BehaviorTestPatchReadiness(
-                false,
-                "Review - test file found, but framework was not detected as xUnit, NUnit, or MSTest.",
-                RelativeToWorkspace(targetFile),
-                null,
-                "behavior test plan " + context.Goal);
-        }
-
+        var edit = await BuildBehaviorTestPatchPreviewEditAsync(context, cancellationToken).ConfigureAwait(false);
         return new BehaviorTestPatchReadiness(
-            true,
-            "Ready - behavior test preview can be drafted.",
-            RelativeToWorkspace(targetFile),
-            framework.Name,
-            "preview behavior test patch " + context.Goal);
+            edit.Ready,
+            edit.Ready ? "Ready - behavior test preview can be drafted." : "Review - " + edit.Status,
+            edit.RelativePath,
+            edit.FrameworkName,
+            edit.Command ?? "behavior test plan " + context.Goal);
     }
 
     private string ClassifyGuidedFeatureWorkflowStage(
@@ -10285,6 +10940,11 @@ public sealed class LocalCodingToolService(
         if (string.IsNullOrWhiteSpace(context.TestTarget.Command))
         {
             return "Resolve validation route";
+        }
+
+        if (testPreview.Ready && synthesis.PreviewReady)
+        {
+            return "Preview paired bundle";
         }
 
         if (testPreview.Ready)
@@ -10378,6 +11038,9 @@ public sealed class LocalCodingToolService(
             synthesis.PreviewReady
                 ? $"Code patch: Ready - preview synthesized feature patch {context.Goal}."
                 : "Code patch: Draft - exact patch synthesis still needs a safe before/after block.",
+            testPreview.Ready && synthesis.PreviewReady
+                ? $"Paired preview: Ready - preview guided feature bundle {context.Goal}."
+                : "Paired preview: Waiting - needs both a behavior test edit and code edit.",
             _lastPatchPreviewRequest is null
                 ? "Pending preview: none."
                 : $"Pending preview: {_lastPatchPreviewRequest.Action} needs owner decision.",
@@ -10483,6 +11146,11 @@ public sealed class LocalCodingToolService(
             return "resolve test target " + goal;
         }
 
+        if (testPreview.Ready && synthesis.PreviewReady)
+        {
+            return "preview guided feature bundle " + goal;
+        }
+
         if (testPreview.Ready)
         {
             return testPreview.Command;
@@ -10525,6 +11193,70 @@ public sealed class LocalCodingToolService(
             "Dashboard binding test: build feature button points at the expected ICommand.",
             "Assertion draft: output contains the contract heading, target file row, validation row, and no hidden apply step."
         ];
+    }
+
+    private async Task<BehaviorTestPatchPreviewEdit> BuildBehaviorTestPatchPreviewEditAsync(
+        FeatureWorkContext context,
+        CancellationToken cancellationToken)
+    {
+        var targetFile = ResolveBehaviorTestPatchTarget(context);
+        if (string.IsNullOrWhiteSpace(targetFile))
+        {
+            return new BehaviorTestPatchPreviewEdit(
+                false,
+                "no existing C# test file target was resolved.",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+        }
+
+        var content = await File.ReadAllTextAsync(targetFile, cancellationToken).ConfigureAwait(false);
+        var framework = ResolveBehaviorTestFramework(targetFile, content);
+        if (framework is null)
+        {
+            return new BehaviorTestPatchPreviewEdit(
+                false,
+                "test framework could not be detected as xUnit, NUnit, or MSTest.",
+                targetFile,
+                RelativeToWorkspace(targetFile),
+                null,
+                null,
+                null,
+                null,
+                null);
+        }
+
+        var methodName = BuildBehaviorTestMethodName(context.Goal, content);
+        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var testMethod = BuildBehaviorTestMethod(context.Goal, methodName, framework, newline);
+        if (!TryBuildBehaviorTestInsertionBlock(content, testMethod, out var oldText, out var newText, out var blockReason))
+        {
+            return new BehaviorTestPatchPreviewEdit(
+                false,
+                blockReason,
+                targetFile,
+                RelativeToWorkspace(targetFile),
+                framework.Name,
+                methodName,
+                blockReason,
+                null,
+                null);
+        }
+
+        return new BehaviorTestPatchPreviewEdit(
+            true,
+            "Ready - behavior test preview can be drafted.",
+            targetFile,
+            RelativeToWorkspace(targetFile),
+            framework.Name,
+            methodName,
+            blockReason,
+            new CodingPatchEdit(targetFile, oldText, newText),
+            "preview behavior test patch " + context.Goal);
     }
 
     private string? ResolveBehaviorTestPatchTarget(FeatureWorkContext context)
@@ -17595,6 +18327,17 @@ public sealed class LocalCodingToolService(
         string? TargetFile,
         string? FrameworkName,
         string Command);
+
+    private sealed record BehaviorTestPatchPreviewEdit(
+        bool Ready,
+        string Status,
+        string? FullPath,
+        string? RelativePath,
+        string? FrameworkName,
+        string? MethodName,
+        string? AnchorReason,
+        CodingPatchEdit? Edit,
+        string? Command);
 
     private sealed record EditImpactSurface(
         IReadOnlyList<string> DirectFiles,

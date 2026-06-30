@@ -28,6 +28,8 @@ public static class CodingAbilityCatalog
     public static IReadOnlyList<string> FastBuilderPath { get; } =
     [
         "interpret build goal <goal>",
+        "feature intake <goal>",
+        "autonomous feature orchestrator <goal>",
         "show architecture options <goal>",
         "write acceptance criteria <goal>",
         "suggest tests for <goal>",
@@ -37,6 +39,7 @@ public static class CodingAbilityCatalog
         "project index",
         "coding context packet",
         "show next coding action",
+        "implementation evidence pack <goal>",
         "show execution packet",
         "validation plan"
     ];
@@ -75,6 +78,10 @@ public static class CodingAbilityCatalog
             "Turn an idea into an owner-reviewable roadmap, tests, and file plan.",
             [
                 new("Roadmap", "draft implementation roadmap <goal>"),
+                new("Feature intake", "feature intake <goal>"),
+                new("Feature orchestrator", "autonomous feature orchestrator <goal>"),
+                new("Implementation planner", "feature implementation planner <goal>"),
+                new("Evidence pack", "implementation evidence pack <goal>"),
                 new("Acceptance criteria", "write acceptance criteria <goal>"),
                 new("Focused tests", "suggest tests for <goal>"),
                 new("Codebase patterns", "detect codebase patterns"),
@@ -396,7 +403,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask for code review, build/test validation, failure diagnosis, patch previews, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask for feature intake, guarded build orchestration, code review, build/test validation, failure diagnosis, patch previews, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");

@@ -746,6 +746,26 @@ public static class CodingToolRequestParser
         "preview generated patch"
     ];
 
+    private static readonly string[] GuidedFeatureBundlePreviewPrefixes =
+    [
+        "preview guided feature bundle ",
+        "preview feature bundle ",
+        "preview paired feature patch ",
+        "preview code and test patch ",
+        "preview code plus test ",
+        "paired preview "
+    ];
+
+    private static readonly string[] GuidedFeatureBundlePreviewRequests =
+    [
+        "preview guided feature bundle",
+        "preview feature bundle",
+        "preview paired feature patch",
+        "preview code and test patch",
+        "preview code plus test",
+        "paired preview"
+    ];
+
     private static readonly string[] AutonomousPatchLoopPrefixes =
     [
         "autonomous patch loop ",
@@ -889,6 +909,88 @@ public static class CodingToolRequestParser
         "start guided build",
         "tell ali to build",
         "build this feature"
+    ];
+
+    private static readonly string[] FeatureImplementationPlannerPrefixes =
+    [
+        "feature implementation planner ",
+        "implementation planner ",
+        "multi file implementation planner ",
+        "multi-file implementation planner ",
+        "feature implementation plan ",
+        "multi file feature plan ",
+        "multi-file feature plan "
+    ];
+
+    private static readonly string[] FeatureImplementationPlannerRequests =
+    [
+        "feature implementation planner",
+        "implementation planner",
+        "multi file implementation planner",
+        "multi-file implementation planner",
+        "feature implementation plan",
+        "multi file feature plan",
+        "multi-file feature plan"
+    ];
+
+    private static readonly string[] FeatureIntakeNormalizerPrefixes =
+    [
+        "feature intake ",
+        "feature intake normalizer ",
+        "normalize feature request ",
+        "clarify feature request ",
+        "build request intake ",
+        "request intake "
+    ];
+
+    private static readonly string[] FeatureIntakeNormalizerRequests =
+    [
+        "feature intake",
+        "feature intake normalizer",
+        "normalize feature request",
+        "clarify feature request",
+        "build request intake",
+        "request intake"
+    ];
+
+    private static readonly string[] AutonomousFeatureOrchestratorPrefixes =
+    [
+        "autonomous feature orchestrator ",
+        "mini codex orchestrator ",
+        "feature orchestrator ",
+        "feature autopilot ",
+        "feature control tower ",
+        "build orchestration "
+    ];
+
+    private static readonly string[] AutonomousFeatureOrchestratorRequests =
+    [
+        "autonomous feature orchestrator",
+        "mini codex orchestrator",
+        "feature orchestrator",
+        "feature autopilot",
+        "feature control tower",
+        "build orchestration"
+    ];
+
+    private static readonly string[] ImplementationEvidencePackPrefixes =
+    [
+        "implementation evidence pack ",
+        "feature evidence pack ",
+        "coding evidence pack ",
+        "closeout evidence pack ",
+        "release evidence pack ",
+        "evidence pack "
+    ];
+
+    private static readonly string[] ImplementationEvidencePackRequests =
+    [
+        "implementation evidence pack",
+        "feature evidence pack",
+        "coding evidence pack",
+        "closeout evidence pack",
+        "release evidence pack",
+        "evidence pack"
     ];
 
     private static readonly string[] PlainEnglishFeatureBuilderPrefixes =
@@ -2861,6 +2963,9 @@ public static class CodingToolRequestParser
     private static bool IsPreviewSynthesizedFeaturePatchRequest(string text) =>
         PreviewSynthesizedFeaturePatchRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsGuidedFeatureBundlePreviewRequest(string text) =>
+        GuidedFeatureBundlePreviewRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
     private static bool IsAutonomousPatchLoopRequest(string text) =>
         AutonomousPatchLoopRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
@@ -2881,6 +2986,18 @@ public static class CodingToolRequestParser
 
     private static bool IsGuidedFeatureWorkflowRequest(string text) =>
         GuidedFeatureWorkflowRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFeatureImplementationPlannerRequest(string text) =>
+        FeatureImplementationPlannerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsFeatureIntakeNormalizerRequest(string text) =>
+        FeatureIntakeNormalizerRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsAutonomousFeatureOrchestratorRequest(string text) =>
+        AutonomousFeatureOrchestratorRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsImplementationEvidencePackRequest(string text) =>
+        ImplementationEvidencePackRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsPlainEnglishFeatureBuilderRequest(string text) =>
         PlainEnglishFeatureBuilderRequests.Any(request => text.Equals(request, StringComparison.OrdinalIgnoreCase));
@@ -3042,6 +3159,7 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, FeaturePatchDraftPlanPrefixes, CodingToolAction.ShowFeaturePatchDraftPlan, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ExactPatchSynthesisPrefixes, CodingToolAction.ShowExactPatchSynthesis, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PreviewSynthesizedFeaturePatchPrefixes, CodingToolAction.PreviewSynthesizedFeaturePatch, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, GuidedFeatureBundlePreviewPrefixes, CodingToolAction.PreviewGuidedFeatureBundle, userConfirmed, out request)
             || TryParsePrefixedQuery(text, AutonomousPatchLoopPrefixes, CodingToolAction.ShowAutonomousPatchLoop, userConfirmed, out request)
             || TryParsePrefixedQuery(text, FeatureSessionLedgerPrefixes, CodingToolAction.ShowFeatureSessionLedger, userConfirmed, out request)
             || TryParsePrefixedQuery(text, ValidationRepairRunnerPrefixes, CodingToolAction.ShowValidationRepairRunner, userConfirmed, out request)
@@ -3049,6 +3167,10 @@ public static class CodingToolRequestParser
             || TryParsePrefixedQuery(text, PostPatchValidationRouterPrefixes, CodingToolAction.ShowPostPatchValidationRouter, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PatchPreviewIntelligencePrefixes, CodingToolAction.ShowPatchPreviewIntelligence, userConfirmed, out request)
             || TryParsePrefixedQuery(text, GuidedFeatureWorkflowPrefixes, CodingToolAction.ShowGuidedFeatureWorkflow, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureImplementationPlannerPrefixes, CodingToolAction.ShowFeatureImplementationPlanner, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, FeatureIntakeNormalizerPrefixes, CodingToolAction.ShowFeatureIntakeNormalizer, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, AutonomousFeatureOrchestratorPrefixes, CodingToolAction.ShowAutonomousFeatureOrchestrator, userConfirmed, out request)
+            || TryParsePrefixedQuery(text, ImplementationEvidencePackPrefixes, CodingToolAction.ShowImplementationEvidencePack, userConfirmed, out request)
             || TryParsePrefixedQuery(text, PlainEnglishFeatureBuilderPrefixes, CodingToolAction.ShowPlainEnglishFeatureBuilder, userConfirmed, out request)
             || TryParsePlainEnglishBuildRequest(text, userConfirmed, out request))
         {
@@ -3139,6 +3261,12 @@ public static class CodingToolRequestParser
             return true;
         }
 
+        if (IsGuidedFeatureBundlePreviewRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.PreviewGuidedFeatureBundle, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
         if (IsAutonomousPatchLoopRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowAutonomousPatchLoop, null, UserConfirmed: userConfirmed);
@@ -3178,6 +3306,30 @@ public static class CodingToolRequestParser
         if (IsGuidedFeatureWorkflowRequest(text))
         {
             request = new CodingToolRequest(CodingToolAction.ShowGuidedFeatureWorkflow, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeatureImplementationPlannerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeatureImplementationPlanner, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsFeatureIntakeNormalizerRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowFeatureIntakeNormalizer, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsAutonomousFeatureOrchestratorRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowAutonomousFeatureOrchestrator, null, UserConfirmed: userConfirmed);
+            return true;
+        }
+
+        if (IsImplementationEvidencePackRequest(text))
+        {
+            request = new CodingToolRequest(CodingToolAction.ShowImplementationEvidencePack, null, UserConfirmed: userConfirmed);
             return true;
         }
 

@@ -158,6 +158,7 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowFeaturePatchDraftPlan
             or CodingToolAction.ShowExactPatchSynthesis
             or CodingToolAction.PreviewSynthesizedFeaturePatch
+            or CodingToolAction.PreviewGuidedFeatureBundle
             or CodingToolAction.ShowAutonomousPatchLoop
             or CodingToolAction.ShowFeatureSessionLedger
             or CodingToolAction.ShowValidationRepairRunner
@@ -165,6 +166,10 @@ public sealed class CodingWorkspacePolicy
             or CodingToolAction.ShowPostPatchValidationRouter
             or CodingToolAction.ShowPatchPreviewIntelligence
             or CodingToolAction.ShowGuidedFeatureWorkflow
+            or CodingToolAction.ShowFeatureImplementationPlanner
+            or CodingToolAction.ShowFeatureIntakeNormalizer
+            or CodingToolAction.ShowAutonomousFeatureOrchestrator
+            or CodingToolAction.ShowImplementationEvidencePack
             or CodingToolAction.ShowPlainEnglishFeatureBuilder
             or CodingToolAction.ShowBuildFeatureLane
             or CodingToolAction.ShowCSharpSymbolIndex

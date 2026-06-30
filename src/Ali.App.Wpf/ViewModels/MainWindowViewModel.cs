@@ -276,6 +276,11 @@ public sealed class MainWindowViewModel : ObservableObject
         RunCodingSymbolDiffAuditCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Symbol diff audit", "show mandatory symbol diff audit", "Coding.SymbolDiffAudit"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingGeneratedFileGuardCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Generated file guard", "show generated file guard", "Coding.GeneratedFileGuard"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureBuilderCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Guided feature workflow", "guided feature workflow current feature", "Coding.FeatureBuilder"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingGuidedBundlePreviewCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Paired feature preview", "preview guided feature bundle current feature", "Coding.GuidedBundlePreview"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingImplementationPlannerCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Implementation planner", "feature implementation planner current feature", "Coding.ImplementationPlanner"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureIntakeCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intake", "feature intake current feature", "Coding.FeatureIntake"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingFeatureOrchestratorCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature orchestrator", "autonomous feature orchestrator current feature", "Coding.FeatureOrchestrator"), () => !IsBusy && !IsRecording && !IsTranscribing);
+        RunCodingEvidencePackCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Evidence pack", "implementation evidence pack current feature", "Coding.EvidencePack"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingBuildFeatureLaneCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Build feature lane", "show build feature lane", "Coding.BuildFeatureLane"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureWorkContextCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature work context", "feature work context current feature", "Coding.FeatureWorkContext"), () => !IsBusy && !IsRecording && !IsTranscribing);
         RunCodingFeatureIntentCommand = CreateAsyncCommand(() => RunCodingDiagnosticAsync("Feature intent", "feature intent packet current feature", "Coding.FeatureIntent"), () => !IsBusy && !IsRecording && !IsTranscribing);
@@ -742,6 +747,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RunCodingGeneratedFileGuardCommand { get; }
 
     public ICommand RunCodingFeatureBuilderCommand { get; }
+
+    public ICommand RunCodingGuidedBundlePreviewCommand { get; }
+
+    public ICommand RunCodingImplementationPlannerCommand { get; }
+
+    public ICommand RunCodingFeatureIntakeCommand { get; }
+
+    public ICommand RunCodingFeatureOrchestratorCommand { get; }
+
+    public ICommand RunCodingEvidencePackCommand { get; }
 
     public ICommand RunCodingBuildFeatureLaneCommand { get; }
 
@@ -3422,6 +3437,11 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("show mandatory symbol diff audit", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show generated file guard", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("guided feature workflow", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("preview guided feature bundle", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature implementation planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature intake", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("autonomous feature orchestrator", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("implementation evidence pack", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
@@ -3527,6 +3547,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (command.StartsWith("show build feature lane", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("guided feature workflow", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("preview guided feature bundle", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature implementation planner", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("feature intake", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("autonomous feature orchestrator", StringComparison.OrdinalIgnoreCase)
+            || command.StartsWith("implementation evidence pack", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature work context", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("feature intent packet", StringComparison.OrdinalIgnoreCase)
             || command.StartsWith("behavior contract", StringComparison.OrdinalIgnoreCase)
@@ -3540,6 +3565,11 @@ public sealed class MainWindowViewModel : ObservableObject
             || command.StartsWith("feature completion receipt", StringComparison.OrdinalIgnoreCase))
         {
             return command.StartsWith("guided feature workflow", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("preview guided feature bundle", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("feature implementation planner", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("feature intake", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("autonomous feature orchestrator", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("implementation evidence pack", StringComparison.OrdinalIgnoreCase)
                 ? "Next - Run the single next command shown by the workflow."
                 : "Next - Work the feature lane top to bottom before previewing a patch.";
         }
@@ -3580,6 +3610,31 @@ public sealed class MainWindowViewModel : ObservableObject
             "Code preview:",
             "Test preview:",
             "Patch/test pairing:",
+            "Guided feature bundle preview:",
+            "Behavior test edit:",
+            "Code edits:",
+            "Bundle edits:",
+            "Pairing rule:",
+            "Feature implementation planner",
+            "Implementation order:",
+            "Files by role:",
+            "Roslyn targeting:",
+            "Validation matrix:",
+            "Rollback and stop plan:",
+            "Feature intake normalizer",
+            "Normalized brief:",
+            "Ambiguity check:",
+            "Acceptance checks:",
+            "Starting route:",
+            "Autonomous feature orchestrator",
+            "Readiness score:",
+            "12-cycle board:",
+            "Stop rules:",
+            "Implementation evidence pack",
+            "Evidence status:",
+            "Proof checklist:",
+            "Recent receipts:",
+            "Risk and rollback:",
             "Goal:",
             "Behavior test patch preview:",
             "Test file:",
@@ -3690,13 +3745,29 @@ public sealed class MainWindowViewModel : ObservableObject
             "- 4.",
             "- 5.",
             "- 6.",
+            "- 7.",
+            "- 8.",
+            "- 9.",
+            "- 10.",
+            "- 11.",
+            "- 12.",
             "- High",
             "- Medium",
             "- Low",
             "- Intake:",
             "- Target:",
+            "- Primary target:",
+            "- Risk level:",
+            "- Acceptance:",
+            "- Test intent:",
+            "- Code diff:",
+            "- Review:",
+            "- Edit proof:",
+            "- Validation proof:",
+            "- Git proof:",
             "- Behavior test:",
             "- Code patch:",
+            "- Paired preview:",
             "- Apply state:",
             "- Release state:",
             "- Git state:"
@@ -6957,6 +7028,31 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RunCodingFeatureBuilderCommand is AsyncRelayCommand runCodingFeatureBuilder)
         {
             runCodingFeatureBuilder.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingGuidedBundlePreviewCommand is AsyncRelayCommand runCodingGuidedBundlePreview)
+        {
+            runCodingGuidedBundlePreview.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingImplementationPlannerCommand is AsyncRelayCommand runCodingImplementationPlanner)
+        {
+            runCodingImplementationPlanner.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFeatureIntakeCommand is AsyncRelayCommand runCodingFeatureIntake)
+        {
+            runCodingFeatureIntake.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingFeatureOrchestratorCommand is AsyncRelayCommand runCodingFeatureOrchestrator)
+        {
+            runCodingFeatureOrchestrator.RaiseCanExecuteChanged();
+        }
+
+        if (RunCodingEvidencePackCommand is AsyncRelayCommand runCodingEvidencePack)
+        {
+            runCodingEvidencePack.RaiseCanExecuteChanged();
         }
 
         if (RunCodingBuildFeatureLaneCommand is AsyncRelayCommand runCodingBuildFeatureLane)

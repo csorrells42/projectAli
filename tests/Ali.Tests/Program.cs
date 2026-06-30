@@ -148,6 +148,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
     ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
     ("local coding tool previews behavior test patch", TestLocalCodingToolPreviewsBehaviorTestPatch),
+    ("local coding tool previews guided feature bundle", TestLocalCodingToolPreviewsGuidedFeatureBundle),
     ("local coding tool previews same-file patch bundle", TestLocalCodingToolPreviewsSameFilePatchBundle),
     ("local coding tool rejects stale patch bundle", TestLocalCodingToolRejectsStalePatchBundle),
     ("local coding tool manages pending patch preview", TestLocalCodingToolManagesPendingPatchPreview),
@@ -587,6 +588,9 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("show visual studio integration", builderIndex);
     Contains("coding context packet", builderIndex);
     Contains("project index", builderIndex);
+    Contains("feature intake <goal>", builderIndex);
+    Contains("autonomous feature orchestrator <goal>", builderIndex);
+    Contains("implementation evidence pack <goal>", builderIndex);
     Contains("confirm run packet item N", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
@@ -596,6 +600,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("Here is how I can help", userGuide);
     Contains("For location-based weather", userGuide);
     Contains("Programming", userGuide);
+    Contains("feature intake", userGuide);
     Contains("Context packet", userGuide);
     Contains("coding context packet", userGuide);
     Contains("PDF", userGuide);
@@ -818,6 +823,9 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal("replace Demo with Widget", exactPatchRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("preview synthesized feature patch replace Demo with Widget", out var synthesizedPreviewRequest));
     Equal(CodingToolAction.PreviewSynthesizedFeaturePatch, synthesizedPreviewRequest.Action);
+    Equal(true, CodingToolRequestParser.TryParse("preview guided feature bundle Save button", out var guidedBundlePreviewRequest));
+    Equal(CodingToolAction.PreviewGuidedFeatureBundle, guidedBundlePreviewRequest.Action);
+    Equal("Save button", guidedBundlePreviewRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("autonomous patch loop Save button", out var patchLoopRequest));
     Equal(CodingToolAction.ShowAutonomousPatchLoop, patchLoopRequest.Action);
     Equal(true, CodingToolRequestParser.TryParse("feature session ledger Save button", out var sessionLedgerRequest));
@@ -836,6 +844,18 @@ static Task TestCodingParserRoutesAdvancedCodingHelpers()
     Equal(true, CodingToolRequestParser.TryParse("tell ali to build settings button", out var tellAliBuildRequest));
     Equal(CodingToolAction.ShowGuidedFeatureWorkflow, tellAliBuildRequest.Action);
     Equal("settings button", tellAliBuildRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("feature implementation planner Save button", out var implementationPlannerRequest));
+    Equal(CodingToolAction.ShowFeatureImplementationPlanner, implementationPlannerRequest.Action);
+    Equal("Save button", implementationPlannerRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("feature intake Save button", out var featureIntakeRequest));
+    Equal(CodingToolAction.ShowFeatureIntakeNormalizer, featureIntakeRequest.Action);
+    Equal("Save button", featureIntakeRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("autonomous feature orchestrator Save button", out var featureOrchestratorRequest));
+    Equal(CodingToolAction.ShowAutonomousFeatureOrchestrator, featureOrchestratorRequest.Action);
+    Equal("Save button", featureOrchestratorRequest.Query);
+    Equal(true, CodingToolRequestParser.TryParse("implementation evidence pack Save button", out var evidencePackRequest));
+    Equal(CodingToolAction.ShowImplementationEvidencePack, evidencePackRequest.Action);
+    Equal("Save button", evidencePackRequest.Query);
     Equal(true, CodingToolRequestParser.TryParse("feature builder Save button", out var featureBuilderRequest));
     Equal(CodingToolAction.ShowPlainEnglishFeatureBuilder, featureBuilderRequest.Action);
     Equal("Save button", featureBuilderRequest.Query);
@@ -3581,7 +3601,8 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Guarded patterns:", generatedGuard.Message);
     Contains("Mini-Codex readiness report v2", reportCard.Message);
     Contains("Report card:", reportCard.Message);
-    Contains("Endzone estimate: 86-88%", reportCard.Message);
+    Contains("Endzone estimate: 88-90%", reportCard.Message);
+    Contains("Autonomy layer: feature intake", reportCard.Message);
 }
 
 static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
@@ -3648,6 +3669,10 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
         new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)));
 
     var workflow = await service.TryHandleAsync("guided feature workflow Save button", CancellationToken.None);
+    var planner = await service.TryHandleAsync("feature implementation planner Save button", CancellationToken.None);
+    var intake = await service.TryHandleAsync("feature intake Save button", CancellationToken.None);
+    var orchestrator = await service.TryHandleAsync("autonomous feature orchestrator Save button", CancellationToken.None);
+    var evidence = await service.TryHandleAsync("implementation evidence pack Save button", CancellationToken.None);
 
     Equal(true, workflow.Handled);
     Equal(true, workflow.Succeeded);
@@ -3661,6 +3686,39 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Contains("Ask/stop rules:", workflow.Message);
     Contains("Next command: preview behavior test patch Save button", workflow.Message);
     Equal(false, (await File.ReadAllTextAsync(testPath)).Contains("NotImplementedException", StringComparison.Ordinal));
+
+    Equal(true, planner.Handled);
+    Equal(true, planner.Succeeded);
+    Contains("Feature implementation planner v1", planner.Message);
+    Contains("Implementation order:", planner.Message);
+    Contains("Files by role:", planner.Message);
+    Contains("Roslyn targeting:", planner.Message);
+    Contains("Validation matrix:", planner.Message);
+    Contains("Rollback and stop plan:", planner.Message);
+
+    Equal(true, intake.Handled);
+    Equal(true, intake.Succeeded);
+    Contains("Feature intake normalizer v1", intake.Message);
+    Contains("Normalized brief:", intake.Message);
+    Contains("Ambiguity check:", intake.Message);
+    Contains("Acceptance checks:", intake.Message);
+    Contains("Starting route:", intake.Message);
+
+    Equal(true, orchestrator.Handled);
+    Equal(true, orchestrator.Succeeded);
+    Contains("Autonomous feature orchestrator v1", orchestrator.Message);
+    Contains("Readiness score:", orchestrator.Message);
+    Contains("12-cycle board:", orchestrator.Message);
+    Contains("Stop rules:", orchestrator.Message);
+    Contains("Next command:", orchestrator.Message);
+
+    Equal(true, evidence.Handled);
+    Equal(true, evidence.Succeeded);
+    Contains("Implementation evidence pack v1", evidence.Message);
+    Contains("Evidence status:", evidence.Message);
+    Contains("Proof checklist:", evidence.Message);
+    Contains("Recent receipts:", evidence.Message);
+    Contains("Risk and rollback:", evidence.Message);
 }
 
 static Task TestProgrammingDashboardExposesCockpitCommands()
@@ -3686,7 +3744,17 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingGeneratedFileGuardCommand", dashboard);
     Contains("Build Feature", dashboard);
     Contains("Guided Build", dashboard);
+    Contains("Paired Preview", dashboard);
+    Contains("Impl Planner", dashboard);
+    Contains("Intake", dashboard);
+    Contains("Orchestrator", dashboard);
+    Contains("Evidence Pack", dashboard);
     Contains("RunCodingFeatureBuilderCommand", dashboard);
+    Contains("RunCodingGuidedBundlePreviewCommand", dashboard);
+    Contains("RunCodingImplementationPlannerCommand", dashboard);
+    Contains("RunCodingFeatureIntakeCommand", dashboard);
+    Contains("RunCodingFeatureOrchestratorCommand", dashboard);
+    Contains("RunCodingEvidencePackCommand", dashboard);
     Contains("RunCodingBuildFeatureLaneCommand", dashboard);
     Contains("RunCodingFeatureWorkContextCommand", dashboard);
     Contains("RunCodingFeatureIntentCommand", dashboard);
@@ -3713,6 +3781,11 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RunCodingGeneratedFileGuardCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureBuilderCommand = CreateAsyncCommand", viewModel);
     Contains("guided feature workflow current feature", viewModel);
+    Contains("RunCodingGuidedBundlePreviewCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingImplementationPlannerCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureIntakeCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingFeatureOrchestratorCommand = CreateAsyncCommand", viewModel);
+    Contains("RunCodingEvidencePackCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingBuildFeatureLaneCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureWorkContextCommand = CreateAsyncCommand", viewModel);
     Contains("RunCodingFeatureIntentCommand = CreateAsyncCommand", viewModel);
@@ -4076,6 +4149,7 @@ static async Task TestLocalCodingToolRunsValidationRepairRunner()
     Contains("Repair focus:", repair.Message);
     Contains("Likely fix candidates:", repair.Message);
     Contains("Repair steps:", repair.Message);
+    Contains("Repair routing v2:", repair.Message);
     Contains("Preview attempt:", repair.Message);
     Contains("Pending preview: PreviewReplaceText", repair.Message);
     Contains("Next command: confirm apply last patch preview", repair.Message);
@@ -4503,6 +4577,73 @@ static async Task TestLocalCodingToolPreviewsBehaviorTestPatch()
     var updated = await File.ReadAllTextAsync(testPath);
     Contains("SaveButtonBehaviorContract", updated);
     Contains("NotImplementedException", updated);
+}
+
+static async Task TestLocalCodingToolPreviewsGuidedFeatureBundle()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var sourcePath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(sourcePath, "class Demo { }");
+    var testProject = Path.Combine(workspace, "Demo.Tests");
+    Directory.CreateDirectory(testProject);
+    await File.WriteAllTextAsync(
+        Path.Combine(testProject, "Demo.Tests.csproj"),
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
+            <PackageReference Include="xunit" Version="2.8.1" />
+          </ItemGroup>
+        </Project>
+        """);
+    var testPath = Path.Combine(testProject, "WidgetTests.cs");
+    await File.WriteAllTextAsync(
+        testPath,
+        """
+        using Xunit;
+
+        namespace Demo.Tests;
+
+        public sealed class WidgetTests
+        {
+            [Fact]
+            public void ExistingTest()
+            {
+                Assert.True(true);
+            }
+        }
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+
+    var preview = await service.TryHandleAsync("preview guided feature bundle replace Demo with Widget", CancellationToken.None);
+
+    Equal(true, preview.Handled);
+    Equal(true, preview.Succeeded);
+    Contains("Guided feature bundle preview", preview.Message);
+    Contains("Behavior test edit: Ready", preview.Message);
+    Contains("Code edits: 1 preview-ready", preview.Message);
+    Contains("Bundle edits: 2", preview.Message);
+    Contains("Patch bundle preview", preview.Message);
+    Equal("class Demo { }", await File.ReadAllTextAsync(sourcePath));
+    Equal(false, (await File.ReadAllTextAsync(testPath)).Contains("NotImplementedException", StringComparison.Ordinal));
+
+    var applied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, applied.Handled);
+    Equal(true, applied.Succeeded);
+    Contains("Applied last patch preview bundle", applied.Message);
+    Equal("class Widget { }", await File.ReadAllTextAsync(sourcePath));
+    var updatedTest = await File.ReadAllTextAsync(testPath);
+    Contains("ReplaceDemoWithWidgetBehaviorContract", updatedTest);
+    Contains("NotImplementedException", updatedTest);
 }
 
 static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()
