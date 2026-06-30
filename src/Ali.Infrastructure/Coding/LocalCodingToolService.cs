@@ -15084,25 +15084,59 @@ public sealed class LocalCodingToolService(
                     </ResourceDictionary>
                 </UserControl.Resources>
 
-                <Border Style="{StaticResource DashboardDetailCardStyle}">
-                    <StackPanel>
-                        <TextBlock Text="Selected item" FontWeight="SemiBold" Margin="0,0,0,8" />
-                        <TextBlock Text="{Binding Item.Name, ElementName=Root, TargetNullValue=No item selected}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <TextBlock Margin="0,8,0,0">
-                            <Run Text="Owner: " />
-                            <Run Text="{Binding Item.Owner, ElementName=Root, TargetNullValue=none}" />
-                        </TextBlock>
-                        <TextBlock Margin="0,4,0,0">
-                            <Run Text="Status: " />
-                            <Run Text="{Binding Item.Status, ElementName=Root, TargetNullValue=none}" />
-                        </TextBlock>
-                        <Button Content="Mark Ready"
-                                Style="{StaticResource DashboardSecondaryButtonStyle}"
-                                Click="PromoteButton_Click"
-                                HorizontalAlignment="Left"
-                                Margin="0,10,0,0" />
-                    </StackPanel>
-                </Border>
+                <Grid x:Name="VisualStateRoot">
+                    <VisualStateManager.VisualStateGroups>
+                        <VisualStateGroup x:Name="StatusStates">
+                            <VisualState x:Name="DefaultState" />
+                            <VisualState x:Name="ReadyState">
+                                <Storyboard>
+                                    <ColorAnimation Storyboard.TargetName="StateAccentBorder"
+                                                    Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
+                                                    To="#17B26A"
+                                                    Duration="0:0:0.18" />
+                                </Storyboard>
+                            </VisualState>
+                            <VisualState x:Name="ReviewState">
+                                <Storyboard>
+                                    <ColorAnimation Storyboard.TargetName="StateAccentBorder"
+                                                    Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
+                                                    To="#F79009"
+                                                    Duration="0:0:0.18" />
+                                </Storyboard>
+                            </VisualState>
+                            <VisualState x:Name="DraftState">
+                                <Storyboard>
+                                    <ColorAnimation Storyboard.TargetName="StateAccentBorder"
+                                                    Storyboard.TargetProperty="(Border.BorderBrush).(SolidColorBrush.Color)"
+                                                    To="#6941C6"
+                                                    Duration="0:0:0.18" />
+                                </Storyboard>
+                            </VisualState>
+                        </VisualStateGroup>
+                    </VisualStateManager.VisualStateGroups>
+
+                    <Border x:Name="StateAccentBorder"
+                            Style="{StaticResource DashboardDetailCardStyle}"
+                            BorderBrush="#D0D7DE">
+                        <StackPanel>
+                            <TextBlock Text="Selected item" FontWeight="SemiBold" Margin="0,0,0,8" />
+                            <TextBlock Text="{Binding Item.Name, ElementName=Root, TargetNullValue=No item selected}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,8,0,0">
+                                <Run Text="Owner: " />
+                                <Run Text="{Binding Item.Owner, ElementName=Root, TargetNullValue=none}" />
+                            </TextBlock>
+                            <TextBlock Margin="0,4,0,0">
+                                <Run Text="Status: " />
+                                <Run Text="{Binding Item.Status, ElementName=Root, TargetNullValue=none}" />
+                            </TextBlock>
+                            <Button Content="Mark Ready"
+                                    Style="{StaticResource DashboardSecondaryButtonStyle}"
+                                    Click="PromoteButton_Click"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,10,0,0" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </UserControl>
             """;
     }
@@ -15114,6 +15148,7 @@ public sealed class LocalCodingToolService(
             : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
         return
             $$"""
+            using System;
             using System.Windows;
             using System.Windows.Controls;
 
@@ -15124,7 +15159,7 @@ public sealed class LocalCodingToolService(
                         nameof(Item),
                         typeof(MainWindowViewModel.DashboardItem),
                         typeof(DashboardDetailCard),
-                        new PropertyMetadata(null));
+                        new PropertyMetadata(null, OnItemChanged));
 
                 public static readonly RoutedEvent PromoteRequestedEvent =
                     EventManager.RegisterRoutedEvent(
@@ -15136,6 +15171,7 @@ public sealed class LocalCodingToolService(
                 public DashboardDetailCard()
                 {
                     InitializeComponent();
+                    Loaded += DashboardDetailCard_Loaded;
                 }
 
                 public event RoutedEventHandler PromoteRequested
@@ -15153,6 +15189,30 @@ public sealed class LocalCodingToolService(
                 private void PromoteButton_Click(object sender, RoutedEventArgs e)
                 {
                     RaiseEvent(new RoutedEventArgs(PromoteRequestedEvent, this));
+                }
+
+                private static void OnItemChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
+                {
+                    if (dependencyObject is DashboardDetailCard card)
+                    {
+                        card.UpdateVisualState(true);
+                    }
+                }
+
+                private void DashboardDetailCard_Loaded(object sender, RoutedEventArgs e) =>
+                    UpdateVisualState(false);
+
+                private void UpdateVisualState(bool useTransitions)
+                {
+                    var status = Item?.Status ?? string.Empty;
+                    var state = status.Equals("Ready", StringComparison.OrdinalIgnoreCase)
+                        ? "ReadyState"
+                        : status.Equals("Review", StringComparison.OrdinalIgnoreCase)
+                            ? "ReviewState"
+                            : status.Equals("Draft", StringComparison.OrdinalIgnoreCase)
+                                ? "DraftState"
+                                : "DefaultState";
+                    VisualStateManager.GoToElementState(VisualStateRoot, state, useTransitions);
                 }
             }
             """;
