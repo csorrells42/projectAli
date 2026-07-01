@@ -16983,6 +16983,62 @@ public sealed partial class LocalCodingToolService(
             .ToList();
     }
 
+    private static IReadOnlyList<string> ExtractXamlTemplateSelectorReferences(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"\b(?:ContentTemplateSelector|ItemTemplateSelector|CellTemplateSelector)\s*=\s*[""']\{(?:StaticResource|DynamicResource)\s+(?<key>[^,\}\s]+)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["key"].Value.Trim())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractXamlConverterResourceReferences(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"\bConverter\s*=\s*[""']\{(?:StaticResource|DynamicResource)\s+(?<key>[^,\}\s]+)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["key"].Value.Trim())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractXamlAttachedMemberOwners(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"\b(?<owner>(?:[A-Za-z_][\w\.-]*:)?[A-Za-z_]\w*)\.[A-Za-z_]\w+\s*=", RegexOptions.CultureInvariant)
+            .Select(match => StripXamlPrefix(match.Groups["owner"].Value.Trim()))
+            .Where(owner => !string.IsNullOrWhiteSpace(owner))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractXamlElementNames(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"<\s*(?!/|!|\?)(?:[A-Za-z_][\w\.-]*:)?(?<name>[A-Za-z_][\w\.-]*)\b", RegexOptions.CultureInvariant)
+            .Select(match => StripXamlPrefix(match.Groups["name"].Value.Trim()))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static IReadOnlyList<string> ExtractResourceDictionarySources(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -17053,6 +17109,7 @@ public sealed partial class LocalCodingToolService(
             "Content",
             "Command",
             "CommandParameter",
+            "Modifiers",
             "DataContext",
             "Width",
             "Height",
@@ -17072,7 +17129,10 @@ public sealed partial class LocalCodingToolService(
         };
         return Regex.Matches(text, @"\b(?<attribute>(?:[A-Za-z_][\w\.-]*:)?[A-Za-z_][\w\.-]*)\s*=\s*[""'](?<value>[A-Za-z_]\w*)[""']", RegexOptions.CultureInvariant)
             .Select(match => (Attribute: StripXamlPrefix(match.Groups["attribute"].Value), Value: match.Groups["value"].Value))
+            .Where(match => !match.Attribute.Contains('.', StringComparison.Ordinal))
             .Where(match => !ignoredAttributes.Contains(match.Attribute))
+            .Where(match => !string.Equals(match.Value, "True", StringComparison.OrdinalIgnoreCase))
+            .Where(match => !string.Equals(match.Value, "False", StringComparison.OrdinalIgnoreCase))
             .Where(match => !match.Value.StartsWith("StaticResource", StringComparison.OrdinalIgnoreCase))
             .Where(match => !match.Value.StartsWith("DynamicResource", StringComparison.OrdinalIgnoreCase))
             .Select(match => match.Value)
@@ -20509,6 +20569,7 @@ public sealed partial class LocalCodingToolService(
         var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, csharpSymbols).Take(8).ToList();
         var readinessRows = BuildWpfComplexWindowReadinessRows(xamlFiles, csharpFiles);
         var constructionRows = BuildWpfDynamicConstructionRouteRows(goal, xamlFiles, csharpFiles);
+        var dependencyRows = BuildWpfAdvancedDependencyRows(xamlFiles, csharpFiles, csharpSymbols);
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
             .Take(8)
@@ -20543,6 +20604,8 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(readinessRows.Select(row => $"  - {row}"));
         lines.Add("WPF dynamic construction route:");
         lines.AddRange(constructionRows.Select(row => $"  - {row}"));
+        lines.Add("WPF advanced dependency context:");
+        lines.AddRange(dependencyRows.Select(row => $"  - {row}"));
 
         lines.Add(viewModelRows.Count == 0
             ? "- View-model/state files: Review - none detected in current scope."
@@ -20628,6 +20691,119 @@ public sealed partial class LocalCodingToolService(
         var resources = FormatInlineList(ExtractXamlResourceKeys(text).Take(6));
         return $"{RelativeToWorkspace(file)} root {root}; objects {objects}; bindings {bindings}; commands {commands}; resources {resources}";
     }
+
+    private IReadOnlyList<string> BuildWpfAdvancedDependencyRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles,
+        IReadOnlyList<CSharpSymbolInfo> csharpSymbols)
+    {
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        var symbolNames = csharpSymbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var templateCounts = CountKnownXamlObjects(
+            xamlFiles,
+            ["DataTemplate", "HierarchicalDataTemplate", "ControlTemplate", "ItemsPanelTemplate", "DataTemplateSelector"]);
+        var selectorRefs = xamlFiles
+            .SelectMany(file => ExtractXamlTemplateSelectorReferences(SafeReadText(file)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var selectorSymbols = csharpSymbols
+            .Where(symbol => symbol.Name.Contains("TemplateSelector", StringComparison.OrdinalIgnoreCase))
+            .Select(symbol => symbol.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var converterRefs = xamlFiles
+            .SelectMany(file => ExtractXamlConverterResourceReferences(SafeReadText(file)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var converterSymbols = csharpSymbols
+            .Where(symbol => symbol.Name.Contains("Converter", StringComparison.OrdinalIgnoreCase))
+            .Select(symbol => symbol.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var behaviorRefs = xamlFiles
+            .SelectMany(file => ExtractXamlAttachedMemberOwners(SafeReadText(file)))
+            .Where(owner => owner.Contains("Behavior", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var behaviorSymbols = csharpSymbols
+            .Where(symbol => symbol.Name.Contains("Behavior", StringComparison.OrdinalIgnoreCase))
+            .Select(symbol => symbol.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var bindingProxyRefs = ExtractXamlResourceReferences(allXamlText)
+            .Concat(ExtractXamlElementNames(allXamlText))
+            .Where(name => name.Contains("BindingProxy", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var bindingProxySymbols = csharpSymbols
+            .Where(symbol => symbol.Name.Contains("BindingProxy", StringComparison.OrdinalIgnoreCase))
+            .Select(symbol => symbol.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var shellCommands = CountKnownXamlObjects(xamlFiles, ["KeyBinding", "CommandBinding", "InputBinding", "MouseBinding"]);
+        var routedCommandSymbols = csharpSymbols
+            .Where(symbol => symbol.Name.EndsWith("Command", StringComparison.OrdinalIgnoreCase))
+            .Where(symbol => allCSharpText.Contains("RoutedCommand", StringComparison.Ordinal)
+                || allCSharpText.Contains("RoutedUICommand", StringComparison.Ordinal)
+                || allXamlText.Contains("InputBindings", StringComparison.Ordinal)
+                || allXamlText.Contains("CommandBindings", StringComparison.Ordinal))
+            .Select(symbol => symbol.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var hasVirtualization = MentionsAny(
+            allXamlText,
+            "VirtualizingPanel.IsVirtualizing",
+            "VirtualizingPanel.VirtualizationMode",
+            "ScrollViewer.CanContentScroll",
+            "ScrollViewer.IsDeferredScrollingEnabled");
+
+        return
+        [
+            BuildWpfDependencyRow(
+                "Templates/selectors",
+                templateCounts.Count > 0 || selectorRefs.Count > 0 || selectorSymbols.Count > 0,
+                $"templates {FormatInlineList(templateCounts)}; selector refs {FormatInlineList(selectorRefs)}; selector symbols {FormatInlineList(selectorSymbols)}",
+                "add DataTemplate/HierarchicalDataTemplate/ControlTemplate resources and DataTemplateSelector classes only where visual polymorphism is needed"),
+            BuildWpfDependencyRow(
+                "Converters",
+                converterRefs.Count == 0 || converterRefs.Any(name => symbolNames.Contains(name)) || converterSymbols.Count > 0,
+                $"converter refs {FormatInlineList(converterRefs)}; converter symbols {FormatInlineList(converterSymbols)}",
+                "define referenced IValueConverter/IMultiValueConverter classes and resource keys before using Converter={StaticResource ...}"),
+            BuildWpfDependencyRow(
+                "Behaviors/attached properties",
+                behaviorRefs.Count == 0 || behaviorRefs.Any(name => symbolNames.Contains(name)) || behaviorSymbols.Count > 0,
+                $"behavior refs {FormatInlineList(behaviorRefs)}; behavior symbols {FormatInlineList(behaviorSymbols)}",
+                "define attached-property behavior classes before using local:Behavior.Property in XAML"),
+            BuildWpfDependencyRow(
+                "Binding proxies",
+                bindingProxyRefs.Count == 0 || bindingProxyRefs.Any(name => symbolNames.Contains(name)) || bindingProxySymbols.Count > 0,
+                $"proxy refs {FormatInlineList(bindingProxyRefs)}; proxy symbols {FormatInlineList(bindingProxySymbols)}",
+                "add a Freezable BindingProxy resource when templates, menus, or context menus need outer DataContext access"),
+            BuildWpfDependencyRow(
+                "Shell commands/input",
+                shellCommands.Count > 0 || routedCommandSymbols.Count > 0,
+                $"input/command binding objects {FormatInlineList(shellCommands)}; routed command symbols {FormatInlineList(routedCommandSymbols)}",
+                "add Window.InputBindings/CommandBindings only for shell-level keyboard actions; keep feature commands on the view model"),
+            BuildWpfDependencyRow(
+                "Virtualization/performance",
+                hasVirtualization,
+                "virtualization or deferred scrolling flags are present",
+                "add VirtualizingPanel and deferred scrolling settings for large DataGrid/ListView/TreeView surfaces")
+        ];
+    }
+
+    private static string BuildWpfDependencyRow(string name, bool good, string detail, string nextStep)
+        => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
 
     private IReadOnlyList<string> BuildWpfDynamicConstructionRouteRows(
         string goal,

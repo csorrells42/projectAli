@@ -4346,13 +4346,23 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
         <Window x:Class="Demo.App.MainWindow"
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:local="clr-namespace:Demo.App"
                 Title="{Binding Title}">
             <Window.Resources>
                 <ResourceDictionary>
                     <Style x:Key="PrimaryButtonStyle" TargetType="Button" />
                     <DataTemplate x:Key="ProjectRowTemplate" />
+                    <local:SelectedProjectNameConverter x:Key="SelectedProjectNameConverter" />
+                    <local:ProjectRowTemplateSelector x:Key="ProjectRowTemplateSelector" />
+                    <local:ProjectBindingProxy x:Key="ProjectBindingProxy" Data="{Binding}" />
                 </ResourceDictionary>
             </Window.Resources>
+            <Window.InputBindings>
+                <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+            </Window.InputBindings>
+            <Window.CommandBindings>
+                <CommandBinding Command="ApplicationCommands.Save" Executed="SaveExecuted" CanExecute="SaveCanExecute" />
+            </Window.CommandBindings>
             <DockPanel>
                 <Menu DockPanel.Dock="Top" />
                 <StatusBar DockPanel.Dock="Bottom" />
@@ -4366,10 +4376,19 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                     <GridSplitter Grid.Column="1" Width="5" />
                     <TabControl Grid.Column="2">
                         <TabItem Header="Projects">
-                            <DataGrid ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject}" />
+                            <DataGrid ItemsSource="{Binding Projects}"
+                                      SelectedItem="{Binding SelectedProject}"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      ScrollViewer.CanContentScroll="True" />
                         </TabItem>
                         <TabItem Header="Details">
-                            <ContentControl Content="{Binding SelectedProject}" ContentTemplate="{StaticResource ProjectRowTemplate}" />
+                            <StackPanel>
+                                <ContentControl Content="{Binding SelectedProject}" ContentTemplate="{StaticResource ProjectRowTemplate}" />
+                                <TextBlock Text="{Binding SelectedProject, Converter={StaticResource SelectedProjectNameConverter}}"
+                                           local:ProjectFocusBehavior.FocusOnLoaded="True" />
+                                <ContentControl Content="{Binding Source={StaticResource ProjectBindingProxy}, Path=Data.SelectedProject}"
+                                                ContentTemplateSelector="{StaticResource ProjectRowTemplateSelector}" />
+                            </StackPanel>
                         </TabItem>
                     </TabControl>
                     <Button Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" />
@@ -4380,6 +4399,8 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "MainWindow.xaml.cs"),
         """
+        using System.Windows.Input;
+
         namespace Demo.App;
 
         public partial class MainWindow
@@ -4387,6 +4408,15 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
             public MainWindow()
             {
                 InitializeComponent();
+            }
+
+            private void SaveExecuted(object sender, ExecutedRoutedEventArgs e)
+            {
+            }
+
+            private void SaveCanExecute(object sender, CanExecuteRoutedEventArgs e)
+            {
+                e.CanExecute = true;
             }
         }
         """);
@@ -4473,12 +4503,69 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "ProjectRowTemplateSelector.cs"),
         """
+        using System;
+        using System.Globalization;
+        using System.Windows;
         using System.Windows.Controls;
+        using System.Windows.Data;
 
         namespace Demo.App;
 
         public sealed class ProjectRowTemplateSelector : DataTemplateSelector
         {
+        }
+
+        public sealed class SelectedProjectNameConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return value?.ToString() ?? "No project selected";
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return Binding.DoNothing;
+            }
+        }
+
+        public static class ProjectFocusBehavior
+        {
+            public static readonly DependencyProperty FocusOnLoadedProperty =
+                DependencyProperty.RegisterAttached(
+                    "FocusOnLoaded",
+                    typeof(bool),
+                    typeof(ProjectFocusBehavior),
+                    new PropertyMetadata(false));
+
+            public static bool GetFocusOnLoaded(DependencyObject element)
+            {
+                return (bool)element.GetValue(FocusOnLoadedProperty);
+            }
+
+            public static void SetFocusOnLoaded(DependencyObject element, bool value)
+            {
+                element.SetValue(FocusOnLoadedProperty, value);
+            }
+        }
+
+        public sealed class ProjectBindingProxy : Freezable
+        {
+            public static readonly DependencyProperty DataProperty =
+                DependencyProperty.Register(
+                    nameof(Data),
+                    typeof(object),
+                    typeof(ProjectBindingProxy));
+
+            public object? Data
+            {
+                get => GetValue(DataProperty);
+                set => SetValue(DataProperty, value);
+            }
+
+            protected override Freezable CreateInstanceCore()
+            {
+                return new ProjectBindingProxy();
+            }
         }
         """);
     var service = new LocalCodingToolService(
@@ -4531,7 +4618,7 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Resources/templates: Good - resources, styles, or templates present.", context.Text);
     Contains("MVVM commands/state: Good - INotifyPropertyChanged and commands present.", context.Text);
     Contains("Input validation: Good - validation surface present.", context.Text);
-    Contains("Async/performance: Review - add async/cancel state and virtualization for slow or large views.", context.Text);
+    Contains("Async/performance: Good - async/performance signals present.", context.Text);
     Contains("WPF dynamic construction route:", context.Text);
     Contains("Goal shape: dashboard/workspace.", context.Text);
     Contains("Shell target: extend existing Window shell", context.Text);
@@ -4540,6 +4627,19 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Data surface: choose DataGrid/ListView/TreeView from row/list/hierarchy needs", context.Text);
     Contains("Resources/templates: extend existing ResourceDictionary/Style/DataTemplate keys", context.Text);
     Contains("Validation/async: add INotifyDataErrorInfo", context.Text);
+    Contains("WPF advanced dependency context:", context.Text);
+    Contains("Templates/selectors: Good", context.Text);
+    Contains("ProjectRowTemplateSelector", context.Text);
+    Contains("Converters: Good", context.Text);
+    Contains("SelectedProjectNameConverter", context.Text);
+    Contains("Behaviors/attached properties: Good", context.Text);
+    Contains("ProjectFocusBehavior", context.Text);
+    Contains("Binding proxies: Good", context.Text);
+    Contains("ProjectBindingProxy", context.Text);
+    Contains("Shell commands/input: Good", context.Text);
+    Contains("CommandBinding x1", context.Text);
+    Contains("KeyBinding x1", context.Text);
+    Contains("Virtualization/performance: Good - virtualization or deferred scrolling flags are present.", context.Text);
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
@@ -7324,6 +7424,7 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
     Contains("WPF relationship map:", prompt);
     Contains("WPF integrity context:", prompt);
     Contains("WPF dynamic construction route:", prompt);
+    Contains("WPF advanced dependency context:", prompt);
     Contains("MainWindow.xaml x:Class Demo.App.MissingWindow missing C# symbol", prompt);
     Contains("resource reference MissingButtonStyle was not found", prompt);
     Contains("event handler MissingClickHandler was not found", prompt);
