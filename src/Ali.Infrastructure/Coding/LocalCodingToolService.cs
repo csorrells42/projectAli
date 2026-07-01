@@ -14509,6 +14509,8 @@ public sealed class LocalCodingToolService(
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="5" />
+                        <RowDefinition Height="{Binding Data.OutputPanelHeight, Source={StaticResource DashboardCommandsProxy}, Mode=TwoWay}" MinHeight="120" />
                     </Grid.RowDefinitions>
 
                     <Border Style="{StaticResource DashboardHeaderCardStyle}">
@@ -14527,11 +14529,11 @@ public sealed class LocalCodingToolService(
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="{Binding NavigationColumnWidth, Mode=TwoWay}" MinWidth="160" />
+                            <ColumnDefinition Width="{Binding Data.NavigationColumnWidth, Source={StaticResource DashboardCommandsProxy}, Mode=TwoWay}" MinWidth="160" />
                             <ColumnDefinition Width="5" />
                             <ColumnDefinition Width="*" MinWidth="320" />
                             <ColumnDefinition Width="5" />
-                            <ColumnDefinition Width="{Binding DetailsColumnWidth, Mode=TwoWay}" MinWidth="220" />
+                            <ColumnDefinition Width="{Binding Data.DetailsColumnWidth, Source={StaticResource DashboardCommandsProxy}, Mode=TwoWay}" MinWidth="220" />
                         </Grid.ColumnDefinitions>
 
                         <GroupBox Header="Navigation" Style="{StaticResource DashboardPaneGroupBoxStyle}">
@@ -14686,6 +14688,44 @@ public sealed class LocalCodingToolService(
                             </StackPanel>
                         </Border>
                     </Grid>
+
+                    <GridSplitter Grid.Row="2"
+                                  Height="5"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Center"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ResizeDirection="Rows" />
+
+                    <GroupBox x:Name="OutputPaneGroupBox"
+                              Grid.Row="3"
+                              Header="Output"
+                              Style="{StaticResource DashboardPaneGroupBoxStyle}"
+                              Margin="0,10,0,0">
+                        <TabControl SelectedIndex="{Binding SelectedOutputPanelIndex, Mode=TwoWay}">
+                            <TabItem Header="Activity">
+                                <ListBox ItemsSource="{Binding Activity}"
+                                         VirtualizingPanel.IsVirtualizing="True"
+                                         VirtualizingPanel.VirtualizationMode="Recycling"
+                                         ScrollViewer.CanContentScroll="True" />
+                            </TabItem>
+                            <TabItem Header="Problems">
+                                <DataGrid ItemsSource="{Binding Problems}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False"
+                                          EnableRowVirtualization="True"
+                                          VirtualizingPanel.IsVirtualizing="True"
+                                          VirtualizingPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="Auto" />
+                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" />
+                                        <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="2*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </TabItem>
+                        </TabControl>
+                    </GroupBox>
                 </Grid>
             </DockPanel>
         </Window>
@@ -15691,6 +15731,8 @@ public sealed class LocalCodingToolService(
                 private string _themeButtonText = "Light Theme";
                 private GridLength _navigationColumnWidth = new(220d);
                 private GridLength _detailsColumnWidth = new(280d);
+                private GridLength _outputPanelHeight = new(160d);
+                private int _selectedOutputPanelIndex;
 
                 public MainWindowViewModel(
                     IDashboardDialogService? dialogService = null,
@@ -15736,6 +15778,8 @@ public sealed class LocalCodingToolService(
                 public ICollectionView ItemsView { get; }
 
                 public ObservableCollection<string> Activity { get; } = new();
+
+                public ObservableCollection<DashboardProblem> Problems { get; } = new();
 
                 public ObservableCollection<DashboardNavigationItem> NavigationItems { get; } = new();
 
@@ -15940,6 +15984,18 @@ public sealed class LocalCodingToolService(
                     set => SetField(ref _detailsColumnWidth, value);
                 }
 
+                public GridLength OutputPanelHeight
+                {
+                    get => _outputPanelHeight;
+                    set => SetField(ref _outputPanelHeight, value);
+                }
+
+                public int SelectedOutputPanelIndex
+                {
+                    get => _selectedOutputPanelIndex;
+                    set => SetField(ref _selectedOutputPanelIndex, value);
+                }
+
                 private void SeedNavigation()
                 {
                     NavigationItems.Clear();
@@ -16026,6 +16082,9 @@ public sealed class LocalCodingToolService(
                     Activity.Clear();
                     Activity.Add("Dashboard loaded.");
                     Activity.Add("Three sample work items are ready for review.");
+                    Problems.Clear();
+                    Problems.Add(new DashboardProblem("Info", "Dashboard", "No blocking problems detected."));
+                    Problems.Add(new DashboardProblem("Review", "Validation queue", "One item still needs review before release."));
                     SelectedItem = FirstVisibleItem();
                     UpdateMetrics();
                     StatusText = "Ready - 3 items loaded";
@@ -16107,6 +16166,8 @@ public sealed class LocalCodingToolService(
                     var state = _layoutStateService.Load();
                     NavigationColumnWidth = new GridLength(Math.Max(160d, state.NavigationColumnWidth));
                     DetailsColumnWidth = new GridLength(Math.Max(220d, state.DetailsColumnWidth));
+                    OutputPanelHeight = new GridLength(Math.Max(120d, state.OutputPanelHeight));
+                    SelectedOutputPanelIndex = Math.Clamp(state.SelectedOutputPanelIndex, 0, 1);
                     Activity.Insert(0, "Layout restored.");
                     StatusText = "Layout restored";
                     return state;
@@ -16117,6 +16178,8 @@ public sealed class LocalCodingToolService(
                     var state = new DashboardLayoutState(
                         Math.Max(160d, NavigationColumnWidth.Value),
                         Math.Max(220d, DetailsColumnWidth.Value),
+                        Math.Max(120d, OutputPanelHeight.Value),
+                        Math.Clamp(SelectedOutputPanelIndex, 0, 1),
                         windowLeft,
                         windowTop,
                         Math.Max(760d, windowWidth),
@@ -16489,6 +16552,8 @@ public sealed class LocalCodingToolService(
                 public sealed record DashboardItem(string Name, string Owner, string Status);
 
                 public sealed record DashboardMetric(string Label, string Value, string Detail);
+
+                public sealed record DashboardProblem(string Severity, string Source, string Message);
 
                 public sealed class DashboardNavigationItem : INotifyPropertyChanged
                 {
@@ -16957,12 +17022,14 @@ public sealed class LocalCodingToolService(
             public sealed record DashboardLayoutState(
                 double NavigationColumnWidth,
                 double DetailsColumnWidth,
+                double OutputPanelHeight,
+                int SelectedOutputPanelIndex,
                 double WindowLeft,
                 double WindowTop,
                 double WindowWidth,
                 double WindowHeight)
             {
-                public static DashboardLayoutState Default { get; } = new(220d, 280d, double.NaN, double.NaN, 980d, 620d);
+                public static DashboardLayoutState Default { get; } = new(220d, 280d, 160d, 0, double.NaN, double.NaN, 980d, 620d);
 
                 public bool HasWindowBounds =>
                     !double.IsNaN(WindowLeft)
