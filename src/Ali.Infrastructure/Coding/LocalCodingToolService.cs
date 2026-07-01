@@ -14837,6 +14837,10 @@ public sealed class LocalCodingToolService(
             : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
         return
             $$"""
+            using System;
+            using System.ComponentModel;
+            using System.IO;
+            using System.Text.Json;
             using System.Windows;
             using System.Windows.Input;
             using System.Windows.Media;
@@ -14852,7 +14856,41 @@ public sealed class LocalCodingToolService(
                 public MainWindow()
                 {
                     InitializeComponent();
-                    DataContext = new MainWindowViewModel(new DashboardDialogService(this), new DashboardThemeService(this));
+                    DataContext = new MainWindowViewModel(
+                        new DashboardDialogService(this),
+                        new DashboardThemeService(this),
+                        new DashboardLayoutStateService());
+                    Loaded += MainWindow_Loaded;
+                    Closing += MainWindow_Closing;
+                }
+
+                private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+                {
+                    if (DataContext is MainWindowViewModel viewModel)
+                    {
+                        ApplyWindowBounds(viewModel.RestoreLayout());
+                    }
+                }
+
+                private void MainWindow_Closing(object? sender, CancelEventArgs e)
+                {
+                    if (DataContext is MainWindowViewModel viewModel)
+                    {
+                        viewModel.SaveLayout(Left, Top, Width, Height);
+                    }
+                }
+
+                private void ApplyWindowBounds(DashboardLayoutState state)
+                {
+                    if (!state.HasWindowBounds)
+                    {
+                        return;
+                    }
+
+                    Left = state.WindowLeft;
+                    Top = state.WindowTop;
+                    Width = Math.Max(MinWidth, state.WindowWidth);
+                    Height = Math.Max(MinHeight, state.WindowHeight);
                 }
 
                 private void FocusDetailsCommand_CanExecute(object sender, CanExecuteRoutedEventArgs e)
@@ -14917,6 +14955,54 @@ public sealed class LocalCodingToolService(
                     _owner.Resources["DashboardSubtleForegroundBrush"] = new SolidColorBrush(palette.SubtleForeground);
                     _owner.Resources["DashboardAccentBrush"] = new SolidColorBrush(palette.Accent);
                     _owner.Resources["DashboardAccentHoverBrush"] = new SolidColorBrush(palette.AccentHover);
+                }
+            }
+
+            public sealed class DashboardLayoutStateService : IDashboardLayoutStateService
+            {
+                private static string LayoutPath => Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "GeneratedWpfDashboard",
+                    "dashboard-layout.json");
+
+                public DashboardLayoutState Load()
+                {
+                    try
+                    {
+                        if (!File.Exists(LayoutPath))
+                        {
+                            return DashboardLayoutState.Default;
+                        }
+
+                        var json = File.ReadAllText(LayoutPath);
+                        return JsonSerializer.Deserialize<DashboardLayoutState>(json) ?? DashboardLayoutState.Default;
+                    }
+                    catch (IOException)
+                    {
+                        return DashboardLayoutState.Default;
+                    }
+                    catch (JsonException)
+                    {
+                        return DashboardLayoutState.Default;
+                    }
+                }
+
+                public void Save(DashboardLayoutState state)
+                {
+                    try
+                    {
+                        var directory = Path.GetDirectoryName(LayoutPath);
+                        if (!string.IsNullOrWhiteSpace(directory))
+                        {
+                            Directory.CreateDirectory(directory);
+                        }
+
+                        var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
+                        File.WriteAllText(LayoutPath, json);
+                    }
+                    catch (IOException)
+                    {
+                    }
                 }
             }
             """;
@@ -15582,6 +15668,7 @@ public sealed class LocalCodingToolService(
                 private readonly Dictionary<string, List<string>> _errors = new();
                 private readonly IDashboardDialogService _dialogService;
                 private readonly IDashboardThemeService _themeService;
+                private readonly IDashboardLayoutStateService _layoutStateService;
                 private readonly DispatcherTimer _searchRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
                 private string _newItemName = string.Empty;
                 private string _newItemError = string.Empty;
@@ -15605,10 +15692,14 @@ public sealed class LocalCodingToolService(
                 private GridLength _navigationColumnWidth = new(220d);
                 private GridLength _detailsColumnWidth = new(280d);
 
-                public MainWindowViewModel(IDashboardDialogService? dialogService = null, IDashboardThemeService? themeService = null)
+                public MainWindowViewModel(
+                    IDashboardDialogService? dialogService = null,
+                    IDashboardThemeService? themeService = null,
+                    IDashboardLayoutStateService? layoutStateService = null)
                 {
                     _dialogService = dialogService ?? new NullDashboardDialogService();
                     _themeService = themeService ?? new NullDashboardThemeService();
+                    _layoutStateService = layoutStateService ?? new NullDashboardLayoutStateService();
                     _searchRefreshTimer.Tick += SearchRefreshTimer_Tick;
                     ItemsView = CollectionViewSource.GetDefaultView(Items);
                     ItemsView.Filter = FilterItem;
@@ -16009,6 +16100,28 @@ public sealed class LocalCodingToolService(
                     DetailsColumnWidth = new GridLength(280d);
                     Activity.Insert(0, "Layout reset.");
                     StatusText = "Layout reset";
+                }
+
+                public DashboardLayoutState RestoreLayout()
+                {
+                    var state = _layoutStateService.Load();
+                    NavigationColumnWidth = new GridLength(Math.Max(160d, state.NavigationColumnWidth));
+                    DetailsColumnWidth = new GridLength(Math.Max(220d, state.DetailsColumnWidth));
+                    Activity.Insert(0, "Layout restored.");
+                    StatusText = "Layout restored";
+                    return state;
+                }
+
+                public void SaveLayout(double windowLeft, double windowTop, double windowWidth, double windowHeight)
+                {
+                    var state = new DashboardLayoutState(
+                        Math.Max(160d, NavigationColumnWidth.Value),
+                        Math.Max(220d, DetailsColumnWidth.Value),
+                        windowLeft,
+                        windowTop,
+                        Math.Max(760d, windowWidth),
+                        Math.Max(520d, windowHeight));
+                    _layoutStateService.Save(state);
                 }
 
                 public IEnumerable GetErrors(string? propertyName)
@@ -16832,6 +16945,39 @@ public sealed class LocalCodingToolService(
             public sealed class NullDashboardDialogService : IDashboardDialogService
             {
                 public bool Confirm(DashboardDialogRequest request) => true;
+            }
+
+            public interface IDashboardLayoutStateService
+            {
+                DashboardLayoutState Load();
+
+                void Save(DashboardLayoutState state);
+            }
+
+            public sealed record DashboardLayoutState(
+                double NavigationColumnWidth,
+                double DetailsColumnWidth,
+                double WindowLeft,
+                double WindowTop,
+                double WindowWidth,
+                double WindowHeight)
+            {
+                public static DashboardLayoutState Default { get; } = new(220d, 280d, double.NaN, double.NaN, 980d, 620d);
+
+                public bool HasWindowBounds =>
+                    !double.IsNaN(WindowLeft)
+                    && !double.IsNaN(WindowTop)
+                    && WindowWidth > 0d
+                    && WindowHeight > 0d;
+            }
+
+            public sealed class NullDashboardLayoutStateService : IDashboardLayoutStateService
+            {
+                public DashboardLayoutState Load() => DashboardLayoutState.Default;
+
+                public void Save(DashboardLayoutState state)
+                {
+                }
             }
 
             public interface IDashboardThemeService
