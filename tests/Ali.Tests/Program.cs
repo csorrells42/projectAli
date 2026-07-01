@@ -4532,6 +4532,14 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("MVVM commands/state: Good - INotifyPropertyChanged and commands present.", context.Text);
     Contains("Input validation: Good - validation surface present.", context.Text);
     Contains("Async/performance: Review - add async/cancel state and virtualization for slow or large views.", context.Text);
+    Contains("WPF dynamic construction route:", context.Text);
+    Contains("Goal shape: dashboard/workspace.", context.Text);
+    Contains("Shell target: extend existing Window shell", context.Text);
+    Contains("Regions: use ContentControl/TabControl/TreeView/UserControl regions.", context.Text);
+    Contains("State model: extend existing view-model/state classes", context.Text);
+    Contains("Data surface: choose DataGrid/ListView/TreeView from row/list/hierarchy needs", context.Text);
+    Contains("Resources/templates: extend existing ResourceDictionary/Style/DataTemplate keys", context.Text);
+    Contains("Validation/async: add INotifyDataErrorInfo", context.Text);
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
@@ -7315,6 +7323,7 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
     var prompt = runtime.LastRequest.History[0].Text;
     Contains("WPF relationship map:", prompt);
     Contains("WPF integrity context:", prompt);
+    Contains("WPF dynamic construction route:", prompt);
     Contains("MainWindow.xaml x:Class Demo.App.MissingWindow missing C# symbol", prompt);
     Contains("resource reference MissingButtonStyle was not found", prompt);
     Contains("event handler MissingClickHandler was not found", prompt);
@@ -9753,6 +9762,8 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("wpf complex window guide <goal>", instruction);
     Contains("WPF layout/object checklist", instruction);
     Contains("Advanced WPF object/layout decision map", instruction);
+    Contains("Dynamic WPF construction route", instruction);
+    Contains("Select the shell and region pattern", instruction);
     Contains("CollectionViewSource", instruction);
     Contains("DataTemplateSelector", instruction);
     Contains("Freezable BindingProxy", instruction);
@@ -9811,6 +9822,9 @@ static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
     NotNull(runtime.LastRequest, "Planner instruction should be captured.");
     Contains("WPF/window/layout patch bundles may use up to 16 coordinated edits", runtime.LastRequest!.History[0].Text);
     Contains("Complex WPF patch contract:", runtime.LastRequest.History[0].Text);
+    Contains("Before authoring WPF edits, use the dynamic WPF construction route as a checklist", runtime.LastRequest.History[0].Text);
+    Contains("Dynamic WPF construction route:", runtime.LastRequest.History[0].Text);
+    Contains("Define view-model state before XAML bindings", runtime.LastRequest.History[0].Text);
     Contains("Keep x:Class, namespace, partial class, and .xaml.cs code-behind names aligned.", runtime.LastRequest.History[0].Text);
     Contains("ResourceDictionary Source paths, StaticResource/DynamicResource keys", runtime.LastRequest.History[0].Text);
     Contains("CollectionViewSource sorting/filtering/grouping and VirtualizingPanel settings", runtime.LastRequest.History[0].Text);

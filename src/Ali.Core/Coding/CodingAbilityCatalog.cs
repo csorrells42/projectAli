@@ -247,6 +247,18 @@ public static class CodingAbilityCatalog
             ])
     ];
 
+    public static IReadOnlyList<string> WpfComplexWindowConstructionRoute { get; } =
+    [
+        "Identify the requested window shape first: simple form, dashboard, data manager, wizard/dialog, inspector, or tool surface.",
+        "Select the shell and region pattern: Window shell, Grid/DockPanel frame, optional menu/tool/status rows, and ContentControl/TabControl/UserControl regions only where the workflow needs them.",
+        "Choose the data surface from the actual data shape: DataGrid for editable rows, ListView/ItemsControl for cards, TreeView for hierarchy, TabControl for bounded modes, and detail panes for selected-item work.",
+        "Define view-model state before XAML bindings: properties, ObservableCollection<T>/ICollectionView, selected item, ICommand/CanExecute, validation state, busy/progress text, and cancel state when work may be slow.",
+        "Place reusable visuals in ResourceDictionary styles/templates and keep keys, Source paths, converters, template selectors, and DataTemplates defined before any XAML references them.",
+        "Keep code-behind limited to WPF shell services, lifecycle events, focus/scroll behavior, dependency properties, or dialog bridges that cannot cleanly live in the view model.",
+        "For large or changing surfaces, add virtualization, deferred scrolling, filtering/search debounce, paging, or small observable updates before increasing visual complexity.",
+        "Validate in order: dotnet build, XAML binding check, command binding check, narrow UI smoke path, then repair errors before expanding scope."
+    ];
+
     public static IReadOnlyList<CodingAbilityGroup> BuilderGroups { get; } =
     [
         new(
@@ -679,6 +691,8 @@ public static class CodingAbilityCatalog
         var builder = new StringBuilder();
         builder.AppendLine("Advanced WPF object/layout decision map:");
         AppendKnowledgeSections(builder, WpfObjectLayoutKnowledge);
+        builder.AppendLine("Dynamic WPF construction route:");
+        AppendNumbered(builder, WpfComplexWindowConstructionRoute);
         return builder.ToString().TrimEnd();
     }
 

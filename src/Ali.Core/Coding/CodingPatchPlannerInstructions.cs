@@ -17,6 +17,7 @@ internal static class CodingPatchPlannerInstructions
             "For new apps, create or update every required source file in one coherent patch when the workspace and target project path are clear.",
             "For console apps, dynamically design Program.cs around the actual requested behavior with clear prompts, input validation, visible output, loops/menus/data structures when needed, and an optional Console.ReadKey only when the user asks the app to wait before closing.",
             "For WPF apps, dynamically decide Window/UserControl boundaries, XAML layout, view-model properties/commands, data structures, ResourceDictionary styles/templates, validation, virtualization, async UI state, and minimal code-behind services based on the requested app.",
+            "Before authoring WPF edits, use the dynamic WPF construction route as a checklist: classify the requested window shape, choose shell/regions, choose data surfaces, define view-model state, place reusable resources/templates, limit code-behind, add performance safeguards, then validate.",
             "Complex WPF patch contract:",
             "- Keep x:Class, namespace, partial class, and .xaml.cs code-behind names aligned.",
             "- Keep ResourceDictionary Source paths, StaticResource/DynamicResource keys, DataTemplates, styles, converters, and template selectors defined before use.",

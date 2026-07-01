@@ -20508,6 +20508,7 @@ public sealed partial class LocalCodingToolService(
         var relationshipRows = BuildWpfRelationshipContextRows(xamlFiles, csharpSymbols).Take(10).ToList();
         var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, csharpSymbols).Take(8).ToList();
         var readinessRows = BuildWpfComplexWindowReadinessRows(xamlFiles, csharpFiles);
+        var constructionRows = BuildWpfDynamicConstructionRouteRows(goal, xamlFiles, csharpFiles);
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
             .Take(8)
@@ -20540,6 +20541,8 @@ public sealed partial class LocalCodingToolService(
             : integrityRows.Select(row => $"  - {row}"));
         lines.Add("WPF complex-window readiness:");
         lines.AddRange(readinessRows.Select(row => $"  - {row}"));
+        lines.Add("WPF dynamic construction route:");
+        lines.AddRange(constructionRows.Select(row => $"  - {row}"));
 
         lines.Add(viewModelRows.Count == 0
             ? "- View-model/state files: Review - none detected in current scope."
@@ -20624,6 +20627,59 @@ public sealed partial class LocalCodingToolService(
         var commands = FormatInlineList(ExtractXamlBindingNames(text, commandOnly: true).Take(6));
         var resources = FormatInlineList(ExtractXamlResourceKeys(text).Take(6));
         return $"{RelativeToWorkspace(file)} root {root}; objects {objects}; bindings {bindings}; commands {commands}; resources {resources}";
+    }
+
+    private IReadOnlyList<string> BuildWpfDynamicConstructionRouteRows(
+        string goal,
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles)
+    {
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        var wantsDashboard = MentionsAny(goal, "dashboard", "cockpit", "workspace", "control center", "management", "manager");
+        var wantsData = wantsDashboard || MentionsAny(goal, "data", "grid", "table", "row", "record", "list", "items", "inventory", "projects");
+        var wantsNavigation = wantsDashboard || MentionsAny(goal, "navigation", "navigate", "tabs", "sections", "views", "pages", "tree");
+        var wantsDialog = MentionsAny(goal, "dialog", "modal", "confirm", "wizard", "popup");
+        var hasShell = HasAnyXamlObject(allXamlText, "Window");
+        var hasRegions = HasAnyXamlObject(allXamlText, "ContentControl", "TabControl", "TreeView", "Frame", "UserControl");
+        var hasViewModel = MentionsAny(allCSharpText, "ViewModel", "INotifyPropertyChanged", "ObservableCollection");
+        var hasResources = HasAnyXamlObject(allXamlText, "ResourceDictionary", "Style", "DataTemplate", "ControlTemplate")
+            || MentionsAny(allXamlText, "StaticResource", "DynamicResource");
+
+        var goalShape = wantsDashboard
+            ? "dashboard/workspace"
+            : wantsDialog
+                ? "dialog/wizard"
+                : wantsData
+                    ? "data manager"
+                    : "tool surface";
+        var shellTarget = hasShell
+            ? "extend existing Window shell"
+            : "create Window shell";
+        var regionPlan = wantsNavigation || hasRegions
+            ? "use ContentControl/TabControl/TreeView/UserControl regions"
+            : "start with one main region and split into UserControls when workflows diverge";
+        var statePlan = hasViewModel
+            ? "extend existing view-model/state classes"
+            : "create view model with INotifyPropertyChanged, commands, and selected-item state";
+        var dataPlan = wantsData
+            ? "choose DataGrid/ListView/TreeView from row/list/hierarchy needs and pair it with ObservableCollection/ICollectionView"
+            : "only add data controls if the requested workflow needs collections, selection, or hierarchy";
+        var resourcePlan = hasResources
+            ? "extend existing ResourceDictionary/Style/DataTemplate keys"
+            : "create ResourceDictionary styles/templates once visuals repeat";
+
+        return
+        [
+            $"Goal shape: {goalShape}.",
+            $"Shell target: {shellTarget} with Grid/DockPanel rows, columns, splitter needs, and one deliberate scroll boundary.",
+            $"Regions: {regionPlan}.",
+            $"State model: {statePlan}; bind properties and ICommand/CanExecute before adding extra XAML surface.",
+            $"Data surface: {dataPlan}.",
+            $"Resources/templates: {resourcePlan}; keep Source paths and resource keys defined before use.",
+            "Validation/async: add INotifyDataErrorInfo, visible error state, IsBusy, ProgressText, CancellationTokenSource, and cancel commands when the workflow edits input or performs slow work.",
+            "Performance/validation: add virtualization/deferred scrolling for large surfaces, then run dotnet build, XAML binding check, and command binding check before expanding the window."
+        ];
     }
 
     private IReadOnlyList<string> BuildWpfComplexWindowReadinessRows(
