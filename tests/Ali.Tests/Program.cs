@@ -133,6 +133,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows guided feature workflow", TestLocalCodingToolShowsGuidedFeatureWorkflow),
     ("local coding tool shows project control center", TestLocalCodingToolShowsProjectControlCenter),
     ("local coding tool adds WPF object map to context pack", TestLocalCodingToolAddsWpfObjectMapToContextPack),
+    ("local coding tool reports WPF integrity issues", TestLocalCodingToolReportsWpfIntegrityIssues),
     ("local coding tool manages current coding session", TestLocalCodingToolManagesCurrentCodingSession),
     ("programming dashboard exposes cockpit commands", TestProgrammingDashboardExposesCockpitCommands),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
@@ -3763,6 +3764,10 @@ static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
     Contains("Overall score:", readiness.Message);
     Contains("XAML binding check", binding.Message);
     Contains("Unknown bindings: 0", binding.Message);
+    Contains("x:Class declarations: 0", binding.Message);
+    Contains("Resource references: 0", binding.Message);
+    Contains("Event handlers: 0", binding.Message);
+    Contains("WPF integrity checks:", binding.Message);
     Contains("Command binding check", command.Message);
     Contains("Missing command targets: 0", command.Message);
     Contains("Command/UI binding graph:", command.Message);
@@ -4496,6 +4501,80 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Demo.App\\ProjectStyles.xaml", workContext.Message);
     Contains("Demo.App\\ProjectDetailsView.xaml", workContext.Message);
     Contains("Demo.App\\ProjectEditDialog.xaml", workContext.Message);
+}
+
+static async Task TestLocalCodingToolReportsWpfIntegrityIssues()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    var appProject = Path.Combine(appDirectory, "Demo.App.csproj");
+    await File.WriteAllTextAsync(
+        appProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindow.xaml"),
+        """
+        <Window x:Class="Demo.App.MissingWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="Demo">
+            <Window.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.MergedDictionaries>
+                        <ResourceDictionary Source="MissingStyles.xaml" />
+                    </ResourceDictionary.MergedDictionaries>
+                </ResourceDictionary>
+            </Window.Resources>
+            <Grid>
+                <Button Click="MissingClickHandler"
+                        Style="{StaticResource MissingButtonStyle}"
+                        Command="{Binding SaveCommand}" />
+            </Grid>
+        </Window>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindowViewModel.cs"),
+        """
+        using System.Windows.Input;
+
+        namespace Demo.App;
+
+        public sealed class MainWindowViewModel
+        {
+            public ICommand SaveCommand { get; }
+        }
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: appProject);
+
+    var binding = await service.TryHandleAsync("xaml binding check", CancellationToken.None);
+
+    Equal(true, binding.Handled);
+    Equal(true, binding.Succeeded);
+    Contains("XAML binding check", binding.Message);
+    Contains("Unknown bindings: 0", binding.Message);
+    Contains("x:Class declarations: 1", binding.Message);
+    Contains("Resource references: 1", binding.Message);
+    Contains("Event handlers: 1", binding.Message);
+    Contains("WPF integrity checks:", binding.Message);
+    Contains("Demo.App\\MainWindow.xaml x:Class Demo.App.MissingWindow has no matching C# class.", binding.Message);
+    Contains("Demo.App\\MainWindow.xaml x:Class Demo.App.MissingWindow has no MainWindow.xaml.cs code-behind file.", binding.Message);
+    Contains("Demo.App\\MainWindow.xaml ResourceDictionary Source=\"MissingStyles.xaml\" was not found.", binding.Message);
+    Contains("Demo.App\\MainWindow.xaml resource reference MissingButtonStyle was not found in scanned XAML resources.", binding.Message);
+    Contains("Demo.App\\MainWindow.xaml event handler MissingClickHandler was not found in C# symbols.", binding.Message);
 }
 
 static async Task TestLocalCodingToolManagesCurrentCodingSession()

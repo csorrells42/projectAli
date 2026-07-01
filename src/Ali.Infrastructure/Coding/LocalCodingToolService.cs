@@ -16778,16 +16778,33 @@ public sealed partial class LocalCodingToolService(
             .DistinctBy(binding => RelativeToWorkspace(binding.Path) + "|" + binding.Name, StringComparer.OrdinalIgnoreCase)
             .Take(20)
             .ToList();
+        var classDeclarations = ExtractXamlClassDeclarations(xamlFiles).ToList();
+        var resourceReferences = xamlFiles
+            .SelectMany(file => ExtractXamlResourceReferences(SafeReadText(file)).Select(name => (Path: file, Name: name)))
+            .DistinctBy(reference => RelativeToWorkspace(reference.Path) + "|" + reference.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var eventHandlers = xamlFiles
+            .SelectMany(file => ExtractXamlEventHandlers(SafeReadText(file)).Select(name => (Path: file, Name: name)))
+            .DistinctBy(handler => RelativeToWorkspace(handler.Path) + "|" + handler.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, symbols);
         var lines = new List<string>
         {
             "XAML binding check:",
             "No files were changed.",
-            "Engine: XAML text scan + Roslyn C# symbol index",
+            "Engine: XAML text scan + Roslyn C# symbol index + WPF resource/event checks",
             $"XAML files: {xamlFiles.Count}",
             $"Bindings found: {bindings.Count}",
-            $"Unknown bindings: {unknown.Count}"
+            $"Unknown bindings: {unknown.Count}",
+            $"x:Class declarations: {classDeclarations.Count}",
+            $"Resource references: {resourceReferences.Count}",
+            $"Event handlers: {eventHandlers.Count}"
         };
         lines.AddRange(unknown.Count == 0 ? ["- Good - no unknown binding names found."] : unknown.Select(binding => $"- {RelativeToWorkspace(binding.Path)} -> {binding.Name}"));
+        lines.Add("WPF integrity checks:");
+        lines.AddRange(integrityRows.Count == 0
+            ? ["- Good - x:Class, resource dictionary sources, static/dynamic resources, and event handlers look consistent."]
+            : integrityRows.Select(row => $"- {row}"));
         lines.Add("Note - dynamic DataContext, generated properties, and converter parameters may still need human review.");
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
     }
@@ -16837,6 +16854,210 @@ public sealed partial class LocalCodingToolService(
                 return $"- {RelativeToWorkspace(command.Path)} -> {command.Name} -> {symbol.DisplayName} ({RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber})";
             }));
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
+    }
+
+    private IReadOnlyList<string> BuildWpfXamlIntegrityRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<CSharpSymbolInfo> symbols)
+    {
+        var rows = new List<string>();
+        var symbolNames = symbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var symbolDisplays = symbols.Select(symbol => symbol.DisplayName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var resourceKeys = xamlFiles
+            .SelectMany(file => ExtractXamlResourceDefinitions(SafeReadText(file)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (path, className) in ExtractXamlClassDeclarations(xamlFiles))
+        {
+            var simpleName = className.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? className;
+            var classFound = symbolNames.Contains(simpleName) || symbolDisplays.Contains(className);
+            if (!classFound)
+            {
+                rows.Add($"{RelativeToWorkspace(path)} x:Class {className} has no matching C# class.");
+            }
+
+            var codeBehind = Path.ChangeExtension(path, ".xaml.cs");
+            if (!File.Exists(codeBehind))
+            {
+                rows.Add($"{RelativeToWorkspace(path)} x:Class {className} has no {Path.GetFileName(codeBehind)} code-behind file.");
+            }
+        }
+
+        foreach (var file in xamlFiles)
+        {
+            var text = SafeReadText(file);
+            foreach (var source in ExtractResourceDictionarySources(text))
+            {
+                var resolved = ResolveResourceDictionarySource(file, source);
+                if (resolved is not null && !File.Exists(resolved))
+                {
+                    rows.Add($"{RelativeToWorkspace(file)} ResourceDictionary Source=\"{source}\" was not found.");
+                }
+            }
+
+            foreach (var reference in ExtractXamlResourceReferences(text))
+            {
+                if (!resourceKeys.Contains(reference))
+                {
+                    rows.Add($"{RelativeToWorkspace(file)} resource reference {reference} was not found in scanned XAML resources.");
+                }
+            }
+
+            foreach (var handler in ExtractXamlEventHandlers(text))
+            {
+                if (!symbolNames.Contains(handler))
+                {
+                    rows.Add($"{RelativeToWorkspace(file)} event handler {handler} was not found in C# symbols.");
+                }
+            }
+        }
+
+        return rows.Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList();
+    }
+
+    private IEnumerable<(string Path, string ClassName)> ExtractXamlClassDeclarations(IEnumerable<string> files)
+    {
+        foreach (var file in files)
+        {
+            var text = SafeReadText(file);
+            foreach (Match match in Regex.Matches(text, @"\bx:Class\s*=\s*[""'](?<name>[^""']+)[""']", RegexOptions.CultureInvariant))
+            {
+                var className = match.Groups["name"].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(className))
+                {
+                    yield return (file, className);
+                }
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractXamlResourceDefinitions(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"(?:x:Key|Key)\s*=\s*[""'](?<key>[^""']+)[""']", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["key"].Value.Trim())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractXamlResourceReferences(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"\{(?:StaticResource|DynamicResource)\s+(?<key>[^,\}\s]+)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["key"].Value.Trim())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Where(key => !key.StartsWith("{", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractResourceDictionarySources(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(text, @"<\s*ResourceDictionary\b[^>]*\bSource\s*=\s*[""'](?<source>[^""']+)[""']", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["source"].Value.Trim())
+            .Where(source => !string.IsNullOrWhiteSpace(source))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ResolveResourceDictionarySource(string ownerXamlPath, string source)
+    {
+        if (string.IsNullOrWhiteSpace(source)
+            || source.StartsWith("pack://", StringComparison.OrdinalIgnoreCase)
+            || source.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || source.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var normalized = source.Replace('/', Path.DirectorySeparatorChar).Trim();
+        var componentMarker = ";component" + Path.DirectorySeparatorChar;
+        var componentIndex = normalized.IndexOf(componentMarker, StringComparison.OrdinalIgnoreCase);
+        if (componentIndex >= 0)
+        {
+            normalized = normalized[(componentIndex + componentMarker.Length)..];
+        }
+
+        if (Path.IsPathFullyQualified(normalized))
+        {
+            return Path.GetFullPath(normalized);
+        }
+
+        var directory = Path.GetDirectoryName(ownerXamlPath);
+        return string.IsNullOrWhiteSpace(directory) ? null : Path.GetFullPath(Path.Combine(directory, normalized));
+    }
+
+    private static IReadOnlyList<string> ExtractXamlEventHandlers(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var ignoredAttributes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Class",
+            "Key",
+            "Name",
+            "Source",
+            "Style",
+            "Template",
+            "ContentTemplate",
+            "ContentTemplateSelector",
+            "ItemTemplate",
+            "ItemsSource",
+            "SelectedItem",
+            "Text",
+            "Title",
+            "Header",
+            "Content",
+            "Command",
+            "CommandParameter",
+            "DataContext",
+            "Width",
+            "Height",
+            "MinWidth",
+            "MinHeight",
+            "MaxWidth",
+            "MaxHeight",
+            "Margin",
+            "Padding",
+            "Foreground",
+            "Background",
+            "BorderBrush",
+            "BorderThickness",
+            "Grid.Column",
+            "Grid.Row",
+            "DockPanel.Dock"
+        };
+        return Regex.Matches(text, @"\b(?<attribute>(?:[A-Za-z_][\w\.-]*:)?[A-Za-z_][\w\.-]*)\s*=\s*[""'](?<value>[A-Za-z_]\w*)[""']", RegexOptions.CultureInvariant)
+            .Select(match => (Attribute: StripXamlPrefix(match.Groups["attribute"].Value), Value: match.Groups["value"].Value))
+            .Where(match => !ignoredAttributes.Contains(match.Attribute))
+            .Where(match => !match.Value.StartsWith("StaticResource", StringComparison.OrdinalIgnoreCase))
+            .Where(match => !match.Value.StartsWith("DynamicResource", StringComparison.OrdinalIgnoreCase))
+            .Select(match => match.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string StripXamlPrefix(string name)
+    {
+        var colon = name.LastIndexOf(':');
+        return colon >= 0 ? name[(colon + 1)..] : name;
     }
 
     private static IReadOnlyList<string> BuildRouteDriftRows(
