@@ -20454,6 +20454,29 @@ public sealed partial class LocalCodingToolService(
         return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    private static IReadOnlyList<XamlBindingUsage> ExtractXamlBindingUsages(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return Regex.Matches(
+                text,
+                @"\b(?<attribute>(?:[A-Za-z_][\w\.-]*:)?[A-Za-z_][\w\.-]*)\s*=\s*[""'][^""']*\{Binding(?<binding>[^""']*)[""']",
+                RegexOptions.CultureInvariant)
+            .Select(match =>
+            {
+                var attribute = StripXamlPrefix(match.Groups["attribute"].Value.Trim());
+                var bindingText = match.Groups["binding"].Value.Trim().TrimEnd('}');
+                var name = CleanBindingName(bindingText);
+                return new XamlBindingUsage(string.Empty, attribute, name);
+            })
+            .Where(usage => !string.IsNullOrWhiteSpace(usage.Attribute) && !string.IsNullOrWhiteSpace(usage.Name))
+            .DistinctBy(usage => $"{usage.Attribute}|{usage.Name}", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static string CleanBindingName(string bindingText)
     {
         if (string.IsNullOrWhiteSpace(bindingText))
@@ -20461,19 +20484,24 @@ public sealed partial class LocalCodingToolService(
             return string.Empty;
         }
 
-        var path = bindingText;
-        if (path.StartsWith("Path=", StringComparison.OrdinalIgnoreCase))
+        var clauses = bindingText
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        var path = clauses.FirstOrDefault(clause => clause.StartsWith("Path=", StringComparison.OrdinalIgnoreCase));
+        if (path is not null)
         {
             path = path[5..];
         }
-
-        var comma = path.IndexOf(',');
-        if (comma >= 0)
+        else
         {
-            path = path[..comma];
+            path = clauses.FirstOrDefault(clause =>
+                !clause.Contains('=')
+                && !clause.Contains("RelativeSource", StringComparison.OrdinalIgnoreCase)
+                && !clause.Contains("ElementName", StringComparison.OrdinalIgnoreCase)
+                && !clause.StartsWith("Source", StringComparison.OrdinalIgnoreCase));
         }
 
-        path = path.Trim().Trim('"', '\'', '{', '}');
+        path = (path ?? string.Empty).Trim().Trim('"', '\'', '{', '}');
         if (path.Length == 0 || path.Contains("RelativeSource", StringComparison.OrdinalIgnoreCase) || path.Contains("ElementName", StringComparison.OrdinalIgnoreCase))
         {
             return string.Empty;
@@ -20485,6 +20513,8 @@ public sealed partial class LocalCodingToolService(
 
     private static bool IsIgnoredBindingName(string name) =>
         name is "DataContext" or "ActualWidth" or "ActualHeight" or "SelectedItem" or "PlacementTarget" or "Tag";
+
+    private readonly record struct XamlBindingUsage(string Path, string Attribute, string Name);
 
     private static string SafeReadText(string file)
     {
@@ -20573,6 +20603,7 @@ public sealed partial class LocalCodingToolService(
         var constructionRows = BuildWpfDynamicConstructionRouteRows(goal, xamlFiles, csharpFiles);
         var topologyRows = BuildWpfAdvancedLayoutTopologyRows(xamlFiles, csharpFiles);
         var dependencyRows = BuildWpfAdvancedDependencyRows(xamlFiles, csharpFiles, csharpSymbols);
+        var bindingStateRows = BuildWpfBindingStateAlignmentRows(xamlFiles, csharpFiles, csharpSymbols);
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
             .Take(8)
@@ -20611,6 +20642,8 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(topologyRows.Select(row => $"  - {row}"));
         lines.Add("WPF advanced dependency context:");
         lines.AddRange(dependencyRows.Select(row => $"  - {row}"));
+        lines.Add("WPF binding/state alignment:");
+        lines.AddRange(bindingStateRows.Select(row => $"  - {row}"));
 
         lines.Add(viewModelRows.Count == 0
             ? "- View-model/state files: Review - none detected in current scope."
@@ -20808,6 +20841,166 @@ public sealed partial class LocalCodingToolService(
     }
 
     private static string BuildWpfDependencyRow(string name, bool good, string detail, string nextStep)
+        => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
+
+    private IReadOnlyList<string> BuildWpfBindingStateAlignmentRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles,
+        IReadOnlyList<CSharpSymbolInfo> csharpSymbols)
+    {
+        var usages = xamlFiles
+            .SelectMany(file => ExtractXamlBindingUsages(SafeReadText(file)).Select(usage => usage with { Path = file }))
+            .Where(usage => !string.IsNullOrWhiteSpace(usage.Name))
+            .Where(usage => !IsIgnoredBindingName(usage.Name))
+            .DistinctBy(usage => $"{RelativeToWorkspace(usage.Path)}|{usage.Attribute}|{usage.Name}", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        var symbolNames = csharpSymbols
+            .Select(symbol => symbol.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var bindableStateNames = ExtractWpfBindableStateNames(csharpFiles);
+        var availableBindingNames = symbolNames
+            .Concat(bindableStateNames)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var propertyNames = csharpSymbols
+            .Where(symbol => symbol.Kind.Equals("property", StringComparison.OrdinalIgnoreCase))
+            .Select(symbol => symbol.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var commandNames = usages
+            .Where(usage => usage.Attribute.Equals("Command", StringComparison.OrdinalIgnoreCase) || usage.Name.EndsWith("Command", StringComparison.Ordinal))
+            .Select(usage => usage.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var collectionBindings = usages
+            .Where(usage => usage.Attribute.Equals("ItemsSource", StringComparison.OrdinalIgnoreCase))
+            .Select(usage => usage.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var collectionState = ExtractWpfCollectionStateNames(csharpFiles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var selectedBindings = usages
+            .Where(usage => usage.Attribute.Contains("Selected", StringComparison.OrdinalIgnoreCase)
+                || usage.Name.StartsWith("Selected", StringComparison.OrdinalIgnoreCase))
+            .Select(usage => usage.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var busyBindings = usages
+            .Where(usage => usage.Name.Contains("Busy", StringComparison.OrdinalIgnoreCase)
+                || usage.Name.Contains("Progress", StringComparison.OrdinalIgnoreCase)
+                || usage.Name.Contains("Cancel", StringComparison.OrdinalIgnoreCase))
+            .Select(usage => usage.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var missingBindings = usages
+            .Where(usage => !availableBindingNames.Contains(usage.Name))
+            .Where(usage => !usage.Name.Contains("Source=", StringComparison.OrdinalIgnoreCase))
+            .Select(usage => $"{usage.Name} ({usage.Attribute})")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        var missingCommands = commandNames
+            .Where(command => !symbolNames.Contains(command))
+            .Take(10)
+            .ToList();
+        var missingCollections = collectionBindings
+            .Where(binding => !collectionState.Contains(binding, StringComparer.OrdinalIgnoreCase) && !symbolNames.Contains(binding))
+            .Take(10)
+            .ToList();
+        var missingSelectedState = selectedBindings
+            .Where(binding => !propertyNames.Contains(binding) && !availableBindingNames.Contains(binding))
+            .Take(10)
+            .ToList();
+        var hasValidationState = MentionsAny(allCSharpText, "INotifyDataErrorInfo", "IDataErrorInfo")
+            || MentionsAny(allXamlText, "ValidatesOnNotifyDataErrors", "NotifyOnValidationError", "Validation.ErrorTemplate", "ErrorTemplate");
+
+        return
+        [
+            BuildWpfBindingStateRow(
+                "Binding targets",
+                missingBindings.Count == 0,
+                $"bindings {FormatInlineList(usages.Select(usage => usage.Name).Distinct(StringComparer.OrdinalIgnoreCase).Take(12))}",
+                $"missing C# binding targets {FormatInlineList(missingBindings)}"),
+            BuildWpfBindingStateRow(
+                "Command targets",
+                commandNames.Count == 0 || missingCommands.Count == 0,
+                $"commands {FormatInlineList(commandNames)}",
+                $"missing command properties/fields {FormatInlineList(missingCommands)}"),
+            BuildWpfBindingStateRow(
+                "Collection surfaces",
+                collectionBindings.Count == 0 || missingCollections.Count == 0,
+                $"ItemsSource bindings {FormatInlineList(collectionBindings)}; collection state {FormatInlineList(collectionState)}",
+                $"missing collection state {FormatInlineList(missingCollections)}"),
+            BuildWpfBindingStateRow(
+                "Selection/current item state",
+                selectedBindings.Count == 0 || missingSelectedState.Count == 0,
+                $"selection bindings {FormatInlineList(selectedBindings)}",
+                $"missing selected/current item properties {FormatInlineList(missingSelectedState)}"),
+            BuildWpfBindingStateRow(
+                "Busy/progress/cancel state",
+                busyBindings.Count == 0 || busyBindings.All(binding => availableBindingNames.Contains(binding)),
+                $"workflow bindings {FormatInlineList(busyBindings)}",
+                "add IsBusy, ProgressText, and cancel command state for slow or blocking UI actions"),
+            BuildWpfBindingStateRow(
+                "Validation state",
+                hasValidationState,
+                "validation state or binding validation surface is present",
+                "add INotifyDataErrorInfo/IDataErrorInfo and validation binding flags for editable complex windows")
+        ];
+    }
+
+    private static IReadOnlyList<string> ExtractWpfCollectionStateNames(IReadOnlyList<string> csharpFiles)
+    {
+        var names = new List<string>();
+        foreach (var file in csharpFiles)
+        {
+            var text = SafeReadText(file);
+            names.AddRange(Regex.Matches(
+                    text,
+                    @"\b(?:ObservableCollection|ICollectionView|CollectionViewSource|IEnumerable|IReadOnlyList|List)\s*<[^>]+>\s+(?<name>[A-Z][A-Za-z0-9_]*)",
+                    RegexOptions.CultureInvariant)
+                .Select(match => match.Groups["name"].Value));
+        }
+
+        return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractWpfBindableStateNames(IReadOnlyList<string> csharpFiles)
+    {
+        var names = new List<string>();
+        foreach (var file in csharpFiles)
+        {
+            var text = SafeReadText(file);
+            names.AddRange(Regex.Matches(
+                    text,
+                    @"public\s+[\w<>,\?\[\]\s]+\s+(?<name>[A-Z][A-Za-z0-9_]*)\s*{\s*get;",
+                    RegexOptions.CultureInvariant)
+                .Select(match => match.Groups["name"].Value));
+            foreach (Match record in Regex.Matches(text, @"\brecord\s+[A-Za-z_]\w*\s*\((?<parameters>[^)]*)\)", RegexOptions.CultureInvariant))
+            {
+                foreach (var parameter in record.Groups["parameters"].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var tokens = parameter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    var name = tokens.LastOrDefault();
+                    if (!string.IsNullOrWhiteSpace(name) && char.IsUpper(name[0]))
+                    {
+                        names.Add(name.TrimEnd('?', ';'));
+                    }
+                }
+            }
+        }
+
+        return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string BuildWpfBindingStateRow(string name, bool good, string detail, string nextStep)
         => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
 
     private IReadOnlyList<string> BuildWpfAdvancedLayoutTopologyRows(

@@ -4694,6 +4694,16 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("CommandBinding x1", context.Text);
     Contains("KeyBinding x1", context.Text);
     Contains("Virtualization/performance: Good - virtualization or deferred scrolling flags are present.", context.Text);
+    Contains("WPF binding/state alignment:", context.Text);
+    Contains("Binding targets: Good", context.Text);
+    Contains("Command targets: Good", context.Text);
+    Contains("Collection surfaces: Good", context.Text);
+    Contains("ItemsSource bindings NavigationItems, Projects, Metrics", context.Text);
+    Contains("Selection/current item state: Good", context.Text);
+    Contains("selection bindings SelectedProject", context.Text);
+    Contains("Busy/progress/cancel state: Good", context.Text);
+    Contains("workflow bindings IsBusy, ProgressText, CancelRefreshCommand", context.Text);
+    Contains("Validation state: Good", context.Text);
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
@@ -4755,6 +4765,7 @@ static async Task TestLocalCodingToolReportsWpfIntegrityIssues()
                 </ResourceDictionary>
             </Window.Resources>
             <Grid>
+                <TextBlock Text="{Binding MissingTitle}" />
                 <Button Click="MissingClickHandler"
                         Style="{StaticResource MissingButtonStyle}"
                         Command="{Binding SaveCommand}" />
@@ -4780,11 +4791,13 @@ static async Task TestLocalCodingToolReportsWpfIntegrityIssues()
         configuredCurrentSolutionOrProjectPath: appProject);
 
     var binding = await service.TryHandleAsync("xaml binding check", CancellationToken.None);
+    var context = await service.BuildContextPackAsync("fix WPF binding and layout issues", CancellationToken.None);
 
     Equal(true, binding.Handled);
     Equal(false, binding.Succeeded);
     Contains("XAML binding check", binding.Message);
-    Contains("Unknown bindings: 0", binding.Message);
+    Contains("Unknown bindings: 1", binding.Message);
+    Contains("Demo.App\\MainWindow.xaml -> MissingTitle", binding.Message);
     Contains("x:Class declarations: 1", binding.Message);
     Contains("Resource references: 1", binding.Message);
     Contains("Event handlers: 1", binding.Message);
@@ -4794,6 +4807,9 @@ static async Task TestLocalCodingToolReportsWpfIntegrityIssues()
     Contains("Demo.App\\MainWindow.xaml ResourceDictionary Source=\"MissingStyles.xaml\" was not found.", binding.Message);
     Contains("Demo.App\\MainWindow.xaml resource reference MissingButtonStyle was not found in scanned XAML resources.", binding.Message);
     Contains("Demo.App\\MainWindow.xaml event handler MissingClickHandler was not found in C# symbols.", binding.Message);
+    Contains("WPF binding/state alignment:", context.Text);
+    Contains("Binding targets: Review - missing C# binding targets MissingTitle (Text).", context.Text);
+    Contains("Command targets: Good - commands SaveCommand.", context.Text);
 }
 
 static async Task TestLocalCodingToolManagesCurrentCodingSession()
@@ -7483,6 +7499,7 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
     Contains("WPF dynamic construction route:", prompt);
     Contains("WPF advanced layout topology:", prompt);
     Contains("WPF advanced dependency context:", prompt);
+    Contains("WPF binding/state alignment:", prompt);
     Contains("MainWindow.xaml x:Class Demo.App.MissingWindow missing C# symbol", prompt);
     Contains("resource reference MissingButtonStyle was not found", prompt);
     Contains("event handler MissingClickHandler was not found", prompt);
