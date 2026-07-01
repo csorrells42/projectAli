@@ -16829,7 +16829,7 @@ public sealed partial class LocalCodingToolService(
             ? ["- Good - x:Class, resource dictionary sources, static/dynamic resources, and event handlers look consistent."]
             : integrityRows.Select(row => $"- {row}"));
         lines.Add("Note - dynamic DataContext, generated properties, and converter parameters may still need human review.");
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
+        return new CodingToolResult(true, unknown.Count == 0 && integrityRows.Count == 0, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
     }
 
     private CodingToolResult VerifyCommandBindings()
@@ -16876,7 +16876,7 @@ public sealed partial class LocalCodingToolService(
 
                 return $"- {RelativeToWorkspace(command.Path)} -> {command.Name} -> {symbol.DisplayName} ({RelativeToWorkspace(symbol.Path)}:{symbol.LineNumber})";
             }));
-        return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
+        return new CodingToolResult(true, missing.Count == 0, string.Join(Environment.NewLine, lines), "Command binding check", Policy.WorkspaceRoot);
     }
 
     private IReadOnlyList<string> BuildWpfXamlIntegrityRows(
@@ -21859,7 +21859,9 @@ public sealed partial class LocalCodingToolService(
 
     private static bool IsValidationReceipt(CodingReceipt receipt) =>
         IsDotNetReceipt(receipt)
-        || receipt.Action is nameof(CodingToolAction.CreateFile)
+        || receipt.Action is nameof(CodingToolAction.VerifyXamlBindings)
+            or nameof(CodingToolAction.VerifyCommandBindings)
+            or nameof(CodingToolAction.CreateFile)
             or nameof(CodingToolAction.AppendFile)
             or nameof(CodingToolAction.ReplaceText)
             or nameof(CodingToolAction.ApplyLastPatchPreview)

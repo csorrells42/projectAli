@@ -175,6 +175,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
     ("orchestrator stops canned fallback in programming mode", TestOrchestratorStopsCannedFallbackInProgrammingMode),
     ("orchestrator previews model-authored programming patch", TestOrchestratorPreviewsModelAuthoredProgrammingPatch),
+    ("orchestrator sends WPF validation evidence to model patcher", TestOrchestratorSendsWpfValidationEvidenceToModelPatcher),
     ("orchestrator rejects stale programming planner command", TestOrchestratorRejectsStaleProgrammingPlannerCommand),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
     ("orchestrator injects active coding task followup context", TestOrchestratorInjectsActiveCodingTaskFollowupContext),
@@ -4608,7 +4609,7 @@ static async Task TestLocalCodingToolReportsWpfIntegrityIssues()
     var binding = await service.TryHandleAsync("xaml binding check", CancellationToken.None);
 
     Equal(true, binding.Handled);
-    Equal(true, binding.Succeeded);
+    Equal(false, binding.Succeeded);
     Contains("XAML binding check", binding.Message);
     Contains("Unknown bindings: 0", binding.Message);
     Contains("x:Class declarations: 1", binding.Message);
@@ -7163,6 +7164,143 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
     var apply = await codingTool.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
     Equal(true, apply.Succeeded);
     Contains("factorial", await File.ReadAllTextAsync(programPath));
+}
+
+static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    var projectPath = Path.Combine(appDirectory, "Demo.App.csproj");
+    var xamlPath = Path.Combine(appDirectory, "MainWindow.xaml");
+    var codeBehindPath = Path.Combine(appDirectory, "MainWindow.xaml.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """);
+    var brokenXaml = string.Join(
+        Environment.NewLine,
+        "<Window x:Class=\"Demo.App.MissingWindow\"",
+        "        xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"",
+        "        xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\"",
+        "        Title=\"Demo\">",
+        "    <Grid>",
+        "        <Button Click=\"MissingClickHandler\"",
+        "                Style=\"{StaticResource MissingButtonStyle}\"",
+        "                Command=\"{Binding SaveCommand}\" />",
+        "    </Grid>",
+        "</Window>",
+        string.Empty);
+    var repairedXaml = string.Join(
+        Environment.NewLine,
+        "<Window x:Class=\"Demo.App.MainWindow\"",
+        "        xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"",
+        "        xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\"",
+        "        Title=\"Demo\">",
+        "    <Window.Resources>",
+        "        <Style x:Key=\"MissingButtonStyle\" TargetType=\"Button\" />",
+        "    </Window.Resources>",
+        "    <Grid>",
+        "        <Button Style=\"{StaticResource MissingButtonStyle}\"",
+        "                Command=\"{Binding SaveCommand}\" />",
+        "    </Grid>",
+        "</Window>",
+        string.Empty);
+    var newCodeBehind = string.Join(
+        Environment.NewLine,
+        "namespace Demo.App;",
+        string.Empty,
+        "public partial class MainWindow",
+        "{",
+        "    public MainWindow()",
+        "    {",
+        "        InitializeComponent();",
+        "    }",
+        "}",
+        string.Empty);
+    await File.WriteAllTextAsync(xamlPath, brokenXaml);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindowViewModel.cs"),
+        """
+        using System.Windows.Input;
+
+        namespace Demo.App;
+
+        public sealed class MainWindowViewModel
+        {
+            public ICommand SaveCommand { get; }
+        }
+        """);
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        selected_path = "Build/test repair loop",
+        summary = "Repair WPF class, resource, and event-handler validation issues.",
+        confidence = 0.88,
+        edits = new[]
+        {
+            new
+            {
+                path = xamlPath,
+                oldText = brokenXaml,
+                newText = repairedXaml
+            },
+            new
+            {
+                path = codeBehindPath,
+                oldText = string.Empty,
+                newText = newCodeBehind
+            }
+        }
+    });
+    var runtime = new FixedSequenceRuntime(patchJson);
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Fix the WPF validation issues in MainWindow.xaml.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    var prompt = runtime.LastRequest.History[0].Text;
+    Contains("WPF relationship map:", prompt);
+    Contains("WPF integrity context:", prompt);
+    Contains("MainWindow.xaml x:Class Demo.App.MissingWindow missing C# symbol", prompt);
+    Contains("resource reference MissingButtonStyle was not found", prompt);
+    Contains("event handler MissingClickHandler was not found", prompt);
+    Contains("Complex WPF patch contract:", prompt);
+    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Status: No files changed yet.", answer);
+    Equal(brokenXaml, await File.ReadAllTextAsync(xamlPath));
+    Equal(false, File.Exists(codeBehindPath));
 }
 
 static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
