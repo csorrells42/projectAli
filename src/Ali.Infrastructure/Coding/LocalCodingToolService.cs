@@ -38,7 +38,7 @@ public sealed class LocalCodingToolService(
     private const int MaxEditContentCharacters = 48_000;
     private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
-    private const int MaxPatchBundleEdits = 8;
+    private const int MaxPatchBundleEdits = 10;
     private const int MaxValidationRepairPreviewAttempts = 2;
     private const int MaxWorkspaceSummaryEntries = 20;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
@@ -12909,6 +12909,20 @@ public sealed class LocalCodingToolService(
                     continue;
                 }
 
+                if (!hasTransform
+                    && TryBuildNewWpfDialogPatchBlock(context.Goal, fullPath, out var newWpfDialogText, out var newWpfDialogNote))
+                {
+                    candidates.Add(new FeaturePatchSynthesisCandidate(
+                        RelativeToWorkspace(fullPath),
+                        fullPath,
+                        "deterministic WPF dialog recipe",
+                        string.Empty,
+                        newWpfDialogText,
+                        true,
+                        newWpfDialogNote));
+                    continue;
+                }
+
                 candidates.Add(new FeaturePatchSynthesisCandidate(
                     RelativeToWorkspace(fullPath),
                     fullPath,
@@ -13118,6 +13132,8 @@ public sealed class LocalCodingToolService(
                     AddIfSafeNewWpfStylesTarget(targets, Path.Combine(primaryDirectory, "AliDashboardStyles.xaml"));
                     AddIfSafeNewWpfUserControlTarget(targets, Path.Combine(primaryDirectory, "DashboardDetailCard.xaml"));
                     AddIfSafeNewWpfUserControlTarget(targets, Path.Combine(primaryDirectory, "DashboardDetailCard.xaml.cs"));
+                    AddIfSafeNewWpfDialogTarget(targets, Path.Combine(primaryDirectory, "DashboardConfirmDialog.xaml"));
+                    AddIfSafeNewWpfDialogTarget(targets, Path.Combine(primaryDirectory, "DashboardConfirmDialog.xaml.cs"));
                 }
             }
         }
@@ -13182,6 +13198,14 @@ public sealed class LocalCodingToolService(
         }
     }
 
+    private void AddIfSafeNewWpfDialogTarget(List<string> targets, string path)
+    {
+        if (IsSafeNewWpfDialogPath(path))
+        {
+            targets.Add(path);
+        }
+    }
+
     private bool IsEditableWpfSurfaceFile(string path) =>
         File.Exists(path)
         && IsSafeWpfSurfacePath(path);
@@ -13223,6 +13247,16 @@ public sealed class LocalCodingToolService(
         var fileName = Path.GetFileName(path);
         return (fileName.Equals("DashboardDetailCard.xaml", StringComparison.OrdinalIgnoreCase)
                 || fileName.Equals("DashboardDetailCard.xaml.cs", StringComparison.OrdinalIgnoreCase))
+               && Policy.IsInsideWorkspace(path)
+               && !IsBuildArtifactPath(path)
+               && !IsGeneratedOrDesignerFile(path);
+    }
+
+    private bool IsSafeNewWpfDialogPath(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return (fileName.Equals("DashboardConfirmDialog.xaml", StringComparison.OrdinalIgnoreCase)
+                || fileName.Equals("DashboardConfirmDialog.xaml.cs", StringComparison.OrdinalIgnoreCase))
                && Policy.IsInsideWorkspace(path)
                && !IsBuildArtifactPath(path)
                && !IsGeneratedOrDesignerFile(path);
@@ -14856,8 +14890,15 @@ public sealed class LocalCodingToolService(
                     _owner = owner;
                 }
 
-                public bool Confirm(DashboardDialogRequest request) =>
-                    MessageBox.Show(_owner, request.Message, request.Title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
+                public bool Confirm(DashboardDialogRequest request)
+                {
+                    var dialog = new DashboardConfirmDialog(request)
+                    {
+                        Owner = _owner
+                    };
+
+                    return dialog.ShowDialog() == true;
+                }
             }
 
             public sealed class DashboardThemeService : IDashboardThemeService
@@ -15069,6 +15110,41 @@ public sealed class LocalCodingToolService(
         return true;
     }
 
+    private static bool TryBuildNewWpfDialogPatchBlock(
+        string goal,
+        string fullPath,
+        out string newText,
+        out string note)
+    {
+        newText = string.Empty;
+        note = string.Empty;
+        if (!IsWpfComplexWindowGoal(goal) || File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(fullPath);
+        if (!fileName.Equals("DashboardConfirmDialog.xaml", StringComparison.OrdinalIgnoreCase)
+            && !fileName.Equals("DashboardConfirmDialog.xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(fullPath);
+        var codeBehindPath = string.IsNullOrWhiteSpace(directory) ? null : Path.Combine(directory, "MainWindow.xaml.cs");
+        var namespaceName = codeBehindPath is null ? null : ExtractCSharpNamespaceName(SafeReadText(codeBehindPath));
+        if (fileName.Equals("DashboardConfirmDialog.xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            newText = BuildWpfDashboardConfirmDialogXaml(namespaceName);
+            note = "WPF complex-dashboard DashboardConfirmDialog.xaml modal-window starter recipe.";
+            return true;
+        }
+
+        newText = BuildWpfDashboardConfirmDialogCodeBehind(namespaceName);
+        note = "WPF complex-dashboard DashboardConfirmDialog.xaml.cs modal-window starter recipe.";
+        return true;
+    }
+
     private static string BuildWpfDashboardDetailCardXaml(string? namespaceName)
     {
         var controlClass = string.IsNullOrWhiteSpace(namespaceName)
@@ -15230,6 +15306,110 @@ public sealed class LocalCodingToolService(
                                 : "DefaultState";
                     VisualStateManager.GoToElementState(VisualStateRoot, state, useTransitions);
                 }
+            }
+            """;
+    }
+
+    private static string BuildWpfDashboardConfirmDialogXaml(string? namespaceName)
+    {
+        var dialogClass = string.IsNullOrWhiteSpace(namespaceName)
+            ? "DashboardConfirmDialog"
+            : namespaceName + ".DashboardConfirmDialog";
+        return
+            $$"""
+            <Window x:Class="{{dialogClass}}"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    Title="{Binding Title}"
+                    Width="420"
+                    MinWidth="360"
+                    SizeToContent="Height"
+                    ResizeMode="NoResize"
+                    WindowStartupLocation="CenterOwner"
+                    ShowInTaskbar="False">
+                <Window.Resources>
+                    <ResourceDictionary>
+                        <ResourceDictionary.MergedDictionaries>
+                            <ResourceDictionary Source="AliDashboardStyles.xaml" />
+                        </ResourceDictionary.MergedDictionaries>
+                    </ResourceDictionary>
+                </Window.Resources>
+
+                <Grid Margin="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="{Binding Title}"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="1"
+                               Text="{Binding Message}"
+                               TextWrapping="Wrap"
+                               Margin="0,10,0,20" />
+                    <StackPanel Grid.Row="2"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right">
+                        <Button Content="{Binding CancelText}"
+                                IsCancel="True"
+                                MinWidth="96"
+                                Style="{StaticResource DashboardSecondaryButtonStyle}"
+                                Margin="0,0,8,0" />
+                        <Button Content="{Binding PrimaryText}"
+                                IsDefault="True"
+                                MinWidth="96"
+                                Style="{StaticResource DashboardPrimaryButtonStyle}"
+                                Click="PrimaryButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Window>
+            """;
+    }
+
+    private static string BuildWpfDashboardConfirmDialogCodeBehind(string? namespaceName)
+    {
+        var namespaceLine = string.IsNullOrWhiteSpace(namespaceName)
+            ? string.Empty
+            : $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}";
+        return
+            $$"""
+            using System.Windows;
+
+            {{namespaceLine}}public partial class DashboardConfirmDialog : Window
+            {
+                public DashboardConfirmDialog(DashboardDialogRequest request)
+                {
+                    InitializeComponent();
+                    DataContext = new DashboardConfirmDialogViewModel(request);
+                }
+
+                private void PrimaryButton_Click(object sender, RoutedEventArgs e)
+                {
+                    DialogResult = true;
+                    Close();
+                }
+            }
+
+            public sealed class DashboardConfirmDialogViewModel
+            {
+                public DashboardConfirmDialogViewModel(DashboardDialogRequest request)
+                {
+                    Title = request.Title;
+                    Message = request.Message;
+                    PrimaryText = request.PrimaryText;
+                    CancelText = request.CancelText;
+                }
+
+                public string Title { get; }
+
+                public string Message { get; }
+
+                public string PrimaryText { get; }
+
+                public string CancelText { get; }
             }
             """;
     }
@@ -16643,7 +16823,11 @@ public sealed class LocalCodingToolService(
                 bool Confirm(DashboardDialogRequest request);
             }
 
-            public sealed record DashboardDialogRequest(string Title, string Message);
+            public sealed record DashboardDialogRequest(
+                string Title,
+                string Message,
+                string PrimaryText = "OK",
+                string CancelText = "Cancel");
 
             public sealed class NullDashboardDialogService : IDashboardDialogService
             {
