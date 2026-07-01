@@ -659,6 +659,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("VirtualizingPanel", builderIndex);
     Contains("RoutedCommand/InputBindings", builderIndex);
     Contains("ErrorTemplate/Adorner", builderIndex);
+    Contains("x:Class, namespaces, partial classes, code-behind files", builderIndex);
+    Contains("ResourceDictionary Source paths", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
     Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
@@ -9539,6 +9541,7 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("Do not add a widget or starter recipe just because a keyword appears", instruction);
     Contains("Programming lane map:", instruction);
     Contains("If recent assistant text contains `Next:` or `Next command:`", instruction);
+    Contains("model-authored patch lane should design the app dynamically", instruction);
     Contains("console app guide <goal>", instruction);
     Contains("wpf app guide <goal>", instruction);
     Contains("wpf layout guide <goal>", instruction);
@@ -9554,6 +9557,9 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("VirtualizingPanel", instruction);
     Contains("RoutedCommand/InputBindings", instruction);
     Contains("ErrorTemplate/Adorner", instruction);
+    Contains("x:Class, namespaces, partial classes, code-behind files", instruction);
+    Contains("ResourceDictionary Source paths", instruction);
+    Equal(false, instruction.Contains("legacy starter lane", StringComparison.OrdinalIgnoreCase));
     Contains("feature patch draft <goal>", instruction);
     Contains("exact patch synthesis <goal>", instruction);
     Contains("preview synthesized feature patch <goal>", instruction);
@@ -9601,6 +9607,11 @@ static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
     Equal("C:/Workspace/Demo/DashboardView12.xaml", plan.Edits[11].Path);
     NotNull(runtime.LastRequest, "Planner instruction should be captured.");
     Contains("WPF/window/layout patch bundles may use up to 16 coordinated edits", runtime.LastRequest!.History[0].Text);
+    Contains("Complex WPF patch contract:", runtime.LastRequest.History[0].Text);
+    Contains("Keep x:Class, namespace, partial class, and .xaml.cs code-behind names aligned.", runtime.LastRequest.History[0].Text);
+    Contains("ResourceDictionary Source paths, StaticResource/DynamicResource keys", runtime.LastRequest.History[0].Text);
+    Contains("CollectionViewSource sorting/filtering/grouping and VirtualizingPanel settings", runtime.LastRequest.History[0].Text);
+    Contains("dotnet build, XAML binding check, command binding check", runtime.LastRequest.History[0].Text);
 }
 
 static async Task TestModelSourcePlannerGuardsWeatherForecastsForSources()

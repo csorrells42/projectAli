@@ -242,7 +242,8 @@ public static class CodingAbilityCatalog
             "Diagnostics and build order",
             [
                 "Build order: shell layout, one bound workflow, view-model state/commands, validation, styles/templates, secondary panes/dialogs, then polish.",
-                "Validation order: dotnet build, XAML binding check, command binding check, narrow UI smoke path, then repair compiler/binding errors before adding more surface area."
+                "Validation order: dotnet build, XAML binding check, command binding check, narrow UI smoke path, then repair compiler/binding/resource/event errors before adding more surface area.",
+                "Integrity checks: keep x:Class, namespaces, partial classes, code-behind files, ResourceDictionary Source paths, resource keys, DataTemplates, converters, template selectors, and event handlers aligned."
             ])
     ];
 
