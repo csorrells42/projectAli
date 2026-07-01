@@ -17123,6 +17123,8 @@ public sealed partial class LocalCodingToolService(
             "Background",
             "BorderBrush",
             "BorderThickness",
+            "HorizontalAlignment",
+            "VerticalAlignment",
             "Grid.Column",
             "Grid.Row",
             "DockPanel.Dock"
@@ -20569,6 +20571,7 @@ public sealed partial class LocalCodingToolService(
         var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, csharpSymbols).Take(8).ToList();
         var readinessRows = BuildWpfComplexWindowReadinessRows(xamlFiles, csharpFiles);
         var constructionRows = BuildWpfDynamicConstructionRouteRows(goal, xamlFiles, csharpFiles);
+        var topologyRows = BuildWpfAdvancedLayoutTopologyRows(xamlFiles, csharpFiles);
         var dependencyRows = BuildWpfAdvancedDependencyRows(xamlFiles, csharpFiles, csharpSymbols);
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
@@ -20604,6 +20607,8 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(readinessRows.Select(row => $"  - {row}"));
         lines.Add("WPF dynamic construction route:");
         lines.AddRange(constructionRows.Select(row => $"  - {row}"));
+        lines.Add("WPF advanced layout topology:");
+        lines.AddRange(topologyRows.Select(row => $"  - {row}"));
         lines.Add("WPF advanced dependency context:");
         lines.AddRange(dependencyRows.Select(row => $"  - {row}"));
 
@@ -20805,6 +20810,132 @@ public sealed partial class LocalCodingToolService(
     private static string BuildWpfDependencyRow(string name, bool good, string detail, string nextStep)
         => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
 
+    private IReadOnlyList<string> BuildWpfAdvancedLayoutTopologyRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles)
+    {
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        var rowDefinitionCount = Regex.Matches(allXamlText, @"<\s*RowDefinition\b", RegexOptions.CultureInvariant).Count;
+        var columnDefinitionCount = Regex.Matches(allXamlText, @"<\s*ColumnDefinition\b", RegexOptions.CultureInvariant).Count;
+        var gridPlacementCount = Regex.Matches(allXamlText, @"\bGrid\.(?:Row|Column)(?:Span)?\s*=", RegexOptions.CultureInvariant).Count;
+        var windowCount = CountXamlObjectOccurrences(allXamlText, "Window");
+        var shellCounts = CountKnownXamlObjects(
+            xamlFiles,
+            ["Window", "DockPanel", "Grid", "GridSplitter", "Menu", "ToolBar", "StatusBar", "ScrollViewer"]);
+        var regionCounts = CountKnownXamlObjects(
+            xamlFiles,
+            ["ContentControl", "TabControl", "TabItem", "Frame", "TreeView", "UserControl", "GroupBox", "Expander"]);
+        var masterDetailSignals = BuildWpfMasterDetailSignals(allXamlText);
+        var overlaySignals = BuildWpfOverlaySignals(allXamlText, allCSharpText);
+        var dialogSignals = BuildWpfDialogSignals(allXamlText, allCSharpText, windowCount);
+        var templateCounts = CountKnownXamlObjects(
+            xamlFiles,
+            ["DataTemplate", "HierarchicalDataTemplate", "ControlTemplate", "ItemsPanelTemplate", "Style"]);
+        var motionSignals = BuildWpfMotionSignals(allXamlText);
+
+        return
+        [
+            BuildWpfTopologyRow(
+                "Shell composition",
+                HasAnyXamlObject(allXamlText, "Window") && HasAnyXamlObject(allXamlText, "Grid", "DockPanel"),
+                $"shell {FormatInlineList(shellCounts)}; grid rows {rowDefinitionCount}; columns {columnDefinitionCount}; placements {gridPlacementCount}",
+                "establish a Window shell with explicit Grid/DockPanel regions, splitter boundaries, and scroll ownership before adding controls"),
+            BuildWpfTopologyRow(
+                "Regions/navigation topology",
+                regionCounts.Count > 0 && HasAnyXamlObject(allXamlText, "ContentControl", "TabControl", "TreeView", "Frame", "UserControl"),
+                $"regions {FormatInlineList(regionCounts)}",
+                "define navigation regions with ContentControl/TabControl/TreeView/UserControl before wiring feature-specific controls"),
+            BuildWpfTopologyRow(
+                "Master/detail topology",
+                masterDetailSignals.Count >= 3,
+                FormatInlineList(masterDetailSignals),
+                "pair list/grid selection with a detail region, row details, or selected-item content template"),
+            BuildWpfTopologyRow(
+                "Overlay/busy layer",
+                overlaySignals.Count >= 2,
+                FormatInlineList(overlaySignals),
+                "add a top-layer busy/progress surface using Panel.ZIndex, IsBusy state, ProgressText, and cancel affordance when workflows can block"),
+            BuildWpfTopologyRow(
+                "Dialog/window topology",
+                dialogSignals.Count > 0,
+                FormatInlineList(dialogSignals),
+                "separate modal/wizard/edit flows into dialog windows or popups with owner/startup behavior"),
+            BuildWpfTopologyRow(
+                "Templates/items panels",
+                templateCounts.Count > 0 || MentionsAny(allXamlText, "ItemTemplate", "ContentTemplate", "CellTemplate", "ItemsPanel"),
+                $"templates {FormatInlineList(templateCounts)}",
+                "move repeated visuals into DataTemplate/ControlTemplate/ItemsPanelTemplate resources before duplicating XAML"),
+            BuildWpfTopologyRow(
+                "Visual states/motion",
+                motionSignals.Count > 0,
+                FormatInlineList(motionSignals),
+                "use triggers, visual states, and short storyboards for state feedback instead of code-behind visual mutation")
+        ];
+    }
+
+    private static IReadOnlyList<string> BuildWpfMasterDetailSignals(string text)
+    {
+        var signals = new List<string>();
+        AddSignalIfPresent(signals, text, "DataGrid");
+        AddSignalIfPresent(signals, text, "ListView");
+        AddSignalIfPresent(signals, text, "TreeView");
+        AddSignalIfPresent(signals, text, "SelectedItem");
+        AddSignalIfPresent(signals, text, "SelectedProject");
+        AddSignalIfPresent(signals, text, "RowDetailsTemplate");
+        AddSignalIfPresent(signals, text, "ContentTemplateSelector");
+        AddSignalIfPresent(signals, text, "ContentControl");
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildWpfOverlaySignals(string xamlText, string csharpText)
+    {
+        var signals = new List<string>();
+        AddSignalIfPresent(signals, xamlText, "Panel.ZIndex");
+        AddSignalIfPresent(signals, xamlText, "ProgressBar");
+        AddSignalIfPresent(signals, xamlText, "Popup");
+        AddSignalIfPresent(signals, xamlText, "Adorner");
+        AddSignalIfPresent(signals, xamlText, "IsHitTestVisible");
+        AddSignalIfPresent(signals, xamlText, "IsBusy");
+        AddSignalIfPresent(signals, csharpText, "IsBusy");
+        AddSignalIfPresent(signals, csharpText, "ProgressText");
+        AddSignalIfPresent(signals, csharpText, "Cancel");
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildWpfDialogSignals(string xamlText, string csharpText, int windowCount)
+    {
+        var signals = new List<string>();
+        if (windowCount > 1)
+        {
+            signals.Add($"Window x{windowCount}");
+        }
+
+        AddSignalIfPresent(signals, xamlText, "Popup");
+        AddSignalIfPresent(signals, xamlText, "WindowStartupLocation");
+        AddSignalIfPresent(signals, xamlText, "ShowInTaskbar");
+        AddSignalIfPresent(signals, csharpText, "ShowDialog");
+        AddSignalIfPresent(signals, csharpText, "Owner");
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildWpfMotionSignals(string text)
+    {
+        var signals = new List<string>();
+        AddSignalIfPresent(signals, text, "VisualStateManager");
+        AddSignalIfPresent(signals, text, "VisualState");
+        AddSignalIfPresent(signals, text, "Storyboard");
+        AddSignalIfPresent(signals, text, "BeginStoryboard");
+        AddSignalIfPresent(signals, text, "DoubleAnimation");
+        AddSignalIfPresent(signals, text, "EventTrigger");
+        AddSignalIfPresent(signals, text, "DataTrigger");
+        AddSignalIfPresent(signals, text, "MultiDataTrigger");
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static string BuildWpfTopologyRow(string name, bool good, string detail, string nextStep)
+        => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
+
     private IReadOnlyList<string> BuildWpfDynamicConstructionRouteRows(
         string goal,
         IReadOnlyList<string> xamlFiles,
@@ -20914,8 +21045,14 @@ public sealed partial class LocalCodingToolService(
     private static bool HasAnyXamlObject(string text, params string[] objectNames)
         => objectNames.Any(name => Regex.IsMatch(
             text,
-            @"<\s*(?:[A-Za-z_][\w\.-]*:)?" + Regex.Escape(name) + @"\b",
+            @"<\s*(?:[A-Za-z_][\w\.-]*:)?" + Regex.Escape(name) + @"(?=[\s>/])",
             RegexOptions.CultureInvariant));
+
+    private static int CountXamlObjectOccurrences(string text, string objectName) =>
+        Regex.Matches(
+            text,
+            @"<\s*(?:[A-Za-z_][\w\.-]*:)?" + Regex.Escape(objectName) + @"(?=[\s>/])",
+            RegexOptions.CultureInvariant).Count;
 
     private IReadOnlyList<string> BuildWpfRelationshipContextRows(
         IReadOnlyList<string> xamlFiles,

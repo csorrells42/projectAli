@@ -4350,8 +4350,12 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                 Title="{Binding Title}">
             <Window.Resources>
                 <ResourceDictionary>
+                    <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
                     <Style x:Key="PrimaryButtonStyle" TargetType="Button" />
                     <DataTemplate x:Key="ProjectRowTemplate" />
+                    <ItemsPanelTemplate x:Key="MetricsPanelTemplate">
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
                     <local:SelectedProjectNameConverter x:Key="SelectedProjectNameConverter" />
                     <local:ProjectRowTemplateSelector x:Key="ProjectRowTemplateSelector" />
                     <local:ProjectBindingProxy x:Key="ProjectBindingProxy" Data="{Binding}" />
@@ -4379,7 +4383,13 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                             <DataGrid ItemsSource="{Binding Projects}"
                                       SelectedItem="{Binding SelectedProject}"
                                       VirtualizingPanel.IsVirtualizing="True"
-                                      ScrollViewer.CanContentScroll="True" />
+                                      ScrollViewer.CanContentScroll="True">
+                                <DataGrid.RowDetailsTemplate>
+                                    <DataTemplate>
+                                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ProjectRowTemplate}" />
+                                    </DataTemplate>
+                                </DataGrid.RowDetailsTemplate>
+                            </DataGrid>
                         </TabItem>
                         <TabItem Header="Details">
                             <StackPanel>
@@ -4392,6 +4402,32 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                         </TabItem>
                     </TabControl>
                     <Button Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" />
+                    <ItemsControl Grid.Column="2"
+                                  ItemsSource="{Binding Metrics}"
+                                  ItemsPanel="{StaticResource MetricsPanelTemplate}" />
+                    <Border Grid.ColumnSpan="3"
+                            Panel.ZIndex="10"
+                            Background="#99000000"
+                            Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            IsHitTestVisible="{Binding IsBusy}">
+                        <Border.Triggers>
+                            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                         From="0"
+                                                         To="1"
+                                                         Duration="0:0:0.18" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
+                        </Border.Triggers>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressBar IsIndeterminate="{Binding IsBusy}" Width="160" Height="14" />
+                            <TextBlock Text="{Binding ProgressText}" />
+                            <Button Command="{Binding CancelRefreshCommand}" />
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </DockPanel>
         </Window>
@@ -4434,8 +4470,12 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
             public string Title { get; } = "Project dashboard";
             public ObservableCollection<string> NavigationItems { get; } = [];
             public ObservableCollection<ProjectRow> Projects { get; } = [];
+            public ObservableCollection<string> Metrics { get; } = [];
             public ProjectRow? SelectedProject { get; set; }
             public ICommand SaveCommand { get; }
+            public ICommand CancelRefreshCommand { get; }
+            public bool IsBusy { get; set; }
+            public string ProgressText { get; } = "Refreshing projects";
             public event PropertyChangedEventHandler? PropertyChanged;
             public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
             public bool HasErrors => false;
@@ -4627,6 +4667,20 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Data surface: choose DataGrid/ListView/TreeView from row/list/hierarchy needs", context.Text);
     Contains("Resources/templates: extend existing ResourceDictionary/Style/DataTemplate keys", context.Text);
     Contains("Validation/async: add INotifyDataErrorInfo", context.Text);
+    Contains("WPF advanced layout topology:", context.Text);
+    Contains("Shell composition: Good", context.Text);
+    Contains("GridSplitter", context.Text);
+    Contains("Regions/navigation topology: Good", context.Text);
+    Contains("Master/detail topology: Good", context.Text);
+    Contains("RowDetailsTemplate", context.Text);
+    Contains("Overlay/busy layer: Good", context.Text);
+    Contains("Panel.ZIndex", context.Text);
+    Contains("ProgressText", context.Text);
+    Contains("Dialog/window topology: Good", context.Text);
+    Contains("Templates/items panels: Good", context.Text);
+    Contains("ItemsPanelTemplate", context.Text);
+    Contains("Visual states/motion: Good", context.Text);
+    Contains("Storyboard", context.Text);
     Contains("WPF advanced dependency context:", context.Text);
     Contains("Templates/selectors: Good", context.Text);
     Contains("ProjectRowTemplateSelector", context.Text);
@@ -4643,11 +4697,14 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
+    Contains("Relevant source/config files:", context.Text);
+    Contains("- Demo.App\\ProjectStyles.xaml", context.Text);
+    Contains("- Demo.App\\ProjectDetailsView.xaml", context.Text);
+    Contains("- Demo.App\\ProjectEditDialog.xaml", context.Text);
+    Contains("- Demo.App\\ProjectRowTemplateSelector.cs", context.Text);
     Contains("Editable file excerpts for patch planning:", context.Text);
-    Contains("FILE: Demo.App\\ProjectStyles.xaml", context.Text);
-    Contains("FILE: Demo.App\\ProjectDetailsView.xaml", context.Text);
-    Contains("FILE: Demo.App\\ProjectEditDialog.xaml", context.Text);
-    Contains("FILE: Demo.App\\ProjectRowTemplateSelector.cs", context.Text);
+    Contains("FILE: Demo.App\\MainWindow.xaml", context.Text);
+    Contains("FILE: Demo.App\\MainWindowViewModel.cs", context.Text);
 
     Equal(true, workContext.Handled);
     Equal(true, workContext.Succeeded);
@@ -7424,6 +7481,7 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
     Contains("WPF relationship map:", prompt);
     Contains("WPF integrity context:", prompt);
     Contains("WPF dynamic construction route:", prompt);
+    Contains("WPF advanced layout topology:", prompt);
     Contains("WPF advanced dependency context:", prompt);
     Contains("MainWindow.xaml x:Class Demo.App.MissingWindow missing C# symbol", prompt);
     Contains("resource reference MissingButtonStyle was not found", prompt);
