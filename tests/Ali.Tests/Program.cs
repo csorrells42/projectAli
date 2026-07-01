@@ -132,6 +132,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool shows full coding readiness scanners", TestLocalCodingToolShowsFullCodingReadinessScanners),
     ("local coding tool shows guided feature workflow", TestLocalCodingToolShowsGuidedFeatureWorkflow),
     ("local coding tool shows project control center", TestLocalCodingToolShowsProjectControlCenter),
+    ("local coding tool adds WPF object map to context pack", TestLocalCodingToolAddsWpfObjectMapToContextPack),
     ("local coding tool manages current coding session", TestLocalCodingToolManagesCurrentCodingSession),
     ("programming dashboard exposes cockpit commands", TestProgrammingDashboardExposesCockpitCommands),
     ("local coding tool analyzes solution architecture", TestLocalCodingToolAnalyzesSolutionArchitecture),
@@ -4288,6 +4289,115 @@ static async Task TestLocalCodingToolShowsProjectControlCenter()
     Equal(1, launcher.Starts.Count);
     Equal("explorer.exe", launcher.Starts[0].FileName);
     Equal(appDirectory, launcher.Starts[0].Arguments[0]);
+}
+
+static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "Demo.App");
+    Directory.CreateDirectory(appDirectory);
+    var appProject = Path.Combine(appDirectory, "Demo.App.csproj");
+    await File.WriteAllTextAsync(
+        appProject,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindow.xaml"),
+        """
+        <Window x:Class="Demo.App.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="{Binding Title}">
+            <Window.Resources>
+                <ResourceDictionary>
+                    <Style x:Key="PrimaryButtonStyle" TargetType="Button" />
+                    <DataTemplate x:Key="ProjectRowTemplate" />
+                </ResourceDictionary>
+            </Window.Resources>
+            <DockPanel>
+                <Menu DockPanel.Dock="Top" />
+                <StatusBar DockPanel.Dock="Bottom" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TreeView ItemsSource="{Binding NavigationItems}" />
+                    <GridSplitter Grid.Column="1" Width="5" />
+                    <TabControl Grid.Column="2">
+                        <TabItem Header="Projects">
+                            <DataGrid ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject}" />
+                        </TabItem>
+                        <TabItem Header="Details">
+                            <ContentControl Content="{Binding SelectedProject}" ContentTemplate="{StaticResource ProjectRowTemplate}" />
+                        </TabItem>
+                    </TabControl>
+                    <Button Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" />
+                </Grid>
+            </DockPanel>
+        </Window>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindowViewModel.cs"),
+        """
+        using System.Collections.ObjectModel;
+        using System.ComponentModel;
+        using System.Windows.Input;
+
+        namespace Demo.App;
+
+        public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
+        {
+            public string Title { get; } = "Project dashboard";
+            public ObservableCollection<string> NavigationItems { get; } = [];
+            public ObservableCollection<ProjectRow> Projects { get; } = [];
+            public ProjectRow? SelectedProject { get; set; }
+            public ICommand SaveCommand { get; }
+            public event PropertyChangedEventHandler? PropertyChanged;
+            public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+            public bool HasErrors => false;
+            public System.Collections.IEnumerable GetErrors(string? propertyName) => Array.Empty<string>();
+        }
+
+        public sealed record ProjectRow(string Name);
+        """);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: appProject);
+
+    var context = await service.BuildContextPackAsync("build a complex WPF dashboard window with project navigation and editable rows", CancellationToken.None);
+
+    Equal(true, context.HasContext);
+    Contains("WPF object/layout context:", context.Text);
+    Contains("WPF projects: Demo.App\\Demo.App.csproj", context.Text);
+    Contains("UseWPF=True", context.Text);
+    Contains("XAML files: 1", context.Text);
+    Contains("MainWindow.xaml root Window Demo.App.MainWindow", context.Text);
+    Contains("GridSplitter", context.Text);
+    Contains("DataGrid", context.Text);
+    Contains("TreeView", context.Text);
+    Contains("ContentControl", context.Text);
+    Contains("ResourceDictionary", context.Text);
+    Contains("ProjectRowTemplate", context.Text);
+    Contains("Binding names: Title", context.Text);
+    Contains("NavigationItems", context.Text);
+    Contains("SelectedProject", context.Text);
+    Contains("Command bindings: SaveCommand", context.Text);
+    Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
+    Contains("ObservableCollection", context.Text);
+    Contains("INotifyDataErrorInfo", context.Text);
 }
 
 static async Task TestLocalCodingToolManagesCurrentCodingSession()

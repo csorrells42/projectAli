@@ -116,6 +116,50 @@ public sealed partial class LocalCodingToolService(
         "would",
         "you"
     };
+    private static readonly string[] WpfLayoutObjectNames =
+    [
+        "Window",
+        "UserControl",
+        "Grid",
+        "DockPanel",
+        "StackPanel",
+        "WrapPanel",
+        "UniformGrid",
+        "Canvas",
+        "GridSplitter",
+        "ScrollViewer",
+        "TabControl",
+        "TabItem",
+        "ContentControl",
+        "GroupBox",
+        "Expander",
+        "StatusBar",
+        "Menu",
+        "ToolBar"
+    ];
+    private static readonly string[] WpfDataControlObjectNames =
+    [
+        "ItemsControl",
+        "ListBox",
+        "ListView",
+        "DataGrid",
+        "TreeView",
+        "ComboBox",
+        "DataTemplate",
+        "HierarchicalDataTemplate",
+        "DataTemplateSelector"
+    ];
+    private static readonly string[] WpfResourceObjectNames =
+    [
+        "ResourceDictionary",
+        "Style",
+        "ControlTemplate",
+        "DataTemplate",
+        "StaticResource",
+        "DynamicResource",
+        "BindingProxy",
+        "Converter"
+    ];
 
     private readonly ICodingProcessLauncher _processLauncher = processLauncher ?? new CodingProcessLauncher();
     private readonly ICodingCommandRunner _commandRunner = commandRunner ?? new CodingCommandRunner();
@@ -569,6 +613,8 @@ public sealed partial class LocalCodingToolService(
         lines.Add(string.IsNullOrWhiteSpace(testTarget.Command)
             ? "- No targeted test command detected yet."
             : $"- {testTarget.Command}");
+
+        AddWpfObjectLayoutContext(lines, contextGoal, currentTarget);
 
         var relevantFiles = EnumerateWorkspaceFiles()
             .Where(IsContextRelevantFile)
@@ -19923,7 +19969,350 @@ public sealed partial class LocalCodingToolService(
         {
             return string.Empty;
         }
-    }    private IReadOnlyList<string> SuggestLikelyFilesForGoal(string goal)
+    }
+
+    private void AddWpfObjectLayoutContext(List<string> lines, string goal, string? currentTarget)
+    {
+        if (!Directory.Exists(Policy.WorkspaceRoot))
+        {
+            return;
+        }
+
+        var wantsWpf = MentionsAny(
+            goal,
+            "wpf",
+            "xaml",
+            "desktop",
+            "window",
+            "dashboard",
+            "form",
+            "screen",
+            "ui",
+            "usercontrol",
+            "data grid",
+            "datagrid",
+            "treeview",
+            "layout");
+        var targetDirectory = ResolvePrimaryTargetDirectory(currentTarget);
+        var scopedFiles = GetWpfContextScopeFiles(targetDirectory);
+        var xamlFiles = scopedFiles
+            .Where(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(ScoreWpfContextFile)
+            .ThenBy(RelativeToWorkspace, StringComparer.OrdinalIgnoreCase)
+            .Take(40)
+            .ToList();
+        var projectFiles = scopedFiles
+            .Where(file => file.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(RelativeToWorkspace, StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+        var wpfProjectFiles = projectFiles.Where(IsWpfProjectFile).ToList();
+        if (!wantsWpf && xamlFiles.Count == 0 && wpfProjectFiles.Count == 0)
+        {
+            return;
+        }
+
+        var csharpFiles = scopedFiles
+            .Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !IsGeneratedOrDesignerFile(file))
+            .OrderByDescending(ScoreWpfContextFile)
+            .ThenBy(RelativeToWorkspace, StringComparer.OrdinalIgnoreCase)
+            .Take(80)
+            .ToList();
+        var bindingNames = xamlFiles
+            .SelectMany(file => ExtractXamlBindingNames(SafeReadText(file), commandOnly: false))
+            .Where(name => !IsIgnoredBindingName(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList();
+        var commandNames = xamlFiles
+            .SelectMany(file => ExtractXamlBindingNames(SafeReadText(file), commandOnly: true))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList();
+        var layoutObjects = CountKnownXamlObjects(xamlFiles, WpfLayoutObjectNames);
+        var dataControls = CountKnownXamlObjects(xamlFiles, WpfDataControlObjectNames);
+        var resourceObjects = CountKnownXamlObjects(xamlFiles, WpfResourceObjectNames);
+        var viewModelRows = csharpFiles
+            .Where(IsLikelyWpfStateFile)
+            .Take(8)
+            .Select(BuildWpfCSharpContextRow)
+            .ToList();
+
+        lines.Add("WPF object/layout context:");
+        lines.Add($"- Scope: {FormatWorkspacePath(targetDirectory ?? Policy.WorkspaceRoot)}");
+        lines.Add(wpfProjectFiles.Count == 0
+            ? "- WPF projects: Review - none detected in current scope."
+            : $"- WPF projects: {FormatInlineList(wpfProjectFiles.Select(BuildWpfProjectContextRow))}");
+        lines.Add($"- XAML files: {xamlFiles.Count}; key files: {FormatInlineList(xamlFiles.Take(8).Select(RelativeToWorkspace))}");
+        lines.Add($"- Layout objects: {FormatInlineList(layoutObjects)}");
+        lines.Add($"- Data controls/templates: {FormatInlineList(dataControls)}");
+        lines.Add($"- Resources/templates: {FormatInlineList(resourceObjects)}");
+        lines.Add($"- Binding names: {FormatInlineList(bindingNames)}");
+        lines.Add($"- Command bindings: {FormatInlineList(commandNames)}");
+        foreach (var row in xamlFiles.Take(8).Select(BuildWpfXamlContextRow))
+        {
+            lines.Add($"- XAML map: {row}");
+        }
+
+        lines.Add(viewModelRows.Count == 0
+            ? "- View-model/state files: Review - none detected in current scope."
+            : "- View-model/state files:");
+        lines.AddRange(viewModelRows.Select(row => $"  - {row}"));
+    }
+
+    private IReadOnlyList<string> GetWpfContextScopeFiles(string? targetDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(targetDirectory) && Directory.Exists(targetDirectory))
+        {
+            var targetFiles = ReadWpfScopeFiles(targetDirectory);
+            if (targetFiles.Count > 0 || Path.GetFullPath(targetDirectory).Equals(Path.GetFullPath(Policy.WorkspaceRoot), StringComparison.OrdinalIgnoreCase))
+            {
+                return targetFiles;
+            }
+        }
+
+        return ReadWpfScopeFiles(Policy.WorkspaceRoot);
+    }
+
+    private IReadOnlyList<string> ReadWpfScopeFiles(string root)
+    {
+        return EnumerateFilesUnderDirectory(root)
+            .Where(file => LooksTextReadable(file))
+            .Where(file => Policy.IsInsideWorkspace(file))
+            .Where(file => !ShouldSkipPath(file))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5_000)
+            .ToList();
+    }
+
+    private string BuildWpfProjectContextRow(string projectFile)
+    {
+        try
+        {
+            var document = XDocument.Load(projectFile);
+            var targets = ReadMsBuildPropertyList(document, "TargetFramework", "TargetFrameworks");
+            var output = ReadMsBuildPropertyList(document, "OutputType");
+            return $"{RelativeToWorkspace(projectFile)} target {FormatInlineList(targets)} output {FormatInlineList(output)} UseWPF={ReadBooleanProperty(document, "UseWPF")}";
+        }
+        catch (IOException)
+        {
+            return $"{RelativeToWorkspace(projectFile)} unreadable";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return $"{RelativeToWorkspace(projectFile)} unreadable";
+        }
+        catch (System.Xml.XmlException)
+        {
+            return $"{RelativeToWorkspace(projectFile)} invalid XML";
+        }
+    }
+
+    private static bool IsWpfProjectFile(string projectFile)
+    {
+        try
+        {
+            return ReadBooleanProperty(XDocument.Load(projectFile), "UseWPF");
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+    }
+
+    private string BuildWpfXamlContextRow(string file)
+    {
+        var text = SafeReadText(file);
+        var root = ReadXamlRootSummary(text);
+        var objects = FormatInlineList(CountKnownXamlObjects([file], WpfLayoutObjectNames.Concat(WpfDataControlObjectNames).ToArray()).Take(8));
+        var bindings = FormatInlineList(ExtractXamlBindingNames(text, commandOnly: false).Where(name => !IsIgnoredBindingName(name)).Take(8));
+        var commands = FormatInlineList(ExtractXamlBindingNames(text, commandOnly: true).Take(6));
+        var resources = FormatInlineList(ExtractXamlResourceKeys(text).Take(6));
+        return $"{RelativeToWorkspace(file)} root {root}; objects {objects}; bindings {bindings}; commands {commands}; resources {resources}";
+    }
+
+    private string BuildWpfCSharpContextRow(string file)
+    {
+        var text = SafeReadText(file);
+        var classes = Regex.Matches(text, @"\b(?:class|record)\s+(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["name"].Value)
+            .Take(5)
+            .ToList();
+        var commands = Regex.Matches(text, @"\b(?<name>[A-Za-z_]\w*Command)\b", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["name"].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var collections = Regex.Matches(text, @"ObservableCollection\s*<[^>]+>\s+(?<name>[A-Za-z_]\w*)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["name"].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        var properties = Regex.Matches(text, @"public\s+[\w<>,\?\[\]\s]+\s+(?<name>[A-Z][A-Za-z0-9_]*)\s*{\s*get;", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["name"].Value)
+            .Where(name => !name.EndsWith("Command", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        var signals = new List<string>();
+        AddSignalIfPresent(signals, text, "INotifyPropertyChanged");
+        AddSignalIfPresent(signals, text, "INotifyDataErrorInfo");
+        AddSignalIfPresent(signals, text, "ICommand");
+        AddSignalIfPresent(signals, text, "ObservableCollection");
+        AddSignalIfPresent(signals, text, "CollectionViewSource");
+        AddSignalIfPresent(signals, text, "DependencyProperty");
+        AddSignalIfPresent(signals, text, "WeakEventManager");
+        AddSignalIfPresent(signals, text, "CancellationTokenSource");
+        return $"{RelativeToWorkspace(file)} classes {FormatInlineList(classes)}; commands {FormatInlineList(commands)}; collections {FormatInlineList(collections)}; properties {FormatInlineList(properties)}; signals {FormatInlineList(signals)}";
+    }
+
+    private static void AddSignalIfPresent(List<string> signals, string text, string signal)
+    {
+        if (text.Contains(signal, StringComparison.Ordinal))
+        {
+            signals.Add(signal);
+        }
+    }
+
+    private int ScoreWpfContextFile(string file)
+    {
+        var name = Path.GetFileName(file);
+        var score = 0;
+        if (name.Contains("MainWindow", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 40;
+        }
+
+        if (name.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 35;
+        }
+
+        if (name.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 25;
+        }
+
+        if (name.Contains("Style", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Resource", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 15;
+        }
+
+        return score;
+    }
+
+    private static bool IsLikelyWpfStateFile(string file)
+    {
+        var name = Path.GetFileName(file);
+        if (name.Contains("ViewModel", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Converter", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Behavior", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var text = SafeReadText(file);
+        return text.Contains("ICommand", StringComparison.Ordinal)
+            || text.Contains("ObservableCollection", StringComparison.Ordinal)
+            || text.Contains("INotifyPropertyChanged", StringComparison.Ordinal)
+            || text.Contains("INotifyDataErrorInfo", StringComparison.Ordinal)
+            || text.Contains("DependencyProperty", StringComparison.Ordinal)
+            || text.Contains("CollectionViewSource", StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyList<string> CountKnownXamlObjects(IEnumerable<string> files, IEnumerable<string> objectNames)
+    {
+        var known = objectNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in files)
+        {
+            var text = SafeReadText(file);
+            foreach (Match match in Regex.Matches(text, @"<\s*(?!/|!|\?)(?:[A-Za-z_][\w\.-]*:)?(?<name>[A-Za-z_][\w\.-]*)\b", RegexOptions.CultureInvariant))
+            {
+                var name = match.Groups["name"].Value;
+                if (name.Contains('.', StringComparison.Ordinal) || !known.Contains(name))
+                {
+                    continue;
+                }
+
+                counts[name] = counts.TryGetValue(name, out var count) ? count + 1 : 1;
+            }
+
+            foreach (var name in known.Where(name => name is "StaticResource" or "DynamicResource"))
+            {
+                var count = Regex.Matches(text, @"\{" + Regex.Escape(name) + @"\b", RegexOptions.CultureInvariant).Count;
+                if (count > 0)
+                {
+                    counts[name] = counts.TryGetValue(name, out var current) ? current + count : count;
+                }
+            }
+        }
+
+        return counts
+            .OrderByDescending(pair => pair.Value)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => $"{pair.Key} x{pair.Value}")
+            .ToList();
+    }
+
+    private static string ReadXamlRootSummary(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "unreadable";
+        }
+
+        try
+        {
+            var document = XDocument.Parse(text);
+            var root = document.Root;
+            if (root is null)
+            {
+                return "missing";
+            }
+
+            var className = root.Attributes().FirstOrDefault(attribute => attribute.Name.LocalName.Equals("Class", StringComparison.OrdinalIgnoreCase))?.Value;
+            return string.IsNullOrWhiteSpace(className) ? root.Name.LocalName : $"{root.Name.LocalName} {className}";
+        }
+        catch (System.Xml.XmlException)
+        {
+            var match = Regex.Match(text, @"<\s*(?:[A-Za-z_][\w\.-]*:)?(?<name>[A-Za-z_][\w\.-]*)\b", RegexOptions.CultureInvariant);
+            return match.Success ? match.Groups["name"].Value : "invalid XML";
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractXamlResourceKeys(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var keys = Regex.Matches(text, @"\{(?:StaticResource|DynamicResource)\s+(?<key>[^,\}\s]+)", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["key"].Value.Trim())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+        keys.AddRange(Regex.Matches(text, @"(?:x:Key|Key)\s*=\s*""(?<key>[^""]+)""", RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["key"].Value.Trim())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12));
+        return keys.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList();
+    }
+
+    private IReadOnlyList<string> SuggestLikelyFilesForGoal(string goal)
     {
         var files = Directory.Exists(Policy.WorkspaceRoot)
             ? EnumerateWorkspaceFiles().Take(10_000).Select(RelativeToWorkspace).ToList()
