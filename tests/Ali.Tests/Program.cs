@@ -4524,6 +4524,14 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("ProjectDetailsView.xaml x:Class Demo.App.ProjectDetailsView matched; code-behind ProjectDetailsView.xaml.cs", context.Text);
     Contains("WPF integrity context:", context.Text);
     Contains("Good - x:Class/code-behind, resources, and event handlers look aligned in scanned files.", context.Text);
+    Contains("WPF complex-window readiness:", context.Text);
+    Contains("Shell layout: Good - Window with Grid/DockPanel shell.", context.Text);
+    Contains("Regions/navigation: Good - region/navigation controls present.", context.Text);
+    Contains("Data surfaces: Good - bound data controls and collection/view state present.", context.Text);
+    Contains("Resources/templates: Good - resources, styles, or templates present.", context.Text);
+    Contains("MVVM commands/state: Good - INotifyPropertyChanged and commands present.", context.Text);
+    Contains("Input validation: Good - validation surface present.", context.Text);
+    Contains("Async/performance: Review - add async/cancel state and virtualization for slow or large views.", context.Text);
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);

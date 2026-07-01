@@ -20507,6 +20507,7 @@ public sealed partial class LocalCodingToolService(
         var csharpSymbols = BuildRoslynSymbolIndex(csharpFiles, 10_000);
         var relationshipRows = BuildWpfRelationshipContextRows(xamlFiles, csharpSymbols).Take(10).ToList();
         var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, csharpSymbols).Take(8).ToList();
+        var readinessRows = BuildWpfComplexWindowReadinessRows(xamlFiles, csharpFiles);
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
             .Take(8)
@@ -20537,6 +20538,8 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(integrityRows.Count == 0
             ? ["  - Good - x:Class/code-behind, resources, and event handlers look aligned in scanned files."]
             : integrityRows.Select(row => $"  - {row}"));
+        lines.Add("WPF complex-window readiness:");
+        lines.AddRange(readinessRows.Select(row => $"  - {row}"));
 
         lines.Add(viewModelRows.Count == 0
             ? "- View-model/state files: Review - none detected in current scope."
@@ -20622,6 +20625,65 @@ public sealed partial class LocalCodingToolService(
         var resources = FormatInlineList(ExtractXamlResourceKeys(text).Take(6));
         return $"{RelativeToWorkspace(file)} root {root}; objects {objects}; bindings {bindings}; commands {commands}; resources {resources}";
     }
+
+    private IReadOnlyList<string> BuildWpfComplexWindowReadinessRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles)
+    {
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        return
+        [
+            BuildWpfReadinessRow(
+                "Shell layout",
+                HasAnyXamlObject(allXamlText, "Window") && HasAnyXamlObject(allXamlText, "Grid", "DockPanel"),
+                "Window with Grid/DockPanel shell",
+                "add a Window shell with deliberate Grid/DockPanel regions"),
+            BuildWpfReadinessRow(
+                "Regions/navigation",
+                HasAnyXamlObject(allXamlText, "ContentControl", "TabControl", "TreeView", "Frame"),
+                "region/navigation controls present",
+                "add ContentControl/TabControl/TreeView regions for complex workflows"),
+            BuildWpfReadinessRow(
+                "Data surfaces",
+                HasAnyXamlObject(allXamlText, "DataGrid", "ListView", "ItemsControl", "TreeView")
+                    && MentionsAny(allCSharpText, "ObservableCollection", "ICollectionView", "CollectionViewSource"),
+                "bound data controls and collection/view state present",
+                "pair data controls with ObservableCollection/ICollectionView/CollectionViewSource state"),
+            BuildWpfReadinessRow(
+                "Resources/templates",
+                HasAnyXamlObject(allXamlText, "ResourceDictionary", "Style", "DataTemplate", "ControlTemplate")
+                    || MentionsAny(allXamlText, "StaticResource", "DynamicResource"),
+                "resources, styles, or templates present",
+                "move reusable visuals into ResourceDictionary styles/templates"),
+            BuildWpfReadinessRow(
+                "MVVM commands/state",
+                MentionsAny(allCSharpText, "INotifyPropertyChanged") && MentionsAny(allCSharpText, "ICommand", "RelayCommand", "AsyncRelayCommand"),
+                "INotifyPropertyChanged and commands present",
+                "add view-model properties plus ICommand/CanExecute for feature actions"),
+            BuildWpfReadinessRow(
+                "Input validation",
+                MentionsAny(allCSharpText, "INotifyDataErrorInfo")
+                    || MentionsAny(allXamlText, "ValidatesOnNotifyDataErrors", "Validation.ErrorTemplate", "ErrorTemplate", "Adorner"),
+                "validation surface present",
+                "add INotifyDataErrorInfo plus validation bindings/error template for editable fields"),
+            BuildWpfReadinessRow(
+                "Async/performance",
+                MentionsAny(allCSharpText, "CancellationTokenSource", "AsyncRelayCommand", "Task", "IsBusy", "ProgressText")
+                    || MentionsAny(allXamlText, "VirtualizingPanel", "CanContentScroll", "IsDeferredScrollingEnabled"),
+                "async/performance signals present",
+                "add async/cancel state and virtualization for slow or large views")
+        ];
+    }
+
+    private static string BuildWpfReadinessRow(string name, bool good, string goodDetail, string nextStep)
+        => good ? $"{name}: Good - {goodDetail}." : $"{name}: Review - {nextStep}.";
+
+    private static bool HasAnyXamlObject(string text, params string[] objectNames)
+        => objectNames.Any(name => Regex.IsMatch(
+            text,
+            @"<\s*(?:[A-Za-z_][\w\.-]*:)?" + Regex.Escape(name) + @"\b",
+            RegexOptions.CultureInvariant));
 
     private IReadOnlyList<string> BuildWpfRelationshipContextRows(
         IReadOnlyList<string> xamlFiles,
