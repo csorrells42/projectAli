@@ -4311,6 +4311,17 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
         </Project>
         """);
     await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "App.xaml"),
+        """
+        <Application x:Class="Demo.App.App"
+                     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <Application.Resources>
+                <ResourceDictionary Source="ProjectStyles.xaml" />
+            </Application.Resources>
+        </Application>
+        """);
+    await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "MainWindow.xaml"),
         """
         <Window x:Class="Demo.App.MainWindow"
@@ -4371,19 +4382,88 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
 
         public sealed record ProjectRow(string Name);
         """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "ProjectStyles.xaml"),
+        """
+        <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <Style x:Key="ProjectCardStyle" TargetType="Border" />
+        </ResourceDictionary>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "ProjectDetailsView.xaml"),
+        """
+        <UserControl x:Class="Demo.App.ProjectDetailsView"
+                     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <Grid>
+                <TextBlock Text="{Binding SelectedProject.Name}" />
+            </Grid>
+        </UserControl>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "ProjectDetailsView.xaml.cs"),
+        """
+        namespace Demo.App;
+
+        public partial class ProjectDetailsView
+        {
+            public ProjectDetailsView()
+            {
+                InitializeComponent();
+            }
+        }
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "ProjectEditDialog.xaml"),
+        """
+        <Window x:Class="Demo.App.ProjectEditDialog"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <Grid>
+                <TextBox Text="{Binding SelectedProject.Name}" />
+            </Grid>
+        </Window>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "ProjectEditDialog.xaml.cs"),
+        """
+        namespace Demo.App;
+
+        public partial class ProjectEditDialog
+        {
+            public ProjectEditDialog()
+            {
+                InitializeComponent();
+            }
+        }
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "ProjectRowTemplateSelector.cs"),
+        """
+        using System.Windows.Controls;
+
+        namespace Demo.App;
+
+        public sealed class ProjectRowTemplateSelector : DataTemplateSelector
+        {
+        }
+        """);
     var service = new LocalCodingToolService(
         new CodingWorkspacePolicy(workspace),
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: appProject);
 
-    var context = await service.BuildContextPackAsync("build a complex WPF dashboard window with project navigation and editable rows", CancellationToken.None);
+    const string goal = "build a complex WPF dashboard window with project navigation and editable rows";
+    var context = await service.BuildContextPackAsync(goal, CancellationToken.None);
+    var workContext = await service.TryHandleAsync("feature work context " + goal, CancellationToken.None);
 
     Equal(true, context.HasContext);
     Contains("WPF object/layout context:", context.Text);
     Contains("WPF projects: Demo.App\\Demo.App.csproj", context.Text);
     Contains("UseWPF=True", context.Text);
-    Contains("XAML files: 1", context.Text);
+    Contains("XAML files: 5", context.Text);
     Contains("MainWindow.xaml root Window Demo.App.MainWindow", context.Text);
     Contains("GridSplitter", context.Text);
     Contains("DataGrid", context.Text);
@@ -4391,6 +4471,8 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("ContentControl", context.Text);
     Contains("ResourceDictionary", context.Text);
     Contains("ProjectRowTemplate", context.Text);
+    Contains("ProjectDetailsView.xaml root UserControl Demo.App.ProjectDetailsView", context.Text);
+    Contains("ProjectEditDialog.xaml root Window Demo.App.ProjectEditDialog", context.Text);
     Contains("Binding names: Title", context.Text);
     Contains("NavigationItems", context.Text);
     Contains("SelectedProject", context.Text);
@@ -4398,6 +4480,20 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
+    Contains("Editable file excerpts for patch planning:", context.Text);
+    Contains("FILE: Demo.App\\ProjectStyles.xaml", context.Text);
+    Contains("FILE: Demo.App\\ProjectDetailsView.xaml", context.Text);
+    Contains("FILE: Demo.App\\ProjectEditDialog.xaml", context.Text);
+    Contains("FILE: Demo.App\\ProjectRowTemplateSelector.cs", context.Text);
+
+    Equal(true, workContext.Handled);
+    Equal(true, workContext.Succeeded);
+    Contains("WPF bundle files:", workContext.Message);
+    Contains("Demo.App\\MainWindow.xaml", workContext.Message);
+    Contains("Demo.App\\MainWindowViewModel.cs", workContext.Message);
+    Contains("Demo.App\\ProjectStyles.xaml", workContext.Message);
+    Contains("Demo.App\\ProjectDetailsView.xaml", workContext.Message);
+    Contains("Demo.App\\ProjectEditDialog.xaml", workContext.Message);
 }
 
 static async Task TestLocalCodingToolManagesCurrentCodingSession()

@@ -726,7 +726,8 @@ public sealed partial class LocalCodingToolService(
 
         lines.Add("Editable file excerpts for patch planning:");
         lines.Add("Use only these exact excerpts for oldText in patch previews. Prefer full absolute paths when returning edits.");
-        var remainingCharacters = 12_000;
+        var isWpfAuthoringGoal = IsWpfAuthoringGoal(goal);
+        var remainingCharacters = isWpfAuthoringGoal ? 15_000 : 12_000;
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -760,7 +761,7 @@ public sealed partial class LocalCodingToolService(
                 continue;
             }
 
-            var excerpt = TrimForChat(text, Math.Min(remainingCharacters, 6_000));
+            var excerpt = TrimForChat(text, Math.Min(remainingCharacters, isWpfAuthoringGoal ? 4_500 : 6_000));
             remainingCharacters -= excerpt.Length;
             lines.Add($"FILE: {RelativeToWorkspace(file)}");
             lines.Add($"ABSOLUTE PATH: {file}");
@@ -776,12 +777,20 @@ public sealed partial class LocalCodingToolService(
         AddPatchContextCandidate(files, currentTarget);
 
         var targetDirectory = ResolvePrimaryTargetDirectory(currentTarget);
+        var isWpfGoal = IsWpfAuthoringGoal(goal);
         if (!string.IsNullOrWhiteSpace(targetDirectory) && Directory.Exists(targetDirectory))
         {
             AddPatchContextCandidate(files, Path.Combine(targetDirectory, "Program.cs"));
             AddPatchContextCandidate(files, Path.Combine(targetDirectory, "App.xaml"));
             AddPatchContextCandidate(files, Path.Combine(targetDirectory, "MainWindow.xaml"));
             AddPatchContextCandidate(files, Path.Combine(targetDirectory, "MainWindow.xaml.cs"));
+            if (isWpfGoal)
+            {
+                foreach (var file in ResolveWpfPatchContextFiles(goal, currentTarget, 14))
+                {
+                    AddPatchContextCandidate(files, file);
+                }
+            }
 
             foreach (var file in EnumerateFilesUnderDirectory(targetDirectory)
                          .Where(IsContextRelevantFile)
@@ -809,7 +818,44 @@ public sealed partial class LocalCodingToolService(
 
         return files
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(10)
+            .Take(isWpfGoal ? 16 : 10)
+            .ToList();
+    }
+
+    private IReadOnlyList<string> ResolveWpfPatchContextFiles(string goal, string? currentTarget, int maxFiles)
+    {
+        var selected = new List<string>();
+        AddPatchContextCandidate(selected, currentTarget);
+
+        var targetDirectory = ResolvePrimaryTargetDirectory(currentTarget);
+        if (string.IsNullOrWhiteSpace(targetDirectory) || !Directory.Exists(targetDirectory))
+        {
+            targetDirectory = Directory.Exists(Policy.WorkspaceRoot) ? Policy.WorkspaceRoot : null;
+        }
+
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            return selected;
+        }
+
+        AddPatchContextCandidate(selected, Path.Combine(targetDirectory, "App.xaml"));
+        AddPatchContextCandidate(selected, Path.Combine(targetDirectory, "App.xaml.cs"));
+        AddPatchContextCandidate(selected, Path.Combine(targetDirectory, "MainWindow.xaml"));
+        AddPatchContextCandidate(selected, Path.Combine(targetDirectory, "MainWindow.xaml.cs"));
+        AddPatchContextCandidate(selected, Path.Combine(targetDirectory, "MainWindowViewModel.cs"));
+
+        foreach (var file in EnumerateFilesUnderDirectory(targetDirectory)
+                     .Where(IsWpfPatchContextRelevantFile)
+                     .OrderByDescending(file => ScoresPatchContextFile(file, goal))
+                     .ThenBy(file => RelativeToWorkspace(file), StringComparer.OrdinalIgnoreCase)
+                     .Take(maxFiles))
+        {
+            AddPatchContextCandidate(selected, file);
+        }
+
+        return selected
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(maxFiles)
             .ToList();
     }
 
@@ -905,6 +951,7 @@ public sealed partial class LocalCodingToolService(
     {
         var score = 0;
         var name = Path.GetFileName(file);
+        var extension = Path.GetExtension(file);
         if (name.Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
         {
             score += 40;
@@ -921,6 +968,42 @@ public sealed partial class LocalCodingToolService(
             score += 20;
         }
 
+        if (IsWpfAuthoringGoal(goal))
+        {
+            if (extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 26;
+            }
+
+            if (name.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 28;
+            }
+
+            if (name.Contains("Window", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("View", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Control", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Dialog", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 18;
+            }
+
+            if (name.Contains("Style", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Resource", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Theme", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Template", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 16;
+            }
+
+            if (name.Contains("Converter", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Behavior", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Selector", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 14;
+            }
+        }
+
         foreach (var term in ExtractContextSearchTerms(goal))
         {
             if (Path.GetFileNameWithoutExtension(file).Contains(term, StringComparison.OrdinalIgnoreCase)
@@ -931,6 +1014,84 @@ public sealed partial class LocalCodingToolService(
         }
 
         return score;
+    }
+
+    private static bool IsWpfAuthoringGoal(string goal) =>
+        MentionsAny(
+            goal,
+            "wpf",
+            "xaml",
+            "desktop",
+            "window",
+            "dashboard",
+            "form",
+            "screen",
+            "ui",
+            "usercontrol",
+            "user control",
+            "data grid",
+            "datagrid",
+            "treeview",
+            "layout",
+            "resource dictionary",
+            "style",
+            "template");
+
+    private static bool IsWpfPatchContextRelevantFile(string file)
+    {
+        if (!IsContextRelevantFile(file) || IsGeneratedOrDesignerFile(file))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(file);
+        if (extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!extension.Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileName(file);
+        return name.Contains("Window", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("View", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Control", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Dialog", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("ViewModel", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Converter", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Behavior", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Selector", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Command", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWpfPatchContextRelativePath(string path)
+    {
+        var extension = Path.GetExtension(path);
+        if (extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!extension.Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileName(path);
+        return name.Contains("Window", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("View", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Control", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Dialog", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("ViewModel", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Converter", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Behavior", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Selector", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Command", StringComparison.OrdinalIgnoreCase);
     }
 
     private string? ResolveModelPatchPath(string path, bool createsFile)
@@ -9009,6 +9170,15 @@ public sealed partial class LocalCodingToolService(
                 .ToList();
         }
 
+        if (IsWpfAuthoringGoal(goal))
+        {
+            candidateFiles = candidateFiles
+                .Concat(ResolveWpfPatchContextFiles(goal, GetPrimaryTarget(), 14))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(16)
+                .ToList();
+        }
+
         var goalTerms = ExtractMeaningfulGoalTerms(goal).Take(8).ToList();
         var testTarget = await ResolveTestTargetRecommendationAsync(goal, cancellationToken, changedFiles, graph).ConfigureAwait(false);
         var rankedTargets = RankEditTargetCandidates(goalTerms, hits, candidateFiles, changedFiles);
@@ -9230,6 +9400,9 @@ public sealed partial class LocalCodingToolService(
             $"Plan reasons: {FormatInlineList(context.ImpactScore.Reasons)}",
             topTarget is null ? "Top target: none resolved yet" : $"Top target: {topTarget.RelativePath} ({topTarget.Confidence}, {topTarget.Risk})",
             $"Candidate files: {FormatInlineList(context.RelativeCandidateFiles.Take(8))}",
+            IsWpfAuthoringGoal(context.Goal)
+                ? $"WPF bundle files: {FormatInlineList(context.RelativeCandidateFiles.Where(IsWpfPatchContextRelativePath).Take(12))}"
+                : "WPF bundle files: not a WPF/layout request",
             $"Risk labels: {FormatInlineList(context.RiskLabels)}",
             string.IsNullOrWhiteSpace(context.TestTarget.Command) ? "Test target: none resolved yet" : $"Test target: {context.TestTarget.Command}",
             "Validation rows:"
