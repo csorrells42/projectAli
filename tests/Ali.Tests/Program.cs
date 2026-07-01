@@ -152,6 +152,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
     ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
     ("local coding tool synthesizes hello world console patch", TestLocalCodingToolSynthesizesHelloWorldConsolePatch),
+    ("local coding tool keeps legacy starters opt in", TestLocalCodingToolKeepsLegacyStartersOptIn),
     ("local coding tool creates hello world Program file", TestLocalCodingToolCreatesHelloWorldProgramFile),
     ("local coding tool synthesizes add two integers console patch", TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch),
     ("local coding tool synthesizes escalating console starters", TestLocalCodingToolSynthesizesEscalatingConsoleStarters),
@@ -5233,7 +5234,7 @@ static async Task TestLocalCodingToolSynthesizesHelloWorldConsolePatch()
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    const string goal = "a simple \"hello world\" program that waits for the user to press a button before closing";
+    const string goal = "a starter template for a simple \"hello world\" program that waits for the user to press a button before closing";
 
     var buildThis = await service.TryHandleAsync("build this for me " + goal, CancellationToken.None);
     var synthesis = await service.TryHandleAsync("exact patch synthesis " + goal, CancellationToken.None);
@@ -5274,6 +5275,50 @@ static async Task TestLocalCodingToolSynthesizesHelloWorldConsolePatch()
     Contains("<OutputType>Exe</OutputType>", await File.ReadAllTextAsync(projectPath));
 }
 
+static async Task TestLocalCodingToolKeepsLegacyStartersOptIn()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var projectDirectory = Path.Combine(workspace, "Demo");
+    Directory.CreateDirectory(projectDirectory);
+    var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+    var programPath = Path.Combine(projectDirectory, "Program.cs");
+    await File.WriteAllTextAsync(
+        projectPath,
+        """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+            <ImplicitUsings>enable</ImplicitUsings>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(programPath, "Console.WriteLine(\"Old\");\r\n");
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    const string goal = "a simple \"hello world\" program that waits for the user to press a button before closing";
+
+    var synthesis = await service.TryHandleAsync("exact patch synthesis " + goal, CancellationToken.None);
+    var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
+
+    Equal(true, synthesis.Handled);
+    Equal(true, synthesis.Succeeded);
+    Contains("Legacy starter recipes: off", synthesis.Message);
+    Equal(false, synthesis.Message.Contains("deterministic console recipe", StringComparison.OrdinalIgnoreCase));
+    Equal(false, synthesis.Message.Contains("Console.ReadKey(intercept: true);", StringComparison.OrdinalIgnoreCase));
+    Contains("Next command: concrete patch authoring " + goal, synthesis.Message);
+
+    Equal(true, preview.Handled);
+    Equal(false, preview.Succeeded);
+    Contains("Legacy starter recipes: off", preview.Message);
+    Contains("Next command: concrete patch authoring " + goal, preview.Message);
+    Equal("Console.WriteLine(\"Old\");\r\n", await File.ReadAllTextAsync(programPath));
+}
+
 static async Task TestLocalCodingToolCreatesHelloWorldProgramFile()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -5298,7 +5343,7 @@ static async Task TestLocalCodingToolCreatesHelloWorldProgramFile()
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    const string goal = "a simple hello world console program that waits for a keypress before closing";
+    const string goal = "a starter template for a simple hello world console program that waits for a keypress before closing";
 
     var synthesis = await service.TryHandleAsync("exact patch synthesis " + goal, CancellationToken.None);
     var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
@@ -5362,7 +5407,7 @@ static async Task TestLocalCodingToolSynthesizesAddTwoIntegersConsolePatch()
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    const string goal = "Build a simple C# console program that asks the user for two integers, adds them together, shows the answer, and waits for a keypress before closing.";
+    const string goal = "Build a starter template for a simple C# console program that asks the user for two integers, adds them together, shows the answer, and waits for a keypress before closing.";
 
     var preview = await service.TryHandleAsync("preview synthesized feature patch " + goal, CancellationToken.None);
 
@@ -5415,32 +5460,32 @@ static async Task TestLocalCodingToolSynthesizesEscalatingConsoleStarters()
     await AssertConsoleStarterAsync(
         service,
         programPath,
-        "Build a simple calculator console app with a menu that can add, subtract, multiply, and divide two numbers and wait for a keypress before closing.",
+        "Build a starter template for a simple calculator console app with a menu that can add, subtract, multiply, and divide two numbers and wait for a keypress before closing.",
         ["Enter an operator", "Cannot divide by zero", "Console.ReadKey(intercept: true);"]);
     await AssertConsoleStarterAsync(
         service,
         programPath,
-        "Build a C# console number guessing game that picks a random number and tells the user too high or too low until they guess it.",
+        "Build a starter template for a C# console number guessing game that picks a random number and tells the user too high or too low until they guess it.",
         ["Random.Shared.Next", "Too low", "Too high"]);
     await AssertConsoleStarterAsync(
         service,
         programPath,
-        "Build a menu-driven C# console todo list app that can add tasks, list tasks, remove tasks, and quit.",
+        "Build a starter template for a menu-driven C# console todo list app that can add tasks, list tasks, remove tasks, and quit.",
         ["Todo List", "tasks.Add", "tasks.RemoveAt"]);
     await AssertConsoleStarterAsync(
         service,
         programPath,
-        "Build a C# console notes app that saves notes to a file, lists saved notes, clears notes, and quits.",
+        "Build a starter template for a C# console notes app that saves notes to a file, lists saved notes, clears notes, and quits.",
         ["notes.txt", "File.AppendAllText", "File.ReadAllLines"]);
     await AssertConsoleStarterAsync(
         service,
         programPath,
-        "Build a C# console shopping list app with a menu to add items, list items, remove items, and quit.",
+        "Build a starter template for a C# console shopping list app with a menu to add items, list items, remove items, and quit.",
         ["Shopping List", "items.Add", "items.RemoveAt"]);
     await AssertConsoleStarterAsync(
         service,
         programPath,
-        "Build a C# console contact manager that saves contacts to a file, lists contacts, deletes contacts, and quits.",
+        "Build a starter template for a C# console contact manager that saves contacts to a file, lists contacts, deletes contacts, and quits.",
         ["contacts.txt", "File.AppendAllText", "File.ReadAllLines"]);
 }
 
@@ -5526,7 +5571,7 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    const string counterGoal = "Build a simple WPF counter app with a button that increases the count on screen.";
+    const string counterGoal = "Build a starter template for a simple WPF counter app with a button that increases the count on screen.";
 
     var buildThis = await service.TryHandleAsync("build this for me " + counterGoal, CancellationToken.None);
     Equal(true, buildThis.Handled);
@@ -5555,28 +5600,28 @@ static async Task TestLocalCodingToolSynthesizesWpfCounterStarter()
         service,
         xamlPath,
         codeBehindPath,
-        "Build a simple WPF calculator app that can add, subtract, multiply, and divide two numbers.",
+        "Build a starter template for a simple WPF calculator app that can add, subtract, multiply, and divide two numbers.",
         ["FirstNumberTextBox", "OperationComboBox", "CalculateButton_Click"],
         ["CalculateButton_Click", "Cannot divide by zero.", "ResultTextBlock.Text"]);
     await AssertWpfStarterAsync(
         service,
         xamlPath,
         codeBehindPath,
-        "Build a simple WPF greeting app that asks for a name and says hello.",
+        "Build a starter template for a simple WPF greeting app that asks for a name and says hello.",
         ["NameTextBox", "GreetButton_Click", "GreetingTextBlock"],
         ["GreetButton_Click", "Hello, {name}!", "GreetingTextBlock.Text"]);
     await AssertWpfStarterAsync(
         service,
         xamlPath,
         codeBehindPath,
-        "Build a simple WPF todo list app that can add tasks and remove the selected task.",
+        "Build a starter template for a simple WPF todo list app that can add tasks and remove the selected task.",
         ["TaskTextBox", "TasksListBox", "RemoveTaskButton_Click"],
         ["ObservableCollection<string>", "_tasks.Add", "_tasks.Remove"]);
     await AssertWpfStarterAsync(
         service,
         xamlPath,
         codeBehindPath,
-        "Build a WPF complex project dashboard window with navigation, composed views, a data grid, details pane, and status bar.",
+        "Build a starter template for a WPF complex project dashboard window with navigation, composed views, a data grid, details pane, and status bar.",
         ["ResourceDictionary Source=\"AliDashboardStyles.xaml\"", "BooleanToVisibilityConverter", "DashboardStatusBrushConverter", "DashboardSelectionSummaryConverter", "DashboardBindingProxy", "Window.InputBindings", "KeyBinding Key=\"F5\"", "KeyBinding Key=\"Escape\"", "KeyBinding Key=\"D\" Modifiers=\"Control\"", "FocusDetailsCommand", "Window.CommandBindings", "CommandBinding Command=\"{x:Static local:MainWindow.FocusDetailsCommand}\"", "Executed=\"FocusDetailsCommand_Executed\"", "CanExecute=\"FocusDetailsCommand_CanExecute\"", "DashboardDetailTemplate", "DashboardDetailCard Item=\"{Binding}\"", "ReadyDashboardItemCardTemplate", "ReviewDashboardItemCardTemplate", "DefaultDashboardItemCardTemplate", "DashboardItemCardTemplateSelector", "ReadyTemplate=\"{StaticResource ReadyDashboardItemCardTemplate}\"", "ReviewTemplate=\"{StaticResource ReviewDashboardItemCardTemplate}\"", "DefaultTemplate=\"{StaticResource DefaultDashboardItemCardTemplate}\"", "DataType=\"{x:Type local:OverviewDashboardViewModel}\"", "DataType=\"{x:Type local:ActivityDashboardViewModel}\"", "DataType=\"{x:Type local:SettingsDashboardViewModel}\"", "TabControl", "SelectedIndex=\"{Binding SelectedViewIndex, Mode=TwoWay}\"", "TabItem Header=\"Overview\"", "Content=\"{Binding OverviewView}\"", "TabItem Header=\"Activity\"", "Content=\"{Binding ActivityView}\"", "TabItem Header=\"Settings\"", "Content=\"{Binding SettingsView}\"", "ContentControl", "SelectedItem=\"{Binding SelectedItem, Mode=TwoWay}\"", "DashboardHeaderCardStyle", "NavigationTreeView", "ItemsSource=\"{Binding NavigationItems}\"", "VirtualizingPanel.IsVirtualizing=\"True\"", "VirtualizingPanel.VirtualizationMode=\"Recycling\"", "ScrollViewer.CanContentScroll=\"True\"", "ScrollViewer.IsDeferredScrollingEnabled=\"True\"", "HierarchicalDataTemplate", "IsExpanded\" Value=\"{Binding IsExpanded, Mode=TwoWay}\"", "IsSelected\" Value=\"{Binding IsSelected, Mode=TwoWay}\"", "SelectedNavigationSummary", "ItemsSource=\"{Binding Metrics}\"", "ItemsControl.ItemsPanel", "ItemsPanelTemplate", "local:DashboardAdaptiveWrapPanel MinItemWidth=\"180\"", "DashboardMetricCardStyle", "Text=\"{Binding SearchText, UpdateSourceTrigger=PropertyChanged, diag:PresentationTraceSources.TraceLevel=High}\"", "local:DashboardFocusBehavior.FocusOnLoaded=\"True\"", "ItemsSource=\"{Binding ItemsView}\"", "local:DashboardSelectionBehavior.ScrollSelectedItemIntoView=\"True\"", "DataGrid.GroupStyle", "GroupStyle.HeaderTemplate", "RowDetailsVisibilityMode=\"VisibleWhenSelected\"", "DataGrid.RowDetailsTemplate", "ContentTemplateSelector=\"{StaticResource DashboardItemCardTemplateSelector}\"", "DataGrid.RowStyle", "ContextMenu", "Data.MarkItemReadyCommand", "Data.MarkItemForReviewCommand", "CommandParameter=\"{Binding PlacementTarget.DataContext", "DataGridTemplateColumn", "DataGridTemplateColumn.CellTemplate", "Binding Path=\"Status\" Converter=\"{StaticResource DashboardStatusBrushConverter}\"", "CornerRadius=\"8\"", "ProgressBar", "IsIndeterminate=\"{Binding IsBusy}\"", "Grid.ColumnSpan=\"5\"", "Panel.ZIndex=\"10\"", "Style=\"{StaticResource DashboardBusyOverlayStyle}\"", "Border.Triggers", "EventTrigger RoutedEvent=\"FrameworkElement.Loaded\"", "BeginStoryboard", "Storyboard", "DoubleAnimation Storyboard.TargetProperty=\"Opacity\"", "Duration=\"0:0:0.18\"", "IsHitTestVisible=\"{Binding IsBusy}\"", "Text=\"{Binding ProgressText}\"", "Command=\"{Binding CancelRefreshCommand}\"", "Command=\"{Binding RemoveSelectedItemCommand}\"", "DetailsPaneGroupBox", "Focusable=\"True\"", "Grid.IsSharedSizeScope=\"True\"", "Expander Header=\"Selected item\"", "MultiBinding Converter=\"{StaticResource DashboardSelectionSummaryConverter}\"", "Binding Path=\"SelectedItemName\"", "Binding Path=\"SelectedItemStatus\"", "Expander Header=\"Add item\"", "Expander Header=\"Layout notes\"", "SharedSizeGroup=\"DashboardFormLabels\"", "Grid.ColumnDefinitions", "Grid.RowDefinitions", "ValidatesOnNotifyDataErrors=True", "NotifyOnValidationError=True", "diag:PresentationTraceSources.TraceLevel=High", "DashboardFormLabelStyle", "DashboardInputTextBoxStyle", "DashboardInputComboBoxStyle", "SelectedItemName", "SelectedItemOwner", "SelectedItemStatus", "ItemsSource=\"{Binding StatusOptions}\"", "ItemsSource=\"{Binding ValidationSummary}\"", "Command=\"{Binding ApplySelectedItemCommand}\"", "NewItemError", "GridSplitter", "StatusBar", "Command=\"{Binding AddItemCommand}\""],
         ["DataContext = new MainWindowViewModel(", "new DashboardDialogService(this)", "new DashboardThemeService(this)", "new DashboardLayoutStateService()", "Loaded += MainWindow_Loaded", "Closing += MainWindow_Closing", "ApplyWindowBounds(viewModel.RestoreLayout())", "viewModel.SaveLayout(Left, Top, Width, Height)", "DashboardLayoutStateService", "Environment.SpecialFolder.LocalApplicationData", "JsonSerializer.Deserialize<DashboardLayoutState>", "JsonSerializer.Serialize", "DashboardDialogService", "IDashboardDialogService", "DashboardConfirmDialog", "Owner = _owner", "ShowDialog() == true", "DashboardThemeService", "IDashboardThemeService", "ApplyTheme(DashboardThemePalette palette)", "SolidColorBrush", "DashboardHeaderBrush", "RoutedUICommand FocusDetailsCommand", "InputGestureCollection", "KeyGesture(Key.D, ModifierKeys.Control)", "FocusDetailsCommand_CanExecute", "CanExecuteRoutedEventArgs", "FocusDetailsCommand_Executed", "ExecutedRoutedEventArgs", "DetailsPaneGroupBox.Focus()"],
         "MainWindowViewModel.cs",

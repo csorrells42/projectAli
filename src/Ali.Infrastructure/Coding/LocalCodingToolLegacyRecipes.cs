@@ -5,6 +5,9 @@ namespace Ali.Infrastructure.Coding;
 
 public sealed partial class LocalCodingToolService
 {
+    private static bool UsesLegacyStarterRecipeLane(string goal) =>
+        MentionsAny(goal, "starter", "template", "scaffold", "scaffolding", "recipe", "sample app", "sample project", "boilerplate");
+
     private static bool TryBuildSimpleConsoleProgramCreateBlock(
         string goal,
         string fullPath,

@@ -12823,9 +12823,13 @@ public sealed partial class LocalCodingToolService(
         var candidates = new List<FeaturePatchSynthesisCandidate>();
         var guardRows = new List<string>();
         var hasTransform = TryParseMechanicalPatchTransform(context.Goal, out var oldValue, out var newValue);
+        var allowLegacyStarterRecipes = UsesLegacyStarterRecipeLane(context.Goal);
         guardRows.Add(hasTransform
             ? $"Mechanical transform: replace {oldValue} with {newValue}."
             : "Mechanical transform: none detected - exact anchors only until implementation text is supplied.");
+        guardRows.Add(allowLegacyStarterRecipes
+            ? "Legacy starter recipes: enabled by explicit starter/template/scaffold wording."
+            : "Legacy starter recipes: off - dynamic model patch authoring is the default.");
         var targetPaths = FindDeterministicFeaturePatchTargets(context)
             .Concat(context.RankedTargets
             .Select(target => ToAbsoluteWorkspacePath(target.RelativePath))
@@ -12846,6 +12850,7 @@ public sealed partial class LocalCodingToolService(
             if (!File.Exists(fullPath))
             {
                 if (!hasTransform
+                    && allowLegacyStarterRecipes
                     && TryBuildSimpleConsoleProgramCreateBlock(context.Goal, fullPath, out var createText, out var createNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12860,6 +12865,7 @@ public sealed partial class LocalCodingToolService(
                 }
 
                 if (!hasTransform
+                    && allowLegacyStarterRecipes
                     && TryBuildNewWpfViewModelPatchBlock(context.Goal, fullPath, out var newWpfViewModelText, out var newWpfViewModelNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12874,6 +12880,7 @@ public sealed partial class LocalCodingToolService(
                 }
 
                 if (!hasTransform
+                    && allowLegacyStarterRecipes
                     && TryBuildNewWpfAppPatchBlock(context.Goal, fullPath, out var newWpfAppText, out var newWpfAppNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12888,6 +12895,7 @@ public sealed partial class LocalCodingToolService(
                 }
 
                 if (!hasTransform
+                    && allowLegacyStarterRecipes
                     && TryBuildNewWpfStylesPatchBlock(context.Goal, fullPath, out var newWpfStylesText, out var newWpfStylesNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12902,6 +12910,7 @@ public sealed partial class LocalCodingToolService(
                 }
 
                 if (!hasTransform
+                    && allowLegacyStarterRecipes
                     && TryBuildNewWpfUserControlPatchBlock(context.Goal, fullPath, out var newWpfUserControlText, out var newWpfUserControlNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12916,6 +12925,7 @@ public sealed partial class LocalCodingToolService(
                 }
 
                 if (!hasTransform
+                    && allowLegacyStarterRecipes
                     && TryBuildNewWpfDialogPatchBlock(context.Goal, fullPath, out var newWpfDialogText, out var newWpfDialogNote))
                 {
                     candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12982,6 +12992,7 @@ public sealed partial class LocalCodingToolService(
             }
 
             if (!hasTransform
+                && allowLegacyStarterRecipes
                 && TryBuildConsoleProjectOutputTypePatchBlock(content, context.Goal, fullPath, out var projectOldText, out var projectNewText, out var projectNote))
             {
                 candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -12996,6 +13007,7 @@ public sealed partial class LocalCodingToolService(
             }
 
             if (!hasTransform
+                && allowLegacyStarterRecipes
                 && TryBuildSimpleConsoleProgramPatchBlock(content, context.Goal, fullPath, out var consoleOldText, out var consoleNewText, out var consoleNote))
             {
                 candidates.Add(new FeaturePatchSynthesisCandidate(
@@ -13010,6 +13022,7 @@ public sealed partial class LocalCodingToolService(
             }
 
             if (!hasTransform
+                && allowLegacyStarterRecipes
                 && TryBuildSimpleWpfPatchBlock(content, context.Goal, fullPath, out var wpfOldText, out var wpfNewText, out var wpfNote))
             {
                 candidates.Add(new FeaturePatchSynthesisCandidate(
