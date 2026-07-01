@@ -14257,6 +14257,7 @@ public sealed class LocalCodingToolService(
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                xmlns:diag="clr-namespace:System.Diagnostics;assembly=WindowsBase"
                 xmlns:local="{{BuildWpfLocalXmlNamespace(xamlClass)}}"
                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                 Title="Project Dashboard" Height="620" Width="980" MinHeight="520" MinWidth="760"
@@ -14329,7 +14330,7 @@ public sealed class LocalCodingToolService(
                             </ItemsControl>
                             <DockPanel Grid.Row="1" Margin="0,0,0,8">
                                 <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, diag:PresentationTraceSources.TraceLevel=High}"
                                          local:DashboardFocusBehavior.FocusOnLoaded="True"
                                          VerticalContentAlignment="Center" />
                             </DockPanel>
@@ -14569,16 +14570,16 @@ public sealed class LocalCodingToolService(
                                                 </Grid.RowDefinitions>
                                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Style="{StaticResource DashboardFormLabelStyle}" />
                                                 <TextBox Grid.Row="0" Grid.Column="1"
-                                                         Text="{Binding SelectedItemName, UpdateSourceTrigger=PropertyChanged}"
+                                                         Text="{Binding SelectedItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True, diag:PresentationTraceSources.TraceLevel=High}"
                                                          Style="{StaticResource DashboardInputTextBoxStyle}" />
                                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Owner" Style="{StaticResource DashboardFormLabelStyle}" />
                                                 <TextBox Grid.Row="1" Grid.Column="1"
-                                                         Text="{Binding SelectedItemOwner, UpdateSourceTrigger=PropertyChanged}"
+                                                         Text="{Binding SelectedItemOwner, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True, diag:PresentationTraceSources.TraceLevel=High}"
                                                          Style="{StaticResource DashboardInputTextBoxStyle}" />
                                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Status" Style="{StaticResource DashboardFormLabelStyle}" />
                                                 <ComboBox Grid.Row="2" Grid.Column="1"
                                                           ItemsSource="{Binding StatusOptions}"
-                                                          SelectedItem="{Binding SelectedItemStatus, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          SelectedItem="{Binding SelectedItemStatus, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True, diag:PresentationTraceSources.TraceLevel=High}"
                                                           Style="{StaticResource DashboardInputComboBoxStyle}" />
                                             </Grid>
                                             <ItemsControl ItemsSource="{Binding ValidationSummary}" Margin="0,0,0,8">
@@ -14605,7 +14606,7 @@ public sealed class LocalCodingToolService(
                                                 </Grid.RowDefinitions>
                                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" Style="{StaticResource DashboardFormLabelStyle}" />
                                                 <TextBox Grid.Row="0" Grid.Column="1"
-                                                         Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True}"
+                                                         Text="{Binding NewItemName, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True, diag:PresentationTraceSources.TraceLevel=High}"
                                                          Style="{StaticResource DashboardInputTextBoxStyle}" />
                                             </Grid>
                                             <TextBlock Text="{Binding NewItemError}" Foreground="#B42318" TextWrapping="Wrap" Margin="0,0,0,8" />
@@ -15083,6 +15084,7 @@ public sealed class LocalCodingToolService(
                          xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                          xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                         xmlns:diag="clr-namespace:System.Diagnostics;assembly=WindowsBase"
                          xmlns:local="{{localNamespace}}"
                          xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                          MinHeight="130"
@@ -15134,7 +15136,7 @@ public sealed class LocalCodingToolService(
                             BorderBrush="#D0D7DE">
                         <StackPanel>
                             <TextBlock Text="Selected item" FontWeight="SemiBold" Margin="0,0,0,8" />
-                            <TextBlock Text="{Binding Item.Name, ElementName=Root, TargetNullValue=No item selected}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Item.Name, ElementName=Root, TargetNullValue=No item selected, diag:PresentationTraceSources.TraceLevel=High}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
                             <TextBlock Margin="0,8,0,0">
                                 <Run Text="Owner: " />
                                 <Run Text="{Binding Item.Owner, ElementName=Root, TargetNullValue=none}" />
