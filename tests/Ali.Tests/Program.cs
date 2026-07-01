@@ -5540,7 +5540,21 @@ static async Task TestLocalCodingToolPreviewsExtendedWpfPatchBundle()
     Contains("Patch bundle preview", wpfPreview.Message);
     Contains("Edits: 12", wpfPreview.Message);
     Contains("DashboardView12.xaml", wpfPreview.Message);
+    Contains("XAML binding check - Waiting: xaml binding check", wpfPreview.Message);
+    Contains("Command binding check - Waiting: command binding check", wpfPreview.Message);
+    Contains("WPF validation route - run XAML binding check and command binding check after build.", wpfPreview.Message);
+    Contains("WPF repair route - if either WPF validation step is Bad, ask: fix the WPF validation issues in DashboardView1.xaml", wpfPreview.Message);
     Equal(true, (await File.ReadAllTextAsync(wpfPaths[11])).Contains("OldMarker12", StringComparison.Ordinal));
+
+    var wpfApplied = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+
+    Equal(true, wpfApplied.Handled);
+    Equal(true, wpfApplied.Succeeded);
+    Contains("Applied last patch preview bundle", wpfApplied.Message);
+    Contains("XAML binding check - Waiting: xaml binding check", wpfApplied.Message);
+    Contains("Command binding check - Waiting: command binding check", wpfApplied.Message);
+    Contains("WPF repair route - if either WPF validation step is Bad", wpfApplied.Message);
+    Equal(true, (await File.ReadAllTextAsync(wpfPaths[11])).Contains("NewMarker12", StringComparison.Ordinal));
 
     var codeLines = new List<string>();
     for (var index = 1; index <= 11; index++)

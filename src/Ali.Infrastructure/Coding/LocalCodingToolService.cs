@@ -17885,9 +17885,33 @@ public sealed partial class LocalCodingToolService(
         };
         lines.Add("Queued validation command packet:");
         lines.AddRange(BuildValidationQueueRows(query, paths.Select(RelativeToWorkspace).ToList(), testTarget).Select(row => $"- {row}"));
+        lines.AddRange(BuildWpfValidationRepairRouteRows(query, paths.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
         lines.Add("Semantic patch checks:");
         lines.AddRange(BuildSemanticPatchCheckLines(paths));
         return lines;
+    }
+
+    private static IReadOnlyList<string> BuildWpfValidationRepairRouteRows(string goal, IReadOnlyList<string> changedFiles)
+    {
+        if (!IsWpfValidationRelevant(goal, changedFiles))
+        {
+            return [];
+        }
+
+        var target = FormatInlineList(changedFiles
+            .Where(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+            .Take(3));
+        if (string.Equals(target, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            target = CleanGoal(goal, "current WPF files");
+        }
+
+        return
+        [
+            "WPF validation route - run XAML binding check and command binding check after build.",
+            $"WPF repair route - if either WPF validation step is Bad, ask: fix the WPF validation issues in {target}"
+        ];
     }
 
     private async Task<CodingToolResult> ApplyLastPatchPreviewAsync(CancellationToken cancellationToken)
@@ -18019,6 +18043,7 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(BuildBeforeAfterSymbolDiffRows(prepared.Edits.Select(edit => edit.BeforeSnippet), prepared.Edits.Select(edit => edit.AfterSnippet)).Select(row => $"- {row}"));
         lines.Add("Queued validation command packet:");
         lines.AddRange(BuildValidationQueueRows(string.Join(" ", changedFiles.Select(Path.GetFileNameWithoutExtension)), changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
+        lines.AddRange(BuildWpfValidationRepairRouteRows(string.Join(" ", changedFiles.Select(Path.GetFileNameWithoutExtension)), changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
 
         return new CodingToolResult(
             true,
