@@ -352,19 +352,13 @@ public sealed class ConversationOrchestrator(
                 }
             }
 
-            var synthesizedPreview = await LocalCodingTool.TryHandleAsync(
-                $"preview synthesized feature patch {NormalizeProgrammingGoal(userText)}",
-                cancellationToken).ConfigureAwait(false);
-            if (synthesizedPreview.Handled && synthesizedPreview.Succeeded)
-            {
-                yield return new AssistantStreamChunk(
-                    conversationId,
-                    userMessageId,
-                    assistantMessageId,
-                    BuildProgrammingToolMessage(synthesizedPreview),
-                    EvidenceStatus.Verified);
-                yield break;
-            }
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                BuildProgrammingPatchPlannerStopMessage(userText, patchPlan),
+                EvidenceStatus.Unknown);
+            yield break;
         }
 
         var plan = CodingPlanner is null
@@ -583,6 +577,20 @@ public sealed class ConversationOrchestrator(
             Environment.NewLine,
             $"Next: {next}",
             $"Status: {status}");
+    }
+
+    private static string BuildProgrammingPatchPlannerStopMessage(string userText, CodingPatchPlan patchPlan)
+    {
+        var reason = !string.IsNullOrWhiteSpace(patchPlan.StopReason)
+            ? patchPlan.StopReason
+            : !string.IsNullOrWhiteSpace(patchPlan.Summary)
+                ? patchPlan.Summary
+                : "The dynamic patch planner did not produce a safe patch from the current project context.";
+        return string.Join(
+            Environment.NewLine,
+            $"Next: concrete patch authoring {NormalizeProgrammingGoal(userText)}",
+            $"Status: Dynamic patch planner stopped - {reason}",
+            "Use Next to inspect the exact target files and ask the model for a concrete patch again.");
     }
 
     private static string BuildProgrammingStatus(CodingToolResult result)

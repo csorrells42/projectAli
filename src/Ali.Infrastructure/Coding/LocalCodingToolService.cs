@@ -11055,6 +11055,12 @@ public sealed class LocalCodingToolService(
         lines.Add("- Turn a plain-language feature request into target files, behavior specs, patch body plans, confidence rows, and validation steps.");
         lines.Add("- Preview patches through owner-approved gates; she should not apply edits, run builds/tests, install packages, or use Git write operations without confirmation.");
         lines.Add("- Explain ambiguity plainly when the workspace, project, target file, patch body, or validation route is not clear.");
+        lines.Add("How Ali should choose the coding path:");
+        lines.AddRange(CodingAbilityCatalog.BuildProgrammingCapabilityPathGuide()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Skip(1)
+            .Take(80)
+            .Select(row => $"- {row}"));
         lines.Add("How to ask:");
         lines.Add($"- build this for me {goal}");
         lines.Add($"- owner approved apply packet {goal}");

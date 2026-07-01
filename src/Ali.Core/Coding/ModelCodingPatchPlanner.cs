@@ -8,7 +8,7 @@ namespace Ali.Core.Coding;
 public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodingPatchPlanner
 {
     private const int MaxPlannerOutputCharacters = 18_000;
-    private const int MaxPatchEdits = 8;
+    private const int MaxPatchEdits = 10;
     private const string ConversationId = "coding_patch_plan";
 
     public async Task<CodingPatchPlan> PlanPatchAsync(
@@ -66,17 +66,21 @@ public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodin
             "Do not answer the user. Do not explain. Do not include markdown.",
             "Use the current user message as the only requested goal. Ignore stale goals from previous turns unless the user explicitly says continue, next, or keep going.",
             "Generate a guarded patch preview only when the provided context contains enough exact file text to make a safe edit.",
+            "Design the solution dynamically from the user's goal and the provided project context. Do not rely on canned starter recipes or keyword templates.",
+            "Choose the appropriate programming capability path internally, then author the smallest coherent patch for that path.",
             "For an existing file, oldText must be copied exactly from an editable file excerpt below. Preserve line endings exactly when possible.",
             "For a new file, oldText must be an empty string and path must be a concrete file path inside the selected workspace.",
-            "For console apps, prefer a complete Program.cs with clear prompts, input validation, visible output, and an optional Console.ReadKey when the user asks the app to wait before closing.",
-            "For WPF apps, prefer small MVVM-friendly slices: XAML binds to public view-model properties/commands, code-behind stays minimal, property changes raise notifications, ObservableCollection backs list UIs, async work reports state, and commands keep UI work on the dispatcher-safe path. For complex windows, use Grid/DockPanel/ContentControl regions, ResourceDictionary styles/templates, explicit UserControl boundaries, virtualization for large item lists, and avoid blocking the UI thread.",
-            "For data structures, SQL/database access, services, caches, queues, and APIs, prefer small seams: keep pure data-structure logic testable, keep SQL parameterized, preserve transactions and connection lifetimes, avoid hidden global state, separate service boundaries, keep retries idempotent, and do not add packages or external services unless context or owner approval supports it.",
+            "For new apps, create or update every required source file in one coherent patch when the workspace and target project path are clear.",
+            "For console apps, dynamically design Program.cs around the actual requested behavior with clear prompts, input validation, visible output, loops/menus/data structures when needed, and an optional Console.ReadKey only when the user asks the app to wait before closing.",
+            "For WPF apps, dynamically decide Window/UserControl boundaries, XAML layout, view-model properties/commands, data structures, ResourceDictionary styles/templates, validation, virtualization, async UI state, and minimal code-behind services based on the requested app.",
+            "For data structures, SQL/database access, services, caches, queues, and APIs, dynamically choose the simplest data structure/store/service boundary that meets lookup, ordering, persistence, concurrency, and validation needs.",
             "Do not invent tool results, builds, tests, files, or hidden project facts.",
             "If the request cannot be patched safely from the provided excerpts, return has_patch false with a short stop_reason.",
             "JSON shape:",
-            "{\"has_patch\":true,\"summary\":\"Update Program.cs to read an integer and print its factorial.\",\"confidence\":0.86,\"edits\":[{\"path\":\"C:\\\\Workspace\\\\Demo\\\\Program.cs\",\"oldText\":\"exact current text\",\"newText\":\"replacement text\"}]}",
+            "{\"has_patch\":true,\"selected_path\":\"New console app\",\"summary\":\"Update Program.cs to read an integer and print its factorial.\",\"confidence\":0.86,\"edits\":[{\"path\":\"C:\\\\Workspace\\\\Demo\\\\Program.cs\",\"oldText\":\"exact current text\",\"newText\":\"replacement text\"}]}",
             "No-patch shape:",
             "{\"has_patch\":false,\"summary\":\"Need an exact target file first.\",\"confidence\":0.2,\"stop_reason\":\"No editable file excerpt matched the requested change.\",\"edits\":[]}",
+            CodingAbilityCatalog.BuildProgrammingCapabilityPathGuide(),
             "Approved read-only context:",
             contextPack.Text);
 

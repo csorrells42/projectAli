@@ -166,10 +166,10 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool rejects ambiguous file edits", TestLocalCodingToolRejectsAmbiguousFileEdits),
     ("local coding tool denies disabled file edits", TestLocalCodingToolDeniesDisabledFileEdits),
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
-    ("orchestrator uses coding planner in programming mode", TestOrchestratorUsesCodingPlannerInProgrammingMode),
-    ("orchestrator keeps next step after feature patch draft", TestOrchestratorKeepsNextStepAfterFeaturePatchDraft),
+    ("orchestrator uses dynamic patch planner in programming mode", TestOrchestratorUsesDynamicPatchPlannerInProgrammingMode),
+    ("orchestrator stops canned feature patch draft fallback", TestOrchestratorStopsCannedFeaturePatchDraftFallback),
     ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
-    ("orchestrator falls back to build lane in programming mode", TestOrchestratorFallsBackToBuildLaneInProgrammingMode),
+    ("orchestrator stops canned fallback in programming mode", TestOrchestratorStopsCannedFallbackInProgrammingMode),
     ("orchestrator previews model-authored programming patch", TestOrchestratorPreviewsModelAuthoredProgrammingPatch),
     ("orchestrator rejects stale programming planner command", TestOrchestratorRejectsStaleProgrammingPlannerCommand),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
@@ -4185,6 +4185,10 @@ static async Task TestLocalCodingToolShowsGuidedFeatureWorkflow()
     Contains("Plain-English coding capability card v1", capabilityCard.Message);
     Contains("Current workspace:", capabilityCard.Message);
     Contains("What Ali can do:", capabilityCard.Message);
+    Contains("How Ali should choose the coding path:", capabilityCard.Message);
+    Contains("New WPF app or complex window:", capabilityCard.Message);
+    Contains("Existing feature or bug fix:", capabilityCard.Message);
+    Contains("Data, service, or persistence feature:", capabilityCard.Message);
 }
 
 static async Task TestLocalCodingToolShowsProjectControlCenter()
@@ -6440,7 +6444,7 @@ static async Task TestOrchestratorHandlesExplicitCodingOpenRequest()
     Equal(1, launcher.Starts.Count);
 }
 
-static async Task TestOrchestratorUsesCodingPlannerInProgrammingMode()
+static async Task TestOrchestratorUsesDynamicPatchPlannerInProgrammingMode()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Programming Projects");
@@ -6477,19 +6481,19 @@ static async Task TestOrchestratorUsesCodingPlannerInProgrammingMode()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
+    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
     Contains("Next:", answer);
     Contains("concrete patch authoring", answer);
-    Contains("Status: No files changed yet.", answer);
-    Contains("Use Next to run that step.", answer);
+    Contains("Dynamic patch planner stopped", answer);
+    Contains("Use Next to inspect the exact target files", answer);
     Equal(false, answer.Contains("Programming mode:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Front-door plan:", StringComparison.OrdinalIgnoreCase));
-    Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
+    Equal(EvidenceStatus.Unknown, chunks[0].EvidenceStatus);
 }
 
-static async Task TestOrchestratorKeepsNextStepAfterFeaturePatchDraft()
+static async Task TestOrchestratorStopsCannedFeaturePatchDraftFallback()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Programming Projects");
@@ -6526,12 +6530,14 @@ static async Task TestOrchestratorKeepsNextStepAfterFeaturePatchDraft()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Contains("Next: confirm apply last patch preview", answer);
-    Contains("Status: No files changed yet.", answer);
-    Contains("Use Next to run that step.", answer);
+    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("Dynamic patch planner stopped", answer);
+    Contains("concrete patch authoring", answer);
+    Contains("Use Next to inspect the exact target files", answer);
+    Equal(false, answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Next: no queued step", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
-    Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
+    Equal(EvidenceStatus.Unknown, chunks[0].EvidenceStatus);
 }
 
 static async Task TestOrchestratorKeepsCodingPlannerOutOfNormalChat()
@@ -6573,7 +6579,7 @@ static async Task TestOrchestratorKeepsCodingPlannerOutOfNormalChat()
     Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
 }
 
-static async Task TestOrchestratorFallsBackToBuildLaneInProgrammingMode()
+static async Task TestOrchestratorStopsCannedFallbackInProgrammingMode()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Programming Projects");
@@ -6609,11 +6615,11 @@ static async Task TestOrchestratorFallsBackToBuildLaneInProgrammingMode()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal("coding_action_plan", runtime.LastRequest!.ConversationId);
+    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
     Contains("Next:", answer);
     Contains("concrete patch authoring", answer);
-    Contains("Status: No files changed yet.", answer);
-    Contains("Use Next to run that step.", answer);
+    Contains("Dynamic patch planner stopped", answer);
+    Contains("Use Next to inspect the exact target files", answer);
     Equal(false, answer.Contains("Programming mode selected the next internal action.", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
@@ -6701,6 +6707,10 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
     Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("Design the solution dynamically from the user's goal", runtime.LastRequest.History[0].Text);
+    Contains("Programming capability paths:", runtime.LastRequest.History[0].Text);
+    Contains("New console app:", runtime.LastRequest.History[0].Text);
+    Contains("New WPF app or complex window:", runtime.LastRequest.History[0].Text);
     Contains("Console.WriteLine(\"Hello, World!\");", runtime.LastRequest.History[0].Text);
     Contains("Next: confirm apply last patch preview", answer);
     Contains("Status: No files changed yet.", answer);
@@ -6751,7 +6761,9 @@ static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
     Equal(1, runtime.Requests.Count);
     Equal("coding_patch_plan", runtime.Requests[0].ConversationId);
-    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Dynamic patch planner stopped", answer);
+    Contains("No exact patch available", answer);
+    Equal(false, answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("add export button", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("post patch validation add export button", StringComparison.OrdinalIgnoreCase));
 }
@@ -9116,6 +9128,16 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Equal(true, plan.UseCodingTool);
     NotNull(runtime.LastRequest, "Coding planner runtime request should be captured.");
     var instruction = runtime.LastRequest!.History[0].Text;
+    Contains("selected_path", instruction);
+    Contains("First choose the best programming capability path internally", instruction);
+    Contains("Programming capability paths:", instruction);
+    Contains("New console app:", instruction);
+    Contains("New WPF app or complex window:", instruction);
+    Contains("Existing feature or bug fix:", instruction);
+    Contains("Data, service, or persistence feature:", instruction);
+    Contains("Build/test repair loop:", instruction);
+    Contains("Closeout and handoff:", instruction);
+    Contains("Do not add a widget or starter recipe just because a keyword appears", instruction);
     Contains("Programming lane map:", instruction);
     Contains("If recent assistant text contains `Next:` or `Next command:`", instruction);
     Contains("console app guide <goal>", instruction);

@@ -12,6 +12,12 @@ public sealed record CodingAbilityGroup(
     string Summary,
     IReadOnlyList<CodingAbilityCommand> Commands);
 
+public sealed record CodingCapabilityPath(
+    string Name,
+    string WhenToUse,
+    IReadOnlyList<string> BuildingBlocks,
+    IReadOnlyList<string> CommandSequence);
+
 public sealed record UserCommandHelpEntry(
     string Title,
     string Summary,
@@ -25,6 +31,110 @@ public sealed record UserCommandHelpTopic(
 
 public static class CodingAbilityCatalog
 {
+    public static IReadOnlyList<CodingCapabilityPath> ProgrammingCapabilityPaths { get; } =
+    [
+        new(
+            "New console app",
+            "Use when the user asks for a terminal/console program, command-line utility, simple exercise, calculator, list manager, file-backed notes app, or similar non-UI app.",
+            [
+                "Choose or create the active project first.",
+                "Use Program.cs and the simplest data structure that satisfies input, lookup, ordering, and persistence needs.",
+                "Add input validation, clear output, loop/menu behavior when needed, and a keypress hold only when requested.",
+                "Validate with the smallest dotnet build/test command that covers the project."
+            ],
+            [
+                "active workspace project",
+                "build this for me <goal>",
+                "preview synthesized feature patch <goal>",
+                "confirm apply last patch preview",
+                "post patch validation <goal>"
+            ]),
+        new(
+            "New WPF app or complex window",
+            "Use when the user asks for a desktop GUI, window, dashboard, form, tool surface, data grid, navigation shell, modal dialog, or rich WPF layout.",
+            [
+                "Choose Window/UserControl boundaries before editing.",
+                "Use MVVM-style properties/commands for real behavior; avoid code-behind except for WPF-specific window services/events.",
+                "Pick Grid, DockPanel, TabControl, ContentControl, ItemsControl/DataGrid/TreeView, GridSplitter, ResourceDictionary, templates, validation, virtualization, and async UI state as needed.",
+                "Generate or update App.xaml, MainWindow.xaml, code-behind, view model, styles, dialogs, and user controls as a coherent patch bundle."
+            ],
+            [
+                "active workspace project",
+                "wpf complex window guide <goal>",
+                "build this for me <goal>",
+                "preview synthesized feature patch <goal>",
+                "confirm apply last patch preview",
+                "post patch validation <goal>"
+            ]),
+        new(
+            "Existing feature or bug fix",
+            "Use when the user wants to change current code, add a button/setting/workflow, or repair app behavior in an existing project.",
+            [
+                "Inspect the active project, ownership map, relevant symbols, and impacted tests.",
+                "Use Roslyn targeting for C# symbols and XAML binding checks for WPF surfaces.",
+                "Prefer small multi-file patch bundles with explicit before/after behavior and validation.",
+                "Do not apply until the owner confirms the preview."
+            ],
+            [
+                "coding context packet <goal>",
+                "semantic edit plan <goal>",
+                "roslyn edit planner <goal>",
+                "multi-file patch synthesis <goal>",
+                "preview synthesized feature patch <goal>",
+                "confirm apply last patch preview",
+                "post patch validation <goal>"
+            ]),
+        new(
+            "Data, service, or persistence feature",
+            "Use when the request involves data structures, files, SQL/database, caching, queues, APIs, background work, or performance-sensitive state.",
+            [
+                "Choose the data structure/store from lookup, ordering, persistence, concurrency, and scale requirements.",
+                "For SQL, plan schema, keys, indexes, migrations, transactions, parameterized queries, and measured validation.",
+                "For services, plan boundaries, retries, idempotency, health checks, logging, and configuration.",
+                "Connect the chosen plan to target files and tests before editing."
+            ],
+            [
+                "data structure chooser <goal>",
+                "data systems guide <goal>",
+                "service architecture guide <goal>",
+                "feature implementation planner <goal>",
+                "multi-file patch synthesis <goal>",
+                "post patch validation <goal>"
+            ]),
+        new(
+            "Build/test repair loop",
+            "Use when the user reports a compile, test, package, XAML binding, runtime, or validation failure.",
+            [
+                "Read the latest failure evidence before drafting another patch.",
+                "Map diagnostics to file, symbol, route, or binding.",
+                "Preview the smallest repair patch and rerun the narrowest validation command.",
+                "Escalate only if the same failure repeats after a targeted repair."
+            ],
+            [
+                "diagnose last build failure",
+                "first diagnostic repair route <goal>",
+                "validation repair runner <goal>",
+                "preview synthesized feature patch <goal>",
+                "confirm apply last patch preview",
+                "post patch validation <goal>"
+            ]),
+        new(
+            "Closeout and handoff",
+            "Use after edits validate and the user asks to wrap up, review, commit, report, or prepare delivery.",
+            [
+                "Summarize semantic changes, changed files, validation receipts, residual risk, and commit readiness.",
+                "Use Git write operations only after explicit owner request.",
+                "Keep release notes and reports grounded in actual receipts."
+            ],
+            [
+                "semantic diff summary <goal>",
+                "semantic change receipt <goal>",
+                "review current changes",
+                "can i safely commit",
+                "draft commit message"
+            ])
+    ];
+
     public static IReadOnlyList<string> FastBuilderPath { get; } =
     [
         "interpret build goal <goal>",
@@ -493,6 +603,8 @@ public static class CodingAbilityCatalog
         builder.AppendLine("No files were changed.");
         builder.AppendLine("Fast builder path:");
         AppendNumbered(builder, FastBuilderPath);
+        builder.AppendLine("Programming capability paths:");
+        AppendCapabilityPaths(builder, ProgrammingCapabilityPaths);
         AppendGroups(builder, BuilderGroups);
         builder.AppendLine("Data systems knowledge:");
         AppendBullets(builder, DataSystemsKnowledge);
@@ -500,6 +612,14 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Each new feature should be surfaced in this shared catalog, in the helper/VS command buttons when useful, and in the user/engineering docs.");
         builder.AppendLine("Prototype/future lane:");
         builder.AppendLine("- Screenshot bug diagnosis can use existing temporary image attachments and local vision proof, but reliable screenshot-to-source debugging still needs a dedicated evidence/triage workflow.");
+        return builder.ToString().TrimEnd();
+    }
+
+    public static string BuildProgrammingCapabilityPathGuide()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Programming capability paths:");
+        AppendCapabilityPaths(builder, ProgrammingCapabilityPaths);
         return builder.ToString().TrimEnd();
     }
 
@@ -609,6 +729,19 @@ public static class CodingAbilityCatalog
                 var suffix = command.RequiresConfirmation ? " (confirmation required)" : string.Empty;
                 builder.AppendLine($"- {command.Command}{suffix}");
             }
+        }
+    }
+
+    private static void AppendCapabilityPaths(StringBuilder builder, IEnumerable<CodingCapabilityPath> paths)
+    {
+        foreach (var path in paths)
+        {
+            builder.AppendLine($"{path.Name}:");
+            builder.AppendLine($"- When to use: {path.WhenToUse}");
+            builder.AppendLine("- Building blocks:");
+            AppendBullets(builder, path.BuildingBlocks);
+            builder.AppendLine("- Command sequence:");
+            AppendNumbered(builder, path.CommandSequence);
         }
     }
 
