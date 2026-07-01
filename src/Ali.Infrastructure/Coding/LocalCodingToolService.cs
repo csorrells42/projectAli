@@ -7549,8 +7549,15 @@ public sealed partial class LocalCodingToolService(
         var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
             : Policy.WorkspaceRoot;
-        rows.Add($"4. Build - Waiting for approval: confirm dotnet build \"{primaryTarget}\"");
-        rows.Add("5. Safe commit check - Waiting: can i safely commit");
+        var step = 4;
+        rows.Add($"{step++}. Build - Waiting for approval: confirm dotnet build \"{primaryTarget}\"");
+        if (IsWpfValidationRelevant(goal, changedFiles))
+        {
+            rows.Add($"{step++}. XAML binding check - Waiting: xaml binding check");
+            rows.Add($"{step++}. Command binding check - Waiting: command binding check");
+        }
+
+        rows.Add($"{step}. Safe commit check - Waiting: can i safely commit");
         if (changedFiles.Count > 0)
         {
             rows.Add($"Changed files queued: {FormatInlineList(changedFiles.Take(5))}");
@@ -7558,6 +7565,15 @@ public sealed partial class LocalCodingToolService(
 
         return rows;
     }
+
+    private static bool IsWpfValidationRelevant(string goal, IReadOnlyList<string> changedFiles) =>
+        MentionsAny(goal, "wpf", "xaml", "window", "usercontrol", "datagrid", "treeview", "desktop", "layout")
+        || changedFiles.Any(file =>
+            file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || file.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+            || file.Contains("ViewModel", StringComparison.OrdinalIgnoreCase)
+            || file.Contains("Window", StringComparison.OrdinalIgnoreCase)
+            || file.Contains("View", StringComparison.OrdinalIgnoreCase));
 
     private static IReadOnlyList<string> BuildBeforeAfterSymbolDiffRows(
         IEnumerable<string> beforeTexts,
@@ -9183,9 +9199,16 @@ public sealed partial class LocalCodingToolService(
 
         if (IsWpfAuthoringGoal(goal))
         {
+            var changedSet = changedFiles
+                .Select(ToAbsoluteWorkspacePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             candidateFiles = candidateFiles
                 .Concat(ResolveWpfPatchContextFiles(goal, GetPrimaryTarget(), 14))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(file => (changedSet.Contains(file) ? 1_000 : 0) + ScoresPatchContextFile(file, goal))
+                .ThenBy(file => RelativeToWorkspace(file), StringComparer.OrdinalIgnoreCase)
                 .Take(16)
                 .ToList();
         }
@@ -17016,6 +17039,9 @@ public sealed partial class LocalCodingToolService(
             "Source",
             "Style",
             "Template",
+            "TargetType",
+            "DataType",
+            "BasedOn",
             "ContentTemplate",
             "ContentTemplateSelector",
             "ItemTemplate",
@@ -20453,6 +20479,9 @@ public sealed partial class LocalCodingToolService(
         var layoutObjects = CountKnownXamlObjects(xamlFiles, WpfLayoutObjectNames);
         var dataControls = CountKnownXamlObjects(xamlFiles, WpfDataControlObjectNames);
         var resourceObjects = CountKnownXamlObjects(xamlFiles, WpfResourceObjectNames);
+        var csharpSymbols = BuildRoslynSymbolIndex(csharpFiles, 10_000);
+        var relationshipRows = BuildWpfRelationshipContextRows(xamlFiles, csharpSymbols).Take(10).ToList();
+        var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, csharpSymbols).Take(8).ToList();
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
             .Take(8)
@@ -20474,6 +20503,15 @@ public sealed partial class LocalCodingToolService(
         {
             lines.Add($"- XAML map: {row}");
         }
+
+        lines.Add("WPF relationship map:");
+        lines.AddRange(relationshipRows.Count == 0
+            ? ["- none"]
+            : relationshipRows.Select(row => $"  - {row}"));
+        lines.Add("WPF integrity context:");
+        lines.AddRange(integrityRows.Count == 0
+            ? ["  - Good - x:Class/code-behind, resources, and event handlers look aligned in scanned files."]
+            : integrityRows.Select(row => $"  - {row}"));
 
         lines.Add(viewModelRows.Count == 0
             ? "- View-model/state files: Review - none detected in current scope."
@@ -20558,6 +20596,72 @@ public sealed partial class LocalCodingToolService(
         var commands = FormatInlineList(ExtractXamlBindingNames(text, commandOnly: true).Take(6));
         var resources = FormatInlineList(ExtractXamlResourceKeys(text).Take(6));
         return $"{RelativeToWorkspace(file)} root {root}; objects {objects}; bindings {bindings}; commands {commands}; resources {resources}";
+    }
+
+    private IReadOnlyList<string> BuildWpfRelationshipContextRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<CSharpSymbolInfo> symbols)
+    {
+        var rows = new List<string>();
+        var symbolNames = symbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var symbolDisplays = symbols.Select(symbol => symbol.DisplayName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in xamlFiles.Take(16))
+        {
+            var text = SafeReadText(file);
+            var className = ExtractXamlClassNameForContext(text);
+            var classStatus = FormatWpfClassStatus(className, symbolNames, symbolDisplays);
+            var codeBehind = Path.ChangeExtension(file, ".xaml.cs");
+            var codeBehindStatus = string.IsNullOrWhiteSpace(className)
+                ? "not required"
+                : File.Exists(codeBehind) ? Path.GetFileName(codeBehind) : $"missing {Path.GetFileName(codeBehind)}";
+            var sources = ExtractResourceDictionarySources(text)
+                .Take(5)
+                .Select(source => FormatWpfResourceSourceStatus(file, source));
+            var references = ExtractXamlResourceReferences(text).Take(6);
+            var events = ExtractXamlEventHandlers(text).Take(6);
+            rows.Add(
+                $"{RelativeToWorkspace(file)} x:Class {classStatus}; code-behind {codeBehindStatus}; sources {FormatInlineList(sources)}; resource refs {FormatInlineList(references)}; events {FormatInlineList(events)}");
+        }
+
+        return rows;
+    }
+
+    private static string FormatWpfClassStatus(
+        string className,
+        ISet<string> symbolNames,
+        ISet<string> symbolDisplays)
+    {
+        if (string.IsNullOrWhiteSpace(className))
+        {
+            return "none";
+        }
+
+        var simpleName = className.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? className;
+        return symbolNames.Contains(simpleName) || symbolDisplays.Contains(className)
+            ? $"{className} matched"
+            : $"{className} missing C# symbol";
+    }
+
+    private static string FormatWpfResourceSourceStatus(string ownerXamlPath, string source)
+    {
+        var resolved = ResolveResourceDictionarySource(ownerXamlPath, source);
+        if (resolved is null)
+        {
+            return $"{source} external";
+        }
+
+        return File.Exists(resolved) ? $"{source} found" : $"{source} missing";
+    }
+
+    private static string ExtractXamlClassNameForContext(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var match = Regex.Match(text, @"\bx:Class\s*=\s*[""'](?<name>[^""']+)[""']", RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["name"].Value.Trim() : string.Empty;
     }
 
     private string BuildWpfCSharpContextRow(string file)

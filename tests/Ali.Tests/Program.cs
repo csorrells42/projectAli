@@ -4331,6 +4331,15 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
         </Application>
         """);
     await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "App.xaml.cs"),
+        """
+        namespace Demo.App;
+
+        public partial class App
+        {
+        }
+        """);
+    await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "MainWindow.xaml"),
         """
         <Window x:Class="Demo.App.MainWindow"
@@ -4366,6 +4375,19 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                 </Grid>
             </DockPanel>
         </Window>
+        """);
+    await File.WriteAllTextAsync(
+        Path.Combine(appDirectory, "MainWindow.xaml.cs"),
+        """
+        namespace Demo.App;
+
+        public partial class MainWindow
+        {
+            public MainWindow()
+            {
+                InitializeComponent();
+            }
+        }
         """);
     await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "MainWindowViewModel.cs"),
@@ -4463,10 +4485,17 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
         directory,
         new FakeCodingProcessLauncher(),
         configuredCurrentSolutionOrProjectPath: appProject);
+    var queueService = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, " M Demo.App/MainWindow.xaml", string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: appProject);
 
     const string goal = "build a complex WPF dashboard window with project navigation and editable rows";
     var context = await service.BuildContextPackAsync(goal, CancellationToken.None);
     var workContext = await service.TryHandleAsync("feature work context " + goal, CancellationToken.None);
+    var queue = await queueService.TryHandleAsync("show validation queue runner", CancellationToken.None);
 
     Equal(true, context.HasContext);
     Contains("WPF object/layout context:", context.Text);
@@ -4486,6 +4515,14 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("NavigationItems", context.Text);
     Contains("SelectedProject", context.Text);
     Contains("Command bindings: SaveCommand", context.Text);
+    Contains("WPF relationship map:", context.Text);
+    Contains("App.xaml x:Class Demo.App.App matched; code-behind App.xaml.cs; sources ProjectStyles.xaml found", context.Text);
+    Contains("MainWindow.xaml x:Class Demo.App.MainWindow matched; code-behind MainWindow.xaml.cs", context.Text);
+    Contains("resource refs ProjectRowTemplate", context.Text);
+    Contains("PrimaryButtonStyle", context.Text);
+    Contains("ProjectDetailsView.xaml x:Class Demo.App.ProjectDetailsView matched; code-behind ProjectDetailsView.xaml.cs", context.Text);
+    Contains("WPF integrity context:", context.Text);
+    Contains("Good - x:Class/code-behind, resources, and event handlers look aligned in scanned files.", context.Text);
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
@@ -4503,6 +4540,12 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Demo.App\\ProjectStyles.xaml", workContext.Message);
     Contains("Demo.App\\ProjectDetailsView.xaml", workContext.Message);
     Contains("Demo.App\\ProjectEditDialog.xaml", workContext.Message);
+
+    Equal(true, queue.Handled);
+    Equal(true, queue.Succeeded);
+    Contains("Changed files: 1", queue.Message);
+    Contains("XAML binding check - Waiting: xaml binding check", queue.Message);
+    Contains("Command binding check - Waiting: command binding check", queue.Message);
 }
 
 static async Task TestLocalCodingToolReportsWpfIntegrityIssues()
