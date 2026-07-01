@@ -8,7 +8,7 @@ namespace Ali.Core.Coding;
 public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodingPatchPlanner
 {
     private const int MaxPlannerOutputCharacters = 18_000;
-    private const int MaxPatchEdits = 10;
+    private const int MaxPatchEdits = 16;
     private const string ConversationId = "coding_patch_plan";
 
     public async Task<CodingPatchPlan> PlanPatchAsync(
@@ -73,6 +73,7 @@ public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodin
             "For new apps, create or update every required source file in one coherent patch when the workspace and target project path are clear.",
             "For console apps, dynamically design Program.cs around the actual requested behavior with clear prompts, input validation, visible output, loops/menus/data structures when needed, and an optional Console.ReadKey only when the user asks the app to wait before closing.",
             "For WPF apps, dynamically decide Window/UserControl boundaries, XAML layout, view-model properties/commands, data structures, ResourceDictionary styles/templates, validation, virtualization, async UI state, and minimal code-behind services based on the requested app.",
+            "Patch size guard: keep ordinary non-WPF patches to 10 edits or fewer. WPF/window/layout patch bundles may use up to 16 coordinated edits when the files are WPF surfaces/resources/view-models and the context provides exact excerpts.",
             "For data structures, SQL/database access, services, caches, queues, and APIs, dynamically choose the simplest data structure/store/service boundary that meets lookup, ordering, persistence, concurrency, and validation needs.",
             "Do not invent tool results, builds, tests, files, or hidden project facts.",
             "If the request cannot be patched safely from the provided excerpts, return has_patch false with a short stop_reason.",

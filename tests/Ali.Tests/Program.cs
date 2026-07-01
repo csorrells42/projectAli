@@ -151,6 +151,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local coding tool reviews current changes", TestLocalCodingToolReviewsCurrentChanges),
     ("local coding tool previews literal replace patch", TestLocalCodingToolPreviewsLiteralReplacePatch),
     ("local coding tool previews and applies patch bundle", TestLocalCodingToolPreviewsAndAppliesPatchBundle),
+    ("local coding tool previews extended WPF patch bundle", TestLocalCodingToolPreviewsExtendedWpfPatchBundle),
     ("local coding tool previews synthesized exact feature patch", TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch),
     ("local coding tool synthesizes hello world console patch", TestLocalCodingToolSynthesizesHelloWorldConsolePatch),
     ("local coding tool keeps legacy starters opt in", TestLocalCodingToolKeepsLegacyStartersOptIn),
@@ -275,6 +276,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model source planner guards current vice president for sources", TestModelSourcePlannerGuardsCurrentVicePresidentForSources),
     ("model source planner guards local documents for sources", TestModelSourcePlannerGuardsLocalDocumentsForSources),
     ("model coding planner includes tool lane map", TestModelCodingPlannerIncludesToolLaneMap),
+    ("model coding patch planner allows extended WPF bundles", TestModelCodingPatchPlannerAllowsExtendedWpfBundles),
     ("curated source retriever uses planned weather topic", TestCuratedSourceRetrieverUsesPlannedWeatherTopic),
     ("curated source retriever fetches NWS point forecast", TestCuratedSourceRetrieverFetchesNwsPointForecast),
     ("curated source retriever selects Tullahoma NWS point forecast", TestCuratedSourceRetrieverSelectsTullahomaNwsPointForecast),
@@ -5385,6 +5387,53 @@ static async Task TestLocalCodingToolPreviewsAndAppliesPatchBundle()
     Equal("class NewName { }", await File.ReadAllTextAsync(secondPath));
 }
 
+static async Task TestLocalCodingToolPreviewsExtendedWpfPatchBundle()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var service = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher());
+    var wpfLines = new List<string>();
+    var wpfPaths = new List<string>();
+    for (var index = 1; index <= 12; index++)
+    {
+        var path = Path.Combine(workspace, $"DashboardView{index}.xaml");
+        wpfPaths.Add(path);
+        await File.WriteAllTextAsync(path, $"<UserControl><TextBlock Text=\"OldMarker{index}\" /></UserControl>");
+        wpfLines.Add($"file \"{path}\" replace \"OldMarker{index}\" with \"NewMarker{index}\"");
+    }
+
+    var wpfPreview = await service.TryHandleAsync(
+        "preview patch bundle" + Environment.NewLine + string.Join(Environment.NewLine, wpfLines),
+        CancellationToken.None);
+
+    Equal(true, wpfPreview.Handled);
+    Equal(true, wpfPreview.Succeeded);
+    Contains("Patch bundle preview", wpfPreview.Message);
+    Contains("Edits: 12", wpfPreview.Message);
+    Contains("DashboardView12.xaml", wpfPreview.Message);
+    Equal(true, (await File.ReadAllTextAsync(wpfPaths[11])).Contains("OldMarker12", StringComparison.Ordinal));
+
+    var codeLines = new List<string>();
+    for (var index = 1; index <= 11; index++)
+    {
+        var path = Path.Combine(workspace, $"Service{index}.cs");
+        await File.WriteAllTextAsync(path, $"public sealed class OldService{index} {{ }}");
+        codeLines.Add($"file \"{path}\" replace \"OldService{index}\" with \"NewService{index}\"");
+    }
+
+    var codePreview = await service.TryHandleAsync(
+        "preview patch bundle" + Environment.NewLine + string.Join(Environment.NewLine, codeLines),
+        CancellationToken.None);
+
+    Equal(true, codePreview.Handled);
+    Equal(false, codePreview.Succeeded);
+    Contains("at most 10 edit(s)", codePreview.Message);
+}
+
 static async Task TestLocalCodingToolPreviewsSynthesizedExactFeaturePatch()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -9440,6 +9489,39 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("data systems guide <goal>", instruction);
     Contains("schema, keys, indexes, migrations", instruction);
     Contains("Assistant: Next: feature patch draft add export button", instruction);
+}
+
+static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
+{
+    var editsJson = string.Join(
+        ",",
+        Enumerable.Range(1, 12).Select(index =>
+            $$"""{"path":"C:/Workspace/Demo/DashboardView{{index}}.xaml","oldText":"OldMarker{{index}}","newText":"NewMarker{{index}}"}"""));
+    var runtime = new FixedTextRuntime(
+        $$"""
+        {"has_patch":true,"selected_path":"New WPF app or complex window","summary":"Update a coordinated WPF dashboard bundle.","confidence":0.91,"edits":[{{editsJson}}]}
+        """);
+    var planner = new ModelCodingPatchPlanner(runtime);
+    var context = new CodingContextPack(
+        true,
+        """
+        WPF object/layout context:
+        - WPF projects: Demo.csproj target net10.0-windows output WinExe UseWPF=True
+        Editable file excerpts for patch planning:
+        FILE: DashboardView1.xaml
+        ABSOLUTE PATH: C:/Workspace/Demo/DashboardView1.xaml
+        ```text
+        OldMarker1
+        ```
+        """);
+
+    var plan = await planner.PlanPatchAsync("build a complex WPF dashboard window", context, CancellationToken.None);
+
+    Equal(true, plan.HasPatch);
+    Equal(12, plan.Edits.Count);
+    Equal("C:/Workspace/Demo/DashboardView12.xaml", plan.Edits[11].Path);
+    NotNull(runtime.LastRequest, "Planner instruction should be captured.");
+    Contains("WPF/window/layout patch bundles may use up to 16 coordinated edits", runtime.LastRequest!.History[0].Text);
 }
 
 static async Task TestModelSourcePlannerGuardsWeatherForecastsForSources()

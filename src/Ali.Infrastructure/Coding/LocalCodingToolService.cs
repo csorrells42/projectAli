@@ -39,6 +39,7 @@ public sealed partial class LocalCodingToolService(
     private const int MaxPdfTextCharacters = 40_000;
     private const int MaxReplaceFileCharacters = 500_000;
     private const int MaxPatchBundleEdits = 10;
+    private const int MaxWpfPatchBundleEdits = 16;
     private const int MaxValidationRepairPreviewAttempts = 2;
     private const int MaxWorkspaceSummaryEntries = 20;
     private static readonly TimeSpan DotNetCommandTimeout = TimeSpan.FromSeconds(90);
@@ -1057,6 +1058,11 @@ public sealed partial class LocalCodingToolService(
         }
 
         var name = Path.GetFileName(file);
+        if (name.Equals("App.xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         return name.Contains("Window", StringComparison.OrdinalIgnoreCase)
             || name.Contains("View", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Control", StringComparison.OrdinalIgnoreCase)
@@ -1083,6 +1089,11 @@ public sealed partial class LocalCodingToolService(
         }
 
         var name = Path.GetFileName(path);
+        if (name.Equals("App.xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         return name.Contains("Window", StringComparison.OrdinalIgnoreCase)
             || name.Contains("View", StringComparison.OrdinalIgnoreCase)
             || name.Contains("Control", StringComparison.OrdinalIgnoreCase)
@@ -17846,12 +17857,13 @@ public sealed partial class LocalCodingToolService(
             return false;
         }
 
-        if (request.PatchEdits.Count > MaxPatchBundleEdits)
+        var editLimit = GetPatchBundleEditLimit(request);
+        if (request.PatchEdits.Count > editLimit)
         {
             error = new CodingToolResult(
                 true,
                 false,
-                $"Coding tool blocked: patch bundle can preview at most {MaxPatchBundleEdits} edit(s).",
+                $"Coding tool blocked: patch bundle can preview at most {editLimit} edit(s).",
                 "Patch bundle preview",
                 Policy.WorkspaceRoot);
             return false;
@@ -17898,6 +17910,20 @@ public sealed partial class LocalCodingToolService(
 
         edits = normalized;
         return true;
+    }
+
+    private static int GetPatchBundleEditLimit(CodingToolRequest request) =>
+        IsWpfPatchBundleRequest(request) ? MaxWpfPatchBundleEdits : MaxPatchBundleEdits;
+
+    private static bool IsWpfPatchBundleRequest(CodingToolRequest request)
+    {
+        if (IsWpfAuthoringGoal(request.Query ?? string.Empty))
+        {
+            return true;
+        }
+
+        return request.PatchEdits is { Count: > MaxPatchBundleEdits } edits
+            && edits.All(edit => IsWpfPatchContextRelativePath(edit.Path));
     }
 
     private static async Task<PatchBundlePreparation> PreparePatchBundleAsync(
