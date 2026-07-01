@@ -244,6 +244,15 @@ public static class CodingAbilityCatalog
                 "Build order: shell layout, one bound workflow, view-model state/commands, validation, styles/templates, secondary panes/dialogs, then polish.",
                 "Validation order: dotnet build, XAML binding check, command binding check, narrow UI smoke path, then repair compiler/binding/resource/event errors before adding more surface area.",
                 "Integrity checks: keep x:Class, namespaces, partial classes, code-behind files, ResourceDictionary Source paths, resource keys, DataTemplates, converters, template selectors, and event handlers aligned."
+            ]),
+        new(
+            "Final WPF reasoning lanes",
+            [
+                "Advanced binding diagnostics: identify the DataContext owner, add targeted diag:PresentationTraceSources.TraceLevel=High while repairing suspect bindings, and use BindingProxy, PlacementTarget, RelativeSource, or named sources across ContextMenu/template namescope boundaries.",
+                "MVVM implementation: create observable properties, ObservableCollection<T>/ICollectionView state, ICommand/CanExecute actions, async/cancel flow, validation state, and dialog/service boundaries before expanding XAML.",
+                "Complex controls: pick DataGrid columns/templates/grouping, TreeView with HierarchicalDataTemplate, TabControl/ContentControl regions, dialogs/wizards, virtualization, and templates from the actual workflow shape.",
+                "Patch synthesis: preview WPF work as a coherent multi-file bundle that keeps XAML, view models, resources, converters, selectors, and minimal code-behind bridges aligned.",
+                "Completion audit: after applying WPF edits, run build, XAML binding check, command binding check, a narrow UI smoke path, and remove obsolete helper routes before closeout."
             ])
     ];
 

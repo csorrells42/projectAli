@@ -729,7 +729,13 @@ public sealed partial class LocalCodingToolService(
         lines.Add("Use only these exact excerpts for oldText in patch previews. Prefer full absolute paths when returning edits.");
         var isWpfAuthoringGoal = IsWpfAuthoringGoal(goal);
         var remainingCharacters = isWpfAuthoringGoal ? 15_000 : 12_000;
-        foreach (var file in files)
+        var excerptFiles = isWpfAuthoringGoal
+            ? files
+                .OrderByDescending(ScoreWpfPatchExcerptFile)
+                .ThenBy(RelativeToWorkspace, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : files;
+        foreach (var file in excerptFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (remainingCharacters <= 0)
@@ -770,6 +776,44 @@ public sealed partial class LocalCodingToolService(
             lines.Add(excerpt);
             lines.Add("```");
         }
+    }
+
+    private int ScoreWpfPatchExcerptFile(string file)
+    {
+        var name = Path.GetFileName(file);
+        var extension = Path.GetExtension(file);
+        var score = ScoresPatchContextFile(file, "wpf");
+
+        if (name.Contains("ViewModel", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 120;
+        }
+
+        if (name.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 100;
+        }
+
+        if (extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)
+            && (name.Contains("Converter", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Selector", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Behavior", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Service", StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 85;
+        }
+
+        if (name.Equals("MainWindow.xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 75;
+        }
+
+        if (extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 45;
+        }
+
+        return score;
     }
 
     private IReadOnlyList<string> ResolvePatchAuthoringContextFiles(string goal, string? currentTarget)
@@ -16784,8 +16828,12 @@ public sealed partial class LocalCodingToolService(
     private CodingToolResult VerifyXamlBindings()
     {
         var xamlFiles = GetXamlFiles();
-        var symbols = BuildRoslynSymbolIndex(GetCSharpFiles(), 10_000);
-        var symbolNames = symbols.Select(symbol => symbol.Name).ToHashSet(StringComparer.Ordinal);
+        var csharpFiles = GetCSharpFiles();
+        var symbols = BuildRoslynSymbolIndex(csharpFiles, 10_000);
+        var symbolNames = symbols
+            .Select(symbol => symbol.Name)
+            .Concat(ExtractWpfBindableStateNames(csharpFiles))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var bindings = new List<(string Path, string Name)>();
         foreach (var file in xamlFiles)
         {
@@ -16811,6 +16859,7 @@ public sealed partial class LocalCodingToolService(
             .DistinctBy(handler => RelativeToWorkspace(handler.Path) + "|" + handler.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, symbols);
+        var diagnosticRows = BuildWpfAdvancedBindingDiagnosticRows(xamlFiles, csharpFiles, symbols);
         var lines = new List<string>
         {
             "XAML binding check:",
@@ -16828,6 +16877,8 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(integrityRows.Count == 0
             ? ["- Good - x:Class, resource dictionary sources, static/dynamic resources, and event handlers look consistent."]
             : integrityRows.Select(row => $"- {row}"));
+        lines.Add("Advanced WPF binding diagnostics:");
+        lines.AddRange(diagnosticRows.Select(row => $"- {row}"));
         lines.Add("Note - dynamic DataContext, generated properties, and converter parameters may still need human review.");
         return new CodingToolResult(true, unknown.Count == 0 && integrityRows.Count == 0, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
     }
@@ -20604,6 +20655,7 @@ public sealed partial class LocalCodingToolService(
         var topologyRows = BuildWpfAdvancedLayoutTopologyRows(xamlFiles, csharpFiles);
         var dependencyRows = BuildWpfAdvancedDependencyRows(xamlFiles, csharpFiles, csharpSymbols);
         var bindingStateRows = BuildWpfBindingStateAlignmentRows(xamlFiles, csharpFiles, csharpSymbols);
+        var finalLearningRows = BuildWpfFinalLearningRows(goal, xamlFiles, csharpFiles, csharpSymbols);
         var viewModelRows = csharpFiles
             .Where(IsLikelyWpfStateFile)
             .Take(8)
@@ -20644,6 +20696,8 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(dependencyRows.Select(row => $"  - {row}"));
         lines.Add("WPF binding/state alignment:");
         lines.AddRange(bindingStateRows.Select(row => $"  - {row}"));
+        lines.Add("WPF final learning map:");
+        lines.AddRange(finalLearningRows.Select(row => $"  - {row}"));
 
         lines.Add(viewModelRows.Count == 0
             ? "- View-model/state files: Review - none detected in current scope."
@@ -21001,6 +21055,239 @@ public sealed partial class LocalCodingToolService(
     }
 
     private static string BuildWpfBindingStateRow(string name, bool good, string detail, string nextStep)
+        => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
+
+    private IReadOnlyList<string> BuildWpfFinalLearningRows(
+        string goal,
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles,
+        IReadOnlyList<CSharpSymbolInfo> csharpSymbols)
+    {
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        var bindingDiagnostics = BuildWpfAdvancedBindingDiagnosticRows(xamlFiles, csharpFiles, csharpSymbols);
+        var mvvmSignals = BuildWpfMvvmImplementationSignals(allCSharpText).ToList();
+        var complexControlSignals = BuildWpfComplexControlSignals(allXamlText, allCSharpText).ToList();
+        var patchTargets = xamlFiles
+            .Concat(csharpFiles.Where(IsLikelyWpfStateFile))
+            .Select(RelativeToWorkspace)
+            .Take(8)
+            .ToList();
+        var validationCommands = new[]
+        {
+            "dotnet build",
+            "xaml binding check",
+            "command binding check",
+            $"post patch validation {CleanGoal(goal, "current WPF change")}"
+        };
+
+        return
+        [
+            BuildWpfFinalLearningRow(
+                "Advanced binding diagnostics",
+                bindingDiagnostics.All(row => row.StartsWith("Trace instrumentation: Good", StringComparison.OrdinalIgnoreCase)
+                    || row.StartsWith("DataContext ownership: Good", StringComparison.OrdinalIgnoreCase)
+                    || row.StartsWith("Outer-context bindings: Good", StringComparison.OrdinalIgnoreCase)
+                    || row.StartsWith("Binding repair route: Good", StringComparison.OrdinalIgnoreCase)),
+                $"trace/DataContext/outer-context route {FormatInlineList(bindingDiagnostics)}",
+                "before patching complex bindings, identify DataContext owner, add targeted PresentationTraceSources trace flags, and use BindingProxy/PlacementTarget for templates or context menus"),
+            BuildWpfFinalLearningRow(
+                "MVVM implementation path",
+                mvvmSignals.Count >= 5,
+                FormatInlineList(mvvmSignals),
+                "define observable state, collections/views, ICommand/CanExecute, async/cancel flow, validation, and service boundaries before adding XAML surface"),
+            BuildWpfFinalLearningRow(
+                "Complex controls path",
+                complexControlSignals.Count >= 5,
+                FormatInlineList(complexControlSignals),
+                "choose DataGrid, TreeView, TabControl, ContentControl, dialogs, templates, and virtualization from the requested workflow shape"),
+            BuildWpfFinalLearningRow(
+                "Model-authored WPF patch synthesis",
+                patchTargets.Count > 0,
+                $"candidate bundle {FormatInlineList(patchTargets)}",
+                "synthesize a multi-file preview that keeps XAML, view-model state, resources, converters, selectors, and code-behind bridges aligned"),
+            BuildWpfFinalLearningRow(
+                "Completion audit gates",
+                xamlFiles.Count > 0,
+                $"required checks {FormatInlineList(validationCommands)}",
+                "after applying WPF edits, run build, XAML binding check, command binding check, a narrow smoke path, and remove obsolete helper routes")
+        ];
+    }
+
+    private IReadOnlyList<string> BuildWpfAdvancedBindingDiagnosticRows(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles,
+        IReadOnlyList<CSharpSymbolInfo> csharpSymbols)
+    {
+        var allXamlText = string.Join(Environment.NewLine, xamlFiles.Select(SafeReadText));
+        var allCSharpText = string.Join(Environment.NewLine, csharpFiles.Select(SafeReadText));
+        var bindingCount = xamlFiles.Sum(file => ExtractXamlBindingUsages(SafeReadText(file)).Count);
+        var traceTargets = ExtractWpfBindingTraceTargets(xamlFiles).Take(8).ToList();
+        var dataContextSignals = BuildWpfDataContextSignals(xamlFiles, csharpFiles, csharpSymbols).Take(8).ToList();
+        var outerContextSignals = BuildWpfOuterContextBindingSignals(allXamlText).Take(8).ToList();
+        var contextMenuCount = CountXamlObjectOccurrences(allXamlText, "ContextMenu");
+        var templateCount = CountKnownXamlObjects(xamlFiles, ["DataTemplate", "HierarchicalDataTemplate", "ControlTemplate", "ItemsPanelTemplate"]).Count;
+        var needsOuterContext = contextMenuCount > 0 || templateCount > 0;
+
+        return
+        [
+            BuildWpfDiagnosticRow(
+                "Trace instrumentation",
+                bindingCount == 0 || traceTargets.Count > 0,
+                $"trace bindings {FormatInlineList(traceTargets)}",
+                "add diag:PresentationTraceSources.TraceLevel=High to suspect bindings while repairing complex windows"),
+            BuildWpfDiagnosticRow(
+                "DataContext ownership",
+                dataContextSignals.Count > 0,
+                $"owners {FormatInlineList(dataContextSignals)}",
+                "make the Window/UserControl DataContext owner explicit in XAML, code-behind, or design-time data before adding bindings"),
+            BuildWpfDiagnosticRow(
+                "Outer-context bindings",
+                !needsOuterContext || outerContextSignals.Count > 0,
+                $"outer-context route {FormatInlineList(outerContextSignals)}",
+                "use Freezable BindingProxy, PlacementTarget, RelativeSource, or named source bindings for ContextMenu/template namescope boundaries"),
+            BuildWpfDiagnosticRow(
+                "Binding repair route",
+                true,
+                "run build, XAML binding check, command binding check, then map the first binding/resource/event failure",
+                "repair the first failing binding or resource before expanding the visual surface")
+        ];
+    }
+
+    private IReadOnlyList<string> ExtractWpfBindingTraceTargets(IReadOnlyList<string> xamlFiles)
+    {
+        var targets = new List<string>();
+        foreach (var file in xamlFiles)
+        {
+            var text = SafeReadText(file);
+            foreach (Match match in Regex.Matches(
+                         text,
+                         @"(?<attribute>[A-Za-z_][\w\.-]*)\s*=\s*[""'][^""']*\{Binding(?<binding>[^""']*PresentationTraceSources\.TraceLevel\s*=\s*(?<level>\w+)[^""']*)[""']",
+                         RegexOptions.CultureInvariant))
+            {
+                var name = CleanBindingName(match.Groups["binding"].Value);
+                var label = string.IsNullOrWhiteSpace(name)
+                    ? StripXamlPrefix(match.Groups["attribute"].Value)
+                    : $"{name} ({StripXamlPrefix(match.Groups["attribute"].Value)})";
+                targets.Add($"{RelativeToWorkspace(file)} -> {label}");
+            }
+        }
+
+        return targets.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private IReadOnlyList<string> BuildWpfDataContextSignals(
+        IReadOnlyList<string> xamlFiles,
+        IReadOnlyList<string> csharpFiles,
+        IReadOnlyList<CSharpSymbolInfo> csharpSymbols)
+    {
+        var signals = new List<string>();
+        foreach (var file in xamlFiles)
+        {
+            var text = SafeReadText(file);
+            if (Regex.IsMatch(text, @"\b(?:Window|UserControl|Page)\.DataContext\b|\bDataContext\s*=", RegexOptions.CultureInvariant))
+            {
+                signals.Add($"{RelativeToWorkspace(file)} DataContext XAML");
+            }
+
+            if (text.Contains("d:DataContext", StringComparison.OrdinalIgnoreCase))
+            {
+                signals.Add($"{RelativeToWorkspace(file)} design DataContext");
+            }
+        }
+
+        foreach (var file in csharpFiles)
+        {
+            var text = SafeReadText(file);
+            if (Regex.IsMatch(text, @"\bDataContext\s*=", RegexOptions.CultureInvariant))
+            {
+                signals.Add($"{RelativeToWorkspace(file)} DataContext assignment");
+            }
+        }
+
+        signals.AddRange(csharpSymbols
+            .Where(symbol => symbol.Name.EndsWith("ViewModel", StringComparison.OrdinalIgnoreCase))
+            .Select(symbol => $"{symbol.Name} view model"));
+
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildWpfOuterContextBindingSignals(string xamlText)
+    {
+        var signals = new List<string>();
+        if (xamlText.Contains("BindingProxy", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add("BindingProxy");
+        }
+
+        if (xamlText.Contains("PlacementTarget", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add("PlacementTarget");
+        }
+
+        if (xamlText.Contains("RelativeSource", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add("RelativeSource");
+        }
+
+        if (xamlText.Contains("AncestorType=ContextMenu", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add("ContextMenu ancestor binding");
+        }
+
+        if (Regex.IsMatch(xamlText, @"Source\s*=\s*\{StaticResource\s+[^}]+BindingProxy", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase))
+        {
+            signals.Add("StaticResource BindingProxy source");
+        }
+
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyList<string> BuildWpfMvvmImplementationSignals(string csharpText)
+    {
+        var signals = new List<string>();
+        AddSignalIf(signals, csharpText, "INotifyPropertyChanged", "observable property state");
+        AddSignalIf(signals, csharpText, "ObservableCollection", "observable collections");
+        AddSignalIf(signals, csharpText, "ICollectionView", "collection view state");
+        AddSignalIf(signals, csharpText, "ICommand", "ICommand actions");
+        AddSignalIf(signals, csharpText, "CanExecute", "CanExecute gates");
+        AddSignalIf(signals, csharpText, "Task", "async workflow");
+        AddSignalIf(signals, csharpText, "CancellationToken", "cancellation flow");
+        AddSignalIf(signals, csharpText, "INotifyDataErrorInfo", "validation state");
+        AddSignalIf(signals, csharpText, "DialogService", "dialog service boundary");
+        return signals;
+    }
+
+    private static IReadOnlyList<string> BuildWpfComplexControlSignals(string xamlText, string csharpText)
+    {
+        var signals = new List<string>();
+        AddSignalIf(signals, xamlText, "DataGrid", "DataGrid surface");
+        AddSignalIf(signals, xamlText, "DataGridTemplateColumn", "templated grid columns");
+        AddSignalIf(signals, xamlText, "GroupStyle", "grouped data view");
+        AddSignalIf(signals, xamlText, "TreeView", "TreeView hierarchy");
+        AddSignalIf(signals, xamlText, "HierarchicalDataTemplate", "hierarchical template");
+        AddSignalIf(signals, xamlText, "TabControl", "tabbed regions");
+        AddSignalIf(signals, xamlText, "ContentControl", "content region");
+        AddSignalIf(signals, xamlText, "Window", "window/dialog shell");
+        AddSignalIf(signals, xamlText, "DataTemplateSelector", "template selector");
+        AddSignalIf(signals, xamlText, "VirtualizingPanel", "virtualized large surface");
+        AddSignalIf(signals, csharpText, "CollectionViewSource", "CollectionViewSource sorting/filtering");
+        AddSignalIf(signals, csharpText, "ShowDialog", "dialog workflow");
+        return signals;
+    }
+
+    private static void AddSignalIf(List<string> signals, string text, string needle, string label)
+    {
+        if (text.Contains(needle, StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add(label);
+        }
+    }
+
+    private static string BuildWpfDiagnosticRow(string name, bool good, string detail, string nextStep)
+        => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
+
+    private static string BuildWpfFinalLearningRow(string name, bool good, string detail, string nextStep)
         => good ? $"{name}: Good - {detail}." : $"{name}: Review - {nextStep}.";
 
     private IReadOnlyList<string> BuildWpfAdvancedLayoutTopologyRows(
@@ -22608,7 +22895,8 @@ public sealed partial class LocalCodingToolService(
         }
 
         var text = userText.Trim();
-        if (CodingToolRequestParser.TryParse(text, out _))
+        if (CodingToolRequestParser.TryParse(text, out var parsedRequest)
+            && !ShouldBuildContextForParsedRequest(parsedRequest.Action))
         {
             return false;
         }
@@ -22624,6 +22912,7 @@ public sealed partial class LocalCodingToolService(
         }
 
         if (text.Contains("c#", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("wpf", StringComparison.OrdinalIgnoreCase)
             || text.Contains(".cs", StringComparison.OrdinalIgnoreCase)
             || text.Contains(".xaml", StringComparison.OrdinalIgnoreCase)
             || text.Contains(".csproj", StringComparison.OrdinalIgnoreCase)
@@ -22638,6 +22927,7 @@ public sealed partial class LocalCodingToolService(
                || MentionsAny(
                    text,
                    "add",
+                   "build",
                    "change",
                    "create",
                    "edit",
@@ -22651,6 +22941,10 @@ public sealed partial class LocalCodingToolService(
                    "update",
                    "write");
     }
+
+    private static bool ShouldBuildContextForParsedRequest(CodingToolAction action) =>
+        action is CodingToolAction.ShowPlainEnglishFeatureBuilder
+            or CodingToolAction.ShowBuildThisFeature;
 
     private static bool MentionsLastFailureFollowUp(string text)
     {

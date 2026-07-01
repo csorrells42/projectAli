@@ -175,6 +175,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
     ("orchestrator stops canned fallback in programming mode", TestOrchestratorStopsCannedFallbackInProgrammingMode),
     ("orchestrator previews model-authored programming patch", TestOrchestratorPreviewsModelAuthoredProgrammingPatch),
+    ("orchestrator previews model-authored WPF program patch", TestOrchestratorPreviewsModelAuthoredWpfProgramPatch),
     ("orchestrator sends WPF validation evidence to model patcher", TestOrchestratorSendsWpfValidationEvidenceToModelPatcher),
     ("orchestrator rejects stale programming planner command", TestOrchestratorRejectsStaleProgrammingPlannerCommand),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
@@ -3646,6 +3647,9 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("CollectionViewSource", wpfGuide.Message);
     Contains("Freezable BindingProxy", wpfGuide.Message);
     Contains("INotifyDataErrorInfo", wpfGuide.Message);
+    Contains("Final WPF reasoning lanes", wpfGuide.Message);
+    Contains("Advanced binding diagnostics", wpfGuide.Message);
+    Contains("Patch synthesis", wpfGuide.Message);
     Contains("WPF layout guide", wpfLayoutGuide.Message);
     Contains("GridSplitter", wpfLayoutGuide.Message);
     Contains("ScrollViewer", wpfLayoutGuide.Message);
@@ -4346,6 +4350,7 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
         <Window x:Class="Demo.App.MainWindow"
                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:diag="clr-namespace:System.Diagnostics;assembly=WindowsBase"
                 xmlns:local="clr-namespace:Demo.App"
                 Title="{Binding Title}">
             <Window.Resources>
@@ -4353,6 +4358,9 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
                     <Style x:Key="PrimaryButtonStyle" TargetType="Button" />
                     <DataTemplate x:Key="ProjectRowTemplate" />
+                    <HierarchicalDataTemplate x:Key="NavigationItemTemplate" ItemsSource="{Binding Children}">
+                        <TextBlock Text="{Binding Name}" />
+                    </HierarchicalDataTemplate>
                     <ItemsPanelTemplate x:Key="MetricsPanelTemplate">
                         <WrapPanel />
                     </ItemsPanelTemplate>
@@ -4376,7 +4384,8 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <TreeView ItemsSource="{Binding NavigationItems}" />
+                    <TreeView ItemsSource="{Binding NavigationItems}"
+                              ItemTemplate="{StaticResource NavigationItemTemplate}" />
                     <GridSplitter Grid.Column="1" Width="5" />
                     <TabControl Grid.Column="2">
                         <TabItem Header="Projects">
@@ -4384,6 +4393,32 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                                       SelectedItem="{Binding SelectedProject}"
                                       VirtualizingPanel.IsVirtualizing="True"
                                       ScrollViewer.CanContentScroll="True">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Save selected"
+                                                  Command="{Binding Data.SaveCommand, Source={StaticResource ProjectBindingProxy}}"
+                                                  CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}" />
+                                            </DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </DataGrid.GroupStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" />
+                                    <DataGridTemplateColumn Header="Status">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Status}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
                                 <DataGrid.RowDetailsTemplate>
                                     <DataTemplate>
                                         <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ProjectRowTemplate}" />
@@ -4424,7 +4459,7 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
                         </Border.Triggers>
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                             <ProgressBar IsIndeterminate="{Binding IsBusy}" Width="160" Height="14" />
-                            <TextBlock Text="{Binding ProgressText}" />
+                            <TextBlock Text="{Binding ProgressText, diag:PresentationTraceSources.TraceLevel=High}" />
                             <Button Command="{Binding CancelRefreshCommand}" />
                         </StackPanel>
                     </Border>
@@ -4444,6 +4479,7 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
             public MainWindow()
             {
                 InitializeComponent();
+                DataContext = new MainWindowViewModel();
             }
 
             private void SaveExecuted(object sender, ExecutedRoutedEventArgs e)
@@ -4459,30 +4495,54 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "MainWindowViewModel.cs"),
         """
+        using System.Collections.Generic;
         using System.Collections.ObjectModel;
         using System.ComponentModel;
+        using System.Threading;
+        using System.Threading.Tasks;
         using System.Windows.Input;
+        using System.Windows.Data;
 
         namespace Demo.App;
 
         public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
         {
             public string Title { get; } = "Project dashboard";
-            public ObservableCollection<string> NavigationItems { get; } = [];
+            public ObservableCollection<ProjectRow> NavigationItems { get; } = [];
             public ObservableCollection<ProjectRow> Projects { get; } = [];
+            public ICollectionView ProjectsView { get; }
             public ObservableCollection<string> Metrics { get; } = [];
             public ProjectRow? SelectedProject { get; set; }
             public ICommand SaveCommand { get; }
             public ICommand CancelRefreshCommand { get; }
             public bool IsBusy { get; set; }
             public string ProgressText { get; } = "Refreshing projects";
+            public CancellationTokenSource? RefreshCancellation { get; private set; }
+            public IProjectDialogService DialogService { get; } = new ProjectDialogService();
             public event PropertyChangedEventHandler? PropertyChanged;
             public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
             public bool HasErrors => false;
             public System.Collections.IEnumerable GetErrors(string? propertyName) => Array.Empty<string>();
+            public MainWindowViewModel()
+            {
+                ProjectsView = CollectionViewSource.GetDefaultView(Projects);
+            }
+
+            public bool CanSave() => !IsBusy;
+            public Task RefreshAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         }
 
-        public sealed record ProjectRow(string Name);
+        public sealed record ProjectRow(string Name, string Status, IReadOnlyList<ProjectRow> Children);
+
+        public interface IProjectDialogService
+        {
+            bool ShowProjectDialog(ProjectRow row);
+        }
+
+        public sealed class ProjectDialogService : IProjectDialogService
+        {
+            public bool ShowProjectDialog(ProjectRow row) => true;
+        }
         """);
     await File.WriteAllTextAsync(
         Path.Combine(appDirectory, "ProjectStyles.xaml"),
@@ -4623,6 +4683,7 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     const string goal = "build a complex WPF dashboard window with project navigation and editable rows";
     var context = await service.BuildContextPackAsync(goal, CancellationToken.None);
     var workContext = await service.TryHandleAsync("feature work context " + goal, CancellationToken.None);
+    var bindingCheck = await service.TryHandleAsync("xaml binding check", CancellationToken.None);
     var queue = await queueService.TryHandleAsync("show validation queue runner", CancellationToken.None);
 
     Equal(true, context.HasContext);
@@ -4646,7 +4707,8 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("WPF relationship map:", context.Text);
     Contains("App.xaml x:Class Demo.App.App matched; code-behind App.xaml.cs; sources ProjectStyles.xaml found", context.Text);
     Contains("MainWindow.xaml x:Class Demo.App.MainWindow matched; code-behind MainWindow.xaml.cs", context.Text);
-    Contains("resource refs ProjectRowTemplate", context.Text);
+    Contains("resource refs NavigationItemTemplate", context.Text);
+    Contains("ProjectRowTemplate", context.Text);
     Contains("PrimaryButtonStyle", context.Text);
     Contains("ProjectDetailsView.xaml x:Class Demo.App.ProjectDetailsView matched; code-behind ProjectDetailsView.xaml.cs", context.Text);
     Contains("WPF integrity context:", context.Text);
@@ -4698,12 +4760,18 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Binding targets: Good", context.Text);
     Contains("Command targets: Good", context.Text);
     Contains("Collection surfaces: Good", context.Text);
-    Contains("ItemsSource bindings NavigationItems, Projects, Metrics", context.Text);
+    Contains("ItemsSource bindings Children, NavigationItems, Projects, Metrics", context.Text);
     Contains("Selection/current item state: Good", context.Text);
     Contains("selection bindings SelectedProject", context.Text);
     Contains("Busy/progress/cancel state: Good", context.Text);
     Contains("workflow bindings IsBusy, ProgressText, CancelRefreshCommand", context.Text);
     Contains("Validation state: Good", context.Text);
+    Contains("WPF final learning map:", context.Text);
+    Contains("Advanced binding diagnostics: Good", context.Text);
+    Contains("MVVM implementation path: Good", context.Text);
+    Contains("Complex controls path: Good", context.Text);
+    Contains("Model-authored WPF patch synthesis: Good", context.Text);
+    Contains("Completion audit gates: Good", context.Text);
     Contains("MainWindowViewModel.cs classes MainWindowViewModel", context.Text);
     Contains("ObservableCollection", context.Text);
     Contains("INotifyDataErrorInfo", context.Text);
@@ -4724,6 +4792,13 @@ static async Task TestLocalCodingToolAddsWpfObjectMapToContextPack()
     Contains("Demo.App\\ProjectStyles.xaml", workContext.Message);
     Contains("Demo.App\\ProjectDetailsView.xaml", workContext.Message);
     Contains("Demo.App\\ProjectEditDialog.xaml", workContext.Message);
+
+    Equal(true, bindingCheck.Handled);
+    Equal(true, bindingCheck.Succeeded);
+    Contains("Advanced WPF binding diagnostics:", bindingCheck.Message);
+    Contains("Trace instrumentation: Good", bindingCheck.Message);
+    Contains("DataContext ownership: Good", bindingCheck.Message);
+    Contains("Outer-context bindings: Good", bindingCheck.Message);
 
     Equal(true, queue.Handled);
     Equal(true, queue.Succeeded);
@@ -7369,6 +7444,258 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
     Contains("factorial", await File.ReadAllTextAsync(programPath));
 }
 
+static async Task TestOrchestratorPreviewsModelAuthoredWpfProgramPatch()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "TaskDesk");
+    Directory.CreateDirectory(appDirectory);
+    var projectPath = Path.Combine(appDirectory, "TaskDesk.csproj");
+    var xamlPath = Path.Combine(appDirectory, "MainWindow.xaml");
+    var codeBehindPath = Path.Combine(appDirectory, "MainWindow.xaml.cs");
+    var viewModelPath = Path.Combine(appDirectory, "MainWindowViewModel.cs");
+    var stylesPath = Path.Combine(appDirectory, "TaskDeskStyles.xaml");
+    var initialProject = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """;
+    var initialXaml = """
+        <Window x:Class="TaskDesk.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="TaskDesk" Height="450" Width="800">
+            <Grid />
+        </Window>
+        """;
+    var initialCodeBehind = """
+        using System.Windows;
+
+        namespace TaskDesk;
+
+        public partial class MainWindow : Window
+        {
+            public MainWindow()
+            {
+                InitializeComponent();
+            }
+        }
+        """;
+    var newXaml = """
+        <Window x:Class="TaskDesk.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:diag="clr-namespace:System.Diagnostics;assembly=WindowsBase"
+                Title="{Binding Title}" Height="520" Width="840" MinHeight="420" MinWidth="680">
+            <Window.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.MergedDictionaries>
+                        <ResourceDictionary Source="TaskDeskStyles.xaml" />
+                    </ResourceDictionary.MergedDictionaries>
+                    <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+                </ResourceDictionary>
+            </Window.Resources>
+            <DockPanel>
+                <StatusBar DockPanel.Dock="Bottom">
+                    <TextBlock Text="{Binding ProgressText, diag:PresentationTraceSources.TraceLevel=High}" />
+                </StatusBar>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Margin="0,0,0,12">
+                        <TextBox Text="{Binding NewTaskTitle, UpdateSourceTrigger=PropertyChanged, ValidatesOnNotifyDataErrors=True, NotifyOnValidationError=True}"
+                                 MinWidth="260"
+                                 VerticalContentAlignment="Center" />
+                        <Button Content="Add"
+                                Command="{Binding AddTaskCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Margin="8,0,0,0" />
+                    </DockPanel>
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding TasksView}"
+                              SelectedItem="{Binding SelectedTask, Mode=TwoWay}"
+                              AutoGenerateColumns="False"
+                              VirtualizingPanel.IsVirtualizing="True"
+                              VirtualizingPanel.VirtualizationMode="Recycling"
+                              ScrollViewer.CanContentScroll="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Task" Binding="{Binding Title}" Width="*" />
+                            <DataGridCheckBoxColumn Header="Done" Binding="{Binding IsDone}" Width="Auto" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <Border Grid.RowSpan="2"
+                            Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            IsHitTestVisible="{Binding IsBusy}">
+                        <ProgressBar IsIndeterminate="{Binding IsBusy}" />
+                    </Border>
+                </Grid>
+            </DockPanel>
+        </Window>
+        """;
+    var newCodeBehind = """
+        using System.Windows;
+
+        namespace TaskDesk;
+
+        public partial class MainWindow : Window
+        {
+            public MainWindow()
+            {
+                InitializeComponent();
+                DataContext = new MainWindowViewModel();
+            }
+        }
+        """;
+    var viewModel = """
+        using System.Collections;
+        using System.Collections.ObjectModel;
+        using System.ComponentModel;
+        using System.Windows.Data;
+        using System.Windows.Input;
+
+        namespace TaskDesk;
+
+        public sealed class MainWindowViewModel : INotifyPropertyChanged, INotifyDataErrorInfo
+        {
+            public string Title { get; } = "TaskDesk";
+            public ObservableCollection<TaskItem> Tasks { get; } = [];
+            public ICollectionView TasksView { get; }
+            public TaskItem? SelectedTask { get; set; }
+            public string NewTaskTitle { get; set; } = string.Empty;
+            public bool IsBusy { get; set; }
+            public string ProgressText { get; set; } = "Ready";
+            public ICommand AddTaskCommand { get; }
+            public event PropertyChangedEventHandler? PropertyChanged;
+            public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+            public bool HasErrors => string.IsNullOrWhiteSpace(NewTaskTitle);
+
+            public MainWindowViewModel()
+            {
+                TasksView = CollectionViewSource.GetDefaultView(Tasks);
+                AddTaskCommand = new RelayCommand(AddTask, CanAddTask);
+            }
+
+            public IEnumerable GetErrors(string? propertyName)
+            {
+                return HasErrors ? new[] { "Enter a task title." } : Array.Empty<string>();
+            }
+
+            private bool CanAddTask() => !IsBusy && !string.IsNullOrWhiteSpace(NewTaskTitle);
+
+            private void AddTask()
+            {
+                Tasks.Add(new TaskItem(NewTaskTitle.Trim(), false));
+                NewTaskTitle = string.Empty;
+                ProgressText = "Task added.";
+            }
+        }
+
+        public sealed record TaskItem(string Title, bool IsDone);
+
+        public sealed class RelayCommand(Action execute, Func<bool> canExecute) : ICommand
+        {
+            public event EventHandler? CanExecuteChanged;
+            public bool CanExecute(object? parameter) => canExecute();
+            public void Execute(object? parameter) => execute();
+        }
+        """;
+    var styles = """
+        <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+            <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+                <Setter Property="Padding" Value="14,6" />
+            </Style>
+        </ResourceDictionary>
+        """;
+    await File.WriteAllTextAsync(projectPath, initialProject);
+    await File.WriteAllTextAsync(xamlPath, initialXaml);
+    await File.WriteAllTextAsync(codeBehindPath, initialCodeBehind);
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        selected_path = "New WPF app or complex window",
+        summary = "Create a TaskDesk WPF task manager UI.",
+        confidence = 0.93,
+        edits = new[]
+        {
+            new { path = xamlPath, oldText = initialXaml, newText = newXaml },
+            new { path = codeBehindPath, oldText = initialCodeBehind, newText = newCodeBehind },
+            new { path = viewModelPath, oldText = string.Empty, newText = viewModel },
+            new { path = stylesPath, oldText = string.Empty, newText = styles }
+        }
+    });
+    var runtime = new FixedSequenceRuntime(patchJson);
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    const string wpfTaskManagerRequest = "Build me a WPF task manager app where I can type a task, add it, see tasks in a grid, and mark tasks done.";
+    var preflightContext = await codingTool.BuildContextPackAsync(wpfTaskManagerRequest, CancellationToken.None);
+    if (!preflightContext.HasContext)
+    {
+        throw new InvalidOperationException("Plain-text WPF build request did not produce a coding context pack.");
+    }
+
+    Contains("WPF final learning map:", preflightContext.Text);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       wpfTaskManagerRequest,
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    NotNull(runtime.LastRequest, "Plain-text WPF requirement should enter the model patch planner before direct coding tools.");
+    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("For WPF apps, dynamically decide Window/UserControl boundaries", runtime.LastRequest.History[0].Text);
+    Contains("WPF final learning map:", runtime.LastRequest.History[0].Text);
+    Contains("Advanced binding diagnostics: Review", runtime.LastRequest.History[0].Text);
+    Contains("MVVM implementation path", runtime.LastRequest.History[0].Text);
+    Contains("Complex controls path", runtime.LastRequest.History[0].Text);
+    Contains("Model-authored WPF patch synthesis", runtime.LastRequest.History[0].Text);
+    Contains("Completion audit gates", runtime.LastRequest.History[0].Text);
+    Contains("FILE: TaskDesk\\MainWindow.xaml", runtime.LastRequest.History[0].Text);
+    Contains("FILE: TaskDesk\\MainWindow.xaml.cs", runtime.LastRequest.History[0].Text);
+    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Status: No files changed yet.", answer);
+    Contains("Use Next to run that step.", answer);
+    Equal(initialXaml, await File.ReadAllTextAsync(xamlPath));
+    Equal(false, File.Exists(viewModelPath));
+
+    var apply = await codingTool.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    if (!apply.Succeeded)
+    {
+        throw new InvalidOperationException("Model-authored WPF patch preview did not apply successfully: " + apply.Message);
+    }
+    Contains("DataGrid", await File.ReadAllTextAsync(xamlPath));
+    Contains("MainWindowViewModel", await File.ReadAllTextAsync(codeBehindPath));
+    Contains("ICollectionView", await File.ReadAllTextAsync(viewModelPath));
+    Contains("PrimaryButtonStyle", await File.ReadAllTextAsync(stylesPath));
+}
+
 static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
@@ -10000,6 +10327,10 @@ static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
     Contains("Complex WPF patch contract:", runtime.LastRequest.History[0].Text);
     Contains("Before authoring WPF edits, use the dynamic WPF construction route as a checklist", runtime.LastRequest.History[0].Text);
     Contains("Dynamic WPF construction route:", runtime.LastRequest.History[0].Text);
+    Contains("Final WPF reasoning lanes", runtime.LastRequest.History[0].Text);
+    Contains("Advanced binding diagnostics", runtime.LastRequest.History[0].Text);
+    Contains("Patch synthesis", runtime.LastRequest.History[0].Text);
+    Contains("Completion audit", runtime.LastRequest.History[0].Text);
     Contains("Define view-model state before XAML bindings", runtime.LastRequest.History[0].Text);
     Contains("Keep x:Class, namespace, partial class, and .xaml.cs code-behind names aligned.", runtime.LastRequest.History[0].Text);
     Contains("ResourceDictionary Source paths, StaticResource/DynamicResource keys", runtime.LastRequest.History[0].Text);

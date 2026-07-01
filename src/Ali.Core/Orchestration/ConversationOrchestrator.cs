@@ -321,18 +321,6 @@ public sealed class ConversationOrchestrator(
             yield break;
         }
 
-        var directResult = await LocalCodingTool.TryHandleAsync(userText, cancellationToken).ConfigureAwait(false);
-        if (directResult.Handled)
-        {
-            yield return new AssistantStreamChunk(
-                conversationId,
-                userMessageId,
-                assistantMessageId,
-                BuildProgrammingToolMessage(directResult),
-                directResult.Succeeded ? EvidenceStatus.Verified : EvidenceStatus.Unknown);
-            yield break;
-        }
-
         if (CodingPatchPlanner is not null && ShouldAttemptModelPatch(userText))
         {
             var patchContext = await LocalCodingTool.BuildContextPackAsync(userText, cancellationToken).ConfigureAwait(false);
@@ -358,6 +346,18 @@ public sealed class ConversationOrchestrator(
                 assistantMessageId,
                 BuildProgrammingPatchPlannerStopMessage(userText, patchPlan),
                 EvidenceStatus.Unknown);
+            yield break;
+        }
+
+        var directResult = await LocalCodingTool.TryHandleAsync(userText, cancellationToken).ConfigureAwait(false);
+        if (directResult.Handled)
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                BuildProgrammingToolMessage(directResult),
+                directResult.Succeeded ? EvidenceStatus.Verified : EvidenceStatus.Unknown);
             yield break;
         }
 
@@ -504,6 +504,7 @@ public sealed class ConversationOrchestrator(
         if (MentionsAny(
                 normalized,
                 "add",
+                "build",
                 "change",
                 "create",
                 "edit",
