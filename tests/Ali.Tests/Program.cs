@@ -647,6 +647,14 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("Fast SQL design", builderIndex);
     Contains("SQL Server, PostgreSQL, MySQL/MariaDB, and SQLite", builderIndex);
     Contains("Caching and queues", builderIndex);
+    Contains("Advanced WPF object/layout decision map", builderIndex);
+    Contains("CollectionViewSource", builderIndex);
+    Contains("DataTemplateSelector", builderIndex);
+    Contains("Freezable BindingProxy", builderIndex);
+    Contains("INotifyDataErrorInfo", builderIndex);
+    Contains("VirtualizingPanel", builderIndex);
+    Contains("RoutedCommand/InputBindings", builderIndex);
+    Contains("ErrorTemplate/Adorner", builderIndex);
     Contains("Ali computer assistant command index", computerIndex);
     Contains("what can you do", computerIndex);
     Contains("plan peripheral setup Scarlett Solo microphone gain", computerIndex);
@@ -661,6 +669,7 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("concrete patch authoring", userGuide);
     Contains("confidence scoring", userGuide);
     Contains("common data structures and service/database choices", userGuide);
+    Contains("advanced WPF object/layout choices", userGuide);
     Contains("Context packet", userGuide);
     Contains("coding context packet", userGuide);
     Contains("PDF", userGuide);
@@ -3626,6 +3635,10 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("WPF app guide", wpfGuide.Message);
     Contains("INotifyPropertyChanged", wpfGuide.Message);
     Contains("ObservableCollection<T>", wpfGuide.Message);
+    Contains("Advanced WPF object/layout decision map", wpfGuide.Message);
+    Contains("CollectionViewSource", wpfGuide.Message);
+    Contains("Freezable BindingProxy", wpfGuide.Message);
+    Contains("INotifyDataErrorInfo", wpfGuide.Message);
     Contains("WPF layout guide", wpfLayoutGuide.Message);
     Contains("GridSplitter", wpfLayoutGuide.Message);
     Contains("ScrollViewer", wpfLayoutGuide.Message);
@@ -3638,6 +3651,8 @@ static async Task TestLocalCodingToolShowsAdvancedCodingHelpers()
     Contains("WPF complex window guide", wpfComplexWindowGuide.Message);
     Contains("ContentControl region", wpfComplexWindowGuide.Message);
     Contains("virtualization", wpfComplexWindowGuide.Message);
+    Contains("DataTemplateSelector", wpfComplexWindowGuide.Message);
+    Contains("ErrorTemplate/Adorner", wpfComplexWindowGuide.Message);
 }
 
 static async Task TestLocalCodingToolShowsFullCodingReadinessScanners()
@@ -6756,6 +6771,11 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
     Contains("Programming capability paths:", runtime.LastRequest.History[0].Text);
     Contains("New console app:", runtime.LastRequest.History[0].Text);
     Contains("New WPF app or complex window:", runtime.LastRequest.History[0].Text);
+    Contains("Advanced WPF object/layout decision map", runtime.LastRequest.History[0].Text);
+    Contains("DataTemplateSelector", runtime.LastRequest.History[0].Text);
+    Contains("CollectionViewSource", runtime.LastRequest.History[0].Text);
+    Contains("INotifyDataErrorInfo", runtime.LastRequest.History[0].Text);
+    Contains("VirtualizingPanel", runtime.LastRequest.History[0].Text);
     Contains("Console.WriteLine(\"Hello, World!\");", runtime.LastRequest.History[0].Text);
     Contains("Next: confirm apply last patch preview", answer);
     Contains("Status: No files changed yet.", answer);
@@ -9192,6 +9212,14 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("wpf styling guide <goal>", instruction);
     Contains("wpf complex window guide <goal>", instruction);
     Contains("WPF layout/object checklist", instruction);
+    Contains("Advanced WPF object/layout decision map", instruction);
+    Contains("CollectionViewSource", instruction);
+    Contains("DataTemplateSelector", instruction);
+    Contains("Freezable BindingProxy", instruction);
+    Contains("INotifyDataErrorInfo", instruction);
+    Contains("VirtualizingPanel", instruction);
+    Contains("RoutedCommand/InputBindings", instruction);
+    Contains("ErrorTemplate/Adorner", instruction);
     Contains("feature patch draft <goal>", instruction);
     Contains("exact patch synthesis <goal>", instruction);
     Contains("preview synthesized feature patch <goal>", instruction);

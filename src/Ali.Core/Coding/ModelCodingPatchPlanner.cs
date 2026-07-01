@@ -81,6 +81,7 @@ public sealed class ModelCodingPatchPlanner(ILocalModelRuntime runtime) : ICodin
             "No-patch shape:",
             "{\"has_patch\":false,\"summary\":\"Need an exact target file first.\",\"confidence\":0.2,\"stop_reason\":\"No editable file excerpt matched the requested change.\",\"edits\":[]}",
             CodingAbilityCatalog.BuildProgrammingCapabilityPathGuide(),
+            CodingAbilityCatalog.BuildWpfObjectLayoutPlannerGuide(),
             "Approved read-only context:",
             contextPack.Text);
 

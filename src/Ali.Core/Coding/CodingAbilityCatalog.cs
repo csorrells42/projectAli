@@ -18,6 +18,10 @@ public sealed record CodingCapabilityPath(
     IReadOnlyList<string> BuildingBlocks,
     IReadOnlyList<string> CommandSequence);
 
+public sealed record CodingKnowledgeSection(
+    string Name,
+    IReadOnlyList<string> Guidance);
+
 public sealed record UserCommandHelpEntry(
     string Title,
     string Summary,
@@ -188,6 +192,58 @@ public static class CodingAbilityCatalog
         "Service patterns: repository/unit-of-work only when it reduces coupling, background workers, hosted services, HTTP APIs, message queues, retry/idempotency, caching boundaries, health checks, structured logging, and configuration/secrets separation.",
         "Caching and queues: Redis/in-memory caches, cache invalidation rules, TTLs, pub/sub, durable queues, outbox pattern, backpressure, and dead-letter handling.",
         "Validation approach: unit-test pure data-structure logic, integration-test database mappings and migrations, load-test hot queries/services, and prove failure behavior for retries, timeouts, and duplicate messages."
+    ];
+
+    public static IReadOnlyList<CodingKnowledgeSection> WpfObjectLayoutKnowledge { get; } =
+    [
+        new(
+            "Shell and regions",
+            [
+                "Use Window for the shell, UserControl for reusable workflow regions, ContentControl for active view regions, and dialog windows/services for modal decisions.",
+                "For complex windows, compose menu/tool/status rows around a resizable main Grid or DockPanel rather than placing everything in one flat panel."
+            ]),
+        new(
+            "Layout containers",
+            [
+                "Prefer Grid for advanced windows; use Auto/star/fixed rows deliberately, SharedSizeGroup for aligned forms, and GridSplitter with MinWidth/MinHeight for owner-resizable panes.",
+                "Use DockPanel for shell framing, StackPanel only for small one-axis groups, WrapPanel/UniformGrid for compact repeated controls, and ScrollViewer only around the region that should scroll."
+            ]),
+        new(
+            "Data controls",
+            [
+                "Use ItemsControl/ListBox/ListView for repeated models, DataGrid for tabular review/edit screens, TreeView for hierarchy, TabControl for bounded modes, and CollectionViewSource for sorting, filtering, grouping, and current item state.",
+                "Enable VirtualizingPanel virtualization and deferred scrolling for large lists/grids; keep SelectedItem and selection-dependent command state explicit."
+            ]),
+        new(
+            "Binding and view models",
+            [
+                "Use INotifyPropertyChanged, ObservableCollection<T>, ICommand/CanExecute, INotifyDataErrorInfo, and small model/view-model types instead of putting behavior in XAML names or code-behind.",
+                "Use DependencyProperty for reusable controls, Freezable BindingProxy for binding across namescopes, WeakEventManager for long-lived event subscriptions, and DispatcherTimer/Dispatcher only for UI-thread coordination."
+            ]),
+        new(
+            "Resources and templates",
+            [
+                "Use ResourceDictionary files for brushes, spacing, styles, DataTemplates, and ControlTemplates; prefer StaticResource unless runtime theme switching requires DynamicResource.",
+                "Use DataTemplate, HierarchicalDataTemplate, DataTemplateSelector, Style BasedOn, triggers, and converters for presentation decisions; keep business decisions in view-model properties."
+            ]),
+        new(
+            "Validation and interaction",
+            [
+                "Make invalid input visible with validation bindings, ErrorTemplate/Adorner feedback, disabled unsafe commands, status text, and focus behavior.",
+                "Use RoutedCommand/InputBindings only for shell-level keyboard commands; keep feature actions in view-model ICommand properties when possible."
+            ]),
+        new(
+            "Async and performance",
+            [
+                "Represent slow work with async commands, CancellationTokenSource, IsBusy, ProgressText, and cancel commands; never block the UI thread while loading, saving, or refreshing data.",
+                "For large views, combine virtualization, paging/filtering, debounce timers, measured validation, and small observable updates instead of rebuilding the whole visual tree."
+            ]),
+        new(
+            "Diagnostics and build order",
+            [
+                "Build order: shell layout, one bound workflow, view-model state/commands, validation, styles/templates, secondary panes/dialogs, then polish.",
+                "Validation order: dotnet build, XAML binding check, command binding check, narrow UI smoke path, then repair compiler/binding errors before adding more surface area."
+            ])
     ];
 
     public static IReadOnlyList<CodingAbilityGroup> BuilderGroups { get; } =
@@ -608,10 +664,20 @@ public static class CodingAbilityCatalog
         AppendGroups(builder, BuilderGroups);
         builder.AppendLine("Data systems knowledge:");
         AppendBullets(builder, DataSystemsKnowledge);
+        builder.AppendLine("Advanced WPF object/layout decision map:");
+        AppendKnowledgeSections(builder, WpfObjectLayoutKnowledge);
         builder.AppendLine("Ability-index maintenance rule:");
         builder.AppendLine("- Each new feature should be surfaced in this shared catalog, in the helper/VS command buttons when useful, and in the user/engineering docs.");
         builder.AppendLine("Prototype/future lane:");
         builder.AppendLine("- Screenshot bug diagnosis can use existing temporary image attachments and local vision proof, but reliable screenshot-to-source debugging still needs a dedicated evidence/triage workflow.");
+        return builder.ToString().TrimEnd();
+    }
+
+    public static string BuildWpfObjectLayoutPlannerGuide()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Advanced WPF object/layout decision map:");
+        AppendKnowledgeSections(builder, WpfObjectLayoutKnowledge);
         return builder.ToString().TrimEnd();
     }
 
@@ -631,7 +697,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
-        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, create simple console and WPF starter apps, reason about common data structures and service/database choices, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
+        builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, create simple console and WPF starter apps, reason about common data structures and service/database choices, advanced WPF object/layout choices, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
         builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");
@@ -758,6 +824,14 @@ public static class CodingAbilityCatalog
         foreach (var row in rows)
         {
             builder.AppendLine($"- {row}");
+        }
+    }
+
+    private static void AppendKnowledgeSections(StringBuilder builder, IEnumerable<CodingKnowledgeSection> sections)
+    {
+        foreach (var section in sections)
+        {
+            builder.AppendLine($"- {section.Name}: {string.Join(" ", section.Guidance)}");
         }
     }
 }
