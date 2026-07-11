@@ -232,6 +232,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 limit = Math.Clamp(settings.MaxSearchResults, 1, 10),
                 sources = ResolveFirecrawlSources(plan),
                 tbs = ResolveFirecrawlTbs(plan),
+                timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000,
                 scrapeOptions = settings.UseFirecrawlSearchScrapeOptions
                     ? new
                     {
