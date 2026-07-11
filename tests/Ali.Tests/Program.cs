@@ -207,7 +207,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("desktop installer supports Visual Studio extension only mode", TestDesktopInstallerSupportsVisualStudioExtensionOnlyMode),
     ("desktop installer skips Ollama installer when executable exists", TestDesktopInstallerSkipsOllamaInstallerWhenExecutableExists),
     ("desktop installer repair preserves profile data", TestDesktopInstallerRepairPreservesProfileData),
-    ("desktop installer repair merges starter sources", TestDesktopInstallerRepairMergesStarterSources),
+    ("desktop installer repair verifies internet backend settings", TestDesktopInstallerRepairVerifiesInternetBackendSettings),
     ("desktop installer installs sidecar voice resources", TestDesktopInstallerInstallsSidecarVoiceResources),
     ("desktop installer repairs sidecar voice resources", TestDesktopInstallerRepairsSidecarVoiceResources),
     ("desktop uninstaller removes app and preserves user data", TestDesktopUninstallerRemovesAppAndPreservesUserData),
@@ -272,7 +272,6 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("local vector library reads direct approved document", TestLocalVectorLibraryReadsDirectApprovedDocument),
     ("local vector library retrieves indexed folder document", TestLocalVectorLibraryRetrievesIndexedFolderDocument),
     ("local vector library refuses outside folder document", TestLocalVectorLibraryRefusesOutsideFolderDocument),
-    ("curated source catalog merges missing starter sources", TestCuratedSourceCatalogMergesMissingStarterSources),
     ("model source planner parses structured plan", TestModelSourcePlannerParsesStructuredPlan),
     ("model source planner rejects non-json output", TestModelSourcePlannerRejectsNonJsonOutput),
     ("model source planner includes saved memory context", TestModelSourcePlannerIncludesSavedMemoryContext),
@@ -299,7 +298,7 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model coding patch planner rejects selected path drift", TestModelCodingPatchPlannerRejectsSelectedPathDrift),
     ("source prompt formatter distinguishes stable fallback", TestSourcePromptFormatterDistinguishesStableFallback),
     ("source prompt formatter forbids no-internet fallback after lookup", TestSourcePromptFormatterForbidsNoInternetFallbackAfterLookup),
-    ("orchestrator injects approved source excerpts", TestOrchestratorInjectsApprovedSourceExcerpts),
+    ("orchestrator injects source excerpts", TestOrchestratorInjectsSourceExcerpts),
     ("orchestrator owns source appendix", TestOrchestratorOwnsSourceAppendix),
     ("orchestrator reports attempted source lookup without excerpts", TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts),
     ("orchestrator treats forecast as current weather without bootstrap runtime", TestOrchestratorTreatsForecastAsCurrentWeatherWithoutBootstrapRuntime),
@@ -9078,7 +9077,7 @@ static async Task TestUserDataBackupRestoresProfileAndSettings()
         EmbeddingModel = "test-embed"
     });
     Directory.CreateDirectory(Path.Combine(dataRoot, "Sources"));
-    await File.WriteAllTextAsync(Path.Combine(dataRoot, "Sources", "curated_sources.json"), "sources");
+    await File.WriteAllTextAsync(Path.Combine(dataRoot, "Sources", "internet_backends.json"), "{}");
     Directory.CreateDirectory(Path.Combine(dataRoot, "GeneratedDocuments"));
     await File.WriteAllTextAsync(Path.Combine(dataRoot, "GeneratedDocuments", "report.pdf"), "pdf");
     Directory.CreateDirectory(Path.Combine(dataRoot, "SessionAudio"));
@@ -9265,64 +9264,24 @@ static async Task TestDesktopInstallerRepairPreservesProfileData()
     Contains("already exists; installer did not overwrite", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
-static async Task TestDesktopInstallerRepairMergesStarterSources()
+static async Task TestDesktopInstallerRepairVerifiesInternetBackendSettings()
 {
     var root = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var payload = Path.Combine(root, "payload");
     var localRoot = Path.Combine(root, "LocalAli");
     var sourcesRoot = Path.Combine(localRoot, "BootstrapData", "Sources");
     Directory.CreateDirectory(payload);
-    Directory.CreateDirectory(sourcesRoot);
     await File.WriteAllTextAsync(Path.Combine(payload, "Ali.App.Wpf.exe"), "fresh app");
-    var existing = new[]
-    {
-        new SourceCatalogEntry(
-            Id: "owner-source",
-            Topic: "custom",
-            Name: "Owner Source",
-            Url: "https://example.test/owner",
-            Type: "web",
-            TrustLevel: "owner",
-            Keywords: ["owner"],
-            Topics: ["owner topic"],
-            Notes: "Preserve this.",
-            Enabled: true)
-    };
-    await File.WriteAllTextAsync(
-        Path.Combine(sourcesRoot, "curated_sources.json"),
-        JsonSerializer.Serialize(existing));
 
     var installer = new AliDesktopInstaller();
     var result = await installer.InstallAsync(new AliDesktopInstallOptions(
         payload,
         localRoot,
         RepairExistingInstall: true));
-    var repairedJson = await File.ReadAllTextAsync(Path.Combine(sourcesRoot, "curated_sources.json"));
-    var repaired = JsonSerializer.Deserialize<List<SourceCatalogEntry>>(repairedJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
 
     Equal(true, result.Succeeded);
-    Equal(true, repaired.Any(source => source.Id == "owner-source"));
-    Equal(true, repaired.Any(source => source.Id == "weather-gov"));
-    Equal(true, repaired.Any(source => source.Id == "python-docs"));
-    Equal(true, repaired.Any(source => source.Id == "nws-mobile"));
-    Equal(true, repaired.Any(source => source.Id == "nhc-noaa"));
-    Equal(true, repaired.Any(source => source.Id == "ap-news"));
-    Equal(true, repaired.Any(source => source.Id == "nasa-main"));
-    Equal(true, repaired.Any(source => source.Id == "medlineplus"));
-    Equal(true, repaired.Any(source => source.Id == "alabama-gov"));
-    Equal(true, repaired.Count >= 2_000);
-    Equal(true, repaired.Count(source => source.Topic == "weather") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "sports") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "local_news") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "regional_news") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "national_news") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "international_news") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "science") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "history") >= 100);
-    Equal(true, repaired.Count(source => source.Topic == "military_history") >= 100);
-    Equal(true, repaired.Any(source => source.Name.Contains("National Geographic", StringComparison.OrdinalIgnoreCase)));
-    Equal(true, repaired.Any(source => source.Name.Contains("Army Center of Military History", StringComparison.OrdinalIgnoreCase)));
-    Contains("Bundled Sources & Topics repaired", string.Join(Environment.NewLine, result.DependencyMessages));
+    Equal(true, File.Exists(Path.Combine(sourcesRoot, "internet_backends.example.json")));
+    Contains("Internet source backend settings example verified", string.Join(Environment.NewLine, result.DependencyMessages));
 }
 
 static async Task TestDesktopInstallerInstallsSidecarVoiceResources()
@@ -10558,58 +10517,6 @@ static async Task TestLocalVectorLibraryRefusesOutsideFolderDocument()
     Contains("outside the approved RAG folder", result.Warnings[0]);
 }
 
-static async Task TestCuratedSourceCatalogMergesMissingStarterSources()
-{
-    var directory = NewTestDirectory();
-    var sourceStore = new FileSourceRetriever(directory, new HttpClient(new StaticPageHandler("unused")));
-    Directory.CreateDirectory(sourceStore.RootDirectory);
-    var existing = new[]
-    {
-        new SourceCatalogEntry(
-            Id: "custom-owner-source",
-            Topic: "custom",
-            Name: "Owner Custom Source",
-            Url: "https://example.test/custom",
-            Type: "web",
-            TrustLevel: "owner",
-            Keywords: ["custom"],
-            Topics: ["custom topic"],
-            Notes: "Keep this owner source.",
-            Enabled: true)
-    };
-    await File.WriteAllTextAsync(sourceStore.CatalogPath, JsonSerializer.Serialize(existing));
-
-    sourceStore.WriteExample();
-    var catalog = sourceStore.LoadCatalog();
-
-    Equal(true, catalog.Any(source => source.Id == "custom-owner-source"));
-    Equal(true, catalog.Any(source => source.Id == "weather-gov"));
-    Equal(true, catalog.Any(source => source.Id == "python-docs"));
-    Equal(true, catalog.Any(source => source.Id == "nws-mobile"));
-    Equal(true, catalog.Any(source => source.Id == "nws-tullahoma-tn-forecast"));
-    Equal(true, catalog.Any(source => source.Id == "nhc-noaa"));
-    Equal(true, catalog.Any(source => source.Id == "ap-news"));
-    Equal(true, catalog.Any(source => source.Id == "nasa-main"));
-    Equal(true, catalog.Any(source => source.Id == "medlineplus"));
-    Equal(true, catalog.Any(source => source.Id == "alabama-gov"));
-    Equal(true, catalog.Any(source => source.Id == "sql-server-docs"));
-    Equal(true, catalog.Any(source => source.Id == "postgres-docs"));
-    Equal(true, catalog.Any(source => source.Id == "redis-docs"));
-    Equal(true, catalog.Any(source => source.Id == "sqlite-docs"));
-    Equal(true, catalog.Count >= 2_000);
-    Equal(true, catalog.Count(source => source.Topic == "weather") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "sports") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "local_news") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "regional_news") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "national_news") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "international_news") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "science") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "history") >= 100);
-    Equal(true, catalog.Count(source => source.Topic == "military_history") >= 100);
-    Equal(true, catalog.Any(source => source.Name.Contains("National Geographic", StringComparison.OrdinalIgnoreCase)));
-    Equal(true, catalog.Any(source => source.Name.Contains("Army Center of Military History", StringComparison.OrdinalIgnoreCase)));
-}
-
 static async Task TestModelSourcePlannerParsesStructuredPlan()
 {
     var runtime = new FixedTextRuntime(
@@ -10618,7 +10525,7 @@ static async Task TestModelSourcePlannerParsesStructuredPlan()
         """);
     var planner = new ModelSourceQueryPlanner(runtime);
 
-    var plan = await planner.PlanAsync("please plan approved sources for this question", Array.Empty<ChatMessage>(), CancellationToken.None);
+    var plan = await planner.PlanAsync("please plan source lookup for this question", Array.Empty<ChatMessage>(), CancellationToken.None);
 
     Equal(true, plan.UseSources);
     Equal(true, plan.RequiresSourceGrounding);
@@ -11417,7 +11324,7 @@ static Task TestSourcePromptFormatterForbidsNoInternetFallbackAfterLookup()
         "Current news excerpt.");
     var prompt = SourcePromptFormatter.BuildPromptContext(new SourceRetrievalResult([source], Array.Empty<string>()));
 
-    Contains("app already performed the approved source lookup", prompt);
+    Contains("app already performed the source lookup", prompt);
     Contains("do not say you lack internet access", prompt);
     Contains("Do not mention training cutoffs", prompt);
     return Task.CompletedTask;
@@ -11443,7 +11350,7 @@ static Task TestSourcePromptFormatterMarksExcerptsUntrusted()
     return Task.CompletedTask;
 }
 
-static async Task TestOrchestratorInjectsApprovedSourceExcerpts()
+static async Task TestOrchestratorInjectsSourceExcerpts()
 {
     var options = CreateRuntimeOptions("fake-local-model");
     var handler = new FakeOpenAiHandler(options.Model);
@@ -11458,7 +11365,7 @@ static async Task TestOrchestratorInjectsApprovedSourceExcerpts()
                 "CDC Flu",
                 "https://example.test/flu",
                 DateTimeOffset.UtcNow,
-                "Approved source excerpt about flu.")
+                "Source excerpt about flu.")
         ],
         Array.Empty<string>());
     var orchestrator = new ConversationOrchestrator(
@@ -11488,8 +11395,8 @@ static async Task TestOrchestratorInjectsApprovedSourceExcerpts()
     }
 
     var answer = string.Concat(chunks);
-    Contains("Retrieved approved source excerpts", handler.LastChatBody);
-    Contains("Approved source excerpt about flu.", handler.LastChatBody);
+    Contains("Retrieved source excerpts", handler.LastChatBody);
+    Contains("Source excerpt about flu.", handler.LastChatBody);
     Contains("Sources checked:", answer);
     Contains("https://example.test/flu", answer);
 }
@@ -11508,7 +11415,7 @@ static async Task TestOrchestratorOwnsSourceAppendix()
                 "Real Source",
                 "https://example.test/real",
                 DateTimeOffset.UtcNow,
-                "Approved source excerpt.")
+                "Source excerpt.")
         ],
         Array.Empty<string>());
     var orchestrator = new ConversationOrchestrator(
@@ -11552,7 +11459,7 @@ static async Task TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts()
     var correctionQueue = new CorrectionQueueService(new FileCorrectionQueueStore(directory));
     var sourceResult = new SourceRetrievalResult(
         Array.Empty<SourceExcerpt>(),
-        ["No matching approved sources were selected for the planned query."],
+        ["No matching source excerpts were returned for the planned query."],
         true);
     var orchestrator = new ConversationOrchestrator(
         runtime,
@@ -11580,8 +11487,8 @@ static async Task TestOrchestratorReportsAttemptedSourceLookupWithoutExcerpts()
         chunks.Add(chunk.Text);
     }
 
-    Contains("Approved source lookup was attempted", handler.LastChatBody);
-    Contains("No matching approved sources", handler.LastChatBody);
+    Contains("Source lookup was attempted", handler.LastChatBody);
+    Contains("No matching source excerpts", handler.LastChatBody);
     Contains("Planner intent: weather", handler.LastChatBody);
     Equal("OK", string.Concat(chunks));
 }

@@ -130,17 +130,17 @@
 
                     <Border Style="{StaticResource PanelCard}">
                         <StackPanel>
-                            <TextBlock Text="Sources &amp; Local Library"
+                            <TextBlock Text="Internet &amp; Local Library"
                                        Foreground="{StaticResource TextBrush}"
                                        FontSize="17"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Maintain approved research sources and local documents Ali can use for grounded answers."
+                            <TextBlock Text="Configure internet source backends in Settings and maintain local documents Ali can use for grounded answers."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,4,0,6" />
                             <WrapPanel>
-                                <Button Content="Sources"
-                                        Command="{Binding OpenSourcesTopicsCommand}" />
+                                <Button Content="Internet Settings"
+                                        Command="{Binding OpenSettingsCommand}" />
                                 <Button Content="Local Library"
                                         Command="{Binding OpenLocalLibraryCommand}" />
                             </WrapPanel>

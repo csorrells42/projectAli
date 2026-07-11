@@ -89,7 +89,7 @@ public sealed class AliDesktopInstaller
                     dependencyMessages.Add("Assistant profile not created; first app launch will ask for the assistant name.");
                 }
 
-                RepairStarterSources(normalizedOptions, dependencyMessages, warnings);
+                RepairInternetBackendSettings(normalizedOptions, dependencyMessages, warnings);
                 await HandleOllamaAsync(normalizedOptions, dependencyMessages, cancellationToken).ConfigureAwait(false);
                 CreateShortcuts(normalizedOptions, targetDirectory, dependencyMessages, warnings);
             }
@@ -550,42 +550,19 @@ public sealed class AliDesktopInstaller
             .FirstOrDefault();
     }
 
-    private static void RepairStarterSources(
+    private static void RepairInternetBackendSettings(
         AliDesktopInstallOptions options,
         List<string> dependencyMessages,
         List<string> warnings)
     {
         try
         {
-            using var httpClient = new HttpClient();
-            var sourceStore = new FileSourceRetriever(
-                Path.Combine(options.LocalAliRoot, "BootstrapData"),
-                httpClient);
-            var result = sourceStore.RepairStarterCatalog();
-            sourceStore.WriteExample();
             WebSourceBackendSettingsStore.WriteExample(Path.Combine(options.LocalAliRoot, "BootstrapData"));
-
-            if (result.CatalogCreated)
-            {
-                dependencyMessages.Add($"Bundled Sources & Topics catalog created with {result.AddedStarterSourceCount} approved source(s).");
-            }
-            else if (result.AddedStarterSourceCount > 0)
-            {
-                dependencyMessages.Add($"Bundled Sources & Topics repaired: added {result.AddedStarterSourceCount} missing approved source(s), preserved {result.ExistingSourceCount} existing source(s).");
-            }
-            else
-            {
-                dependencyMessages.Add($"Bundled Sources & Topics verified: {result.ExistingSourceCount} approved source(s) already present.");
-            }
-
-            if (!string.IsNullOrWhiteSpace(result.BackupPath))
-            {
-                warnings.Add($"Invalid Sources & Topics catalog was backed up before repair: {result.BackupPath}");
-            }
+            dependencyMessages.Add("Internet source backend settings example verified.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {
-            warnings.Add($"Bundled Sources & Topics could not be repaired: {ex.Message}");
+            warnings.Add($"Internet source backend settings example could not be verified: {ex.Message}");
         }
     }
 

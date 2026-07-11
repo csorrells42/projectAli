@@ -589,10 +589,10 @@ public static class CodingAbilityCatalog
             ]),
         new(
             "Sources",
-            "Approved web sources, topic labels, and the local document library.",
+            "Internet backend settings and the local document library.",
             [
-                new("Sources and topics", "Manage source URLs and the topics they are useful for.", "Use the Sources button in the top bar."),
-                new("Local library", "Choose the approved local RAG folder and scan it.", "Use the Local Library button in the top bar.")
+                new("Internet backend", "Configure Tavily search and Firecrawl extraction keys.", "Use Settings -> Internet."),
+                new("Local library", "Choose the approved local RAG folder and scan it.", "Use the Local Library button under maintenance.")
             ]),
         new(
             "Voice",
@@ -806,7 +806,7 @@ public static class CodingAbilityCatalog
         }
 
         builder.AppendLine("Truth boundary:");
-        builder.AppendLine("- Ali should not claim she has no internet/source access when approved source lookup is available.");
+        builder.AppendLine("- Ali should not claim she has no internet/source access when configured source lookup is available.");
         builder.AppendLine("- Ali should say source access uses configured internet search/extraction and approved local library lookup, not a free-form browser or autonomous web agent.");
         return builder.ToString().TrimEnd();
     }

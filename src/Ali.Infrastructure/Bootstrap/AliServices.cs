@@ -67,8 +67,6 @@ public sealed class AliServices
 
     public string LocalVectorLibraryIndexPath => LocalVectorLibrarySettingsStore.GetIndexPath(DataRoot);
 
-    public string CuratedSourcesCatalogPath => CreateFileSourceRetriever().CatalogPath;
-
     public string InternetBackendSettingsPath => WebSourceBackendSettingsStore.GetSettingsPath(DataRoot);
 
     public string InternetBackendSettingsExamplePath => WebSourceBackendSettingsStore.GetExamplePath(DataRoot);
@@ -122,9 +120,6 @@ public sealed class AliServices
     public LocalVectorLibraryRetriever CreateLocalVectorLibraryRetriever() =>
         new(DataRoot, _httpClient, LoadLocalVectorLibrarySettings());
 
-    public FileSourceRetriever CreateFileSourceRetriever() =>
-        new(DataRoot, _httpClient);
-
     public WebSourceBackendSettings LoadWebSourceBackendSettings() =>
         WebSourceBackendSettingsStore.LoadOrDefault(DataRoot);
 
@@ -133,12 +128,6 @@ public sealed class AliServices
 
     public TavilyFirecrawlSourceRetriever CreateWebSourceRetriever() =>
         new(_httpClient, LoadWebSourceBackendSettings());
-
-    public IReadOnlyList<SourceCatalogEntry> LoadCuratedSources() =>
-        CreateFileSourceRetriever().LoadCatalog();
-
-    public void SaveCuratedSources(IEnumerable<SourceCatalogEntry> sources) =>
-        CreateFileSourceRetriever().SaveCatalog(sources);
 
     public UserDataBackupService CreateUserDataBackupService() =>
         new(DataRoot, ProfileDataRoot);
@@ -193,8 +182,6 @@ public sealed class AliServices
         var configuredOptions = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot);
         var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
-        var sourceStore = new FileSourceRetriever(dataRoot, httpClient);
-        sourceStore.WriteExample();
         WebSourceBackendSettingsStore.WriteExample(dataRoot);
         LocalVectorLibrarySettingsStore.WriteExample(dataRoot);
         CodingToolSettingsStore.WriteExample(dataRoot);

@@ -92,7 +92,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private MaintenanceDashboardWindow? _maintenanceDashboardWindow;
     private ProgrammingDashboardWindow? _programmingDashboardWindow;
     private LocalLibraryWindow? _localLibraryWindow;
-    private SourcesTopicsWindow? _sourcesTopicsWindow;
     private bool _voiceMonitorRequested;
     private bool _suppressInputMonitorRestart;
     private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
@@ -240,7 +239,6 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenMaintenanceDashboardCommand = CreateCommand(_ => OpenMaintenanceDashboard());
         OpenProgrammingDashboardCommand = CreateCommand(_ => OpenProgrammingDashboard());
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
-        OpenSourcesTopicsCommand = CreateCommand(_ => OpenSourcesTopics());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
         RunSelectedCommandExplorerCommand = CreateCommand(parameter => _ = RunCommandExplorerNodeSafelyAsync(parameter), parameter => CanRunCommandExplorerNode(parameter));
         SendProgrammingNextCommand = CreateAsyncCommand(
@@ -667,9 +665,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public string AssistantLocalLibraryToolTip =>
         $"Open {AssistantName}'s approved local RAG folder and vector index.";
 
-    public string AssistantSourcesTopicsToolTip =>
-        $"Manage approved sources and topics {AssistantName} can use for source-backed answers.";
-
     public string AssistantVoiceLabel => $"{AssistantName} voice";
 
     public string AssistantWillUseSelectedModelText =>
@@ -736,8 +731,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenProgrammingDashboardCommand { get; }
 
     public ICommand OpenLocalLibraryCommand { get; }
-
-    public ICommand OpenSourcesTopicsCommand { get; }
 
     public ICommand ToggleCommandExplorerCommand { get; }
 
@@ -3078,7 +3071,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
             var componentLines = new List<string>
             {
-                DescribeSourceCatalogHealth(),
                 DescribeInternetBackendHealth()
             };
 
@@ -3128,7 +3120,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var startedAt = DateTimeOffset.Now;
         var confirmation = System.Windows.MessageBox.Show(
-            "Repair Ali's local install data now?\n\nThis repairs the bundled Sources & Topics catalog, missing example/config helper files, and local voice tool paths. It preserves chats, memories, reminders, app settings, installed models, and the selected runtime model.",
+            "Repair Ali's local install data now?\n\nThis repairs missing example/config helper files, internet backend settings examples, local library folders, and local voice tool paths. It preserves chats, memories, reminders, app settings, installed models, and the selected runtime model.",
             "Repair Ali Install",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
@@ -3162,7 +3154,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 "Ali install repair",
                 [
                     ComponentStatus("Install data", warnings.Count == 0, warnings.Count == 0 ? "repaired" : $"{warnings.Count} warning(s)"),
-                    DescribeSourceCatalogHealth(),
+                    DescribeInternetBackendHealth(),
                     ComponentStatus("Runtime settings", true, "reloaded"),
                     ComponentStatus("Voice paths", !hasVoiceWarning, hasVoiceWarning ? "needs review" : "repaired")
                 ],
@@ -3258,11 +3250,11 @@ public sealed class MainWindowViewModel : ObservableObject
             var componentLines = new List<string>();
             var needsAttention = new List<string>();
 
-            var sourceHealth = DescribeSourceCatalogHealth();
-            componentLines.Add(sourceHealth);
-            if (sourceHealth.Contains(" - Bad", StringComparison.OrdinalIgnoreCase))
+            var internetBackendHealth = DescribeInternetBackendHealth();
+            componentLines.Add(internetBackendHealth);
+            if (internetBackendHealth.Contains(" - Bad", StringComparison.OrdinalIgnoreCase))
             {
-                needsAttention.Add("Sources & Topics need repair.");
+                needsAttention.Add("Internet source backend needs configuration.");
             }
 
             foreach (var check in new[]
@@ -3643,7 +3635,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void RepairAliInstallData(List<string> messages, List<string> warnings)
     {
-        RepairStarterSources(messages, warnings);
         RuntimeSettingsStore.WriteExample(_services.DataRoot);
         messages.Add("Runtime settings example verified; selected runtime model was not changed.");
         WebSourceBackendSettingsStore.WriteExample(_services.DataRoot);
@@ -3654,38 +3645,6 @@ public sealed class MainWindowViewModel : ObservableObject
         CodingToolSettingsStore.WriteExample(_services.DataRoot);
         messages.Add("Coding permission settings example verified.");
         RepairVoiceToolSettings(messages, warnings);
-    }
-
-    private void RepairStarterSources(List<string> messages, List<string> warnings)
-    {
-        try
-        {
-            var sourceStore = _services.CreateFileSourceRetriever();
-            var result = sourceStore.RepairStarterCatalog();
-            sourceStore.WriteExample();
-
-            if (result.CatalogCreated)
-            {
-                messages.Add($"Sources & Topics catalog created with {result.AddedStarterSourceCount} approved source(s).");
-            }
-            else if (result.AddedStarterSourceCount > 0)
-            {
-                messages.Add($"Sources & Topics repaired: added {result.AddedStarterSourceCount} missing approved source(s), preserved {result.ExistingSourceCount} existing source(s).");
-            }
-            else
-            {
-                messages.Add($"Sources & Topics verified: {result.ExistingSourceCount} approved source(s) already present.");
-            }
-
-            if (!string.IsNullOrWhiteSpace(result.BackupPath))
-            {
-                warnings.Add($"Invalid Sources & Topics catalog was backed up before repair: {result.BackupPath}");
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
-        {
-            warnings.Add($"Sources & Topics could not be repaired: {ex.Message}");
-        }
     }
 
     private void RepairVoiceToolSettings(List<string> messages, List<string> warnings)
@@ -3733,19 +3692,6 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException or NotSupportedException)
         {
             warnings.Add($"Voice settings could not be repaired: {ex.Message}");
-        }
-    }
-
-    private string DescribeSourceCatalogHealth()
-    {
-        try
-        {
-            var sources = _services.LoadCuratedSources();
-            return ComponentStatus("Sources & Topics", sources.Count > 0, $"{sources.Count} sources");
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
-        {
-            return ComponentStatus("Sources & Topics", false, ShortMaintenanceDetail(ex.Message));
         }
     }
 
@@ -7188,29 +7134,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _localLibraryWindow.Closed += (_, _) => _localLibraryWindow = null;
         _localLibraryWindow.Show();
         _localLibraryWindow.Activate();
-    }
-
-    private void OpenSourcesTopics()
-    {
-        if (_sourcesTopicsWindow is not null)
-        {
-            if (!_sourcesTopicsWindow.IsVisible)
-            {
-                _sourcesTopicsWindow.Show();
-            }
-
-            _sourcesTopicsWindow.Activate();
-            return;
-        }
-
-        var owner = System.Windows.Application.Current?.MainWindow;
-        _sourcesTopicsWindow = new SourcesTopicsWindow(_services)
-        {
-            Owner = owner
-        };
-        _sourcesTopicsWindow.Closed += (_, _) => _sourcesTopicsWindow = null;
-        _sourcesTopicsWindow.Show();
-        _sourcesTopicsWindow.Activate();
     }
 
     private void RefreshVoiceSettingsChoices()

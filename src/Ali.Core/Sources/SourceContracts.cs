@@ -2,18 +2,6 @@ using Ali.Core.Runtime;
 
 namespace Ali.Core.Sources;
 
-public sealed record SourceCatalogEntry(
-    string Id,
-    string Topic,
-    string Name,
-    string Url,
-    string Type = "web",
-    string TrustLevel = "standard",
-    IReadOnlyList<string>? Keywords = null,
-    IReadOnlyList<string>? Topics = null,
-    string? Notes = null,
-    bool Enabled = true);
-
 public sealed record SourceExcerpt(
     int Index,
     string Topic,
