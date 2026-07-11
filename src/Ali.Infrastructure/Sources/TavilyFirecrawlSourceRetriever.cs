@@ -188,7 +188,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 safe_search = false
             };
             var body = await PostJsonAsync(
-                BuildEndpoint(settings.TavilyBaseUrl, "search"),
+                BuildTavilyEndpoint("search"),
                 payload,
                 apiKey,
                 cancellationToken).ConfigureAwait(false);
@@ -242,7 +242,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                     : null
             };
             var body = await PostJsonAsync(
-                BuildEndpoint(settings.FirecrawlBaseUrl, "search"),
+                BuildFirecrawlEndpoint("search"),
                 payload,
                 apiKey,
                 cancellationToken).ConfigureAwait(false);
@@ -306,7 +306,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000
             };
             var body = await PostJsonAsync(
-                BuildEndpoint(settings.FirecrawlBaseUrl, "scrape"),
+                BuildFirecrawlEndpoint("scrape"),
                 payload,
                 apiKey,
                 cancellationToken).ConfigureAwait(false);
@@ -463,10 +463,16 @@ public sealed class TavilyFirecrawlSourceRetriever(
     private static string NormalizeTavilySearchDepth(string? value) =>
         string.Equals(value, "basic", StringComparison.OrdinalIgnoreCase) ? "basic" : "advanced";
 
-    private static Uri BuildEndpoint(string baseUrl, string path)
+    private Uri BuildTavilyEndpoint(string path) =>
+        BuildEndpoint(settings.TavilyBaseUrl, "https://api.tavily.com", path);
+
+    private Uri BuildFirecrawlEndpoint(string path) =>
+        BuildEndpoint(settings.FirecrawlBaseUrl, "https://api.firecrawl.dev/v2", path);
+
+    private static Uri BuildEndpoint(string baseUrl, string fallbackBaseUrl, string path)
     {
         var trimmedBase = string.IsNullOrWhiteSpace(baseUrl)
-            ? "https://api.tavily.com"
+            ? fallbackBaseUrl
             : baseUrl.Trim().TrimEnd('/');
         var trimmedPath = path.Trim().TrimStart('/');
         if (trimmedBase.EndsWith($"/{trimmedPath}", StringComparison.OrdinalIgnoreCase))
@@ -551,7 +557,8 @@ public sealed class TavilyFirecrawlSourceRetriever(
     }
 
     private static bool IsOfficialFirecrawlEndpoint(string? baseUrl) =>
-        Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+        string.IsNullOrWhiteSpace(baseUrl)
+        || Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
         && string.Equals(uri.Host, "api.firecrawl.dev", StringComparison.OrdinalIgnoreCase);
 
     private static void AddWarningOnce(List<string> warnings, string warning)
