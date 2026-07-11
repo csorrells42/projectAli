@@ -170,21 +170,24 @@ show coding skill command index
 
 The install doctor is read-only. It checks DevRun, Visual Studio discovery, VSIX build artifact, WebHelper bridge URL, runtime settings, saved model, PDF workspace, .NET runtime, OS, and manual dependency commands. It does not install, repair, sign, edit registry, change firewall, change PATH, or modify trust stores.
 
-## Audio Setup Sources
+## Internet And Local Sources
 
-Ali's source-backed audio setup catalog is:
-
-```text
-docs\source-catalogs\ali_audio_setup_sources.json
-```
-
-Merge those entries into the live curated source catalog:
+Ali's internet backend settings are created at startup or repair when missing:
 
 ```text
-%LOCALAPPDATA%\Ali\BootstrapData\Sources\curated_sources.json
+%LOCALAPPDATA%\Ali\BootstrapData\Sources\internet_backends.json
 ```
 
-The catalog gives Ali official source links for the Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure Gator Low Profile Boom Arm SH-BROADCAST2. This is reference material for ordinary source-backed setup questions, not a special audio setup feature.
+Configure Tavily and Firecrawl keys in Ali Settings -> Internet, or set the configured environment variables:
+
+```text
+TAVILY_API_KEY
+FIRECRAWL_API_KEY
+```
+
+Ali's source planner decides when source lookup is needed. Internet lookups use Tavily search first, Firecrawl page extraction for retrieved pages, Firecrawl search fallback when Tavily returns no usable results, and Firecrawl direct scrape for exact URL prompts.
+
+Local reference documents are managed through Maintenance -> Local Library. Put user-approved manuals or reference files in the configured local library root and rebuild the local index there. Do not place legacy JSON source lists in `%LOCALAPPDATA%\Ali\BootstrapData\Sources`; that path now belongs to internet backend settings and Local Library indexes.
 
 ## Coding Companion Checks
 
