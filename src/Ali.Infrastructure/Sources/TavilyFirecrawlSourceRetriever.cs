@@ -288,7 +288,9 @@ public sealed class TavilyFirecrawlSourceRetriever(
             var payload = new
             {
                 url,
-                formats = new[] { "markdown" }
+                formats = new[] { "markdown" },
+                onlyMainContent = true,
+                timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000
             };
             var body = await PostJsonAsync(
                 BuildEndpoint(settings.FirecrawlBaseUrl, "scrape"),
