@@ -570,21 +570,60 @@ public sealed class TavilyFirecrawlSourceRetriever(
         try
         {
             using var document = JsonDocument.Parse(text);
-            if (document.RootElement.TryGetProperty("error", out var error)
-                && error.ValueKind == JsonValueKind.String)
-            {
-                return error.GetString();
-            }
-
-            if (document.RootElement.TryGetProperty("message", out var message)
-                && message.ValueKind == JsonValueKind.String)
-            {
-                return message.GetString();
-            }
+            return TryReadApiError(document.RootElement, depth: 0);
         }
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    private static string? TryReadApiError(JsonElement value, int depth)
+    {
+        if (depth > 4)
+        {
+            return null;
+        }
+
+        if (value.ValueKind is JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+
+        if (value.ValueKind is JsonValueKind.Object)
+        {
+            foreach (var propertyName in new[] { "error", "message", "detail", "code" })
+            {
+                if (value.TryGetProperty(propertyName, out var propertyValue))
+                {
+                    var message = TryReadApiError(propertyValue, depth + 1);
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        return message;
+                    }
+                }
+            }
+
+            foreach (var property in value.EnumerateObject())
+            {
+                var message = TryReadApiError(property.Value, depth + 1);
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    return message;
+                }
+            }
+        }
+
+        if (value.ValueKind is JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                var message = TryReadApiError(item, depth + 1);
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    return message;
+                }
+            }
         }
 
         return null;
