@@ -335,10 +335,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
     private static bool IsCurrentNewsPlan(SourceQueryPlan plan) =>
         plan.Intent.Contains("news", StringComparison.OrdinalIgnoreCase)
-        || plan.PreferredSourceTopics.Any(topic => topic.Contains("news", StringComparison.OrdinalIgnoreCase))
-        || plan.QueryTerms.Any(term => term.Contains("latest", StringComparison.OrdinalIgnoreCase)
-                                      || term.Contains("today", StringComparison.OrdinalIgnoreCase)
-                                      || term.Contains("headlines", StringComparison.OrdinalIgnoreCase));
+        || plan.PreferredSourceTopics.Any(topic => topic.Contains("news", StringComparison.OrdinalIgnoreCase));
 
     private static string NormalizeTavilySearchDepth(string? value) =>
         string.Equals(value, "basic", StringComparison.OrdinalIgnoreCase) ? "basic" : "advanced";
