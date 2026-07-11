@@ -108,10 +108,6 @@ public sealed class FileSourceRetriever
         JsonSerializer.Serialize(stream, sources.ToList(), JsonOptions);
     }
 
-    [Obsolete("The old curated URL fetcher has been replaced by TavilyFirecrawlSourceRetriever.")]
-    public ISourceRetriever CreateRetriever() =>
-        throw new NotSupportedException("The old curated URL fetcher has been replaced by TavilyFirecrawlSourceRetriever.");
-
     private static SourceCatalogEntry[] BuildDefaultCatalog() =>
         LoadBundledDefaultCatalog() ?? Array.Empty<SourceCatalogEntry>();
 

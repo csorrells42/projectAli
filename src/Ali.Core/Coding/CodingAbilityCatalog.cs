@@ -747,12 +747,12 @@ public static class CodingAbilityCatalog
         var builder = new StringBuilder();
         builder.AppendLine("Here is how I can help:");
         builder.AppendLine("- Chat: ask normal questions, brainstorm, write, summarize, and plan.");
-        builder.AppendLine("- Current info: ask for approved-source answers such as current weather, official government facts, news/source checks, and saved local library material when sources are configured.");
+        builder.AppendLine("- Current info: ask for internet-backed answers such as current weather, official government facts, news/source checks, and saved local library material when Tavily/Firecrawl or local sources are configured.");
         builder.AppendLine("- Weather: ask \"what is the weather in Tullahoma, TN\" or tell me your current city/state first. Multi-day forecasts are still being reworked.");
         builder.AppendLine("- Computer maintenance: use the Maintenance button for health checks, repair checks, process/window clues, startup/service clues, cleanup plans, and receipts.");
         builder.AppendLine("- Programming: use the Programming button or ask me to build a feature; I can show the active workspace/project, create simple console and WPF starter apps, reason about common data structures and service/database choices, advanced WPF object/layout choices, run intake, Roslyn targeting, pattern-copy planning, concrete patch authoring, patch body generation, owner apply packets, confidence scoring, patch/test previews, validation minimization, validation routing, semantic diff summaries, and guarded apply steps.");
         builder.AppendLine("- Voice: use push-to-talk, local transcription, local speech, and voice settings when the local voice pack is installed.");
-        builder.AppendLine("- Sources and local library: use Sources and Local Library under maintenance to manage approved web sources and local documents.");
+        builder.AppendLine("- Internet and local library: use Settings > Internet for Tavily/Firecrawl keys, and Local Library under maintenance to manage approved local documents.");
         builder.AppendLine("- PDFs and documents: create, inspect, extract, summarize, combine, and split PDFs inside the approved workspace.");
         builder.AppendLine("- Memory/reminders: save useful local memories and review reminders in Settings.");
         builder.AppendLine();
@@ -793,7 +793,7 @@ public static class CodingAbilityCatalog
         builder.AppendLine("- PDF workspace: create/export, inspect/extract/summarize, Markdown conversion, gated combine/split.");
         builder.AppendLine("- Windows troubleshooting: processes, ports, services/startup, event logs, build locks, install readiness.");
         builder.AppendLine("- General computer planning: file organization, disk cleanup, app install troubleshooting, peripheral setup.");
-        builder.AppendLine("- Source-backed answers: Ali can use approved curated web/source entries when the app performs a source lookup; this is not unrestricted browsing.");
+        builder.AppendLine("- Source-backed answers: Ali can use the configured internet backend for Tavily search and Firecrawl extraction, plus approved local library documents when source lookup is needed.");
         builder.AppendLine("- Audio setup sources: Focusrite Scarlett Solo/2i2, AT2040, FetHead, and Shure SH-BROADCAST2 source links are available as reference material.");
         builder.AppendLine("Guardrails:");
         builder.AppendLine("- Status and planning commands are read-only.");
@@ -807,7 +807,7 @@ public static class CodingAbilityCatalog
 
         builder.AppendLine("Truth boundary:");
         builder.AppendLine("- Ali should not claim she has no internet/source access when approved source lookup is available.");
-        builder.AppendLine("- Ali should say source access is curated/approved-source lookup, not a free-form browser or autonomous web agent.");
+        builder.AppendLine("- Ali should say source access uses configured internet search/extraction and approved local library lookup, not a free-form browser or autonomous web agent.");
         return builder.ToString().TrimEnd();
     }
 

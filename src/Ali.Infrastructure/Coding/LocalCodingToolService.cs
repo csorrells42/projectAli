@@ -25633,7 +25633,7 @@ public sealed partial class LocalCodingToolService(
 
         if (normalized.Contains("/Sources/", StringComparison.OrdinalIgnoreCase))
         {
-            return "curated source retriever and planner tests";
+            return "source planner and internet backend tests";
         }
 
         return "focused regression test near the changed behavior";
