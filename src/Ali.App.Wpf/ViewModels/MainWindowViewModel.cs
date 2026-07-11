@@ -3713,10 +3713,12 @@ public sealed class MainWindowViewModel : ObservableObject
                 return ComponentStatus("Internet source backend", false, $"missing {settings.TavilyApiKeyEnvironmentVariable}");
             }
 
-            return ComponentStatus(
-                "Internet source backend",
-                true,
-                firecrawlConfigured ? "Tavily and Firecrawl configured" : "Tavily configured; Firecrawl will try unauthenticated/fallback extraction");
+            if (!firecrawlConfigured)
+            {
+                return ComponentStatus("Internet source backend", false, $"missing {settings.FirecrawlApiKeyEnvironmentVariable}; Tavily configured");
+            }
+
+            return ComponentStatus("Internet source backend", true, "Tavily and Firecrawl configured");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -5914,7 +5916,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (tavilyConfigured)
         {
-            return "Tavily search is configured. Firecrawl extraction will need an API key if unauthenticated fallback is blocked.";
+            return $"Tavily search is configured. Firecrawl extraction and fallback search need {settings.FirecrawlApiKeyEnvironmentVariable} or a saved Firecrawl API key.";
         }
 
         if (firecrawlConfigured)

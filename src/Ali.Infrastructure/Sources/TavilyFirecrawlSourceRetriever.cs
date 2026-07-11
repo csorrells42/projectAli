@@ -205,7 +205,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                        .ToList()
                    ?? [];
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
         {
             warnings.Add($"Tavily search failed: {ex.Message}");
             return Array.Empty<WebSearchResult>();
@@ -218,6 +218,12 @@ public sealed class TavilyFirecrawlSourceRetriever(
         List<string> warnings,
         CancellationToken cancellationToken)
     {
+        if (!CanCallFirecrawl(out var apiKey, out var missingKeyWarning))
+        {
+            AddWarningOnce(warnings, missingKeyWarning);
+            return Array.Empty<WebSearchResult>();
+        }
+
         try
         {
             var payload = new
@@ -238,7 +244,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
             var body = await PostJsonAsync(
                 BuildEndpoint(settings.FirecrawlBaseUrl, "search"),
                 payload,
-                settings.ResolveFirecrawlApiKey(),
+                apiKey,
                 cancellationToken).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<FirecrawlSearchResponse>(body, JsonOptions);
             var results = (response?.Data?.Web ?? [])
@@ -259,7 +265,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
             return results;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
         {
             warnings.Add($"Firecrawl fallback search failed: {ex.Message}{BuildFirecrawlKeyHint()}");
             return Array.Empty<WebSearchResult>();
@@ -271,6 +277,12 @@ public sealed class TavilyFirecrawlSourceRetriever(
         List<string> warnings,
         CancellationToken cancellationToken)
     {
+        if (!CanCallFirecrawl(out var apiKey, out var missingKeyWarning))
+        {
+            AddWarningOnce(warnings, missingKeyWarning);
+            return null;
+        }
+
         try
         {
             var payload = new
@@ -281,12 +293,12 @@ public sealed class TavilyFirecrawlSourceRetriever(
             var body = await PostJsonAsync(
                 BuildEndpoint(settings.FirecrawlBaseUrl, "scrape"),
                 payload,
-                settings.ResolveFirecrawlApiKey(),
+                apiKey,
                 cancellationToken).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<FirecrawlScrapeResponse>(body, JsonOptions);
             return response?.Data?.Markdown;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
         {
             warnings.Add($"Firecrawl could not extract {url}: {ex.Message}{BuildFirecrawlKeyHint()}");
             return null;
@@ -466,7 +478,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
         if (normalized.Contains("without an API key", StringComparison.OrdinalIgnoreCase)
             || normalized.Contains("API key", StringComparison.OrdinalIgnoreCase))
         {
-            normalized = "API key required or unauthenticated access blocked.";
+            normalized = "API key required or request rejected.";
         }
 
         return normalized.Length <= 240 ? normalized : $"{normalized[..237].TrimEnd()}...";
@@ -476,6 +488,34 @@ public sealed class TavilyFirecrawlSourceRetriever(
         string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey())
             ? $" Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json."
             : string.Empty;
+
+    private bool CanCallFirecrawl(out string? apiKey, out string missingKeyWarning)
+    {
+        apiKey = settings.ResolveFirecrawlApiKey();
+        if (!string.IsNullOrWhiteSpace(apiKey) || !IsOfficialFirecrawlEndpoint(settings.FirecrawlBaseUrl))
+        {
+            missingKeyWarning = string.Empty;
+            return true;
+        }
+
+        missingKeyWarning = $"Firecrawl API key is not configured. Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json.";
+        return false;
+    }
+
+    private static bool IsOfficialFirecrawlEndpoint(string? baseUrl) =>
+        Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+        && string.Equals(uri.Host, "api.firecrawl.dev", StringComparison.OrdinalIgnoreCase);
+
+    private static void AddWarningOnce(List<string> warnings, string warning)
+    {
+        if (string.IsNullOrWhiteSpace(warning)
+            || warnings.Any(existing => string.Equals(existing, warning, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        warnings.Add(warning);
+    }
 
     private static string? TryReadApiError(string text)
     {
