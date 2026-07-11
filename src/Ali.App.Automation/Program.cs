@@ -183,6 +183,10 @@ internal static class Program
             Arguments = JoinArguments(arguments),
             UseShellExecute = false
         };
+        if (!string.IsNullOrWhiteSpace(options.LocalRoot))
+        {
+            startInfo.Environment["ALI_LOCAL_ROOT"] = Path.GetFullPath(options.LocalRoot);
+        }
 
         return Process.Start(startInfo)
                ?? throw new InvalidOperationException($"Could not launch Ali from {options.AppPath}.");
@@ -308,11 +312,10 @@ internal static class Program
         while (DateTimeOffset.UtcNow < deadline)
         {
             var status = ReadOptionalName(window, "MainChatStatusText");
-            var sendButton = FindRequired(window, "MainChatSendButton");
             var messageCount = CountChatMessages(window);
             if (messageCount >= minimumMessageCount
-                && sendButton.Current.IsEnabled
-                && !status.Contains("Streaming", StringComparison.OrdinalIgnoreCase))
+                && (status.Contains("Response complete", StringComparison.OrdinalIgnoreCase)
+                    || !status.Contains("Streaming", StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
@@ -561,19 +564,21 @@ internal sealed record AutomationOptions(
     bool NextOnlyIfEnabled,
     bool RequireLiveRuntime,
     string? ScreenshotPath,
+    string? LocalRoot,
     bool ShutdownLaunchedApp,
     bool ShowHelp)
 {
     public const string HelpText = """
     Usage:
-      Ali.App.Automation chat --app <Ali.App.Wpf.exe> --send "what happened today?" [--require-live-runtime] [--screenshot <path.png>] [--timeout-ms 120000] [--shutdown-launched-app]
+      Ali.App.Automation chat --app <Ali.App.Wpf.exe> --send "what happened today?" [--local-root <isolated-root>] [--require-live-runtime] [--screenshot <path.png>] [--timeout-ms 120000] [--shutdown-launched-app]
       Ali.App.Automation chat --send "..." [--screenshot <path.png>]
-      Ali.App.Automation programming --app <Ali.App.Wpf.exe> --project <path.csproj> --send "make a simple WPF window..." [--require-live-runtime] [--next-count 1] [--next-if-enabled] [--screenshot <path.png>] [--timeout-ms 120000] [--shutdown-launched-app]
+      Ali.App.Automation programming --app <Ali.App.Wpf.exe> --project <path.csproj> --send "make a simple WPF window..." [--local-root <isolated-root>] [--require-live-runtime] [--next-count 1] [--next-if-enabled] [--screenshot <path.png>] [--timeout-ms 120000] [--shutdown-launched-app]
       Ali.App.Automation programming --send "..." [--send "diagnose last build failure"] [--next-count 1] [--next-if-enabled] [--screenshot <path.png>]
 
     If --app is supplied, the runner launches Ali. Programming mode opens the Programming window.
     If --app is omitted, the runner attaches to an existing matching Ali window.
     --send may be supplied more than once; messages are sent in order in the same window.
+    --local-root sets ALI_LOCAL_ROOT for a launched Ali process so validation can use isolated app data.
     If --require-live-runtime is supplied, the runner waits until Ali reports an active non-stub runtime before entering text.
     """;
 
@@ -581,7 +586,7 @@ internal sealed record AutomationOptions(
     {
         if (args.Count == 0 || args.Any(arg => arg is "-h" or "--help" or "/?"))
         {
-            return new AutomationOptions("help", null, null, Array.Empty<string>(), 0, TimeSpan.FromSeconds(90), false, false, null, false, true);
+            return new AutomationOptions("help", null, null, Array.Empty<string>(), 0, TimeSpan.FromSeconds(90), false, false, null, null, false, true);
         }
 
         var mode = args[0];
@@ -593,6 +598,7 @@ internal sealed record AutomationOptions(
         var nextOnlyIfEnabled = false;
         var requireLiveRuntime = false;
         string? screenshotPath = null;
+        string? localRoot = null;
         var shutdownLaunchedApp = false;
 
         for (var index = 1; index < args.Count; index++)
@@ -641,6 +647,10 @@ internal sealed record AutomationOptions(
             {
                 screenshotPath = ReadValue();
             }
+            else if (arg.Equals("--local-root", StringComparison.OrdinalIgnoreCase))
+            {
+                localRoot = ReadValue();
+            }
             else if (arg.Equals("--shutdown-launched-app", StringComparison.OrdinalIgnoreCase))
             {
                 shutdownLaunchedApp = true;
@@ -656,6 +666,6 @@ internal sealed record AutomationOptions(
             nextCount = 1;
         }
 
-        return new AutomationOptions(mode, appPath, projectPath, sendTexts, Math.Max(0, nextCount), timeout, nextOnlyIfEnabled, requireLiveRuntime, screenshotPath, shutdownLaunchedApp, false);
+        return new AutomationOptions(mode, appPath, projectPath, sendTexts, Math.Max(0, nextCount), timeout, nextOnlyIfEnabled, requireLiveRuntime, screenshotPath, localRoot, shutdownLaunchedApp, false);
     }
 }

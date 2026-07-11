@@ -101,10 +101,7 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            var root = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Ali",
-                "Logs");
+            var root = Path.Combine(AliServices.LocalAliRoot, "Logs");
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, "ali-crash.log");
             var text = new StringBuilder()

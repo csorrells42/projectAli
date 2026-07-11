@@ -17,6 +17,8 @@ namespace Ali.Infrastructure.Bootstrap;
 
 public sealed class AliServices
 {
+    public const string LocalAliRootEnvironmentVariable = "ALI_LOCAL_ROOT";
+
     private readonly HttpClient _httpClient;
 
     public AliServices(
@@ -156,9 +158,16 @@ public sealed class AliServices
         ConfigureSpeechTools(speechToTextOptions, new PiperCliTextToSpeechProvider(textToSpeechOptions));
     }
 
-    public static string LocalAliRoot => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Ali");
+    public static string LocalAliRoot
+    {
+        get
+        {
+            var configuredRoot = Environment.GetEnvironmentVariable(LocalAliRootEnvironmentVariable);
+            return string.IsNullOrWhiteSpace(configuredRoot)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ali")
+                : Path.GetFullPath(configuredRoot.Trim());
+        }
+    }
 
     public static string DesktopDataRoot => Path.Combine(LocalAliRoot, "BootstrapData");
 
