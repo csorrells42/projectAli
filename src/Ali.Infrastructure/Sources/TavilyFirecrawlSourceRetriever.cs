@@ -419,10 +419,11 @@ public sealed class TavilyFirecrawlSourceRetriever(
         ?? (string.IsNullOrWhiteSpace(plan.Intent) ? "web" : plan.Intent);
 
     private static string ResolveTavilyTopic(SourceQueryPlan plan) =>
-        plan.Intent.Contains("news", StringComparison.OrdinalIgnoreCase)
-        || plan.PreferredSourceTopics.Any(topic => topic.Contains("news", StringComparison.OrdinalIgnoreCase))
-            ? "news"
-            : "general";
+        HasPlanLabel(plan, "finance")
+            ? "finance"
+            : HasPlanLabel(plan, "news")
+                ? "news"
+                : "general";
 
     private static string? ResolveTavilyTimeRange(
         SourceQueryPlan plan,
@@ -452,8 +453,12 @@ public sealed class TavilyFirecrawlSourceRetriever(
         IsCurrentNewsPlan(plan) ? "qdr:d" : null;
 
     private static bool IsCurrentNewsPlan(SourceQueryPlan plan) =>
-        plan.Intent.Contains("news", StringComparison.OrdinalIgnoreCase)
-        || plan.PreferredSourceTopics.Any(topic => topic.Contains("news", StringComparison.OrdinalIgnoreCase));
+        HasPlanLabel(plan, "news");
+
+    private static bool HasPlanLabel(SourceQueryPlan plan, string label) =>
+        plan.Intent.Contains(label, StringComparison.OrdinalIgnoreCase)
+        || plan.Topic.Contains(label, StringComparison.OrdinalIgnoreCase)
+        || plan.PreferredSourceTopics.Any(topic => topic.Contains(label, StringComparison.OrdinalIgnoreCase));
 
     private static string NormalizeTavilySearchDepth(string? value) =>
         string.Equals(value, "basic", StringComparison.OrdinalIgnoreCase) ? "basic" : "advanced";
