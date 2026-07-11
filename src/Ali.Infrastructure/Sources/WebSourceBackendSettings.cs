@@ -14,6 +14,8 @@ public sealed class WebSourceBackendSettings
 
     public string TavilySearchDepth { get; set; } = "advanced";
 
+    public string TavilyCurrentNewsTimeRange { get; set; } = "day";
+
     public string FirecrawlBaseUrl { get; set; } = "https://api.firecrawl.dev/v2";
 
     public string FirecrawlApiKeyEnvironmentVariable { get; set; } = "FIRECRAWL_API_KEY";
@@ -21,6 +23,8 @@ public sealed class WebSourceBackendSettings
     public string? FirecrawlApiKey { get; set; }
 
     public bool UseFirecrawlForPageExtraction { get; set; } = true;
+
+    public bool UseFirecrawlSearchScrapeOptions { get; set; } = true;
 
     public int MaxSearchResults { get; set; } = 5;
 

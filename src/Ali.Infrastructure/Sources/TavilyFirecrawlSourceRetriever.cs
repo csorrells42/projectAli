@@ -55,7 +55,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
         var results = await SearchWithTavilyAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
         if (results.Count == 0)
         {
-            results = await SearchWithFirecrawlAsync(query, warnings, cancellationToken).ConfigureAwait(false);
+            results = await SearchWithFirecrawlAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
         }
 
         if (results.Count == 0)
@@ -131,15 +131,17 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
         try
         {
+            var tavilyTopic = ResolveTavilyTopic(plan);
             var payload = new
             {
                 query,
                 search_depth = NormalizeTavilySearchDepth(settings.TavilySearchDepth),
                 chunks_per_source = 3,
                 max_results = Math.Clamp(settings.MaxSearchResults, 1, 10),
-                topic = ResolveTavilyTopic(plan),
+                topic = tavilyTopic,
+                time_range = ResolveTavilyTimeRange(plan, tavilyTopic, settings),
                 include_answer = false,
-                include_raw_content = false,
+                include_raw_content = "markdown",
                 include_images = false,
                 include_image_descriptions = false,
                 include_favicon = true,
@@ -157,7 +159,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                        .Select(result => new WebSearchResult(
                            result.Title ?? result.Url!,
                            result.Url!,
-                           result.Content,
+                           result.RawContent ?? result.Content,
                            result.Content,
                            result.PublishedDate,
                            "Tavily"))
@@ -173,6 +175,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
     private async Task<IReadOnlyList<WebSearchResult>> SearchWithFirecrawlAsync(
         string query,
+        SourceQueryPlan plan,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
@@ -181,7 +184,17 @@ public sealed class TavilyFirecrawlSourceRetriever(
             var payload = new
             {
                 query,
-                limit = Math.Clamp(settings.MaxSearchResults, 1, 10)
+                limit = Math.Clamp(settings.MaxSearchResults, 1, 10),
+                sources = ResolveFirecrawlSources(plan),
+                tbs = ResolveFirecrawlTbs(plan),
+                scrapeOptions = settings.UseFirecrawlSearchScrapeOptions
+                    ? new
+                    {
+                        formats = new[] { "markdown" },
+                        onlyMainContent = true,
+                        timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000
+                    }
+                    : null
             };
             var body = await PostJsonAsync(
                 BuildEndpoint(settings.FirecrawlBaseUrl, "search"),
@@ -195,8 +208,8 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 .Select(result => new WebSearchResult(
                     result.Title ?? result.Url!,
                     result.Url!,
-                    result.Description,
-                    result.Description,
+                    result.Markdown ?? result.Description ?? result.Snippet,
+                    result.Description ?? result.Snippet,
                     result.Date,
                     "Firecrawl"))
                 .ToList();
@@ -293,6 +306,40 @@ public sealed class TavilyFirecrawlSourceRetriever(
             ? "news"
             : "general";
 
+    private static string? ResolveTavilyTimeRange(
+        SourceQueryPlan plan,
+        string tavilyTopic,
+        WebSourceBackendSettings settings)
+    {
+        if (!IsCurrentNewsPlan(plan) && !string.Equals(tavilyTopic, "news", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return NormalizeTavilyTimeRange(settings.TavilyCurrentNewsTimeRange);
+    }
+
+    private static string? NormalizeTavilyTimeRange(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized is "day" or "week" or "month" or "year" or "d" or "w" or "m" or "y"
+            ? normalized
+            : "day";
+    }
+
+    private static string[] ResolveFirecrawlSources(SourceQueryPlan plan) =>
+        IsCurrentNewsPlan(plan) ? ["web", "news"] : ["web"];
+
+    private static string? ResolveFirecrawlTbs(SourceQueryPlan plan) =>
+        IsCurrentNewsPlan(plan) ? "qdr:d" : null;
+
+    private static bool IsCurrentNewsPlan(SourceQueryPlan plan) =>
+        plan.Intent.Contains("news", StringComparison.OrdinalIgnoreCase)
+        || plan.PreferredSourceTopics.Any(topic => topic.Contains("news", StringComparison.OrdinalIgnoreCase))
+        || plan.QueryTerms.Any(term => term.Contains("latest", StringComparison.OrdinalIgnoreCase)
+                                      || term.Contains("today", StringComparison.OrdinalIgnoreCase)
+                                      || term.Contains("headlines", StringComparison.OrdinalIgnoreCase));
+
     private static string NormalizeTavilySearchDepth(string? value) =>
         string.Equals(value, "basic", StringComparison.OrdinalIgnoreCase) ? "basic" : "advanced";
 
@@ -384,6 +431,10 @@ public sealed class TavilyFirecrawlSourceRetriever(
         public string? Url { get; set; }
 
         public string? Description { get; set; }
+
+        public string? Snippet { get; set; }
+
+        public string? Markdown { get; set; }
 
         public string? Date { get; set; }
     }
