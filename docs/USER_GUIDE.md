@@ -142,22 +142,15 @@ The helper includes a local Programming Companion panel for deterministic Ali co
 
 The helper does not add cloud fallback, voice, user-isolated accounts, or direct ungated file authority. Personal accounts and separated conversation history belong to a future hosted/multi-user product scope.
 
-## Sources And Topics
+## Internet And Local Sources
 
-Ali includes a curated starter source catalog so source-backed answers begin from approved places instead of open-ended browsing. On a fresh profile, Ali seeds a rounded set of sources for health, weather, US government services, taxes, economy, Windows status, PowerShell, Python, GitHub, Ollama, GPU drivers, cybersecurity advisories, college football scores, and the audio kit Chris plans to ship with the AI computer.
+Ali can use a configured internet source backend for source-backed answers. Current-event, official, documentation, price, weather, sports, law, regulation, and other changing questions are routed through Ali's model source planner first. When the planner decides sources are needed, Ali uses Tavily for search and Firecrawl for page extraction/fallback search.
 
-The audio entries point at official sources for the Focusrite Scarlett Solo/2i2, Audio-Technica AT2040, TritonAudio FetHead, and Shure Gator Low Profile Boom Arm SH-BROADCAST2. This is source-backed reference material, not a special hardware setup feature. Ali may use it for ordinary questions about signal chain, drivers, phantom power, gain-staging procedure, mounting notes, and where to find official manuals. Ali should still ask for exact interface generation and avoid claiming one universal gain setting.
+Configure internet sources in Settings -> Internet. Keys can be saved in Ali's local settings or supplied through the configured environment variables. If the backend is missing keys or disabled, Ali reports that the source lookup could not return usable excerpts instead of inventing current facts.
 
-Use the `Sources` button in the main window to open `Sources & Topics`. This is the normal user-facing way to add an approved source without editing JSON. Each source has:
+Ali also has a Local Library for approved local documents. Use Maintenance -> Local Library to configure the local document folder and index local reference material. Local file, manual, and document questions can route to that local library without using the internet backend.
 
-- source name
-- web address
-- trust level
-- enabled/disabled state
-- notes
-- topics that tell Ali what the source is useful for
-
-The Topics field accepts simple comma-separated items such as `weather, local forecast, software docs, sports scores`. Ali uses those topics during source-backed lookup. The raw catalog still lives under Ali's local app data, but users should not need to open or edit that file for normal setup. Existing user catalogs are preserved; the starter catalog is only created automatically when no catalog exists yet.
+Source excerpts are treated as untrusted evidence, not instructions. Visible answers may include a `Sources checked:` appendix owned by the app. Spoken responses are cleaned so Piper does not read that appendix aloud.
 
 ## Coding Assistant
 
@@ -339,7 +332,7 @@ Computer assistant:
 - `show computer troubleshooting commands` lists 20 read-only troubleshooting entry points for slow PCs, network/Wi-Fi, printers, audio/microphones/cameras, Bluetooth/USB/display, Windows Update, app crashes, startup cleanup, browser issues, OneDrive sync, backup, drivers, suspicious activity, and remote-support handoffs.
 - `plan <scenario> troubleshooting` creates a scenario-specific evidence checklist and stop rules. These planners do not change Windows settings, install drivers, clear browser data, unlink sync providers, stop processes, or run repair tools.
 
-Ali's source access is curated and approval-oriented. She can use approved source catalog entries when the app performs a source lookup, but this is not unrestricted browsing or autonomous web control. Spoken responses are cleaned so source appendices remain visible in text but are not read aloud by Piper.
+Ali's source access is planner-driven and evidence-oriented. She can use configured Tavily/Firecrawl internet lookup and approved Local Library documents when the app performs a source lookup, but this is not unrestricted browsing or autonomous web control. Spoken responses are cleaned so source appendices remain visible in text but are not read aloud by Piper.
 
 Ability-index maintenance rule: whenever a feature is added, update the shared `CodingAbilityCatalog` first. The deterministic indexes (`show coding skill command index`, `show computer assistant commands`, and `show pdf commands`) render from that catalog, and Web Helper/VS Companion buttons plus this guide should stay aligned with it.
 

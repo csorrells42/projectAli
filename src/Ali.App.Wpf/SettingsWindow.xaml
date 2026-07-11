@@ -1235,7 +1235,7 @@
                                        FontSize="18"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource TextBrush}" />
-                            <TextBlock Text="Run a read-only health check for Ali's install, local computer assistant lanes, PDF tools, Visual Studio bridge, source catalog, and recent receipts."
+                            <TextBlock Text="Run a read-only health check for Ali's install, local computer assistant lanes, PDF tools, Visual Studio bridge, internet source backend, local library, and recent receipts."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,3,0,12" />
