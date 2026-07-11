@@ -262,14 +262,9 @@ public sealed class TavilyFirecrawlSourceRetriever(
             AddWarningOnce(warnings, response.Warning ?? string.Empty);
             var results = (response?.Data?.Web ?? [])
                 .Concat(response?.Data?.News ?? [])
-                .Where(result => !string.IsNullOrWhiteSpace(result.Url))
-                .Select(result => new WebSearchResult(
-                    result.Title ?? result.Url!,
-                    result.Url!,
-                    result.Markdown ?? result.Description ?? result.Snippet,
-                    result.Description ?? result.Snippet,
-                    result.Date,
-                    "Firecrawl"))
+                .Select(BuildFirecrawlSearchResult)
+                .Where(result => result is not null)
+                .Select(result => result!)
                 .ToList();
             if (results.Count == 0)
             {
@@ -480,6 +475,29 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
         return null;
     }
+
+    private static WebSearchResult? BuildFirecrawlSearchResult(FirecrawlSearchResult result)
+    {
+        var url = FirstNonBlank(result.Url, result.Metadata?.SourceUrl, result.Metadata?.Url);
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var title = FirstNonBlank(result.Title, result.Metadata?.Title, url) ?? url;
+        var description = FirstNonBlank(result.Description, result.Snippet, result.Metadata?.Description);
+        var content = FirstNonBlank(result.Markdown, description);
+        return new WebSearchResult(
+            title,
+            url,
+            content,
+            description,
+            result.Date,
+            "Firecrawl");
+    }
+
+    private static string? FirstNonBlank(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
     private Uri BuildTavilyEndpoint(string path) =>
         BuildEndpoint(settings.TavilyBaseUrl, "https://api.tavily.com", path);
@@ -722,6 +740,20 @@ public sealed class TavilyFirecrawlSourceRetriever(
         public string? Markdown { get; set; }
 
         public string? Date { get; set; }
+
+        public FirecrawlSearchMetadata? Metadata { get; set; }
+    }
+
+    private sealed class FirecrawlSearchMetadata
+    {
+        public string? Title { get; set; }
+
+        public string? Url { get; set; }
+
+        [JsonPropertyName("sourceURL")]
+        public string? SourceUrl { get; set; }
+
+        public string? Description { get; set; }
     }
 
     private sealed class FirecrawlScrapeResponse
