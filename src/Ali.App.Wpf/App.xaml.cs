@@ -22,9 +22,36 @@ public partial class App : System.Windows.Application
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var assistantProfile = LoadOrCreateAssistantProfile();
         var services = AliServices.CreateForDesktop(assistantProfile);
-        var mainWindow = new MainWindow(new MainWindowViewModel(services));
+        var viewModel = new MainWindowViewModel(services);
+        ApplyStartupAutomationArguments(viewModel, e.Args);
+        var mainWindow = new MainWindow(viewModel);
         MainWindow = mainWindow;
         mainWindow.Show();
+        if (e.Args.Any(arg => arg.Equals("--open-programming", StringComparison.OrdinalIgnoreCase)))
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (viewModel.OpenProgrammingDashboardCommand.CanExecute(null))
+                {
+                    viewModel.OpenProgrammingDashboardCommand.Execute(null);
+                }
+            }));
+        }
+    }
+
+    private static void ApplyStartupAutomationArguments(MainWindowViewModel viewModel, string[] args)
+    {
+        for (var index = 0; index < args.Length; index++)
+        {
+            if (!args[index].Equals("--programming-project", StringComparison.OrdinalIgnoreCase)
+                || index + 1 >= args.Length)
+            {
+                continue;
+            }
+
+            viewModel.CodingCurrentSolutionOrProjectPathText = args[index + 1];
+            index++;
+        }
     }
 
     private static AssistantProfile LoadOrCreateAssistantProfile()

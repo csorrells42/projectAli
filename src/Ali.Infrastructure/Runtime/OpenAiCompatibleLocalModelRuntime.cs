@@ -16,10 +16,13 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const int HealthProbeOutputTokenLimit = 512;
     private const int QwenVisibleOutputTokenFloor = 512;
     private const int QwenVisibleOutputRetryTokenLimit = 1024;
+    private const int CodingActionPlannerOutputTokenFloor = 1024;
+    private const int CodingPatchPlannerOutputTokenFloor = 8192;
     private const int MaxAutomaticLengthContinuations = 1;
     private const string HealthProbeExpectedResponse = "OK";
     private const string SourcePlannerConversationId = "source_query_plan";
     private const string CodingActionPlannerConversationId = "coding_action_plan";
+    private const string CodingPatchPlannerConversationId = "coding_patch_plan";
     private const string VisibleOutputRetryInstruction =
         "The previous runtime attempt produced no visible assistant content. Follow the existing instructions exactly, but write the final result in visible assistant message content only. Do not include hidden reasoning, analysis, or <think> blocks. If the task requires JSON, return only that JSON.";
     private const string ContinueAfterLengthInstruction =
@@ -615,28 +618,50 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             content = BuildUserContent(request)
         });
 
+        var plannerRequest = IsPlannerRequest(request);
         return new
         {
             model = _options.Model,
             messages = messages.ToArray(),
             stream = stream ?? _options.StreamingEnabled,
-            max_tokens = ResolveMaxTokens(maxTokens),
-            temperature = maxTokens.HasValue ? 0 : _options.Temperature,
-            top_p = maxTokens.HasValue ? 0.1 : _options.TopP,
+            max_tokens = ResolveMaxTokens(request, maxTokens),
+            temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
+            top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP,
             think = ShouldDisableThinking() ? false : (bool?)null
         };
     }
 
-    private int ResolveMaxTokens(int? requestedMaxTokens)
+    private int ResolveMaxTokens(ChatRequest request, int? requestedMaxTokens)
     {
         if (requestedMaxTokens.HasValue)
         {
             return requestedMaxTokens.Value;
         }
 
-        return ShouldDisableThinking()
+        var configuredLimit = ShouldDisableThinking()
             ? Math.Max(_options.OutputTokenLimit, QwenVisibleOutputTokenFloor)
             : _options.OutputTokenLimit;
+        if (IsCodingPatchPlannerRequest(request))
+        {
+            return CapPlannerMaxTokensToContext(Math.Max(configuredLimit, CodingPatchPlannerOutputTokenFloor), allowLargePatchOutput: true);
+        }
+
+        return IsCodingActionPlannerRequest(request)
+            ? CapPlannerMaxTokensToContext(Math.Max(configuredLimit, CodingActionPlannerOutputTokenFloor))
+            : configuredLimit;
+    }
+
+    private int CapPlannerMaxTokensToContext(int requestedMaxTokens, bool allowLargePatchOutput = false)
+    {
+        var contextWindow = allowLargePatchOutput
+            ? Math.Max(_options.ContextTokens, 8192)
+            : Math.Max(_options.ContextTokens, 512);
+        var maxByContext = allowLargePatchOutput
+            ? contextWindow - Math.Max(1024, contextWindow / 4)
+            : contextWindow / 2;
+        var hardCeiling = allowLargePatchOutput ? 8192 : 4096;
+        var plannerOutputCeiling = Math.Clamp(maxByContext, 256, hardCeiling);
+        return Math.Min(requestedMaxTokens, plannerOutputCeiling);
     }
 
     private string BuildAssistantPersonaInstruction()
@@ -706,8 +731,11 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private static bool IsCodingActionPlannerRequest(ChatRequest request) =>
         string.Equals(request.ConversationId, CodingActionPlannerConversationId, StringComparison.Ordinal);
 
+    private static bool IsCodingPatchPlannerRequest(ChatRequest request) =>
+        string.Equals(request.ConversationId, CodingPatchPlannerConversationId, StringComparison.Ordinal);
+
     private static bool IsPlannerRequest(ChatRequest request) =>
-        IsSourcePlannerRequest(request) || IsCodingActionPlannerRequest(request);
+        IsSourcePlannerRequest(request) || IsCodingActionPlannerRequest(request) || IsCodingPatchPlannerRequest(request);
 
     private bool ShouldDisableThinking() =>
         IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);

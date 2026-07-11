@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using Ali.Core.Coding;
 using Ali.Infrastructure.Runtime;
@@ -161,6 +162,52 @@ public sealed partial class LocalCodingToolService(
         "BindingProxy",
         "Converter"
     ];
+    private static readonly HashSet<string> WpfCompleteXamlRootNames = new(StringComparer.Ordinal)
+    {
+        "Application",
+        "Page",
+        "ResourceDictionary",
+        "UserControl",
+        "Window"
+    };
+    private static readonly HashSet<string> WpfControlsNamespaceTypeNames = new(StringComparer.Ordinal)
+    {
+        "Button",
+        "CheckBox",
+        "ComboBox",
+        "ContentControl",
+        "DataGrid",
+        "DockPanel",
+        "Grid",
+        "GroupBox",
+        "ItemsControl",
+        "Label",
+        "ListBox",
+        "ListView",
+        "Menu",
+        "PasswordBox",
+        "ProgressBar",
+        "RadioButton",
+        "ScrollViewer",
+        "Slider",
+        "StackPanel",
+        "StatusBar",
+        "TabControl",
+        "TabItem",
+        "TextBlock",
+        "TextBox",
+        "ToolBar",
+        "TreeView",
+        "UserControl",
+        "WrapPanel"
+    };
+    private static readonly HashSet<string> WpfCoreNamespaceTypeNames = new(StringComparer.Ordinal)
+    {
+        "Application",
+        "MessageBox",
+        "RoutedEventArgs",
+        "Window"
+    };
 
     private readonly ICodingProcessLauncher _processLauncher = processLauncher ?? new CodingProcessLauncher();
     private readonly ICodingCommandRunner _commandRunner = commandRunner ?? new CodingCommandRunner();
@@ -538,9 +585,10 @@ public sealed partial class LocalCodingToolService(
 
     public async Task<CodingContextPack> BuildContextPackAsync(
         string userText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool force = false)
     {
-        return await BuildContextPackAsync(userText, force: false, cancellationToken).ConfigureAwait(false);
+        return await BuildContextPackAsync(userText, force, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<CodingContextPack> BuildContextPackAsync(
@@ -629,7 +677,7 @@ public sealed partial class LocalCodingToolService(
             lines.AddRange(relevantFiles.Select(path => $"- {path}"));
         }
 
-        await AddPatchAuthoringFileExcerptsAsync(lines, contextGoal, currentTarget, cancellationToken).ConfigureAwait(false);
+        await AddPatchAuthoringFileExcerptsAsync(lines, contextGoal, currentTarget, force, cancellationToken).ConfigureAwait(false);
 
         if (_lastDotNetRequest is not null && _lastDotNetResult is { Succeeded: false } lastDotNetResult)
         {
@@ -691,15 +739,25 @@ public sealed partial class LocalCodingToolService(
         lines.Add($"- Run command: {state.RunCommand}");
         lines.Add($"- Pipeline: {FormatInlineList(state.PipelineRows.Take(5))}");
         lines.Add("- Continue command: continue current task");
+        if (latestReceipt is { Succeeded: false } failedReceipt && !string.IsNullOrWhiteSpace(failedReceipt.Message))
+        {
+            lines.Add($"- Latest receipt detail: {TrimForChat(failedReceipt.Message!, 700)}");
+        }
+
+        if (latestValidation is { Succeeded: false } failedValidation && !string.IsNullOrWhiteSpace(failedValidation.Message))
+        {
+            lines.Add($"- Latest validation detail: {TrimForChat(failedValidation.Message!, 900)}");
+        }
     }
 
     private async Task AddPatchAuthoringFileExcerptsAsync(
         List<string> lines,
         string goal,
         string? currentTarget,
+        bool force,
         CancellationToken cancellationToken)
     {
-        if (!MentionsAny(
+        if (!force && !MentionsAny(
                 goal,
                 "add",
                 "build",
@@ -726,8 +784,8 @@ public sealed partial class LocalCodingToolService(
         }
 
         lines.Add("Editable file excerpts for patch planning:");
-        lines.Add("Use only these exact excerpts for oldText in patch previews. Prefer full absolute paths when returning edits.");
-        var isWpfAuthoringGoal = IsWpfAuthoringGoal(goal);
+        lines.Add("Use only these exact excerpts for oldText in patch previews. Prefer FILE relative paths in JSON edits; absolute paths must use forward slashes or escaped backslashes.");
+        var isWpfAuthoringGoal = ShouldUseWpfPatchContext(goal, currentTarget);
         var remainingCharacters = isWpfAuthoringGoal ? 15_000 : 12_000;
         var excerptFiles = isWpfAuthoringGoal
             ? files
@@ -735,6 +793,14 @@ public sealed partial class LocalCodingToolService(
                 .ThenBy(RelativeToWorkspace, StringComparer.OrdinalIgnoreCase)
                 .ToList()
             : files;
+        if (isWpfAuthoringGoal)
+        {
+            lines.AddRange(BuildWpfEventHandlerMapLines(excerptFiles, maxRows: 8));
+            lines.AddRange(BuildWpfCodeBehindPatchAnchorLines(excerptFiles, maxAnchors: 4));
+            lines.AddRange(BuildWpfGridRowMapLines(excerptFiles, maxFiles: 4));
+            lines.AddRange(BuildWpfExactPatchAnchorLines(excerptFiles, maxAnchors: 10));
+        }
+
         foreach (var file in excerptFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -776,6 +842,424 @@ public sealed partial class LocalCodingToolService(
             lines.Add(excerpt);
             lines.Add("```");
         }
+    }
+
+    private IReadOnlyList<string> BuildWpfExactPatchAnchorLines(IReadOnlyList<string> files, int maxAnchors)
+    {
+        var lines = new List<string>
+        {
+            "WPF exact patch anchors for oldText:",
+            "Use these anchors for small existing-window edits before choosing replace_file."
+        };
+        var anchors = 0;
+        foreach (var file in files)
+        {
+            if (anchors >= maxAnchors || !File.Exists(file))
+            {
+                break;
+            }
+
+            var extension = Path.GetExtension(file);
+            if (!extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+                && !file.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var text = SafeReadText(file);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var snippets = extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+                ? ExtractWpfXamlExactPatchAnchors(text)
+                : ExtractCSharpMethodExactPatchAnchors(text);
+            if (snippets.Count == 0)
+            {
+                continue;
+            }
+
+            lines.Add($"ANCHOR FILE: {RelativeToWorkspace(file)}");
+            foreach (var snippet in snippets)
+            {
+                if (anchors >= maxAnchors)
+                {
+                    break;
+                }
+
+                lines.Add("OLDTEXT:");
+                lines.Add("```text");
+                lines.Add(snippet);
+                lines.Add("```");
+                anchors++;
+            }
+        }
+
+        if (anchors == 0)
+        {
+            lines.Add("- none found");
+        }
+
+        return lines;
+    }
+
+    private IReadOnlyList<string> BuildWpfEventHandlerMapLines(IReadOnlyList<string> files, int maxRows)
+    {
+        var lines = new List<string>
+        {
+            "WPF event handler map for behavior edits:",
+            "Use these non-source facts to pair visible XAML events with .xaml.cs method anchors."
+        };
+        var rows = 0;
+        foreach (var file in files.Where(file => file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (rows >= maxRows || !File.Exists(file))
+            {
+                break;
+            }
+
+            XDocument document;
+            try
+            {
+                document = XDocument.Parse(SafeReadText(file), LoadOptions.PreserveWhitespace);
+            }
+            catch (XmlException)
+            {
+                continue;
+            }
+
+            var codeBehindPath = file + ".cs";
+            var codeBehindText = File.Exists(codeBehindPath) ? SafeReadText(codeBehindPath) : string.Empty;
+            foreach (var element in document.Descendants())
+            {
+                if (rows >= maxRows)
+                {
+                    break;
+                }
+
+                foreach (var attribute in element.Attributes().Where(IsWpfEventHandlerAttribute))
+                {
+                    if (rows >= maxRows)
+                    {
+                        break;
+                    }
+
+                    var handler = attribute.Value.Trim();
+                    if (string.IsNullOrWhiteSpace(handler))
+                    {
+                        continue;
+                    }
+
+                    var name = GetXamlAttributeValue(element, "x:Name", "Name");
+                    var label = GetXamlAttributeValue(element, "Content", "Header", "Text");
+                    var methodState = ContainsCSharpMethodName(codeBehindText, handler)
+                        ? "method found"
+                        : "method not found";
+                    lines.Add(
+                        $"- {RelativeToWorkspace(file)}: {element.Name.LocalName}{FormatXamlFactIdentity(name, label)} {attribute.Name.LocalName}={handler} -> {RelativeToWorkspace(codeBehindPath)} ({methodState})");
+                    rows++;
+                }
+            }
+        }
+
+        if (rows == 0)
+        {
+            lines.Add("- none found");
+        }
+
+        return lines;
+    }
+
+    private IReadOnlyList<string> BuildWpfCodeBehindPatchAnchorLines(IReadOnlyList<string> files, int maxAnchors)
+    {
+        var lines = new List<string>
+        {
+            "WPF code-behind method anchors for behavior edits:",
+            "Use these exact current methods as oldText when the request changes click/send/selection/update behavior."
+        };
+        var anchors = 0;
+        foreach (var file in files.Where(file => file.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (anchors >= maxAnchors || !File.Exists(file))
+            {
+                break;
+            }
+
+            var snippets = ExtractCSharpMethodExactPatchAnchors(SafeReadText(file));
+            if (snippets.Count == 0)
+            {
+                continue;
+            }
+
+            lines.Add($"CODE-BEHIND FILE: {RelativeToWorkspace(file)}");
+            foreach (var snippet in snippets)
+            {
+                if (anchors >= maxAnchors)
+                {
+                    break;
+                }
+
+                lines.Add("OLDTEXT:");
+                lines.Add("```text");
+                lines.Add(snippet);
+                lines.Add("```");
+                anchors++;
+            }
+        }
+
+        if (anchors == 0)
+        {
+            lines.Add("- none found");
+        }
+
+        return lines;
+    }
+
+    private static bool IsWpfEventHandlerAttribute(XAttribute attribute) =>
+        attribute.Name.LocalName is "Click"
+            or "Checked"
+            or "Unchecked"
+            or "SelectionChanged"
+            or "TextChanged"
+            or "KeyDown"
+            or "KeyUp"
+            or "Loaded"
+            or "Closing";
+
+    private static string GetXamlAttributeValue(XElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var normalized = name.Contains(':', StringComparison.Ordinal)
+                ? name[(name.IndexOf(':') + 1)..]
+                : name;
+            var value = element.Attributes()
+                .FirstOrDefault(attribute => attribute.Name.LocalName.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                ?.Value
+                .Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string FormatXamlFactIdentity(string name, string label)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            parts.Add($"name={name}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            parts.Add($"label={label}");
+        }
+
+        return parts.Count == 0 ? string.Empty : $" ({string.Join(", ", parts)})";
+    }
+
+    private static bool ContainsCSharpMethodName(string text, string methodName) =>
+        !string.IsNullOrWhiteSpace(text)
+        && !string.IsNullOrWhiteSpace(methodName)
+        && Regex.IsMatch(
+            text,
+            $@"\b{Regex.Escape(methodName)}\s*\(",
+            RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(300));
+
+    private IReadOnlyList<string> BuildWpfGridRowMapLines(IReadOnlyList<string> files, int maxFiles)
+    {
+        var lines = new List<string>
+        {
+            "WPF Grid row map for patch planning:",
+            "When inserting visible controls between Grid rows, add RowDefinition as needed and shift later Grid.Row values; preserve existing named controls and handlers."
+        };
+        var maps = 0;
+        foreach (var file in files)
+        {
+            if (maps >= maxFiles || !file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) || !File.Exists(file))
+            {
+                continue;
+            }
+
+            var text = SafeReadText(file);
+            if (!TryParseXamlDocument(text, out var document))
+            {
+                continue;
+            }
+
+            foreach (var grid in document
+                         .Descendants()
+                         .Where(element => element.Name.LocalName.Equals("Grid", StringComparison.OrdinalIgnoreCase))
+                         .Take(3))
+            {
+                var children = grid
+                    .Elements()
+                    .Where(element => !IsWpfRootPropertyElement(element))
+                    .Where(IsVisibleWpfControlElement)
+                    .Select(FormatWpfGridChildPlacement)
+                    .Take(12)
+                    .ToList();
+                if (children.Count == 0)
+                {
+                    continue;
+                }
+
+                var rowDefinitions = grid
+                    .Elements()
+                    .Where(element => element.Name.LocalName.Equals("Grid.RowDefinitions", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(element => element.Elements())
+                    .Count(element => element.Name.LocalName.Equals("RowDefinition", StringComparison.OrdinalIgnoreCase));
+                lines.Add($"GRID FILE: {RelativeToWorkspace(file)}; rows defined: {rowDefinitions}; visible children in document order:");
+                lines.AddRange(children.Select(child => $"- {child}"));
+                maps++;
+                if (maps >= maxFiles)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (maps == 0)
+        {
+            lines.Add("- none found");
+        }
+
+        return lines;
+    }
+
+    private static string FormatWpfGridChildPlacement(XElement element)
+    {
+        var row = ReadAttachedGridIndex(element, "Row");
+        var column = ReadAttachedGridIndex(element, "Column");
+        var rowSpan = Math.Max(1, ReadAttachedGridIndex(element, "RowSpan", 1));
+        var columnSpan = Math.Max(1, ReadAttachedGridIndex(element, "ColumnSpan", 1));
+        return $"{FormatXamlElementForLayoutFact(element)} row={row}, column={column}, rowSpan={rowSpan}, columnSpan={columnSpan}";
+    }
+
+    private static string FormatXamlElementForLayoutFact(XElement element)
+    {
+        var name = element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value
+                   ?? element.Attribute("Name")?.Value
+                   ?? element.Attribute("Content")?.Value
+                   ?? string.Empty;
+        return string.IsNullOrWhiteSpace(name)
+            ? $"{element.Name.LocalName} fact"
+            : $"{element.Name.LocalName}({name}) fact";
+    }
+
+    private static string TrimRejectedPatchText(string value)
+    {
+        var normalized = value.ReplaceLineEndings(" ").Trim();
+        return normalized.Length <= 220
+            ? normalized
+            : normalized[..220] + "...";
+    }
+
+    private static IReadOnlyList<string> ExtractWpfXamlExactPatchAnchors(string text)
+    {
+        var anchorNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "RowDefinition",
+            "Label",
+            "TextBlock",
+            "TextBox",
+            "Button",
+            "CheckBox",
+            "ComboBox",
+            "ListBox",
+            "ListView",
+            "DataGrid",
+            "TreeView",
+            "TabControl",
+            "ContentControl",
+            "Grid",
+            "StackPanel",
+            "DockPanel"
+        };
+        var anchors = new List<string>();
+        foreach (Match match in Regex.Matches(
+                     text,
+                     "<\\s*(?!/|!|\\?)(?:[A-Za-z_][\\w\\.-]*:)?(?<name>[A-Za-z_][\\w\\.-]*)\\b(?:(?:\"[^\"]*\"|'[^']*'|[^'\"<>])*)/?>",
+                     RegexOptions.CultureInvariant | RegexOptions.Singleline))
+        {
+            var name = match.Groups["name"].Value;
+            if (!anchorNames.Contains(name))
+            {
+                continue;
+            }
+
+            var value = match.Value.Trim();
+            if (value.Length is > 0 and <= 800)
+            {
+                anchors.Add(value);
+            }
+        }
+
+        return anchors
+            .Distinct(StringComparer.Ordinal)
+            .Take(18)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractCSharpMethodExactPatchAnchors(string text)
+    {
+        var anchors = new List<string>();
+        foreach (Match match in Regex.Matches(
+                     text,
+                     @"(?m)^[ \t]*(?:private|public|protected|internal)\s+(?:static\s+)?[\w<>,\[\]\?\s]+\s+[A-Za-z_]\w*\s*\([^)]*\)\s*\{",
+                     RegexOptions.CultureInvariant))
+        {
+            var openBrace = text.IndexOf('{', match.Index);
+            if (openBrace < 0)
+            {
+                continue;
+            }
+
+            var end = FindBalancedBraceEnd(text, openBrace);
+            if (end <= openBrace)
+            {
+                continue;
+            }
+
+            var snippet = text[match.Index..end].TrimEnd();
+            if (snippet.Length is > 0 and <= 1_400)
+            {
+                anchors.Add(snippet);
+            }
+        }
+
+        return anchors
+            .Distinct(StringComparer.Ordinal)
+            .Take(8)
+            .ToList();
+    }
+
+    private static int FindBalancedBraceEnd(string text, int openBrace)
+    {
+        var depth = 0;
+        for (var index = openBrace; index < text.Length; index++)
+        {
+            if (text[index] == '{')
+            {
+                depth++;
+            }
+            else if (text[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return index + 1;
+                }
+            }
+        }
+
+        return -1;
     }
 
     private int ScoreWpfPatchExcerptFile(string file)
@@ -822,7 +1306,7 @@ public sealed partial class LocalCodingToolService(
         AddPatchContextCandidate(files, currentTarget);
 
         var targetDirectory = ResolvePrimaryTargetDirectory(currentTarget);
-        var isWpfGoal = IsWpfAuthoringGoal(goal);
+        var isWpfGoal = ShouldUseWpfPatchContext(goal, currentTarget);
         if (!string.IsNullOrWhiteSpace(targetDirectory) && Directory.Exists(targetDirectory))
         {
             AddPatchContextCandidate(files, Path.Combine(targetDirectory, "Program.cs"));
@@ -1082,6 +1566,52 @@ public sealed partial class LocalCodingToolService(
             "style",
             "template");
 
+    private bool ShouldUseWpfPatchContext(string goal, string? currentTarget)
+    {
+        if (IsWpfAuthoringGoal(goal) || IsWpfProjectTarget(currentTarget))
+        {
+            return true;
+        }
+
+        var lastFailure = _lastDotNetResult?.Message ?? string.Empty;
+        return lastFailure.Contains(".xaml", StringComparison.OrdinalIgnoreCase)
+            || lastFailure.Contains("x:Class", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWpfProjectTarget(string? currentTarget)
+    {
+        if (string.IsNullOrWhiteSpace(currentTarget))
+        {
+            return false;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(currentTarget.Trim().Trim('"'));
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (File.Exists(fullPath)
+            && Path.GetExtension(fullPath).Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+            && IsWpfProjectFile(fullPath))
+        {
+            return true;
+        }
+
+        var directory = File.Exists(fullPath)
+            ? Path.GetDirectoryName(fullPath)
+            : Directory.Exists(fullPath)
+                ? fullPath
+                : null;
+        return !string.IsNullOrWhiteSpace(directory)
+            && Directory.Exists(directory)
+            && Directory.EnumerateFiles(directory, "*.xaml", SearchOption.TopDirectoryOnly).Any();
+    }
+
     private static bool IsWpfPatchContextRelevantFile(string file)
     {
         if (!IsContextRelevantFile(file) || IsGeneratedOrDesignerFile(file))
@@ -1202,7 +1732,44 @@ public sealed partial class LocalCodingToolService(
             }
         }
 
+        if (!createsFile
+            && Path.IsPathFullyQualified(trimmed)
+            && TryResolveUniqueExistingFileByName(trimmed, targetDirectory, out var uniqueMatch))
+        {
+            return uniqueMatch;
+        }
+
         return null;
+    }
+
+    private bool TryResolveUniqueExistingFileByName(string requestedPath, string? targetDirectory, out string fullPath)
+    {
+        fullPath = string.Empty;
+        var fileName = Path.GetFileName(requestedPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        var roots = new[] { targetDirectory, Policy.WorkspaceRoot }
+            .Where(root => !string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+            .Select(root => Path.GetFullPath(root!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var matches = roots
+            .SelectMany(EnumerateFilesUnderDirectory)
+            .Where(file => Path.GetFileName(file).Equals(fileName, StringComparison.OrdinalIgnoreCase))
+            .Where(file => Policy.IsInsideWorkspace(file) && LooksTextReadable(file) && !ShouldSkipPath(file))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToList();
+        if (matches.Count != 1)
+        {
+            return false;
+        }
+
+        fullPath = matches[0];
+        return true;
     }
 
     public Task<CodingTaskPlan> BuildTaskPlanAsync(
@@ -1330,7 +1897,8 @@ public sealed partial class LocalCodingToolService(
         var resolvedEdits = new List<CodingPatchEdit>();
         foreach (var edit in edits)
         {
-            var resolvedPath = ResolveModelPatchPath(edit.Path, edit.OldText.Length == 0);
+            var createsFile = edit.OldText.Length == 0 && !edit.ReplaceEntireFile;
+            var resolvedPath = ResolveModelPatchPath(edit.Path, createsFile);
             if (string.IsNullOrWhiteSpace(resolvedPath))
             {
                 return new CodingToolResult(
@@ -1341,7 +1909,8 @@ public sealed partial class LocalCodingToolService(
                     Policy.WorkspaceRoot);
             }
 
-            resolvedEdits.Add(new CodingPatchEdit(resolvedPath, edit.OldText, edit.NewText));
+            var replaceEntireFile = edit.ReplaceEntireFile || (edit.OldText.Length == 0 && File.Exists(resolvedPath));
+            resolvedEdits.Add(new CodingPatchEdit(resolvedPath, edit.OldText, edit.NewText, replaceEntireFile));
         }
 
         var request = new CodingToolRequest(
@@ -8594,7 +9163,7 @@ public sealed partial class LocalCodingToolService(
         lines.Add("- Prefer the smallest targeted test first, then build/full tests when risk is higher.");
         lines.Add("Context available to model:");
         lines.Add(contextPack.HasContext ? "- Good - workspace map, packages, relevant files, and matches are available." : "- Bad - no coding context was built.");
-        lines.Add("Next - use safe edit workflow <goal>, resolve test target <goal>, or review current changes.");
+        lines.Add($"Next command: concrete patch authoring {goal}");
 
         return new CodingToolResult(true, contextPack.HasContext, string.Join(Environment.NewLine, lines), "Coding context packet", Policy.WorkspaceRoot);
     }
@@ -9797,8 +10366,14 @@ public sealed partial class LocalCodingToolService(
         var context = await BuildFeatureWorkContextAsync(request with { Query = goal }, cancellationToken).ConfigureAwait(false);
         LoadPendingPatchPreviewIfNeeded();
         var receipts = ReadRecentReceipts(MaxReceiptEntries);
-        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestValidation = receipts.LastOrDefault(IsValidationReceipt);
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
+        if (latestValidation is { Succeeded: false }
+            && string.Equals(latestValidation.Action, nameof(CodingToolAction.VerifyXamlBindings), StringComparison.Ordinal))
+        {
+            return await ShowXamlBindingValidationRepairRunnerAsync(goal, latestValidation, gitStatus, cancellationToken).ConfigureAwait(false);
+        }
+
         if (_lastDotNetRequest is null || _lastDotNetResult is null)
         {
             var waitingLines = new List<string>
@@ -9901,6 +10476,490 @@ public sealed partial class LocalCodingToolService(
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation repair runner", absolutePath ?? _lastDotNetResult.TargetPath ?? Policy.WorkspaceRoot, parsed.LineNumber);
     }
 
+    private async Task<CodingToolResult> ShowXamlBindingValidationRepairRunnerAsync(
+        string goal,
+        CodingReceipt latestValidation,
+        GitWorkingTreeStatus gitStatus,
+        CancellationToken cancellationToken)
+    {
+        var lines = new List<string>
+        {
+            "Validation repair runner v1:",
+            "No files were changed.",
+            $"Goal: {goal}",
+            "Stage: XAML binding validation failed.",
+            FormatReceiptSummary("Latest validation", latestValidation),
+            $"Git: {gitStatus.Summary}",
+            "Repair focus:"
+        };
+
+        if (_lastPatchPreviewRequest is not null)
+        {
+            lines.Add("- Pending preview already exists; review or discard it before drafting another repair.");
+            lines.Add("Repair steps:");
+            lines.Add("- 1. Show pending patch preview.");
+            lines.Add("- 2. Confirm apply only if the visible diff matches the failed binding repair.");
+            lines.Add("- 3. Rerun XAML binding check.");
+            lines.Add("Next command: show pending patch preview");
+            return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation repair runner", latestValidation.TargetPath ?? Policy.WorkspaceRoot);
+        }
+
+        if (!TryBuildUnknownXamlBindingRepairPreview(
+                latestValidation,
+                out var previewRequest,
+                out var diagnostic,
+                out var refusal))
+        {
+            if (TryBuildWpfSimpleGridLayoutRepairPreview(
+                    latestValidation,
+                    out var structuralPreviewRequest,
+                    out var structuralDiagnostic,
+                    out var structuralRefusal))
+            {
+                var structuralPreview = await PreviewReplaceTextAsync(structuralPreviewRequest, cancellationToken).ConfigureAwait(false);
+                if (structuralPreview.Succeeded)
+                {
+                    _lastPatchPreviewRequest = structuralPreviewRequest;
+                    SavePendingPatchPreview();
+                }
+
+                lines.Add($"- {structuralDiagnostic}");
+                lines.Add("Repair steps:");
+                if (structuralPreview.Succeeded)
+                {
+                    lines.Add("- 1. Preview prepared: replace the simple absolute-positioned Grid with explicit rows.");
+                    lines.Add("- 2. Apply only after reviewing the visible diff.");
+                    lines.Add("- 3. Rerun XAML binding check and command binding check.");
+                    lines.Add("Next command: confirm apply last patch preview");
+                }
+                else
+                {
+                    lines.Add("- 1. Structural preview failed before any file write.");
+                    lines.Add("- 2. Ask the model patch planner for a complete structural XAML repair preview.");
+                    lines.Add($"Next command: {BuildStructuralValidationRepairFallbackCommand(latestValidation, goal)}");
+                }
+
+                lines.Add("Preview result:");
+                lines.Add(TrimForChat(structuralPreview.Message, 2_500));
+                return structuralPreview with
+                {
+                    Message = string.Join(Environment.NewLine, lines),
+                    ToolName = "Validation repair runner"
+                };
+            }
+
+            if (TryBuildWpfStructuralValidationRepairCommand(latestValidation, goal, out var structuralCommand, out var structuralFocus))
+            {
+                if (!string.IsNullOrWhiteSpace(structuralRefusal))
+                {
+                    lines.Add($"- Deterministic structural preview unavailable: {structuralRefusal}");
+                }
+
+                lines.AddRange(structuralFocus.Select(row => $"- {row}"));
+                lines.Add("Repair steps:");
+                lines.Add("- 1. Ask the model patch planner for a complete structural XAML repair preview.");
+                lines.Add("- 2. Apply only after the visible diff preserves existing names, handlers, and behavior.");
+                lines.Add("- 3. Rerun build, XAML binding check, and command binding check.");
+                lines.Add($"Next command: {structuralCommand}");
+                return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation repair runner", latestValidation.TargetPath ?? Policy.WorkspaceRoot);
+            }
+
+            lines.Add($"- Review - {refusal}");
+            lines.Add("Repair steps:");
+            lines.Add("- 1. Run XAML binding check again if the receipt is stale.");
+            lines.Add("- 2. Inspect the XAML element and either remove the invalid binding or add a real DataContext property.");
+            lines.Add("- 3. Keep the repair behind patch preview/apply confirmation.");
+            lines.Add("Next command: xaml binding check");
+            return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Validation repair runner", latestValidation.TargetPath ?? Policy.WorkspaceRoot);
+        }
+
+        var preview = await PreviewReplaceTextAsync(previewRequest, cancellationToken).ConfigureAwait(false);
+        if (preview.Succeeded)
+        {
+            _lastPatchPreviewRequest = previewRequest;
+            SavePendingPatchPreview();
+        }
+
+        lines.Add($"- {diagnostic}");
+        lines.Add("Repair steps:");
+        if (preview.Succeeded)
+        {
+            lines.Add("- 1. Preview prepared: remove the invalid binding attribute only.");
+            lines.Add("- 2. Apply only after reviewing the visible diff.");
+            lines.Add("- 3. Rerun XAML binding check and build.");
+            lines.Add("Next command: confirm apply last patch preview");
+        }
+        else
+        {
+            lines.Add("- 1. Preview failed; inspect the binding line manually.");
+            lines.Add("- 2. Rerun XAML binding check after any repair.");
+            lines.Add("Next command: xaml binding check");
+        }
+
+        lines.Add("Preview result:");
+        lines.Add(TrimForChat(preview.Message, 2_500));
+        return preview with
+        {
+            Message = string.Join(Environment.NewLine, lines),
+            ToolName = "Validation repair runner"
+        };
+    }
+
+    private bool TryBuildWpfSimpleGridLayoutRepairPreview(
+        CodingReceipt latestValidation,
+        out CodingToolRequest previewRequest,
+        out string diagnostic,
+        out string refusal)
+    {
+        previewRequest = default!;
+        diagnostic = string.Empty;
+        refusal = string.Empty;
+        if (string.IsNullOrWhiteSpace(latestValidation.Message))
+        {
+            refusal = "latest XAML validation receipt has no message details.";
+            return false;
+        }
+
+        var overlapRows = latestValidation.Message
+            .ReplaceLineEndings("\n")
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.Contains("simple Grid layout overlap", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        if (overlapRows.Count == 0)
+        {
+            refusal = "latest XAML validation receipt did not include a simple Grid layout overlap row.";
+            return false;
+        }
+
+        var relativePath = overlapRows
+            .Select(ExtractXamlFileNameFromValidationRow)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .SingleOrDefault();
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            refusal = "the simple Grid overlap rows did not identify exactly one XAML file.";
+            return false;
+        }
+
+        var fullPath = ToAbsoluteWorkspacePath(relativePath);
+        if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+        {
+            refusal = $"could not resolve the overlap XAML file inside the workspace: {relativePath}.";
+            return false;
+        }
+
+        var originalText = File.ReadAllText(fullPath);
+        if (!TryBuildSimpleGridRowLayoutReplacement(originalText, out var updatedText, out refusal))
+        {
+            return false;
+        }
+
+        var remainingStructuralRows = BuildWpfXamlStructuralRowsForText(fullPath, updatedText)
+            .Where(IsWpfStructuralRepairRow)
+            .ToList();
+        if (remainingStructuralRows.Count > 0)
+        {
+            refusal = $"candidate layout still fails structural validation: {TrimForChat(remainingStructuralRows[0], 180)}";
+            return false;
+        }
+
+        previewRequest = new CodingToolRequest(
+            CodingToolAction.PreviewReplaceText,
+            fullPath,
+            ExplicitUserPath: false,
+            UserConfirmed: false,
+            Query: "simple WPF Grid layout overlap repair",
+            Content: originalText,
+            Replacement: updatedText);
+        diagnostic = $"{RelativeToWorkspace(fullPath)} simple Grid layout overlap; preview stacks the existing direct controls into explicit Grid rows while preserving names, bindings, and handlers.";
+        return true;
+    }
+
+    private static bool TryBuildSimpleGridRowLayoutReplacement(
+        string originalText,
+        out string updatedText,
+        out string refusal)
+    {
+        updatedText = string.Empty;
+        refusal = string.Empty;
+        if (string.IsNullOrWhiteSpace(originalText))
+        {
+            refusal = "the XAML file is empty.";
+            return false;
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(originalText);
+        }
+        catch (XmlException ex)
+        {
+            refusal = $"the XAML file could not be parsed: {TrimForChat(ex.Message, 180)}";
+            return false;
+        }
+
+        var root = document.Root;
+        if (root is null || !IsSingleContentWpfRoot(root))
+        {
+            refusal = "the XAML root is not a simple WPF Window/UserControl/Page.";
+            return false;
+        }
+
+        var contentChildren = root.Elements()
+            .Where(child => !IsWpfRootPropertyElement(child))
+            .ToList();
+        if (contentChildren.Count != 1)
+        {
+            refusal = "the XAML root does not have exactly one direct content element.";
+            return false;
+        }
+
+        var grid = contentChildren[0];
+        if (!string.Equals(grid.Name.LocalName, "Grid", StringComparison.OrdinalIgnoreCase))
+        {
+            refusal = "the direct content element is not a Grid.";
+            return false;
+        }
+
+        var propertyElements = grid.Elements()
+            .Where(IsWpfRootPropertyElement)
+            .ToList();
+        var directControls = grid.Elements()
+            .Where(child => !IsWpfRootPropertyElement(child))
+            .ToList();
+        if (directControls.Count == 0 || directControls.Any(child => !IsVisibleWpfControlElement(child)))
+        {
+            refusal = "the Grid contains nested layout/content that is not safe for the simple row-layout repair.";
+            return false;
+        }
+
+        if (!directControls.Select(TryBuildWpfLayoutBox).Where(box => box is not null).Select(box => box!).Any())
+        {
+            refusal = "the Grid did not expose absolute-positioned visible controls to repair.";
+            return false;
+        }
+
+        var replacementGrid = new XElement(grid.Name, grid.Attributes());
+        foreach (var propertyElement in propertyElements.Where(element => !string.Equals(element.Name.LocalName, "Grid.RowDefinitions", StringComparison.OrdinalIgnoreCase)))
+        {
+            replacementGrid.Add(new XElement(propertyElement));
+        }
+
+        var rowDefinitions = new XElement(grid.Name.Namespace + "Grid.RowDefinitions");
+        foreach (var _ in directControls)
+        {
+            rowDefinitions.Add(new XElement(grid.Name.Namespace + "RowDefinition", new XAttribute("Height", "Auto")));
+        }
+
+        replacementGrid.Add(rowDefinitions);
+        for (var index = 0; index < directControls.Count; index++)
+        {
+            var control = new XElement(directControls[index]);
+            NormalizeSimpleGridRowRepairControl(control, index);
+            replacementGrid.Add(control);
+        }
+
+        grid.ReplaceWith(replacementGrid);
+        if (root.Attribute("MinWidth") is null && root.Attribute("Width") is null)
+        {
+            root.SetAttributeValue("MinWidth", "320");
+        }
+
+        if (root.Attribute("MinHeight") is null && root.Attribute("Height") is null)
+        {
+            root.SetAttributeValue("MinHeight", "220");
+        }
+
+        updatedText = document.ToString();
+        if (updatedText.Equals(originalText, StringComparison.Ordinal))
+        {
+            refusal = "the simple row-layout repair produced no text change.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void NormalizeSimpleGridRowRepairControl(XElement control, int row)
+    {
+        foreach (var attribute in control.Attributes().Where(IsSimpleGridAbsoluteLayoutAttribute).ToList())
+        {
+            attribute.Remove();
+        }
+
+        control.SetAttributeValue("Grid.Row", row.ToString(CultureInfo.InvariantCulture));
+        control.SetAttributeValue("Margin", "10,4");
+        if (string.Equals(control.Name.LocalName, "TextBox", StringComparison.OrdinalIgnoreCase)
+            && control.Attribute("Width") is null
+            && control.Attribute("MinWidth") is null)
+        {
+            control.SetAttributeValue("MinWidth", "240");
+        }
+    }
+
+    private static bool IsSimpleGridAbsoluteLayoutAttribute(XAttribute attribute)
+    {
+        var name = attribute.Name.LocalName;
+        return name.Equals("Margin", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("HorizontalAlignment", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("VerticalAlignment", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("Grid.", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("Canvas.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildStructuralValidationRepairFallbackCommand(CodingReceipt latestValidation, string goal)
+    {
+        return TryBuildWpfStructuralValidationRepairCommand(latestValidation, goal, out var command, out _)
+            ? command
+            : "concrete patch authoring repair current WPF structural validation failure";
+    }
+
+    private static bool TryBuildWpfStructuralValidationRepairCommand(
+        CodingReceipt latestValidation,
+        string goal,
+        out string command,
+        out IReadOnlyList<string> focusRows)
+    {
+        command = string.Empty;
+        focusRows = [];
+        if (string.IsNullOrWhiteSpace(latestValidation.Message))
+        {
+            return false;
+        }
+
+        var structuralRows = latestValidation.Message
+            .ReplaceLineEndings("\n")
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Where(IsWpfStructuralRepairRow)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+        if (structuralRows.Count == 0)
+        {
+            return false;
+        }
+
+        var files = structuralRows
+            .Select(ExtractXamlFileNameFromValidationRow)
+            .Where(file => !string.IsNullOrWhiteSpace(file))
+            .Select(file => file!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToList();
+        var target = files.Count == 0
+            ? "the affected WPF XAML files"
+            : FormatInlineList(files);
+        var repairGoal = CleanGoal(
+            $"{goal}; repair structural XAML validation failures in {target}; replace the affected layout with valid non-overlapping WPF XAML; preserve existing x:Name/Name values, Click handlers, bindings, and code-behind behavior.",
+            "current WPF structural validation failure");
+        command = $"concrete patch authoring {repairGoal}";
+        focusRows = structuralRows
+            .Select(row => $"Structural failure - {row.TrimStart('-', ' ')}")
+            .ToList();
+        return true;
+    }
+
+    private static bool IsWpfStructuralRepairRow(string line) =>
+        line.Contains("simple Grid layout overlap", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("duplicate x:Name/Name value", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("detached attribute-like text", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("has no Command, Click, or interaction trigger", StringComparison.OrdinalIgnoreCase)
+        || line.Contains("XML parse failed", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ExtractXamlFileNameFromValidationRow(string line)
+    {
+        var match = Regex.Match(line, @"(?<file>[A-Za-z0-9_.\-\\/]+\.xaml)\b", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["file"].Value : null;
+    }
+
+    private bool TryBuildUnknownXamlBindingRepairPreview(
+        CodingReceipt latestValidation,
+        out CodingToolRequest previewRequest,
+        out string diagnostic,
+        out string refusal)
+    {
+        previewRequest = default!;
+        diagnostic = string.Empty;
+        refusal = string.Empty;
+        if (string.IsNullOrWhiteSpace(latestValidation.Message))
+        {
+            refusal = "latest XAML binding receipt has no message details.";
+            return false;
+        }
+
+        var binding = ExtractUnknownXamlBinding(latestValidation.Message);
+        if (binding is null)
+        {
+            refusal = "latest XAML binding receipt did not include a parseable 'File.xaml -> BindingName' row.";
+            return false;
+        }
+
+        var targetDirectory = ResolvePrimaryTargetDirectory(latestValidation.TargetPath) ?? ResolvePrimaryTargetDirectory(GetPrimaryTarget());
+        var xamlPath = Path.IsPathFullyQualified(binding.File)
+            ? binding.File
+            : string.IsNullOrWhiteSpace(targetDirectory)
+                ? Path.Combine(Policy.WorkspaceRoot, binding.File)
+                : Path.Combine(targetDirectory, binding.File);
+        if (!CodingWorkspacePolicy.TryNormalizePath(xamlPath, out var fullPath)
+            || !Policy.IsInsideWorkspace(fullPath)
+            || !File.Exists(fullPath)
+            || !fullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            refusal = $"could not resolve XAML file from binding receipt: {binding.File}.";
+            return false;
+        }
+
+        var text = SafeReadText(fullPath);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            refusal = $"could not read XAML file: {RelativeToWorkspace(fullPath)}.";
+            return false;
+        }
+
+        var match = Regex.Match(
+            text,
+            @$"\s+(?<attribute>[A-Za-z_][\w.:-]*)\s*=\s*""\{{Binding(?:\s+Path=|\s+)?{Regex.Escape(binding.Name)}(?:[,}}\s][^""]*)?\}}""",
+            RegexOptions.CultureInvariant);
+        if (!match.Success)
+        {
+            refusal = $"could not find an exact binding attribute for '{binding.Name}' in {RelativeToWorkspace(fullPath)}.";
+            return false;
+        }
+
+        previewRequest = new CodingToolRequest(
+            CodingToolAction.PreviewReplaceText,
+            fullPath,
+            null,
+            ExplicitUserPath: false,
+            UserConfirmed: false,
+            Content: match.Value,
+            Replacement: string.Empty);
+        diagnostic = $"{RelativeToWorkspace(fullPath)} has unknown binding '{binding.Name}'; preview removes the invalid {match.Groups["attribute"].Value} binding attribute only.";
+        return true;
+    }
+
+    private static UnknownXamlBinding? ExtractUnknownXamlBinding(string message)
+    {
+        foreach (var line in message.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var match = Regex.Match(
+                line,
+                @"^-\s*(?<file>.+?\.xaml)\s*->\s*(?<name>[A-Za-z_]\w*)\s*$",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                return new UnknownXamlBinding(match.Groups["file"].Value.Trim(), match.Groups["name"].Value.Trim());
+            }
+        }
+
+        return null;
+    }
+
     private async Task<CodingToolResult> ShowFeatureRunControllerAsync(CodingToolRequest request, CancellationToken cancellationToken)
     {
         var goal = CleanGoal(request.Query ?? _lastFeatureBuildGoal, "current feature");
@@ -9948,7 +11007,9 @@ public sealed partial class LocalCodingToolService(
     {
         var context = await BuildFeatureWorkContextAsync(request, cancellationToken).ConfigureAwait(false);
         var receipts = ReadRecentReceipts(MaxReceiptEntries);
-        var latestValidation = receipts.LastOrDefault(IsDotNetReceipt);
+        var latestValidation = receipts.LastOrDefault(IsValidationReceipt);
+        var changedFiles = ResolvePostPatchValidationChangedFiles(context, receipts);
+        var nextCommand = BuildPostPatchValidationNextCommand(context.Goal, changedFiles, context.TestTarget);
         var gitStatus = await InspectGitWorkingTreeAsync(cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
         {
@@ -9960,7 +11021,69 @@ public sealed partial class LocalCodingToolService(
             "Route:"
         };
         lines.AddRange(BuildPostPatchValidationRows(context).Select(row => $"- {row}"));
+        if (!string.IsNullOrWhiteSpace(nextCommand))
+        {
+            lines.Add($"Next command: {nextCommand}");
+        }
+
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "Post-patch validation router", Policy.WorkspaceRoot);
+    }
+
+    private IReadOnlyList<string> ResolvePostPatchValidationChangedFiles(
+        FeatureWorkContext context,
+        IReadOnlyList<CodingReceipt> receipts)
+    {
+        var latestApply = receipts.LastOrDefault(receipt =>
+            receipt.Succeeded
+            && receipt.Action.Equals(nameof(CodingToolAction.ApplyLastPatchPreview), StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(receipt.TargetPath));
+        if (latestApply is not null)
+        {
+            return [RelativeToWorkspace(latestApply.TargetPath!)];
+        }
+
+        return context.ChangedFiles;
+    }
+
+    private string BuildPostPatchValidationNextCommand(
+        string goal,
+        IReadOnlyList<string> changedFiles,
+        TestTargetRecommendation? testTarget)
+    {
+        var rows = BuildValidationQueueRows(goal, changedFiles, testTarget);
+        var preferredRows = rows
+            .Where(row => row.Contains(". Build -", StringComparison.OrdinalIgnoreCase))
+            .Concat(rows.Where(row => row.Contains("XAML binding check", StringComparison.OrdinalIgnoreCase)))
+            .Concat(rows.Where(row => row.Contains("Command binding check", StringComparison.OrdinalIgnoreCase)))
+            .Concat(rows);
+        foreach (var row in preferredRows)
+        {
+            var command = ExtractValidationQueueCommand(row);
+            if (!string.IsNullOrWhiteSpace(command))
+            {
+                return command;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static string ExtractValidationQueueCommand(string row)
+    {
+        var marker = row.IndexOf("Waiting for approval:", StringComparison.OrdinalIgnoreCase);
+        if (marker >= 0)
+        {
+            return row[(marker + "Waiting for approval:".Length)..].Trim();
+        }
+
+        marker = row.IndexOf("Waiting:", StringComparison.OrdinalIgnoreCase);
+        if (marker >= 0)
+        {
+            var command = row[(marker + "Waiting:".Length)..].Trim();
+            return command.Contains(" ", StringComparison.Ordinal) ? command : string.Empty;
+        }
+
+        return string.Empty;
     }
 
     private async Task<CodingToolResult> ShowPatchPreviewIntelligenceAsync(CodingToolRequest request, CancellationToken cancellationToken)
@@ -10907,7 +12030,8 @@ public sealed partial class LocalCodingToolService(
             $"- wpf controls guide {goal}",
             $"- wpf styling guide {goal}",
             $"- build this for me {goal}",
-            $"- validation chain planner {goal}"
+            $"- validation chain planner {goal}",
+            $"Next command: concrete patch authoring {goal}"
         };
         return new CodingToolResult(true, true, string.Join(Environment.NewLine, lines), "WPF complex window guide", Policy.WorkspaceRoot);
     }
@@ -14090,7 +15214,17 @@ public sealed partial class LocalCodingToolService(
         output.Contains("CS1002", StringComparison.OrdinalIgnoreCase)
             && output.Contains("; expected", StringComparison.OrdinalIgnoreCase)
         || output.Contains("CS1513", StringComparison.OrdinalIgnoreCase)
-            && output.Contains("} expected", StringComparison.OrdinalIgnoreCase);
+            && output.Contains("} expected", StringComparison.OrdinalIgnoreCase)
+        || ShouldAttemptWpfDeterministicRepairPreview(output);
+
+    private static bool ShouldAttemptWpfDeterministicRepairPreview(string output) =>
+        output.Contains(".xaml", StringComparison.OrdinalIgnoreCase)
+        && (output.Contains("CS0246", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("CS0103", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("CS0123", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("CS1061", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("No overload for", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("does not contain a definition for", StringComparison.OrdinalIgnoreCase));
 
     private string BuildValidationRepairStage(string failureType, bool hasPendingPreview, bool previewAttempted)
     {
@@ -16859,6 +17993,7 @@ public sealed partial class LocalCodingToolService(
             .DistinctBy(handler => RelativeToWorkspace(handler.Path) + "|" + handler.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var integrityRows = BuildWpfXamlIntegrityRows(xamlFiles, symbols);
+        var structuralRows = BuildWpfXamlStructuralRows(xamlFiles);
         var diagnosticRows = BuildWpfAdvancedBindingDiagnosticRows(xamlFiles, csharpFiles, symbols);
         var lines = new List<string>
         {
@@ -16877,10 +18012,14 @@ public sealed partial class LocalCodingToolService(
         lines.AddRange(integrityRows.Count == 0
             ? ["- Good - x:Class, resource dictionary sources, static/dynamic resources, and event handlers look consistent."]
             : integrityRows.Select(row => $"- {row}"));
+        lines.Add("WPF structural UI checks:");
+        lines.AddRange(structuralRows.Count == 0
+            ? ["- Good - XAML parses structurally and interactive controls expose explicit action wiring."]
+            : structuralRows.Select(row => $"- {row}"));
         lines.Add("Advanced WPF binding diagnostics:");
         lines.AddRange(diagnosticRows.Select(row => $"- {row}"));
         lines.Add("Note - dynamic DataContext, generated properties, and converter parameters may still need human review.");
-        return new CodingToolResult(true, unknown.Count == 0 && integrityRows.Count == 0, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
+        return new CodingToolResult(true, unknown.Count == 0 && integrityRows.Count == 0 && structuralRows.Count == 0, string.Join(Environment.NewLine, lines), "XAML binding check", Policy.WorkspaceRoot);
     }
 
     private CodingToolResult VerifyCommandBindings()
@@ -16987,6 +18126,297 @@ public sealed partial class LocalCodingToolService(
         }
 
         return rows.Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList();
+    }
+
+    private IReadOnlyList<string> BuildWpfXamlStructuralRows(IReadOnlyList<string> xamlFiles)
+    {
+        var rows = new List<string>();
+        foreach (var file in xamlFiles)
+        {
+            rows.AddRange(BuildWpfXamlStructuralRowsForText(file, SafeReadText(file)));
+        }
+
+        return rows.Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList();
+    }
+
+    private IReadOnlyList<string> BuildWpfXamlStructuralRowsForText(string file, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(text, LoadOptions.SetLineInfo);
+        }
+        catch (XmlException ex)
+        {
+            return [$"{RelativeToWorkspace(file)} XML parse failed near line {ex.LineNumber}: {TrimForChat(ex.Message, 180)}"];
+        }
+
+        var rows = new List<string>();
+        var root = document.Root;
+        if (root is not null && IsSingleContentWpfRoot(root))
+        {
+            var contentChildren = root.Elements()
+                .Where(child => !IsWpfRootPropertyElement(child))
+                .ToList();
+            if (contentChildren.Count > 1)
+            {
+                rows.Add($"{RelativeToWorkspace(file)} <{root.Name.LocalName}> has {contentChildren.Count} content children; WPF {root.Name.LocalName} can accept only one content child.");
+            }
+        }
+
+        foreach (var duplicate in FindDuplicateXamlNames(document))
+        {
+            rows.Add($"{RelativeToWorkspace(file)} duplicate x:Name/Name value '{duplicate}'.");
+        }
+
+        rows.AddRange(BuildWpfSimpleGridOverlapRows(file, document));
+
+        foreach (var textNode in document.DescendantNodes().OfType<XText>())
+        {
+            var value = textNode.Value.Trim();
+            if (LooksLikeDetachedXamlAttributeText(value))
+            {
+                rows.Add($"{RelativeToWorkspace(file)} detached attribute-like text{FormatXamlLine(textNode)}: {TrimForChat(value, 180)}");
+            }
+        }
+
+        foreach (var element in document.Descendants().Where(IsActionableWpfElement))
+        {
+            if (!HasExplicitWpfAction(element))
+            {
+                rows.Add($"{RelativeToWorkspace(file)} {FormatXamlElement(element)} has no Command, Click, or interaction trigger.");
+            }
+        }
+
+        return rows;
+    }
+
+    private IReadOnlyList<string> BuildWpfSimpleGridOverlapRows(string file, XDocument document)
+    {
+        var rows = new List<string>();
+        foreach (var grid in document.Descendants().Where(element => string.Equals(element.Name.LocalName, "Grid", StringComparison.OrdinalIgnoreCase)))
+        {
+            var boxes = grid.Elements()
+                .Where(element => !IsWpfRootPropertyElement(element))
+                .Select(TryBuildWpfLayoutBox)
+                .Where(box => box is not null)
+                .Select(box => box!)
+                .ToList();
+            for (var leftIndex = 0; leftIndex < boxes.Count; leftIndex++)
+            {
+                for (var rightIndex = leftIndex + 1; rightIndex < boxes.Count; rightIndex++)
+                {
+                    var first = boxes[leftIndex];
+                    var second = boxes[rightIndex];
+                    if (!first.Cell.Equals(second.Cell, StringComparison.Ordinal)
+                        || !LayoutBoxesOverlap(first, second))
+                    {
+                        continue;
+                    }
+
+                    rows.Add($"{RelativeToWorkspace(file)} simple Grid layout overlap: {first.DisplayName} at left={first.Left:0.#}, top={first.Top:0.#} overlaps {second.DisplayName} at left={second.Left:0.#}, top={second.Top:0.#}; use distinct Grid.Row/Grid.Column placement or non-overlapping margins.");
+                    if (rows.Count >= 8)
+                    {
+                        return rows;
+                    }
+                }
+            }
+        }
+
+        return rows;
+    }
+
+    private static WpfLayoutBox? TryBuildWpfLayoutBox(XElement element)
+    {
+        if (!IsVisibleWpfControlElement(element))
+        {
+            return null;
+        }
+
+        var margin = ParseWpfThickness(element.Attribute("Margin")?.Value);
+        var left = margin.Left;
+        var top = margin.Top;
+        var width = ParseDoubleAttribute(element, "Width") ?? EstimateWpfElementWidth(element);
+        var height = ParseDoubleAttribute(element, "Height") ?? EstimateWpfElementHeight(element);
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var row = ReadAttachedGridIndex(element, "Row");
+        var column = ReadAttachedGridIndex(element, "Column");
+        var rowSpan = Math.Max(1, ReadAttachedGridIndex(element, "RowSpan", 1));
+        var columnSpan = Math.Max(1, ReadAttachedGridIndex(element, "ColumnSpan", 1));
+        var cell = $"{row}:{column}:{rowSpan}:{columnSpan}";
+        return new WpfLayoutBox(FormatXamlElement(element), cell, left, top, width, height);
+    }
+
+    private static bool IsVisibleWpfControlElement(XElement element)
+    {
+        var name = element.Name.LocalName;
+        return name.Equals("Button", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("CheckBox", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ComboBox", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Label", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ListBox", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ListView", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("PasswordBox", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("ProgressBar", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("RadioButton", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Slider", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("TextBlock", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("TextBox", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("TreeView", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LayoutBoxesOverlap(WpfLayoutBox first, WpfLayoutBox second)
+    {
+        var horizontal = first.Left < second.Right && second.Left < first.Right;
+        var vertical = first.Top < second.Bottom && second.Top < first.Bottom;
+        return horizontal && vertical;
+    }
+
+    private static (double Left, double Top, double Right, double Bottom) ParseWpfThickness(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return (0, 0, 0, 0);
+        }
+
+        var parts = value
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0)
+            .ToArray();
+        return parts.Length switch
+        {
+            1 => (parts[0], parts[0], parts[0], parts[0]),
+            2 => (parts[0], parts[1], parts[0], parts[1]),
+            >= 4 => (parts[0], parts[1], parts[2], parts[3]),
+            _ => (0, 0, 0, 0)
+        };
+    }
+
+    private static double? ParseDoubleAttribute(XElement element, string attributeName) =>
+        double.TryParse(element.Attribute(attributeName)?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+
+    private static double EstimateWpfElementWidth(XElement element)
+    {
+        var content = element.Attribute("Content")?.Value
+            ?? element.Attribute("Text")?.Value
+            ?? element.Attribute("Header")?.Value
+            ?? string.Empty;
+        var contentWidth = string.IsNullOrWhiteSpace(content) ? 0 : Math.Clamp((content.Length * 7) + 24, 50, 180);
+        return element.Name.LocalName switch
+        {
+            "TextBox" or "PasswordBox" => 120,
+            "CheckBox" or "RadioButton" => Math.Max(90, contentWidth),
+            "Label" or "TextBlock" => Math.Max(60, contentWidth),
+            "Button" => Math.Max(75, contentWidth),
+            _ => Math.Max(80, contentWidth)
+        };
+    }
+
+    private static double EstimateWpfElementHeight(XElement element) =>
+        element.Name.LocalName switch
+        {
+            "TextBox" or "PasswordBox" or "Button" or "Label" or "TextBlock" or "CheckBox" or "RadioButton" => 23,
+            "Slider" or "ProgressBar" => 24,
+            _ => 28
+        };
+
+    private static int ReadAttachedGridIndex(XElement element, string name, int defaultValue = 0)
+    {
+        var value = element
+            .Attributes()
+            .FirstOrDefault(attribute => attribute.Name.LocalName.Equals($"Grid.{name}", StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : defaultValue;
+    }
+
+    private static bool IsSingleContentWpfRoot(XElement element) =>
+        string.Equals(element.Name.LocalName, "Window", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(element.Name.LocalName, "UserControl", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(element.Name.LocalName, "Page", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWpfRootPropertyElement(XElement element) =>
+        element.Name.LocalName.Contains('.', StringComparison.Ordinal);
+
+    private static IReadOnlyList<string> FindDuplicateXamlNames(XDocument document)
+    {
+        var xamlName = XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml");
+        return document
+            .Descendants()
+            .SelectMany(element => new[] { element.Attribute(xamlName)?.Value, element.Attribute("Name")?.Value })
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!.Trim())
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .Take(12)
+            .ToList();
+    }
+
+    private static bool LooksLikeDetachedXamlAttributeText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(value, @"\b[A-Za-z_][\w\.-]*\s*=\s*[""'][^""']*[""']", RegexOptions.CultureInvariant);
+    }
+
+    private static bool IsActionableWpfElement(XElement element) =>
+        string.Equals(element.Name.LocalName, "Button", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(element.Name.LocalName, "MenuItem", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(element.Name.LocalName, "Hyperlink", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasExplicitWpfAction(XElement element)
+    {
+        if (element.Attributes().Any(attribute =>
+                string.Equals(attribute.Name.LocalName, "Command", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(attribute.Name.LocalName, "Click", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(attribute.Name.LocalName, "NavigateUri", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return element
+            .Descendants()
+            .Any(descendant =>
+                string.Equals(descendant.Name.LocalName, "EventTrigger", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(descendant.Name.LocalName, "InvokeCommandAction", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FormatXamlElement(XElement element)
+    {
+        var name = element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value
+                   ?? element.Attribute("Name")?.Value
+                   ?? element.Attribute("Content")?.Value
+                   ?? string.Empty;
+        var label = string.IsNullOrWhiteSpace(name)
+            ? $"<{element.Name.LocalName}>"
+            : $"<{element.Name.LocalName} {name}>";
+        return label + FormatXamlLine(element);
+    }
+
+    private static string FormatXamlLine(XObject node)
+    {
+        if (node is IXmlLineInfo lineInfo && lineInfo.HasLineInfo() && lineInfo.LineNumber > 0)
+        {
+            return $" near line {lineInfo.LineNumber}";
+        }
+
+        return string.Empty;
     }
 
     private IEnumerable<(string Path, string ClassName)> ExtractXamlClassDeclarations(IEnumerable<string> files)
@@ -17930,7 +19360,7 @@ public sealed partial class LocalCodingToolService(
             return error;
         }
 
-        var prepared = await PreparePatchBundleAsync(edits, "Patch bundle preview", cancellationToken).ConfigureAwait(false);
+        var prepared = await PreparePatchBundleAsync(edits, request.Query ?? string.Empty, "Patch bundle preview", cancellationToken).ConfigureAwait(false);
         if (prepared.Error is not null)
         {
             return prepared.Error;
@@ -18069,10 +19499,22 @@ public sealed partial class LocalCodingToolService(
 
         var beforeAfterRows = BuildBeforeAfterSymbolDiffRows([applyRequest.Content ?? string.Empty], [applyRequest.Replacement ?? string.Empty]);
         var result = await EditFileAsync(applyRequest, cancellationToken).ConfigureAwait(false);
+        var changedFiles = string.IsNullOrWhiteSpace(applyRequest.Path)
+            ? Array.Empty<string>()
+            : [applyRequest.Path];
+        var validationGoal = BuildPostApplyValidationGoal(changedFiles);
         return result.Succeeded
             ? result with
             {
-                Message = $"Applied last patch preview.{Environment.NewLine}{result.Message}{Environment.NewLine}Before/after symbol diff:{Environment.NewLine}{string.Join(Environment.NewLine, beforeAfterRows.Select(row => $"- {row}"))}",
+                Message = string.Join(
+                    Environment.NewLine,
+                    "Applied last patch preview.",
+                    result.Message,
+                    "Before/after symbol diff:",
+                    string.Join(Environment.NewLine, beforeAfterRows.Select(row => $"- {row}")),
+                    "Queued validation command packet:",
+                    string.Join(Environment.NewLine, BuildValidationQueueRows(validationGoal, changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}")),
+                    $"Next command: {BuildPostApplyValidationCommand(changedFiles)}"),
                 ToolName = "Patch preview apply"
             }
             : result with
@@ -18118,7 +19560,7 @@ public sealed partial class LocalCodingToolService(
             }
         }
 
-        var prepared = await PreparePatchBundleAsync(edits, "Patch preview apply", cancellationToken).ConfigureAwait(false);
+        var prepared = await PreparePatchBundleAsync(edits, previewRequest.Query ?? string.Empty, "Patch preview apply", cancellationToken).ConfigureAwait(false);
         if (prepared.Error is not null)
         {
             return prepared.Error with
@@ -18155,8 +19597,10 @@ public sealed partial class LocalCodingToolService(
         lines.Add("Before/after symbol diff:");
         lines.AddRange(BuildBeforeAfterSymbolDiffRows(prepared.Edits.Select(edit => edit.BeforeSnippet), prepared.Edits.Select(edit => edit.AfterSnippet)).Select(row => $"- {row}"));
         lines.Add("Queued validation command packet:");
-        lines.AddRange(BuildValidationQueueRows(string.Join(" ", changedFiles.Select(Path.GetFileNameWithoutExtension)), changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
-        lines.AddRange(BuildWpfValidationRepairRouteRows(string.Join(" ", changedFiles.Select(Path.GetFileNameWithoutExtension)), changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
+        var validationGoal = BuildPostApplyValidationGoal(changedFiles);
+        lines.AddRange(BuildValidationQueueRows(validationGoal, changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
+        lines.AddRange(BuildWpfValidationRepairRouteRows(validationGoal, changedFiles.Select(RelativeToWorkspace).ToList()).Select(row => $"- {row}"));
+        lines.Add($"Next command: {BuildPostApplyValidationCommand(changedFiles)}");
 
         return new CodingToolResult(
             true,
@@ -18164,6 +19608,21 @@ public sealed partial class LocalCodingToolService(
             string.Join(Environment.NewLine, lines),
             "Patch preview apply",
             changedFiles.Count == 1 ? changedFiles[0] : Policy.WorkspaceRoot);
+    }
+
+    private static string BuildPostApplyValidationCommand(IEnumerable<string> changedFiles) =>
+        "post patch validation " + BuildPostApplyValidationGoal(changedFiles);
+
+    private static string BuildPostApplyValidationGoal(IEnumerable<string> changedFiles)
+    {
+        var goal = string.Join(
+            " ",
+            changedFiles
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFileNameWithoutExtension)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        return CleanGoal(goal, "current change");
     }
 
     private async Task<CodingToolResult> ShowLastPatchPreviewAsync(CancellationToken cancellationToken)
@@ -18290,7 +19749,22 @@ public sealed partial class LocalCodingToolService(
                 return false;
             }
 
-            normalized.Add(new NormalizedPatchEdit(fullPath, edit.OldText, edit.NewText, edit.OldText.Length == 0));
+            var targetExists = File.Exists(fullPath);
+            var replaceEntireFile = edit.ReplaceEntireFile
+                || (edit.OldText.Length == 0 && targetExists && LooksLikeCompleteFileReplacement(fullPath, edit.NewText));
+            if (edit.OldText.Length == 0 && targetExists && !replaceEntireFile)
+            {
+                error = new CodingToolResult(
+                    true,
+                    false,
+                    "Coding tool blocked: existing-file patch bundle edits need exact oldText, or an explicit complete-file replacement. The supplied replacement looked like a snippet.",
+                    "Patch bundle preview",
+                    fullPath);
+                return false;
+            }
+
+            var createsFile = edit.OldText.Length == 0 && !replaceEntireFile;
+            normalized.Add(new NormalizedPatchEdit(fullPath, edit.OldText, edit.NewText, createsFile, replaceEntireFile));
         }
 
         edits = normalized;
@@ -18311,8 +19785,9 @@ public sealed partial class LocalCodingToolService(
             && edits.All(edit => IsWpfPatchContextRelativePath(edit.Path));
     }
 
-    private static async Task<PatchBundlePreparation> PreparePatchBundleAsync(
+    private async Task<PatchBundlePreparation> PreparePatchBundleAsync(
         IReadOnlyList<NormalizedPatchEdit> edits,
+        string requestText,
         string toolName,
         CancellationToken cancellationToken)
     {
@@ -18329,7 +19804,1008 @@ public sealed partial class LocalCodingToolService(
             prepared.Add(result.Edit!);
         }
 
+        prepared = PreserveOriginalWpfEventHandlers(prepared);
+        prepared = PreserveWpfCodeBehindNamespaceEnvelope(prepared);
+        prepared = PreserveWpfCodeBehindEssentialUsings(prepared);
+        prepared = RepairPreparedWpfSimpleGridOverlaps(prepared);
+
+        var structuralError = BuildPreparedPatchStructuralError(prepared, requestText, toolName);
+        if (structuralError is not null)
+        {
+            return new PatchBundlePreparation([], structuralError);
+        }
+
         return new PatchBundlePreparation(prepared, null);
+    }
+
+    private List<PreparedPatchEdit> PreserveOriginalWpfEventHandlers(List<PreparedPatchEdit> edits)
+    {
+        var updatedTexts = edits
+            .GroupBy(edit => edit.FullPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().UpdatedText, StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var edit = edits[index];
+            if (!edit.FullPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+                || edit.CreatesFile
+                || !TryPreserveOriginalWpfEventHandlers(edit, updatedTexts, out var updatedText))
+            {
+                continue;
+            }
+
+            updatedTexts[edit.FullPath] = updatedText;
+            edits[index] = edit with
+            {
+                UpdatedText = updatedText,
+                AfterSnippet = BuildSnippet(updatedText, 0, updatedText.Length)
+            };
+        }
+
+        return edits;
+    }
+
+    private List<PreparedPatchEdit> PreserveWpfCodeBehindEssentialUsings(List<PreparedPatchEdit> edits)
+    {
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var edit = edits[index];
+            if (!edit.FullPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+                || edit.CreatesFile
+                || !TryPreserveWpfCodeBehindEssentialUsings(edit, out var updatedText))
+            {
+                continue;
+            }
+
+            edits[index] = edit with
+            {
+                UpdatedText = updatedText,
+                AfterSnippet = BuildSnippet(updatedText, 0, updatedText.Length)
+            };
+        }
+
+        return edits;
+    }
+
+    private List<PreparedPatchEdit> RepairPreparedWpfSimpleGridOverlaps(List<PreparedPatchEdit> edits)
+    {
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var edit = edits[index];
+            if (!edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+                || edit.CreatesFile
+                || !BuildWpfXamlStructuralRowsForText(edit.FullPath, edit.UpdatedText)
+                    .Any(row => row.Contains("simple Grid layout overlap", StringComparison.OrdinalIgnoreCase))
+                || !TryBuildSimpleGridRowLayoutReplacement(edit.UpdatedText, out var updatedText, out _)
+                || BuildWpfXamlStructuralRowsForText(edit.FullPath, updatedText)
+                    .Any(IsWpfStructuralRepairRow))
+            {
+                continue;
+            }
+
+            edits[index] = edit with
+            {
+                UpdatedText = updatedText,
+                AfterSnippet = BuildSnippet(updatedText, 0, updatedText.Length)
+            };
+        }
+
+        return edits;
+    }
+
+    private static bool TryPreserveWpfCodeBehindEssentialUsings(PreparedPatchEdit edit, out string updatedText)
+    {
+        updatedText = edit.UpdatedText;
+        var originalUsings = ExtractUsingDirectives(edit.OriginalText);
+        if (originalUsings.Count == 0)
+        {
+            return false;
+        }
+
+        var changed = false;
+        foreach (var usingDirective in originalUsings)
+        {
+            if (updatedText.Contains(usingDirective, StringComparison.Ordinal)
+                || !ShouldPreserveWpfCodeBehindUsing(updatedText, usingDirective))
+            {
+                continue;
+            }
+
+            updatedText = InsertUsingDirective(updatedText, usingDirective);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool ShouldPreserveWpfCodeBehindUsing(string updatedText, string usingDirective)
+    {
+        if (usingDirective.Equals("using System.Windows;", StringComparison.Ordinal))
+        {
+            return ContainsIdentifier(updatedText, "Window")
+                || ContainsIdentifier(updatedText, "RoutedEventArgs")
+                || ContainsIdentifier(updatedText, "MessageBox")
+                || ContainsIdentifier(updatedText, "Application");
+        }
+
+        if (usingDirective.Equals("using System.Windows.Controls;", StringComparison.Ordinal))
+        {
+            return WpfControlsNamespaceTypeNames.Any(typeName => ContainsIdentifier(updatedText, typeName));
+        }
+
+        return false;
+    }
+
+    private static bool ContainsIdentifier(string text, string identifier) =>
+        Regex.IsMatch(text, $@"\b{Regex.Escape(identifier)}\b", RegexOptions.CultureInvariant);
+
+    private List<PreparedPatchEdit> PreserveWpfCodeBehindNamespaceEnvelope(List<PreparedPatchEdit> edits)
+    {
+        var updatedTexts = edits
+            .GroupBy(edit => edit.FullPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().UpdatedText, StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var edit = edits[index];
+            if (!edit.FullPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+                || edit.CreatesFile
+                || !TryPreserveWpfCodeBehindNamespaceEnvelope(edit, updatedTexts, out var updatedText))
+            {
+                continue;
+            }
+
+            updatedTexts[edit.FullPath] = updatedText;
+            edits[index] = edit with
+            {
+                UpdatedText = updatedText,
+                AfterSnippet = BuildSnippet(updatedText, 0, updatedText.Length)
+            };
+        }
+
+        return edits;
+    }
+
+    private static bool TryPreserveWpfCodeBehindNamespaceEnvelope(
+        PreparedPatchEdit edit,
+        IReadOnlyDictionary<string, string> updatedTexts,
+        out string updatedText)
+    {
+        updatedText = edit.UpdatedText;
+        var xamlPath = edit.FullPath[..^".cs".Length];
+        var xamlText = updatedTexts.TryGetValue(xamlPath, out var preparedXaml)
+            ? preparedXaml
+            : File.Exists(xamlPath)
+                ? SafeReadText(xamlPath)
+                : string.Empty;
+        var fullClassName = ExtractXamlClassNameForContext(xamlText);
+        var split = fullClassName.LastIndexOf('.');
+        if (split <= 0 || split >= fullClassName.Length - 1)
+        {
+            return false;
+        }
+
+        var namespaceName = fullClassName[..split];
+        var className = fullClassName[(split + 1)..];
+        if (!TryFindClassDeclaration(edit.UpdatedText, className, out var updatedClass)
+            || string.Equals(GetContainingNamespace(updatedClass), namespaceName, StringComparison.Ordinal)
+            || Regex.IsMatch(edit.UpdatedText, @"\bnamespace\s+", RegexOptions.CultureInvariant))
+        {
+            return false;
+        }
+
+        updatedText = InsertFileScopedNamespace(edit.UpdatedText, namespaceName);
+        return true;
+    }
+
+    private bool TryPreserveOriginalWpfEventHandlers(
+        PreparedPatchEdit edit,
+        IReadOnlyDictionary<string, string> updatedTexts,
+        out string updatedText)
+    {
+        updatedText = edit.UpdatedText;
+        var xamlPath = edit.FullPath[..^".cs".Length];
+        var xamlText = updatedTexts.TryGetValue(xamlPath, out var preparedXaml)
+            ? preparedXaml
+            : File.Exists(xamlPath)
+                ? SafeReadText(xamlPath)
+                : string.Empty;
+        var handlers = ExtractWpfEventHandlerNames(xamlText).ToArray();
+        if (handlers.Length == 0)
+        {
+            return false;
+        }
+
+        var className = ExtractXamlClassNameForContext(xamlText)
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault();
+        if (string.IsNullOrWhiteSpace(className))
+        {
+            return false;
+        }
+
+        if (!TryFindClassDeclaration(edit.OriginalText, className, out var originalClass)
+            || !TryFindClassDeclaration(edit.UpdatedText, className, out var updatedClass))
+        {
+            return false;
+        }
+
+        var newMemberNames = ExtractClassMemberNames(updatedClass)
+            .Except(ExtractClassMemberNames(originalClass), StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
+        var text = edit.UpdatedText;
+        foreach (var replacement in BuildPreservedOriginalHandlerReplacements(
+                     edit.OriginalText,
+                     edit.UpdatedText,
+                     originalClass,
+                     updatedClass,
+                     handlers,
+                     newMemberNames)
+                 .OrderByDescending(item => item.UpdatedMethod.FullSpan.Start))
+        {
+            var replacementIndent = GetLineIndent(text, replacement.UpdatedMethod.SpanStart);
+            var methodText = ReindentCSharpMethod(ExtractNodeText(edit.OriginalText, replacement.OriginalMethod), replacementIndent);
+            text = text.Remove(replacement.UpdatedMethod.FullSpan.Start, replacement.UpdatedMethod.FullSpan.Length)
+                .Insert(replacement.UpdatedMethod.FullSpan.Start, methodText);
+        }
+
+        if (!TryFindClassDeclaration(text, className, out updatedClass))
+        {
+            return false;
+        }
+
+        var updatedMethodNames = updatedClass.Members
+            .OfType<MethodDeclarationSyntax>()
+            .Select(method => method.Identifier.ValueText)
+            .ToHashSet(StringComparer.Ordinal);
+        var originalMethods = originalClass.Members
+            .OfType<MethodDeclarationSyntax>()
+            .Where(method => handlers.Contains(method.Identifier.ValueText, StringComparer.Ordinal))
+            .Where(method => !updatedMethodNames.Contains(method.Identifier.ValueText))
+            .Where(IsWpfEventHandlerShape)
+            .ToArray();
+        if (originalMethods.Length == 0)
+        {
+            updatedText = text;
+            return !updatedText.Equals(edit.UpdatedText, StringComparison.Ordinal);
+        }
+
+        var indent = GetLineIndent(text, updatedClass.CloseBraceToken.SpanStart);
+        if (string.IsNullOrEmpty(indent))
+        {
+            indent = "    ";
+        }
+
+        var insertion = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            originalMethods.Select(method => ReindentCSharpMethod(ExtractNodeText(edit.OriginalText, method), indent)));
+        updatedText = text.Insert(
+            updatedClass.CloseBraceToken.SpanStart,
+            Environment.NewLine + Environment.NewLine + insertion + Environment.NewLine);
+        foreach (var usingDirective in ExtractUsingDirectives(edit.OriginalText))
+        {
+            if (!updatedText.Contains(usingDirective, StringComparison.Ordinal))
+            {
+                updatedText = InsertUsingDirective(updatedText, usingDirective);
+            }
+        }
+
+        return !updatedText.Equals(edit.UpdatedText, StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyList<WpfHandlerReplacement> BuildPreservedOriginalHandlerReplacements(
+        string originalText,
+        string updatedText,
+        ClassDeclarationSyntax originalClass,
+        ClassDeclarationSyntax updatedClass,
+        IReadOnlyList<string> xamlHandlers,
+        IReadOnlySet<string> newMemberNames)
+    {
+        if (newMemberNames.Count == 0)
+        {
+            return [];
+        }
+
+        var originalMethods = originalClass.Members
+            .OfType<MethodDeclarationSyntax>()
+            .Where(IsWpfEventHandlerShape)
+            .ToDictionary(method => method.Identifier.ValueText, StringComparer.Ordinal);
+        var replacements = new List<WpfHandlerReplacement>();
+        foreach (var updatedMethod in updatedClass.Members.OfType<MethodDeclarationSyntax>().Where(IsWpfEventHandlerShape))
+        {
+            var name = updatedMethod.Identifier.ValueText;
+            if (!xamlHandlers.Contains(name, StringComparer.Ordinal)
+                || !originalMethods.TryGetValue(name, out var originalMethod)
+                || MethodsEquivalent(originalText, originalMethod, updatedText, updatedMethod)
+                || MethodMentionsAny(updatedMethod, newMemberNames))
+            {
+                continue;
+            }
+
+            replacements.Add(new WpfHandlerReplacement(originalMethod, updatedMethod));
+        }
+
+        return replacements;
+    }
+
+    private static IReadOnlyCollection<string> ExtractClassMemberNames(ClassDeclarationSyntax classDeclaration)
+    {
+        return classDeclaration.Members
+            .SelectMany<MemberDeclarationSyntax, string>(member => member switch
+            {
+                MethodDeclarationSyntax method => [method.Identifier.ValueText],
+                PropertyDeclarationSyntax property => [property.Identifier.ValueText],
+                FieldDeclarationSyntax field => field.Declaration.Variables.Select(variable => variable.Identifier.ValueText),
+                EventDeclarationSyntax eventDeclaration => [eventDeclaration.Identifier.ValueText],
+                _ => []
+            })
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static bool MethodsEquivalent(
+        string originalText,
+        MethodDeclarationSyntax originalMethod,
+        string updatedText,
+        MethodDeclarationSyntax updatedMethod) =>
+        string.Equals(
+            ExtractNodeText(originalText, originalMethod).ReplaceLineEndings("\n").Trim(),
+            ExtractNodeText(updatedText, updatedMethod).ReplaceLineEndings("\n").Trim(),
+            StringComparison.Ordinal);
+
+    private static bool MethodMentionsAny(MethodDeclarationSyntax method, IReadOnlySet<string> names)
+    {
+        if (names.Count == 0)
+        {
+            return false;
+        }
+
+        return method
+            .DescendantTokens()
+            .Where(token => token.IsKind(SyntaxKind.IdentifierToken))
+            .Select(token => token.ValueText)
+            .Any(names.Contains);
+    }
+
+    private static bool TryFindClassDeclaration(string text, string className, out ClassDeclarationSyntax classDeclaration)
+    {
+        classDeclaration = default!;
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(className))
+        {
+            return false;
+        }
+
+        classDeclaration = CSharpSyntaxTree.ParseText(text)
+            .GetRoot()
+            .DescendantNodes()
+            .OfType<ClassDeclarationSyntax>()
+            .FirstOrDefault(type => string.Equals(type.Identifier.ValueText, className, StringComparison.Ordinal))!;
+        return classDeclaration is not null;
+    }
+
+    private static string ExtractNodeText(string sourceText, SyntaxNode node)
+    {
+        var span = node.FullSpan;
+        return sourceText.Substring(span.Start, span.Length).Trim();
+    }
+
+    private static IReadOnlyList<string> ExtractUsingDirectives(string sourceText)
+    {
+        return CSharpSyntaxTree.ParseText(sourceText)
+            .GetRoot()
+            .DescendantNodes()
+            .OfType<UsingDirectiveSyntax>()
+            .Select(usingDirective => usingDirective.ToFullString().Trim())
+            .Where(usingDirective => !string.IsNullOrWhiteSpace(usingDirective))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private CodingToolResult? BuildPreparedPatchStructuralError(
+        IReadOnlyList<PreparedPatchEdit> edits,
+        string requestText,
+        string toolName)
+    {
+        var updatedTexts = edits
+            .GroupBy(edit => edit.FullPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().UpdatedText, StringComparer.OrdinalIgnoreCase);
+        var rows = edits
+            .Where(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(edit => BuildWpfXamlStructuralRowsForText(edit.FullPath, edit.UpdatedText))
+            .Concat(edits
+                .Where(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) && !edit.CreatesFile)
+                .SelectMany(edit => BuildWpfXamlPreservationRows(edit.FullPath, edit.OriginalText, edit.UpdatedText, requestText)))
+            .Concat(edits
+                .Where(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(edit => BuildWpfCodeBehindStructuralRowsForXamlEdit(edit.FullPath, updatedTexts)))
+            .Concat(edits
+                .Where(edit => edit.FullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(edit => BuildCSharpStructuralRowsForText(edit.FullPath, edit.UpdatedText, updatedTexts)))
+            .Concat(BuildWpfBehaviorCoverageRows(edits, requestText))
+            .Concat(BuildActiveCompilerFailureStructuralRows(updatedTexts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var target = edits
+            .FirstOrDefault(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+            ?.FullPath
+            ?? edits.FirstOrDefault(edit => edit.FullPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))?.FullPath
+            ?? edits.FirstOrDefault()?.FullPath
+            ?? Policy.WorkspaceRoot;
+        var lines = new List<string>
+        {
+            "Coding tool blocked: patch preview would leave invalid WPF/XAML structure.",
+            "No files were changed."
+        };
+        lines.AddRange(rows.Select(row => $"- {row}"));
+        lines.Add("Rejected preview targets:");
+        lines.AddRange(BuildRejectedPatchTargetRows(edits));
+        lines.Add("Repair route: ask Ali for a structurally valid replacement of the affected WPF XAML/code-behind file, or run the last-failure repair path.");
+        return new CodingToolResult(
+            true,
+            false,
+            string.Join(Environment.NewLine, lines),
+            toolName,
+            target);
+    }
+
+    private IReadOnlyList<string> BuildActiveCompilerFailureStructuralRows(
+        IReadOnlyDictionary<string, string> updatedTexts)
+    {
+        if (_lastDotNetResult is not { Succeeded: false } lastDotNetResult)
+        {
+            return [];
+        }
+
+        var rows = new List<string>();
+        foreach (var diagnostic in ExtractMissingNameDiagnostics(lastDotNetResult.Message).Take(6))
+        {
+            var fullPath = ToAbsoluteWorkspacePath(diagnostic.Path) ?? diagnostic.Path;
+            if (!Policy.IsInsideWorkspace(fullPath)
+                || !fullPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var codeBehindText = updatedTexts.TryGetValue(fullPath, out var preparedCodeBehind)
+                ? preparedCodeBehind
+                : File.Exists(fullPath)
+                    ? SafeReadText(fullPath)
+                    : string.Empty;
+            if (string.IsNullOrWhiteSpace(codeBehindText)
+                || !codeBehindText.Contains(diagnostic.Name, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var xamlPath = fullPath[..^".cs".Length];
+            var xamlText = updatedTexts.TryGetValue(xamlPath, out var preparedXaml)
+                ? preparedXaml
+                : File.Exists(xamlPath)
+                    ? SafeReadText(xamlPath)
+                    : string.Empty;
+            if (WpfCodeBehindDefinesName(codeBehindText, xamlText, diagnostic.Name))
+            {
+                continue;
+            }
+
+            rows.Add($"{RelativeToWorkspace(fullPath)} still references unresolved name '{diagnostic.Name}' from the latest build failure; define it in C#/XAML or remove obsolete references before preview.");
+        }
+
+        foreach (var diagnostic in ExtractMissingTypeDiagnostics(lastDotNetResult.Message).Take(6))
+        {
+            var fullPath = ToAbsoluteWorkspacePath(diagnostic.Path) ?? diagnostic.Path;
+            if (!Policy.IsInsideWorkspace(fullPath)
+                || !fullPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+                || !TryGetRequiredWpfNamespaceForType(diagnostic.Name, out var requiredNamespace))
+            {
+                continue;
+            }
+
+            var codeBehindText = updatedTexts.TryGetValue(fullPath, out var preparedCodeBehind)
+                ? preparedCodeBehind
+                : File.Exists(fullPath)
+                    ? SafeReadText(fullPath)
+                    : string.Empty;
+            if (string.IsNullOrWhiteSpace(codeBehindText)
+                || CSharpTextCanResolveTypeFromNamespace(codeBehindText, diagnostic.Name, requiredNamespace))
+            {
+                continue;
+            }
+
+            var diagnosticFileWasPatched = updatedTexts.ContainsKey(fullPath);
+            var hasExternalScopePatch = updatedTexts.Keys.Any(IsMissingTypeExternalScopePatchCandidate);
+            if (!diagnosticFileWasPatched && !hasExternalScopePatch)
+            {
+                rows.Add($"{RelativeToWorkspace(fullPath)} has latest build failure CS0246 for WPF type '{diagnostic.Name}', but this preview does not update that code-behind file or a project/global-using file that could resolve it.");
+                continue;
+            }
+
+            rows.Add($"{RelativeToWorkspace(fullPath)} still references WPF type '{diagnostic.Name}' from the latest build failure without '{requiredNamespace}'; add the using, fully qualify the type, or provide a valid global using before preview.");
+        }
+
+        return rows;
+    }
+
+    private IReadOnlyList<string> BuildWpfBehaviorCoverageRows(IReadOnlyList<PreparedPatchEdit> edits, string requestText)
+    {
+        if (!LooksLikeWpfUserTriggeredBehaviorRequest(requestText)
+            || !edits.Any(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+            || edits.Any(edit => edit.FullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+        {
+            return [];
+        }
+
+        var rows = new List<string>
+        {
+            "WPF behavior coverage missing: the request describes user-triggered behavior, but this preview only changes XAML. Include a code-behind/view-model/command edit, or return no patch with the missing behavior called out."
+        };
+        rows.AddRange(BuildWpfBehaviorCoverageHintRows(edits).Take(3));
+        return rows;
+    }
+
+    private IReadOnlyList<string> BuildWpfBehaviorCoverageHintRows(IReadOnlyList<PreparedPatchEdit> edits)
+    {
+        var rows = new List<string>();
+        foreach (var edit in edits.Where(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)))
+        {
+            var xamlText = string.IsNullOrWhiteSpace(edit.OriginalText) ? edit.UpdatedText : edit.OriginalText;
+            if (string.IsNullOrWhiteSpace(xamlText))
+            {
+                continue;
+            }
+
+            XDocument document;
+            try
+            {
+                document = XDocument.Parse(xamlText, LoadOptions.PreserveWhitespace);
+            }
+            catch (XmlException)
+            {
+                continue;
+            }
+
+            var codeBehindPath = edit.FullPath + ".cs";
+            var codeBehindText = File.Exists(codeBehindPath) ? SafeReadText(codeBehindPath) : string.Empty;
+            foreach (var element in document.Descendants())
+            {
+                foreach (var attribute in element.Attributes().Where(IsWpfEventHandlerAttribute))
+                {
+                    var handler = attribute.Value.Trim();
+                    if (string.IsNullOrWhiteSpace(handler))
+                    {
+                        continue;
+                    }
+
+                    var name = GetXamlAttributeValue(element, "x:Name", "Name");
+                    var label = GetXamlAttributeValue(element, "Content", "Header", "Text");
+                    var methodState = ContainsCSharpMethodName(codeBehindText, handler)
+                        ? "method found"
+                        : "method not found";
+                    rows.Add(
+                        $"Behavior target hint: {RelativeToWorkspace(edit.FullPath)} {element.Name.LocalName}{FormatXamlFactIdentity(name, label)} {attribute.Name.LocalName}={handler} -> {RelativeToWorkspace(codeBehindPath)} ({methodState}); include that code-behind edit when changing this behavior.");
+                    if (rows.Count >= 4)
+                    {
+                        return rows;
+                    }
+                }
+            }
+        }
+
+        return rows;
+    }
+
+    private static bool LooksLikeWpfUserTriggeredBehaviorRequest(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var normalized = text.ReplaceLineEndings(" ");
+        return Regex.IsMatch(
+            normalized,
+            @"\b(?:when|after|on)\b.{0,80}\b(?:click|clicked|press|pressed|select|selected|send|submit|clear|type|enter)\b|\b(?:click|clicked|press|pressed|send|submit|clear)\b.{0,80}\b(?:update|set|show|display|change|clear|write)\b",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
+            TimeSpan.FromMilliseconds(300));
+    }
+
+    private static bool TryGetRequiredWpfNamespaceForType(string typeName, out string requiredNamespace)
+    {
+        if (WpfControlsNamespaceTypeNames.Contains(typeName))
+        {
+            requiredNamespace = "System.Windows.Controls";
+            return true;
+        }
+
+        if (WpfCoreNamespaceTypeNames.Contains(typeName))
+        {
+            requiredNamespace = "System.Windows";
+            return true;
+        }
+
+        requiredNamespace = string.Empty;
+        return false;
+    }
+
+    private static bool CSharpTextCanResolveTypeFromNamespace(string sourceText, string typeName, string requiredNamespace)
+    {
+        if (sourceText.Contains($"using {requiredNamespace};", StringComparison.Ordinal)
+            || sourceText.Contains($"global using {requiredNamespace};", StringComparison.Ordinal)
+            || sourceText.Contains($"{requiredNamespace}.{typeName}", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsMissingTypeExternalScopePatchCandidate(string fullPath)
+    {
+        var extension = Path.GetExtension(fullPath);
+        if (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".props", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".targets", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return Path.GetFileName(fullPath).Equals("GlobalUsings.cs", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool WpfCodeBehindDefinesName(string codeBehindText, string xamlText, string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return true;
+        }
+
+        if (TryParseXamlDocument(xamlText, out var document)
+            && ExtractXamlNames(document).Contains(name, StringComparer.Ordinal))
+        {
+            return true;
+        }
+
+        var root = CSharpSyntaxTree.ParseText(codeBehindText).GetRoot();
+        return root.DescendantNodes()
+            .OfType<VariableDeclaratorSyntax>()
+            .Any(variable => string.Equals(variable.Identifier.ValueText, name, StringComparison.Ordinal))
+            || root.DescendantNodes()
+                .OfType<ParameterSyntax>()
+                .Any(parameter => string.Equals(parameter.Identifier.ValueText, name, StringComparison.Ordinal))
+            || root.DescendantNodes()
+                .OfType<PropertyDeclarationSyntax>()
+                .Any(property => string.Equals(property.Identifier.ValueText, name, StringComparison.Ordinal))
+            || root.DescendantNodes()
+                .OfType<MethodDeclarationSyntax>()
+                .Any(method => string.Equals(method.Identifier.ValueText, name, StringComparison.Ordinal))
+            || root.DescendantNodes()
+                .OfType<EventDeclarationSyntax>()
+                .Any(eventDeclaration => string.Equals(eventDeclaration.Identifier.ValueText, name, StringComparison.Ordinal));
+    }
+
+    private static IReadOnlyList<MissingNameDiagnostic> ExtractMissingNameDiagnostics(string diagnosticText)
+    {
+        var diagnostics = new List<MissingNameDiagnostic>();
+        foreach (var line in diagnosticText.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!TryExtractDiagnosticFileReference(line, out var reference))
+            {
+                continue;
+            }
+
+            var match = Regex.Match(
+                line,
+                @"\berror\s+CS0103:\s+The name\s+'(?<name>[^']+)'\s+does not exist in the current context",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var name = match.Groups["name"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(name)
+                || diagnostics.Any(existing =>
+                    existing.Path.Equals(reference.Path, StringComparison.OrdinalIgnoreCase)
+                    && existing.Name.Equals(name, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            diagnostics.Add(new MissingNameDiagnostic(reference.Path, name));
+        }
+
+        return diagnostics;
+    }
+
+    private static IReadOnlyList<MissingTypeDiagnostic> ExtractMissingTypeDiagnostics(string diagnosticText)
+    {
+        var diagnostics = new List<MissingTypeDiagnostic>();
+        foreach (var line in diagnosticText.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!TryExtractDiagnosticFileReference(line, out var reference))
+            {
+                continue;
+            }
+
+            var match = Regex.Match(
+                line,
+                @"\berror\s+CS0246:\s+The type or namespace name\s+'(?<name>[^']+)'\s+could not be found",
+                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var name = match.Groups["name"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(name)
+                || diagnostics.Any(existing =>
+                    existing.Path.Equals(reference.Path, StringComparison.OrdinalIgnoreCase)
+                    && existing.Name.Equals(name, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            diagnostics.Add(new MissingTypeDiagnostic(reference.Path, name));
+        }
+
+        return diagnostics;
+    }
+
+    private static IReadOnlyList<string> BuildRejectedPatchTargetRows(IReadOnlyList<PreparedPatchEdit> edits)
+    {
+        return edits
+            .Where(edit => edit.FullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+                || edit.FullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            .Take(4)
+            .Select(edit => $"- {Path.GetFileName(edit.FullPath)}")
+            .ToArray();
+    }
+
+    private IReadOnlyList<string> BuildWpfCodeBehindStructuralRowsForXamlEdit(
+        string xamlPath,
+        IReadOnlyDictionary<string, string> updatedTexts)
+    {
+        var codeBehindPath = xamlPath + ".cs";
+        var codeBehindText = updatedTexts.TryGetValue(codeBehindPath, out var preparedCodeBehind)
+            ? preparedCodeBehind
+            : File.Exists(codeBehindPath)
+                ? SafeReadText(codeBehindPath)
+                : string.Empty;
+        return BuildWpfCodeBehindStructuralRows(codeBehindPath, codeBehindText, updatedTexts);
+    }
+
+    private IReadOnlyList<string> BuildWpfXamlPreservationRows(
+        string file,
+        string originalText,
+        string updatedText,
+        string requestText)
+    {
+        if (string.IsNullOrWhiteSpace(originalText) || string.IsNullOrWhiteSpace(updatedText))
+        {
+            return [];
+        }
+
+        if (!TryParseXamlDocument(originalText, out var original)
+            || !TryParseXamlDocument(updatedText, out var updated))
+        {
+            return [];
+        }
+
+        var rows = new List<string>();
+        var originalNames = ExtractXamlNames(original);
+        var updatedNames = ExtractXamlNames(updated);
+        foreach (var removedName in originalNames.Except(updatedNames, StringComparer.OrdinalIgnoreCase).Take(8))
+        {
+            if (AllowsRequestedXamlRemoval(requestText, removedName))
+            {
+                continue;
+            }
+
+            rows.Add($"{RelativeToWorkspace(file)} removed existing named element '{removedName}'. Preserve existing named elements unless the requested change explicitly removes or renames them.");
+        }
+
+        var originalHandlers = ExtractWpfEventHandlerNames(originalText);
+        var updatedHandlers = ExtractWpfEventHandlerNames(updatedText);
+        foreach (var removedHandler in originalHandlers.Except(updatedHandlers, StringComparer.Ordinal).Take(8))
+        {
+            if (AllowsRequestedXamlRemoval(requestText, removedHandler))
+            {
+                continue;
+            }
+
+            rows.Add($"{RelativeToWorkspace(file)} removed existing XAML event handler '{removedHandler}'. Preserve existing handlers unless the requested change explicitly removes or renames them.");
+        }
+
+        return rows;
+    }
+
+    private static bool AllowsRequestedXamlRemoval(string requestText, string symbol)
+    {
+        if (string.IsNullOrWhiteSpace(requestText) || string.IsNullOrWhiteSpace(symbol))
+        {
+            return false;
+        }
+
+        var normalized = requestText.ReplaceLineEndings(" ");
+        if (!normalized.Contains(symbol, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(
+            normalized,
+            @"\b(remove|delete|drop|discard|rename|renamed|replace)\b",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    }
+
+    private static bool TryParseXamlDocument(string text, out XDocument document)
+    {
+        try
+        {
+            document = XDocument.Parse(text, LoadOptions.None);
+            return true;
+        }
+        catch (XmlException)
+        {
+            document = new XDocument();
+            return false;
+        }
+    }
+
+    private static IReadOnlyCollection<string> ExtractXamlNames(XDocument document)
+    {
+        var xamlName = XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml");
+        return document
+            .Descendants()
+            .SelectMany(element => new[] { element.Attribute(xamlName)?.Value, element.Attribute("Name")?.Value })
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private IReadOnlyList<string> BuildCSharpStructuralRowsForText(
+        string file,
+        string text,
+        IReadOnlyDictionary<string, string> updatedTexts)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        var rows = new List<string>();
+        var tree = CSharpSyntaxTree.ParseText(text);
+        var root = tree.GetRoot();
+        rows.AddRange(tree
+            .GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Take(6)
+            .Select(diagnostic => $"{RelativeToWorkspace(file)} C# parse error {diagnostic.Id}: {diagnostic.GetMessage()}"));
+
+        rows.AddRange(root
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Where(method => method.Modifiers.Any(SyntaxKind.PrivateKeyword))
+            .Where(method => method.Parent is not ClassDeclarationSyntax and not StructDeclarationSyntax and not RecordDeclarationSyntax)
+            .Take(6)
+            .Select(method => $"{RelativeToWorkspace(file)} method {method.Identifier.ValueText} is not inside a class/struct/record."));
+
+        if (file.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            rows.AddRange(BuildWpfCodeBehindStructuralRows(file, text, updatedTexts));
+        }
+
+        return rows;
+    }
+
+    private IReadOnlyList<string> BuildWpfCodeBehindStructuralRows(
+        string codeBehindPath,
+        string codeBehindText,
+        IReadOnlyDictionary<string, string> updatedTexts)
+    {
+        var xamlPath = codeBehindPath[..^".cs".Length];
+        var xamlText = updatedTexts.TryGetValue(xamlPath, out var preparedXaml)
+            ? preparedXaml
+            : File.Exists(xamlPath)
+                ? SafeReadText(xamlPath)
+                : string.Empty;
+        if (string.IsNullOrWhiteSpace(xamlText))
+        {
+            return [];
+        }
+
+        var classMatch = Regex.Match(xamlText, @"\bx:Class\s*=\s*""(?<class>[^""]+)""", RegexOptions.CultureInvariant);
+        if (!classMatch.Success)
+        {
+            return [];
+        }
+
+        var fullClassName = classMatch.Groups["class"].Value.Trim();
+        var expectedNamespace = fullClassName.Contains('.', StringComparison.Ordinal)
+            ? fullClassName[..fullClassName.LastIndexOf('.')]
+            : string.Empty;
+        var className = fullClassName.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? fullClassName;
+        var handlers = ExtractWpfEventHandlerNames(xamlText);
+        var tree = CSharpSyntaxTree.ParseText(codeBehindText);
+        var root = tree.GetRoot();
+        var matchingClasses = root
+            .DescendantNodes()
+            .OfType<ClassDeclarationSyntax>()
+            .Where(type => string.Equals(type.Identifier.ValueText, className, StringComparison.Ordinal))
+            .ToArray();
+        var matchingClass = matchingClasses.FirstOrDefault(type =>
+            string.Equals(GetContainingNamespace(type), expectedNamespace, StringComparison.Ordinal));
+        var rows = new List<string>();
+        if (matchingClass is null)
+        {
+            rows.Add(matchingClasses.Length > 0
+                ? $"{RelativeToWorkspace(codeBehindPath)} class {className} is not in namespace {expectedNamespace} required by XAML x:Class {fullClassName}."
+                : $"{RelativeToWorkspace(codeBehindPath)} has no matching class {fullClassName} for XAML x:Class.");
+            return rows;
+        }
+
+        if (!matchingClass.Modifiers.Any(SyntaxKind.PartialKeyword))
+        {
+            rows.Add($"{RelativeToWorkspace(codeBehindPath)} class {className} is not partial.");
+        }
+
+        if (!matchingClass.Members.OfType<ConstructorDeclarationSyntax>().Any(ctor => ctor.Identifier.ValueText == className))
+        {
+            rows.Add($"{RelativeToWorkspace(codeBehindPath)} class {className} has no constructor.");
+        }
+
+        if (!codeBehindText.Contains("InitializeComponent", StringComparison.Ordinal))
+        {
+            rows.Add($"{RelativeToWorkspace(codeBehindPath)} class {className} does not call InitializeComponent().");
+        }
+
+        var methodsByName = matchingClass.Members
+            .OfType<MethodDeclarationSyntax>()
+            .GroupBy(method => method.Identifier.ValueText, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        foreach (var handler in handlers.Take(8))
+        {
+            if (!methodsByName.TryGetValue(handler, out var handlerMethods) || handlerMethods.Length == 0)
+            {
+                rows.Add($"{RelativeToWorkspace(codeBehindPath)} missing XAML event handler {handler} inside class {className}; add the method in .xaml.cs or remove the unnecessary XAML event attribute.");
+                continue;
+            }
+
+            if (!handlerMethods.Any(IsWpfEventHandlerShape))
+            {
+                rows.Add($"{RelativeToWorkspace(codeBehindPath)} XAML event handler {handler} must return void and keep two event parameters.");
+            }
+        }
+
+        return rows;
+    }
+
+    private static bool IsWpfEventHandlerShape(MethodDeclarationSyntax method)
+    {
+        return string.Equals(method.ReturnType.ToString(), "void", StringComparison.Ordinal)
+            && method.ParameterList.Parameters.Count == 2;
+    }
+
+    private static string GetContainingNamespace(SyntaxNode node)
+    {
+        for (var current = node.Parent; current is not null; current = current.Parent)
+        {
+            if (current is FileScopedNamespaceDeclarationSyntax fileScoped)
+            {
+                return fileScoped.Name.ToString();
+            }
+
+            if (current is NamespaceDeclarationSyntax blockScoped)
+            {
+                return blockScoped.Name.ToString();
+            }
+        }
+
+        return string.Empty;
     }
 
     private static async Task<PatchEditPreparation> PreparePatchEditAsync(
@@ -18374,16 +20850,12 @@ public sealed partial class LocalCodingToolService(
             return new PatchEditPreparation(
                 new PreparedPatchEdit(
                     edit.FullPath,
+                    string.Empty,
                     edit.NewText,
                     "(new file)",
                     BuildSnippet(edit.NewText, 0, edit.NewText.Length),
                     true),
                 null);
-        }
-
-        if (edit.OldText.Length == 0)
-        {
-            return new PatchEditPreparation(null, new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", toolName, edit.FullPath));
         }
 
         if (!File.Exists(edit.FullPath))
@@ -18416,15 +20888,94 @@ public sealed partial class LocalCodingToolService(
             existing = await File.ReadAllTextAsync(edit.FullPath, cancellationToken).ConfigureAwait(false);
         }
 
+        if (edit.ReplaceEntireFile)
+        {
+            currentTexts[edit.FullPath] = edit.NewText;
+            return new PatchEditPreparation(
+                new PreparedPatchEdit(
+                    edit.FullPath,
+                    existing,
+                    edit.NewText,
+                    BuildSnippet(existing, 0, existing.Length),
+                    BuildSnippet(edit.NewText, 0, edit.NewText.Length),
+                    false),
+                null);
+        }
+
+        if (edit.OldText.Length == 0)
+        {
+            return new PatchEditPreparation(null, new CodingToolResult(true, false, "Coding tool blocked: text to replace cannot be empty.", toolName, edit.FullPath));
+        }
+
         var count = CountOrdinalOccurrences(existing, edit.OldText);
         if (count != 1)
         {
+            if (TryBuildCSharpMethodReplacement(edit.FullPath, existing, edit.OldText, edit.NewText, out var methodUpdated, out var methodName))
+            {
+                currentTexts[edit.FullPath] = methodUpdated;
+                var methodIndex = methodUpdated.IndexOf(methodName, StringComparison.Ordinal);
+                return new PatchEditPreparation(
+                    new PreparedPatchEdit(
+                        edit.FullPath,
+                        existing,
+                        methodUpdated,
+                        BuildSnippet(existing, Math.Max(0, existing.IndexOf(methodName, StringComparison.Ordinal)), methodName.Length),
+                        BuildSnippet(methodUpdated, Math.Max(0, methodIndex), methodName.Length),
+                        false),
+                    null);
+            }
+
+            if (TryBuildCSharpWhitespaceInsensitiveReplacement(edit.FullPath, existing, edit.OldText, edit.NewText, out var whitespaceUpdated, out var whitespaceIndex, out var whitespaceLength))
+            {
+                currentTexts[edit.FullPath] = whitespaceUpdated;
+                return new PatchEditPreparation(
+                    new PreparedPatchEdit(
+                        edit.FullPath,
+                        existing,
+                        whitespaceUpdated,
+                        BuildSnippet(existing, whitespaceIndex, whitespaceLength),
+                        BuildSnippet(whitespaceUpdated, whitespaceIndex, edit.NewText.Length),
+                        false),
+                    null);
+            }
+
+            if (TryBuildXamlNamedElementReplacement(edit.FullPath, existing, edit.OldText, edit.NewText, out var xamlUpdated, out var xamlIndex, out var xamlLength))
+            {
+                currentTexts[edit.FullPath] = xamlUpdated;
+                return new PatchEditPreparation(
+                    new PreparedPatchEdit(
+                        edit.FullPath,
+                        existing,
+                        xamlUpdated,
+                        BuildSnippet(existing, xamlIndex, xamlLength),
+                        BuildSnippet(xamlUpdated, xamlIndex, Math.Max(edit.NewText.Length, xamlLength)),
+                        false),
+                    null);
+            }
+
+            if (LooksLikeCompleteFileReplacement(edit.FullPath, edit.NewText))
+            {
+                currentTexts[edit.FullPath] = edit.NewText;
+                return new PatchEditPreparation(
+                    new PreparedPatchEdit(
+                        edit.FullPath,
+                        existing,
+                        edit.NewText,
+                        BuildSnippet(existing, 0, existing.Length),
+                        BuildSnippet(edit.NewText, 0, edit.NewText.Length),
+                        false),
+                    null);
+            }
+
             return new PatchEditPreparation(
                 null,
                 new CodingToolResult(
                     true,
                     false,
-                    $"Coding tool blocked: patch bundle expected exactly one match in {edit.FullPath} but found {count}.",
+                    string.Join(
+                        Environment.NewLine,
+                        $"Coding tool blocked: patch bundle expected exactly one match in {edit.FullPath} but found {count}.",
+                        $"Rejected oldText excerpt: {TrimRejectedPatchText(edit.OldText)}"),
                     toolName,
                     edit.FullPath));
         }
@@ -18435,11 +20986,324 @@ public sealed partial class LocalCodingToolService(
         return new PatchEditPreparation(
             new PreparedPatchEdit(
                 edit.FullPath,
+                existing,
                 updated,
                 BuildSnippet(existing, index, edit.OldText.Length),
                 BuildSnippet(updated, index, edit.NewText.Length),
                 false),
             null);
+    }
+
+    private static bool TryBuildCSharpWhitespaceInsensitiveReplacement(
+        string fullPath,
+        string existing,
+        string oldText,
+        string newText,
+        out string updated,
+        out int index,
+        out int length)
+    {
+        updated = string.Empty;
+        index = 0;
+        length = 0;
+        if (!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(existing)
+            || string.IsNullOrWhiteSpace(oldText)
+            || oldText.Length < 40)
+        {
+            return false;
+        }
+
+        var tokens = Regex
+            .Split(oldText.Trim(), @"\s+")
+            .Where(token => !string.IsNullOrWhiteSpace(token))
+            .ToArray();
+        if (tokens.Length < 4)
+        {
+            return false;
+        }
+
+        var pattern = string.Join(@"\s+", tokens.Select(Regex.Escape));
+        var matches = Regex
+            .Matches(existing, pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(300))
+            .Cast<Match>()
+            .Take(2)
+            .ToArray();
+        if (matches.Length != 1)
+        {
+            return false;
+        }
+
+        var match = matches[0];
+        index = match.Index;
+        length = match.Length;
+        updated = existing.Remove(index, length).Insert(index, newText);
+        return !updated.Equals(existing, StringComparison.Ordinal);
+    }
+
+    private static bool TryBuildXamlNamedElementReplacement(
+        string fullPath,
+        string existing,
+        string oldText,
+        string newText,
+        out string updated,
+        out int index,
+        out int length)
+    {
+        updated = string.Empty;
+        index = 0;
+        length = 0;
+        if (!fullPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(existing)
+            || string.IsNullOrWhiteSpace(oldText)
+            || string.IsNullOrWhiteSpace(newText)
+            || !newText.Contains(oldText, StringComparison.Ordinal)
+            || !TryExtractXamlNamedElementIdentity(oldText, out var elementName, out var xamlName))
+        {
+            return false;
+        }
+
+        var matches = Regex
+            .Matches(
+                existing,
+                "<\\s*(?!/|!|\\?)(?:[A-Za-z_][\\w\\.-]*:)?(?<name>[A-Za-z_][\\w\\.-]*)\\b(?:(?:\"[^\"]*\"|'[^']*'|[^'\"<>])*)/?>",
+                RegexOptions.CultureInvariant | RegexOptions.Singleline,
+                TimeSpan.FromMilliseconds(300))
+            .Cast<Match>()
+            .Where(match => match.Groups["name"].Value.Equals(elementName, StringComparison.OrdinalIgnoreCase))
+            .Where(match => TryExtractXamlNamedElementIdentity(match.Value, out _, out var candidateName)
+                && candidateName.Equals(xamlName, StringComparison.Ordinal))
+            .Take(2)
+            .ToArray();
+        if (matches.Length != 1)
+        {
+            return false;
+        }
+
+        var match = matches[0];
+        var replacement = newText.Replace(oldText, match.Value, StringComparison.Ordinal);
+        index = match.Index;
+        length = match.Length;
+        updated = existing.Remove(index, length).Insert(index, replacement);
+        return !updated.Equals(existing, StringComparison.Ordinal);
+    }
+
+    private static bool TryExtractXamlNamedElementIdentity(string text, out string elementName, out string xamlName)
+    {
+        elementName = string.Empty;
+        xamlName = string.Empty;
+        var match = Regex.Match(
+            text.Trim(),
+            "^<\\s*(?:[A-Za-z_][\\w\\.-]*:)?(?<name>[A-Za-z_][\\w\\.-]*)\\b(?<attributes>(?:\"[^\"]*\"|'[^']*'|[^'\"<>])*)/?>\\s*$",
+            RegexOptions.CultureInvariant | RegexOptions.Singleline,
+            TimeSpan.FromMilliseconds(300));
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var nameMatch = Regex.Match(
+            match.Groups["attributes"].Value,
+            "\\b(?:x:Name|Name)\\s*=\\s*[\"'](?<name>[^\"']+)[\"']",
+            RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(300));
+        if (!nameMatch.Success)
+        {
+            return false;
+        }
+
+        elementName = match.Groups["name"].Value;
+        xamlName = nameMatch.Groups["name"].Value;
+        return !string.IsNullOrWhiteSpace(elementName) && !string.IsNullOrWhiteSpace(xamlName);
+    }
+
+    private static bool TryBuildCSharpMethodReplacement(
+        string fullPath,
+        string existing,
+        string oldText,
+        string newText,
+        out string updated,
+        out string methodName)
+    {
+        updated = string.Empty;
+        methodName = string.Empty;
+        if (!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(existing)
+            || !TryExtractSingleMethod(newText, out var replacementMethod))
+        {
+            return false;
+        }
+
+        if (TryExtractSingleMethod(oldText, out var oldMethod)
+            && !string.Equals(oldMethod.Identifier.ValueText, replacementMethod.Identifier.ValueText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var replacementMethodName = replacementMethod.Identifier.ValueText;
+        methodName = replacementMethodName;
+        var root = CSharpSyntaxTree.ParseText(existing).GetRoot();
+        var matchingMethods = root
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Where(method => string.Equals(method.Identifier.ValueText, replacementMethodName, StringComparison.Ordinal))
+            .ToArray();
+        if (matchingMethods.Length != 1)
+        {
+            return false;
+        }
+
+        var existingMethod = matchingMethods[0];
+        if (existingMethod.Body is not null && replacementMethod.Body is not null)
+        {
+            var replacementBody = ReindentCSharpMethod(
+                replacementMethod.Body.NormalizeWhitespace().ToFullString(),
+                GetLineIndent(existing, existingMethod.Body.SpanStart));
+            updated = existing.Remove(existingMethod.Body.Span.Start, existingMethod.Body.Span.Length)
+                .Insert(existingMethod.Body.Span.Start, replacementBody);
+            return !updated.Equals(existing, StringComparison.Ordinal);
+        }
+
+        var replacement = ReindentCSharpMethod(
+            replacementMethod.NormalizeWhitespace().ToFullString(),
+            GetLineIndent(existing, existingMethod.SpanStart));
+        updated = existing.Remove(existingMethod.Span.Start, existingMethod.Span.Length)
+            .Insert(existingMethod.Span.Start, replacement);
+        return !updated.Equals(existing, StringComparison.Ordinal);
+    }
+
+    private static bool TryExtractSingleMethod(string text, out MethodDeclarationSyntax method)
+    {
+        method = default!;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var methods = CSharpSyntaxTree.ParseText(text)
+            .GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .ToArray();
+        if (methods.Length == 1)
+        {
+            method = methods[0];
+            return true;
+        }
+
+        var wrapped = $"class __PatchMethodWrapper {{{Environment.NewLine}{text}{Environment.NewLine}}}";
+        methods = CSharpSyntaxTree.ParseText(wrapped)
+            .GetRoot()
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .ToArray();
+        if (methods.Length != 1)
+        {
+            return false;
+        }
+
+        method = methods[0];
+        return true;
+    }
+
+    private static string GetLineIndent(string text, int index)
+    {
+        var lineStart = text.LastIndexOf('\n', Math.Max(0, index - 1));
+        lineStart = lineStart < 0 ? 0 : lineStart + 1;
+        var builder = new StringBuilder();
+        for (var i = lineStart; i < text.Length && (text[i] == ' ' || text[i] == '\t'); i++)
+        {
+            builder.Append(text[i]);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string ReindentCSharpMethod(string methodText, string indent)
+    {
+        var lines = methodText.ReplaceLineEndings("\n").Trim().Split('\n');
+        return string.Join(
+            Environment.NewLine,
+            lines.Select((line, index) => index == 0 ? indent + line.TrimStart() : indent + line));
+    }
+
+    private static bool LooksLikeCompleteFileReplacement(string fullPath, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !HasBalancedCurlyBraces(text))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(fullPath);
+        var extension = Path.GetExtension(fullPath);
+        if (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            var trimmed = text.TrimStart();
+            return trimmed.StartsWith("<Project", StringComparison.OrdinalIgnoreCase)
+                && text.Contains("</Project>", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (fileName.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            var className = fileName[..^".xaml.cs".Length];
+            return text.Contains($"partial class {className}", StringComparison.Ordinal)
+                && text.Contains("InitializeComponent", StringComparison.Ordinal)
+                && (text.Contains(": Window", StringComparison.Ordinal)
+                    || text.Contains(": UserControl", StringComparison.Ordinal));
+        }
+
+        if (extension.Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return text.Contains("namespace ", StringComparison.Ordinal)
+                && (text.Contains(" class ", StringComparison.Ordinal)
+                    || text.Contains(" record ", StringComparison.Ordinal)
+                    || text.Contains(" struct ", StringComparison.Ordinal)
+                    || text.Contains(" interface ", StringComparison.Ordinal));
+        }
+
+        return extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+            && LooksLikeCompleteXamlFileReplacement(text);
+    }
+
+    private static bool LooksLikeCompleteXamlFileReplacement(string text)
+    {
+        if (!TryParseXamlDocument(text, out var document) || document.Root is null)
+        {
+            return false;
+        }
+
+        var rootName = document.Root.Name.LocalName;
+        if (!WpfCompleteXamlRootNames.Contains(rootName, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        return document.Root.GetDefaultNamespace().NamespaceName.Length > 0
+            || document.Root.Attributes().Any(attribute =>
+                attribute.IsNamespaceDeclaration
+                && attribute.Name.LocalName.Equals("x", StringComparison.Ordinal));
+    }
+
+    private static bool HasBalancedCurlyBraces(string text)
+    {
+        var depth = 0;
+        foreach (var character in text)
+        {
+            if (character == '{')
+            {
+                depth++;
+            }
+            else if (character == '}')
+            {
+                depth--;
+                if (depth < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return depth == 0;
     }
 
     private static async Task<CodingToolResult> CreateFileAsync(
@@ -18793,7 +21657,25 @@ public sealed partial class LocalCodingToolService(
     private async Task<CodingToolResult> SuggestLastFailurePatchAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (_lastDotNetResult is not { Succeeded: false } lastDotNetResult)
+        var receipts = ReadRecentReceipts(MaxReceiptEntries);
+        var latestDotNetReceipt = receipts.LastOrDefault(IsDotNetReceipt);
+        if (_lastDotNetResult is { Succeeded: true }
+            || _lastDotNetResult is null && latestDotNetReceipt is { Succeeded: true })
+        {
+            return new CodingToolResult(
+                true,
+                false,
+                "No active failed dotnet command is available. The latest dotnet validation passed, so this tool will not reuse an older stale failure patch. Repair the latest failed validation receipt instead.",
+                "Last failure patch suggestion",
+                latestDotNetReceipt?.TargetPath ?? Policy.WorkspaceRoot);
+        }
+
+        var lastFailureMessage = _lastDotNetResult is { Succeeded: false } lastDotNetResult
+            ? lastDotNetResult.Message
+            : latestDotNetReceipt is { Succeeded: false } && !string.IsNullOrWhiteSpace(latestDotNetReceipt.Message)
+                ? latestDotNetReceipt.Message
+                : null;
+        if (string.IsNullOrWhiteSpace(lastFailureMessage))
         {
             return new CodingToolResult(
                 true,
@@ -18803,7 +21685,7 @@ public sealed partial class LocalCodingToolService(
                 Policy.WorkspaceRoot);
         }
 
-        var diagnostic = ExtractDiagnosticFileReferences(lastDotNetResult.Message)
+        var diagnostic = ExtractDiagnosticFileReferences(lastFailureMessage)
             .FirstOrDefault(reference => reference.LineNumber is > 0
                                          && File.Exists(reference.Path)
                                          && Policy.IsInsideWorkspace(reference.Path));
@@ -18829,7 +21711,7 @@ public sealed partial class LocalCodingToolService(
                 diagnostic.LineNumber);
         }
 
-        var parsed = ParseCompilerDiagnostic(lastDotNetResult.Message);
+        var parsed = ParseCompilerDiagnostic(lastFailureMessage);
         var parsedForCandidates = new CompilerDiagnosticInfo(
             string.IsNullOrWhiteSpace(parsed.Path) ? diagnostic.Path : parsed.Path,
             parsed.LineNumber ?? diagnostic.LineNumber,
@@ -18837,19 +21719,98 @@ public sealed partial class LocalCodingToolService(
         var symbolContext = FindEnclosingSymbolAtLine(diagnostic.Path, diagnostic.LineNumber);
         var testQuery = BuildDiagnosticTestQuery(parsedForCandidates, diagnostic.Path, symbolContext);
         var testTarget = await ResolveTestTargetRecommendationAsync(testQuery, cancellationToken).ConfigureAwait(false);
-        var candidates = BuildDiagnosticFixCandidates(parsedForCandidates, lastDotNetResult.Message, diagnostic.Path, symbolContext, testTarget);
+        var candidates = BuildDiagnosticFixCandidates(parsedForCandidates, lastFailureMessage, diagnostic.Path, symbolContext, testTarget);
         var primaryTarget = Directory.Exists(Policy.WorkspaceRoot) && TryFindPrimaryProjectOrSolution(Policy.WorkspaceRoot, out var primary)
             ? primary
             : Policy.WorkspaceRoot;
 
-        if (!TryBuildDeterministicFailurePatch(
-                lastDotNetResult.Message,
+        var patchPath = diagnostic.Path;
+        var diagnosticLabel = string.Empty;
+        var oldText = string.Empty;
+        var newText = string.Empty;
+        var refusal = string.Empty;
+        var hasPatch = TryBuildWpfXamlStructuralRepairPatch(diagnostic.Path, lines, out diagnosticLabel, out oldText, out newText);
+        if (hasPatch)
+        {
+            patchPath = diagnostic.Path;
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildWpfMissingEventHandlerRepairPatch(
+                lastFailureMessage,
+                diagnostic.Path,
+                out patchPath,
+                out diagnosticLabel,
+                out oldText,
+                out newText);
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildWpfEventHandlerSignatureRepairPatch(
+                lastFailureMessage,
+                diagnostic.Path,
+                out patchPath,
+                out diagnosticLabel,
+                out oldText,
+                out newText);
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildWpfProjectRepairPatch(
+            lastFailureMessage,
+            diagnostic.Path,
+            primaryTarget,
+            out patchPath,
+            out diagnosticLabel,
+            out oldText,
+            out newText);
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildWpfCodeBehindAlignmentRepairPatch(
+                lastFailureMessage,
+                diagnostic.Path,
+                out diagnosticLabel,
+                out oldText,
+                out newText);
+            patchPath = diagnostic.Path;
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildWpfCodeBehindMissingUsingPatch(
+                lastFailureMessage,
+                diagnostic.Path,
+                out diagnosticLabel,
+                out oldText,
+                out newText);
+            patchPath = diagnostic.Path;
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildWpfCodeBehindRepairPatch(diagnostic.Path, lines, out diagnosticLabel, out oldText, out newText);
+            patchPath = diagnostic.Path;
+        }
+
+        if (!hasPatch)
+        {
+            hasPatch = TryBuildDeterministicFailurePatch(
+                lastFailureMessage,
                 lines,
                 diagnostic.LineNumber.Value,
-                out var diagnosticLabel,
-                out var oldText,
-                out var newText,
-                out var refusal))
+                out diagnosticLabel,
+                out oldText,
+                out newText,
+                out refusal);
+            patchPath = diagnostic.Path;
+        }
+
+        if (!hasPatch)
         {
             var refusalLines = new List<string>
             {
@@ -18870,8 +21831,8 @@ public sealed partial class LocalCodingToolService(
 
         var previewRequest = new CodingToolRequest(
             CodingToolAction.PreviewReplaceText,
-            diagnostic.Path,
-            diagnostic.LineNumber,
+            patchPath,
+            patchPath.Equals(diagnostic.Path, StringComparison.OrdinalIgnoreCase) ? diagnostic.LineNumber : null,
             ExplicitUserPath: false,
             UserConfirmed: false,
             Content: oldText,
@@ -18891,6 +21852,7 @@ public sealed partial class LocalCodingToolService(
             messageLines.Add($"Diagnostic: {diagnosticLabel}");
             AddDiagnosticCandidateGuidance(messageLines, candidates, testQuery, testTarget, primaryTarget);
             messageLines.Add("To apply this pending preview after review, use: confirm apply last patch preview");
+            messageLines.Add("Next command: confirm apply last patch preview");
         }
         else
         {
@@ -18905,6 +21867,697 @@ public sealed partial class LocalCodingToolService(
             Message = string.Join(Environment.NewLine, messageLines),
             ToolName = "Last failure patch suggestion"
         };
+    }
+
+    private static bool TryBuildWpfXamlStructuralRepairPatch(
+        string diagnosticPath,
+        IReadOnlyList<string> lines,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        if (!diagnosticPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        oldText = File.Exists(diagnosticPath)
+            ? File.ReadAllText(diagnosticPath)
+            : string.Join(Environment.NewLine, lines);
+        if (string.IsNullOrWhiteSpace(oldText))
+        {
+            return false;
+        }
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(oldText, LoadOptions.PreserveWhitespace);
+        }
+        catch (XmlException)
+        {
+            return false;
+        }
+
+        var changed = false;
+        var root = document.Root;
+        if (root is not null && IsSingleContentWpfRoot(root))
+        {
+            var contentChildren = root.Elements()
+                .Where(child => !IsWpfRootPropertyElement(child))
+                .ToList();
+            foreach (var duplicateContent in contentChildren.Skip(1).ToList())
+            {
+                duplicateContent.Remove();
+                changed = true;
+            }
+        }
+
+        var detachedText = document
+            .DescendantNodes()
+            .OfType<XText>()
+            .Where(node => LooksLikeDetachedXamlAttributeText(node.Value.Trim()))
+            .ToList();
+        var detachedClick = detachedText
+            .Select(node => Regex.Match(node.Value, @"\bClick\s*=\s*[""'](?<handler>[A-Za-z_]\w*)[""']", RegexOptions.CultureInvariant))
+            .FirstOrDefault(match => match.Success)
+            ?.Groups["handler"].Value;
+
+        foreach (var node in detachedText)
+        {
+            node.Remove();
+            changed = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(detachedClick))
+        {
+            var buttonWithoutAction = document
+                .Descendants()
+                .FirstOrDefault(element =>
+                    string.Equals(element.Name.LocalName, "Button", StringComparison.OrdinalIgnoreCase)
+                    && !HasExplicitWpfAction(element));
+            if (buttonWithoutAction is not null)
+            {
+                buttonWithoutAction.SetAttributeValue("Click", detachedClick);
+                changed = true;
+            }
+        }
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        newText = document.ToString();
+        diagnosticLabel = $"WPF XAML structural repair for {Path.GetFileName(diagnosticPath)}";
+        return !newText.Equals(oldText, StringComparison.Ordinal);
+    }
+
+    private static bool TryBuildWpfProjectRepairPatch(
+        string diagnosticText,
+        string diagnosticPath,
+        string? primaryTarget,
+        out string patchPath,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        patchPath = string.Empty;
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        if (!diagnosticPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+            || !(diagnosticText.Contains("Window", StringComparison.Ordinal)
+                 || diagnosticText.Contains("RoutedEventArgs", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(primaryTarget)
+            || !primaryTarget.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(primaryTarget))
+        {
+            return false;
+        }
+
+        oldText = File.ReadAllText(primaryTarget);
+        var updated = oldText;
+        updated = Regex.Replace(
+            updated,
+            @"<OutputType>\s*Exe\s*</OutputType>",
+            "<OutputType>WinExe</OutputType>",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        updated = Regex.Replace(
+            updated,
+            @"<TargetFramework>(?<tfm>net\d+(?:\.\d+)?)(?<suffix>-[^<]+)?</TargetFramework>",
+            match =>
+            {
+                var tfm = match.Groups["tfm"].Value;
+                var suffix = match.Groups["suffix"].Value;
+                return suffix.Contains("windows", StringComparison.OrdinalIgnoreCase)
+                    ? match.Value
+                    : $"<TargetFramework>{tfm}-windows</TargetFramework>";
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (!updated.Contains("<UseWPF>", StringComparison.OrdinalIgnoreCase))
+        {
+            updated = Regex.Replace(
+                updated,
+                @"(<PropertyGroup>\s*)",
+                "$1\r\n    <UseWPF>true</UseWPF>",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        if (updated.Equals(oldText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        patchPath = primaryTarget;
+        diagnosticLabel = $"WPF project configuration repair for {Path.GetFileName(primaryTarget)}";
+        newText = updated;
+        return true;
+    }
+
+    private static bool TryBuildWpfCodeBehindAlignmentRepairPatch(
+        string diagnosticText,
+        string diagnosticPath,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        if (!diagnosticPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(diagnosticPath)
+            || !diagnosticText.Contains("CS0246", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var xamlPath = diagnosticPath[..^".cs".Length];
+        if (!File.Exists(xamlPath))
+        {
+            return false;
+        }
+
+        var xaml = File.ReadAllText(xamlPath);
+        var classMatch = Regex.Match(xaml, @"\bx:Class\s*=\s*""(?<class>[^""]+)""", RegexOptions.CultureInvariant);
+        var rootMatch = Regex.Match(xaml, @"<\s*(?<root>Window|UserControl)\b", RegexOptions.CultureInvariant);
+        if (!classMatch.Success || !rootMatch.Success)
+        {
+            return false;
+        }
+
+        var fullClassName = classMatch.Groups["class"].Value.Trim();
+        var split = fullClassName.LastIndexOf('.');
+        if (split <= 0 || split >= fullClassName.Length - 1)
+        {
+            return false;
+        }
+
+        var namespaceName = fullClassName[..split];
+        var className = fullClassName[(split + 1)..];
+        var baseType = rootMatch.Groups["root"].Value;
+
+        oldText = File.ReadAllText(diagnosticPath);
+        if (string.IsNullOrWhiteSpace(oldText))
+        {
+            return false;
+        }
+
+        var tree = CSharpSyntaxTree.ParseText(oldText);
+        var root = tree.GetRoot();
+        var classDeclaration = root
+            .DescendantNodes()
+            .OfType<ClassDeclarationSyntax>()
+            .FirstOrDefault(type => string.Equals(type.Identifier.ValueText, className, StringComparison.Ordinal));
+        if (classDeclaration is null)
+        {
+            return false;
+        }
+
+        var updated = EnsureWpfCodeBehindRequiredUsings(oldText);
+
+        var classPattern = $@"(?<head>\b(?:public|internal|protected|private|static|sealed|abstract|partial|\s)+class\s+{Regex.Escape(className)})(?<base>\s*:[^{{\r\n]+)?(?<tail>\s*\{{)";
+        updated = Regex.Replace(
+            updated,
+            classPattern,
+            match =>
+            {
+                var baseList = match.Groups["base"].Value;
+                return baseList.Contains(baseType, StringComparison.Ordinal)
+                    ? match.Value
+                    : $"{match.Groups["head"].Value} : {baseType}{match.Groups["tail"].Value}";
+            },
+            RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(200));
+
+        if (!string.Equals(GetContainingNamespace(classDeclaration), namespaceName, StringComparison.Ordinal)
+            && !Regex.IsMatch(updated, @"\bnamespace\s+", RegexOptions.CultureInvariant))
+        {
+            updated = InsertFileScopedNamespace(updated, namespaceName);
+        }
+
+        if (updated.Equals(oldText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        diagnosticLabel = $"WPF code-behind alignment repair for {Path.GetFileName(diagnosticPath)}";
+        newText = updated.TrimEnd();
+        return true;
+    }
+
+    private static string InsertUsingDirective(string text, string usingDirective)
+    {
+        var normalized = text.TrimStart();
+        var leading = text[..(text.Length - normalized.Length)];
+        return leading + usingDirective + Environment.NewLine + Environment.NewLine + normalized;
+    }
+
+    private static string EnsureWpfCodeBehindRequiredUsings(string text)
+    {
+        var requiredUsings = new List<string>();
+        if (!text.Contains("using System.Windows;", StringComparison.Ordinal)
+            && WpfCoreNamespaceTypeNames.Any(typeName => ContainsIdentifier(text, typeName)))
+        {
+            requiredUsings.Add("using System.Windows;");
+        }
+
+        if (!text.Contains("using System.Windows.Controls;", StringComparison.Ordinal)
+            && WpfControlsNamespaceTypeNames.Any(typeName => ContainsIdentifier(text, typeName)))
+        {
+            requiredUsings.Add("using System.Windows.Controls;");
+        }
+
+        var updated = text;
+        foreach (var requiredUsing in requiredUsings.AsEnumerable().Reverse())
+        {
+            updated = InsertUsingDirective(updated, requiredUsing);
+        }
+
+        return updated;
+    }
+
+    private static string InsertFileScopedNamespace(string text, string namespaceName)
+    {
+        var match = Regex.Match(
+            text,
+            @"\A(?<usings>(?:\s*using\s+[^;]+;\s*)+)",
+            RegexOptions.CultureInvariant);
+        if (!match.Success)
+        {
+            return $"namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}{text.TrimStart()}";
+        }
+
+        var usings = match.Groups["usings"].Value.TrimEnd();
+        var rest = text[match.Length..].TrimStart();
+        return $"{usings}{Environment.NewLine}{Environment.NewLine}namespace {namespaceName};{Environment.NewLine}{Environment.NewLine}{rest}";
+    }
+
+    private static bool TryBuildWpfCodeBehindMissingUsingPatch(
+        string diagnosticText,
+        string diagnosticPath,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        if (!diagnosticPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(diagnosticPath)
+            || !diagnosticText.Contains("CS0246", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        oldText = File.ReadAllText(diagnosticPath);
+        var updated = EnsureWpfCodeBehindRequiredUsings(oldText);
+        if (updated.Equals(oldText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        newText = updated.TrimEnd();
+        diagnosticLabel = $"WPF code-behind using repair for {Path.GetFileName(diagnosticPath)}";
+        return true;
+    }
+
+    private static bool TryBuildWpfEventHandlerSignatureRepairPatch(
+        string diagnosticText,
+        string diagnosticPath,
+        out string patchPath,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        patchPath = string.Empty;
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        if (!diagnosticText.Contains("CS0123", StringComparison.Ordinal)
+            && !diagnosticText.Contains("No overload for", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var xamlPath = diagnosticPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            ? diagnosticPath
+            : diagnosticPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+                ? diagnosticPath[..^".cs".Length]
+                : string.Empty;
+        if (string.IsNullOrWhiteSpace(xamlPath) || !File.Exists(xamlPath))
+        {
+            return false;
+        }
+
+        var codeBehindPath = xamlPath + ".cs";
+        if (!File.Exists(codeBehindPath))
+        {
+            return false;
+        }
+
+        var xaml = File.ReadAllText(xamlPath);
+        var xamlHandlers = ExtractWpfEventHandlerNames(xaml).ToHashSet(StringComparer.Ordinal);
+        if (xamlHandlers.Count == 0)
+        {
+            return false;
+        }
+
+        var diagnosticHandlerMatch = Regex.Match(
+            diagnosticText,
+            @"No overload for ['""](?<handler>[A-Za-z_]\w*)['""] matches delegate",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        if (diagnosticHandlerMatch.Success)
+        {
+            var diagnosticHandler = diagnosticHandlerMatch.Groups["handler"].Value;
+            xamlHandlers = xamlHandlers.Contains(diagnosticHandler)
+                ? [diagnosticHandler]
+                : [];
+        }
+
+        oldText = File.ReadAllText(codeBehindPath);
+        if (string.IsNullOrWhiteSpace(oldText))
+        {
+            return false;
+        }
+
+        var sourceText = oldText;
+        var root = CSharpSyntaxTree.ParseText(oldText).GetRoot();
+        var replacements = root
+            .DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Where(method => xamlHandlers.Contains(method.Identifier.ValueText))
+            .Where(method => !IsWpfEventHandlerShape(method))
+            .Select(method => BuildWpfEventHandlerSignatureReplacement(sourceText, method))
+            .Where(replacement => replacement is not null)
+            .Select(replacement => replacement!.Value)
+            .OrderByDescending(replacement => replacement.Start)
+            .ToArray();
+        if (replacements.Length == 0)
+        {
+            return false;
+        }
+
+        var updated = oldText;
+        foreach (var replacement in replacements)
+        {
+            updated = updated.Remove(replacement.Start, replacement.Length).Insert(replacement.Start, replacement.Text);
+        }
+
+        if (!updated.Contains("using System.Windows;", StringComparison.Ordinal))
+        {
+            updated = InsertUsingDirective(updated, "using System.Windows;");
+        }
+
+        if (updated.Equals(oldText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        patchPath = codeBehindPath;
+        diagnosticLabel = $"WPF event handler signature repair for {Path.GetFileName(codeBehindPath)}";
+        newText = updated.TrimEnd();
+        return true;
+    }
+
+    private static (int Start, int Length, string Text)? BuildWpfEventHandlerSignatureReplacement(
+        string sourceText,
+        MethodDeclarationSyntax method)
+    {
+        if (method.Body is null)
+        {
+            return null;
+        }
+
+        var indent = GetLineIndent(sourceText, method.SpanStart);
+        var body = ReindentCSharpMethod(method.Body.NormalizeWhitespace().ToFullString(), indent);
+        var text = indent + $"private void {method.Identifier.ValueText}(object sender, RoutedEventArgs e)"
+            + Environment.NewLine
+            + body;
+        return (method.Span.Start, method.Span.Length, text);
+    }
+
+    private static bool TryBuildWpfMissingEventHandlerRepairPatch(
+        string diagnosticText,
+        string diagnosticPath,
+        out string patchPath,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        patchPath = string.Empty;
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        if (!diagnosticText.Contains("CS1061", StringComparison.Ordinal)
+            || !diagnosticText.Contains("does not contain a definition for", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var handlerMatch = Regex.Match(
+            diagnosticText,
+            @"definition for ['""](?<handler>[A-Za-z_]\w*)['""]",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        if (!handlerMatch.Success)
+        {
+            return false;
+        }
+
+        var handlerName = handlerMatch.Groups["handler"].Value;
+        var xamlPath = diagnosticPath.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+            ? diagnosticPath
+            : diagnosticPath.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase)
+                ? diagnosticPath[..^".cs".Length]
+                : string.Empty;
+        if (string.IsNullOrWhiteSpace(xamlPath) || !File.Exists(xamlPath))
+        {
+            return false;
+        }
+
+        var codeBehindPath = xamlPath + ".cs";
+        if (!File.Exists(codeBehindPath))
+        {
+            return false;
+        }
+
+        var xaml = File.ReadAllText(xamlPath);
+        if (!ExtractWpfEventHandlerNames(xaml).Contains(handlerName, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        var classMatch = Regex.Match(xaml, @"\bx:Class\s*=\s*""(?<class>[^""]+)""", RegexOptions.CultureInvariant);
+        var className = classMatch.Success
+            ? classMatch.Groups["class"].Value.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault()
+            : null;
+        if (string.IsNullOrWhiteSpace(className))
+        {
+            return false;
+        }
+
+        oldText = File.ReadAllText(codeBehindPath);
+        var root = CSharpSyntaxTree.ParseText(oldText).GetRoot();
+        var classDeclaration = root
+            .DescendantNodes()
+            .OfType<ClassDeclarationSyntax>()
+            .FirstOrDefault(type => string.Equals(type.Identifier.ValueText, className, StringComparison.Ordinal));
+        if (classDeclaration is null
+            || classDeclaration.Members.OfType<MethodDeclarationSyntax>().Any(method => string.Equals(method.Identifier.ValueText, handlerName, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        var indent = GetLineIndent(oldText, classDeclaration.CloseBraceToken.SpanStart);
+        if (string.IsNullOrEmpty(indent))
+        {
+            indent = "    ";
+        }
+
+        var methodText = BuildMissingWpfEventHandlerMethod(xaml, handlerName, indent);
+        var insertion = Environment.NewLine + Environment.NewLine + methodText + Environment.NewLine;
+        var updated = oldText.Insert(classDeclaration.CloseBraceToken.SpanStart, insertion);
+        if (!updated.Contains("using System.Windows;", StringComparison.Ordinal))
+        {
+            updated = InsertUsingDirective(updated, "using System.Windows;");
+        }
+
+        patchPath = codeBehindPath;
+        diagnosticLabel = $"WPF missing event handler repair for {Path.GetFileName(codeBehindPath)}";
+        newText = updated.TrimEnd();
+        return !newText.Equals(oldText, StringComparison.Ordinal);
+    }
+
+    private static string BuildMissingWpfEventHandlerMethod(string xaml, string handlerName, string indent)
+    {
+        var innerIndent = indent + "    ";
+        var lines = new List<string>
+        {
+            indent + $"private void {handlerName}(object sender, RoutedEventArgs e)",
+            indent + "{"
+        };
+        if (WpfHandlerLooksLikeCloseAction(xaml, handlerName))
+        {
+            lines.Add(innerIndent + "Close();");
+        }
+
+        lines.Add(indent + "}");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static bool WpfHandlerLooksLikeCloseAction(string xaml, string handlerName)
+    {
+        if (handlerName.Contains("close", StringComparison.OrdinalIgnoreCase)
+            || handlerName.Contains("exit", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var elementMatch = Regex.Match(
+            xaml,
+            $@"<[^>]+\bClick\s*=\s*""{Regex.Escape(handlerName)}""[^>]*>",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        if (!elementMatch.Success)
+        {
+            return false;
+        }
+
+        return Regex.IsMatch(
+            elementMatch.Value,
+            @"\b(Content|Header)\s*=\s*""[^""]*(close|exit)[^""]*""",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    }
+
+    private static bool TryBuildWpfCodeBehindRepairPatch(
+        string diagnosticPath,
+        IReadOnlyList<string> lines,
+        out string diagnosticLabel,
+        out string oldText,
+        out string newText)
+    {
+        diagnosticLabel = string.Empty;
+        oldText = string.Empty;
+        newText = string.Empty;
+        var fileName = Path.GetFileName(diagnosticPath);
+        if (!fileName.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var xamlPath = diagnosticPath[..^".cs".Length];
+        if (!File.Exists(xamlPath))
+        {
+            return false;
+        }
+
+        var xaml = File.ReadAllText(xamlPath);
+        var classMatch = Regex.Match(xaml, @"\bx:Class\s*=\s*""(?<class>[^""]+)""", RegexOptions.CultureInvariant);
+        if (!classMatch.Success)
+        {
+            return false;
+        }
+
+        var fullClassName = classMatch.Groups["class"].Value.Trim();
+        var split = fullClassName.LastIndexOf('.');
+        if (split <= 0 || split >= fullClassName.Length - 1)
+        {
+            return false;
+        }
+
+        var namespaceName = fullClassName[..split];
+        var className = fullClassName[(split + 1)..];
+        var rootMatch = Regex.Match(xaml, @"<\s*(?<root>Window|UserControl)\b", RegexOptions.CultureInvariant);
+        var baseType = rootMatch.Success ? rootMatch.Groups["root"].Value : "Window";
+        var handlers = ExtractWpfEventHandlerNames(xaml).ToArray();
+        var textBoxName = ExtractFirstNamedElement(xaml, "TextBox");
+        var builder = new StringBuilder();
+        builder.AppendLine("using System.Windows;");
+        if (baseType.Equals("UserControl", StringComparison.Ordinal))
+        {
+            builder.AppendLine("using System.Windows.Controls;");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine($"namespace {namespaceName};");
+        builder.AppendLine();
+        builder.AppendLine($"public partial class {className} : {baseType}");
+        builder.AppendLine("{");
+        builder.AppendLine($"    public {className}()");
+        builder.AppendLine("    {");
+        builder.AppendLine("        InitializeComponent();");
+        builder.AppendLine("    }");
+        foreach (var handler in handlers)
+        {
+            builder.AppendLine();
+            builder.AppendLine($"    private void {handler}(object sender, RoutedEventArgs e)");
+            builder.AppendLine("    {");
+            if (!string.IsNullOrWhiteSpace(textBoxName)
+                && handler.Contains("send", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.AppendLine($"        MessageBox.Show({textBoxName}.Text);");
+            }
+            else if (!string.IsNullOrWhiteSpace(textBoxName)
+                     && handler.Contains("clear", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.AppendLine($"        {textBoxName}.Text = string.Empty;");
+            }
+
+            builder.AppendLine("    }");
+        }
+
+        builder.AppendLine("}");
+        diagnosticLabel = $"WPF code-behind repair for {fileName}";
+        oldText = File.ReadAllText(diagnosticPath);
+        newText = builder.ToString().TrimEnd();
+        return true;
+    }
+
+    private static IReadOnlyList<string> ExtractWpfEventHandlerNames(string xaml)
+    {
+        var eventNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Click",
+            "Loaded",
+            "Closed",
+            "Closing",
+            "SelectionChanged",
+            "TextChanged",
+            "Checked",
+            "Unchecked",
+            "MouseDoubleClick",
+            "KeyDown",
+            "KeyUp"
+        };
+        var handlers = new List<string>();
+        foreach (Match match in Regex.Matches(
+                     xaml,
+                     @"\b(?<name>[A-Za-z_]\w*)\s*=\s*""(?<value>[A-Za-z_]\w*)""",
+                     RegexOptions.CultureInvariant))
+        {
+            if (eventNames.Contains(match.Groups["name"].Value))
+            {
+                handlers.Add(match.Groups["value"].Value);
+            }
+        }
+
+        return handlers.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    private static string ExtractFirstNamedElement(string xaml, string elementName)
+    {
+        var match = Regex.Match(
+            xaml,
+            $@"<\s*{Regex.Escape(elementName)}\b[^>]*\bx:Name\s*=\s*""(?<name>[A-Za-z_]\w*)""",
+            RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["name"].Value : string.Empty;
     }
 
     private static void AddDiagnosticCandidateGuidance(
@@ -19139,15 +22792,39 @@ public sealed partial class LocalCodingToolService(
         var outputBlock = string.IsNullOrWhiteSpace(diagnosticSummary)
             ? TrimForChat(output, MaxCommandOutputCharacters)
             : $"{diagnosticSummary}{Environment.NewLine}{TrimForChat(output, MaxCommandOutputCharacters)}";
+        var nextCommand = BuildDotNetFailureNextCommand(request.Action, run, output);
+        var message = $"{status}{Environment.NewLine}Current target: {FormatWorkspacePath(targetPath)}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{outputBlock}";
+        if (!string.IsNullOrWhiteSpace(nextCommand))
+        {
+            message = $"{message}{Environment.NewLine}Next command: {nextCommand}";
+        }
+
         var result = new CodingToolResult(
             true,
             run.ExitCode == 0 && !run.TimedOut,
-            $"{status}{Environment.NewLine}Current target: {FormatWorkspacePath(targetPath)}{Environment.NewLine}Command: {commandLine}{Environment.NewLine}Working directory: {workingDirectory}{Environment.NewLine}{outputBlock}",
+            message,
             "dotnet",
             targetPath,
             ExitCode: run.ExitCode);
         StoreLastDotNetResult(request, result);
         return result;
+    }
+
+    private static string BuildDotNetFailureNextCommand(CodingToolAction action, CodingCommandRun run, string output)
+    {
+        if (run.ExitCode == 0 && !run.TimedOut)
+        {
+            return string.Empty;
+        }
+
+        if (ExtractStructuredDiagnostics(action, output, 1).Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return action == CodingToolAction.Test
+            ? "validation repair runner fix the current test failure"
+            : "validation repair runner fix the current build failure";
     }
 
     private async Task<CodingToolResult> RunGitCommandAsync(
@@ -22762,7 +26439,8 @@ public sealed partial class LocalCodingToolService(
             var exitCode = ReadInt(root, "ExitCode") ?? ReadInt(root, "exitCode");
             var patchOutcome = ReadString(root, "PatchOutcome") ?? ReadString(root, "patchOutcome");
             var riskAwareTestDepth = ReadString(root, "RiskAwareTestDepth") ?? ReadString(root, "riskAwareTestDepth");
-            return new CodingReceipt(timestamp, action, succeeded, targetPath, exitCode, patchOutcome, riskAwareTestDepth);
+            var message = ReadString(root, "Message") ?? ReadString(root, "message");
+            return new CodingReceipt(timestamp, action, succeeded, targetPath, exitCode, patchOutcome, riskAwareTestDepth, message);
         }
         catch (JsonException)
         {
@@ -23830,14 +27508,20 @@ public sealed partial class LocalCodingToolService(
         string FullPath,
         string OldText,
         string NewText,
-        bool CreatesFile);
+        bool CreatesFile,
+        bool ReplaceEntireFile);
 
     private sealed record PreparedPatchEdit(
         string FullPath,
+        string OriginalText,
         string UpdatedText,
         string BeforeSnippet,
         string AfterSnippet,
         bool CreatesFile);
+
+    private sealed record WpfHandlerReplacement(
+        MethodDeclarationSyntax OriginalMethod,
+        MethodDeclarationSyntax UpdatedMethod);
 
     private sealed record PatchEditPreparation(
         PreparedPatchEdit? Edit,
@@ -24038,6 +27722,30 @@ public sealed partial class LocalCodingToolService(
         string Path,
         int? LineNumber);
 
+    private sealed record MissingNameDiagnostic(
+        string Path,
+        string Name);
+
+    private sealed record MissingTypeDiagnostic(
+        string Path,
+        string Name);
+
+    private sealed record WpfLayoutBox(
+        string DisplayName,
+        string Cell,
+        double Left,
+        double Top,
+        double Width,
+        double Height)
+    {
+        public double Right => Left + Width;
+        public double Bottom => Top + Height;
+    }
+
+    private sealed record UnknownXamlBinding(
+        string File,
+        string Name);
+
     private sealed record RoadmapNextActionRecommendation(
         string Action,
         string Confidence,
@@ -24185,7 +27893,8 @@ public sealed partial class LocalCodingToolService(
         string? TargetPath,
         int? ExitCode,
         string? PatchOutcome = null,
-        string? RiskAwareTestDepth = null);
+        string? RiskAwareTestDepth = null,
+        string? Message = null);
 
     private sealed record GitWorkingTreeStatus(
         bool Available,

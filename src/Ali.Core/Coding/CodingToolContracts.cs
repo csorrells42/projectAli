@@ -265,7 +265,8 @@ public sealed record CodingToolRequest(
 public sealed record CodingPatchEdit(
     string Path,
     string OldText,
-    string NewText);
+    string NewText,
+    bool ReplaceEntireFile = false);
 
 public sealed record CodingToolPermission(
     CodingToolPermissionKind Kind,
@@ -303,9 +304,18 @@ public sealed record CodingActionPlan(
     bool UseCodingTool,
     string Command,
     string Summary,
-    double Confidence = 0)
+    double Confidence = 0,
+    string SelectedPath = "",
+    string UnderstoodGoal = "",
+    string ExecutionMode = "",
+    string SelectedTool = "",
+    string CommandGoal = "",
+    IReadOnlyList<string>? AcceptanceCriteria = null,
+    IReadOnlyList<string>? InfoUsed = null,
+    string Diagnostic = "",
+    string RawOutputExcerpt = "")
 {
-    public static CodingActionPlan NoAction { get; } = new(false, string.Empty, string.Empty, 0);
+    public static CodingActionPlan NoAction { get; } = new(false, string.Empty, string.Empty, 0, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, Array.Empty<string>(), Array.Empty<string>());
 }
 
 public sealed record CodingPatchPlan(
@@ -313,9 +323,11 @@ public sealed record CodingPatchPlan(
     IReadOnlyList<CodingPatchEdit> Edits,
     string Summary,
     double Confidence = 0,
-    string? StopReason = null)
+    string? StopReason = null,
+    string SelectedPath = "",
+    IReadOnlyList<string>? CriteriaCoverage = null)
 {
-    public static CodingPatchPlan NoPatch { get; } = new(false, [], string.Empty, 0);
+    public static CodingPatchPlan NoPatch { get; } = new(false, [], string.Empty, 0, null, string.Empty, Array.Empty<string>());
 }
 
 public interface ICodingActionPlanner
@@ -323,7 +335,8 @@ public interface ICodingActionPlanner
     Task<CodingActionPlan> PlanAsync(
         string userText,
         IReadOnlyList<Ali.Core.Runtime.ChatMessage> history,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        CodingContextPack? contextPack = null);
 }
 
 public interface ICodingPatchPlanner
@@ -331,7 +344,8 @@ public interface ICodingPatchPlanner
     Task<CodingPatchPlan> PlanPatchAsync(
         string userText,
         CodingContextPack contextPack,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        CodingActionPlan? actionPlan = null);
 }
 
 public interface ILocalCodingTool
@@ -344,7 +358,8 @@ public interface ILocalCodingTool
 
     Task<CodingContextPack> BuildContextPackAsync(
         string userText,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        bool force = false);
 
     Task<CodingTaskPlan> BuildTaskPlanAsync(
         string userText,

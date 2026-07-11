@@ -4,7 +4,7 @@ namespace Ali.Core.Voice;
 
 public static partial class VoiceCommandSafety
 {
-    public static bool RequiresVisibleConfirmation(string transcript)
+    public static bool RequiresVisibleConfirmation(string transcript, bool programmingModeActive = false)
     {
         if (string.IsNullOrWhiteSpace(transcript))
         {
@@ -12,15 +12,26 @@ public static partial class VoiceCommandSafety
         }
 
         var normalized = transcript.Trim();
-        return DestructiveCommandRegex().IsMatch(normalized)
-            || ExecutionCommandRegex().IsMatch(normalized)
+        var alwaysRequiresConfirmation = DestructiveCommandRegex().IsMatch(normalized)
             || ShellToolRegex().IsMatch(normalized)
             || InstallCommandRegex().IsMatch(normalized)
             || CalendarWriteRegex().IsMatch(normalized)
             || EmailWriteRegex().IsMatch(normalized)
-            || FileWriteRegex().IsMatch(normalized)
             || MemoryDeleteRegex().IsMatch(normalized)
             || ModelSwitchRegex().IsMatch(normalized);
+        if (alwaysRequiresConfirmation)
+        {
+            return true;
+        }
+
+        if (programmingModeActive)
+        {
+            return FileWriteRegex().IsMatch(normalized)
+                   && !CodingArtifactOrTaskRegex().IsMatch(normalized);
+        }
+
+        return ExecutionCommandRegex().IsMatch(normalized)
+            || FileWriteRegex().IsMatch(normalized);
     }
 
     public static string BlockedPhaseOneCMessage() =>
@@ -46,6 +57,9 @@ public static partial class VoiceCommandSafety
 
     [GeneratedRegex(@"\b(copy|move|rename|edit|modify|change|write|save)\b.*\b(file|folder|directory)\b", RegexOptions.IgnoreCase)]
     private static partial Regex FileWriteRegex();
+
+    [GeneratedRegex(@"\b(wpf|xaml|window|app|application|project|solution|csproj|sln|class|method|function|viewmodel|view\s+model|code|test|tests|build|compile|debug|feature|bug|ui|screen|dashboard|form|button|grid|textbox|program)\b|\.(?:cs|xaml|csproj|sln|slnx)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex CodingArtifactOrTaskRegex();
 
     [GeneratedRegex(@"\b(delete|forget|remove|change|modify)\b.*\b(memory|memories|remembered)\b", RegexOptions.IgnoreCase)]
     private static partial Regex MemoryDeleteRegex();

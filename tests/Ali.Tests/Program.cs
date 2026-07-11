@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Ali.Core.Conversations;
 using Ali.Core.Coding;
@@ -29,6 +30,12 @@ using Microsoft.CodeAnalysis.CSharp;
 if (args.Contains("--real-runtime", StringComparer.OrdinalIgnoreCase))
 {
     await RunRealRuntimeValidationAsync();
+    return;
+}
+
+if (args.Contains("--real-programming", StringComparer.OrdinalIgnoreCase))
+{
+    await RunRealProgrammingValidationAsync();
     return;
 }
 
@@ -172,12 +179,19 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("orchestrator handles explicit coding open request", TestOrchestratorHandlesExplicitCodingOpenRequest),
     ("orchestrator uses dynamic patch planner in programming mode", TestOrchestratorUsesDynamicPatchPlannerInProgrammingMode),
     ("orchestrator stops canned feature patch draft fallback", TestOrchestratorStopsCannedFeaturePatchDraftFallback),
+    ("orchestrator stops repeated patch preview loop", TestOrchestratorStopsRepeatedPatchPreviewLoop),
+    ("orchestrator blocks cross-turn repeated patch preview guard", TestOrchestratorBlocksCrossTurnRepeatedPatchPreviewGuard),
     ("orchestrator keeps coding planner out of normal chat", TestOrchestratorKeepsCodingPlannerOutOfNormalChat),
     ("orchestrator stops canned fallback in programming mode", TestOrchestratorStopsCannedFallbackInProgrammingMode),
     ("orchestrator previews model-authored programming patch", TestOrchestratorPreviewsModelAuthoredProgrammingPatch),
     ("orchestrator previews model-authored WPF program patch", TestOrchestratorPreviewsModelAuthoredWpfProgramPatch),
+    ("orchestrator previews model-created WPF app in empty workspace", TestOrchestratorPreviewsModelCreatedWpfAppInEmptyWorkspace),
+    ("orchestrator queues validation after applying model-selected patch preview", TestOrchestratorQueuesValidationAfterApplyingModelSelectedPatchPreview),
+    ("orchestrator routes model-selected concrete authoring to patch planner", TestOrchestratorRoutesModelSelectedConcreteAuthoringToPatchPlanner),
+    ("orchestrator accepts varied programming GUI commands", TestOrchestratorAcceptsVariedProgrammingGuiCommands),
     ("orchestrator sends WPF validation evidence to model patcher", TestOrchestratorSendsWpfValidationEvidenceToModelPatcher),
-    ("orchestrator rejects stale programming planner command", TestOrchestratorRejectsStaleProgrammingPlannerCommand),
+    ("orchestrator treats continue as model loop input", TestOrchestratorTreatsContinueAsModelLoopInput),
+    ("orchestrator feeds patch planner evidence to action planner", TestOrchestratorFeedsPatchPlannerEvidenceToActionPlanner),
     ("orchestrator injects coding context for coding help", TestOrchestratorInjectsCodingContextForCodingHelp),
     ("orchestrator injects active coding task followup context", TestOrchestratorInjectsActiveCodingTaskFollowupContext),
     ("orchestrator injects last build failure context", TestOrchestratorInjectsLastBuildFailureContext),
@@ -222,6 +236,8 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("OpenAI runtime includes current local date", TestRuntimeIncludesCurrentLocalDate),
     ("OpenAI runtime omits Ali persona for source planner", TestRuntimeOmitsAliPersonaForSourcePlanner),
     ("OpenAI runtime omits Ali persona for coding planner", TestRuntimeOmitsAliPersonaForCodingPlanner),
+    ("OpenAI runtime omits Ali persona for coding patch planner", TestRuntimeOmitsAliPersonaForCodingPatchPlanner),
+    ("OpenAI runtime gives coding planners structured output budgets", TestRuntimeGivesCodingPlannersStructuredOutputBudgets),
     ("OpenAI runtime disables qwen thinking", TestRuntimeDisablesQwenThinking),
     ("OpenAI runtime shutdown unloads model", TestRuntimeShutdownUnloadsModel),
     ("OpenAI runtime reports empty visible stream content", TestRuntimeReportsEmptyVisibleStreamContent),
@@ -279,7 +295,20 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("model source planner guards current vice president for sources", TestModelSourcePlannerGuardsCurrentVicePresidentForSources),
     ("model source planner guards local documents for sources", TestModelSourcePlannerGuardsLocalDocumentsForSources),
     ("model coding planner includes tool lane map", TestModelCodingPlannerIncludesToolLaneMap),
+    ("model coding planner resolves selected tool templates from map", TestModelCodingPlannerResolvesSelectedToolTemplatesFromMap),
+    ("model coding planner rejects runnable plan without execution mode", TestModelCodingPlannerRejectsRunnablePlanWithoutExecutionMode),
+    ("model coding planner rejects patch preview without criteria", TestModelCodingPlannerRejectsPatchPreviewWithoutCriteria),
+    ("model coding planner rejects patch preview without info evidence", TestModelCodingPlannerRejectsPatchPreviewWithoutInfoEvidence),
+    ("model coding planner rejects patch preview with unknown path", TestModelCodingPlannerRejectsPatchPreviewWithUnknownPath),
+    ("model coding planner rejects patch preview incompatible tool", TestModelCodingPlannerRejectsPatchPreviewIncompatibleTool),
+    ("model coding planner rejects command-only runnable plan", TestModelCodingPlannerRejectsCommandOnlyRunnablePlan),
+    ("model coding planner rejects unknown selected tool", TestModelCodingPlannerRejectsUnknownSelectedTool),
     ("model coding patch planner allows extended WPF bundles", TestModelCodingPatchPlannerAllowsExtendedWpfBundles),
+    ("model coding patch planner accepts large streaming WPF bundle", TestModelCodingPatchPlannerAcceptsLargeStreamingWpfBundle),
+    ("model coding patch planner rejects over-cap edit bundles", TestModelCodingPatchPlannerRejectsOverCapEditBundles),
+    ("model coding patch planner rejects criteria patch without coverage", TestModelCodingPatchPlannerRejectsCriteriaPatchWithoutCoverage),
+    ("model coding patch planner rejects partial criteria coverage", TestModelCodingPatchPlannerRejectsPartialCriteriaCoverage),
+    ("model coding patch planner rejects selected path drift", TestModelCodingPatchPlannerRejectsSelectedPathDrift),
     ("curated source retriever uses planned weather topic", TestCuratedSourceRetrieverUsesPlannedWeatherTopic),
     ("curated source retriever fetches NWS point forecast", TestCuratedSourceRetrieverFetchesNwsPointForecast),
     ("curated source retriever selects Tullahoma NWS point forecast", TestCuratedSourceRetrieverSelectsTullahomaNwsPointForecast),
@@ -624,13 +653,23 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("feature intake <goal>", builderIndex);
     Contains("autonomous feature orchestrator <goal>", builderIndex);
     Contains("roslyn edit planner <goal>", builderIndex);
+    Contains("feature patch draft <goal>", builderIndex);
+    Contains("exact patch synthesis <goal>", builderIndex);
     Contains("multi-file patch synthesis <goal>", builderIndex);
+    Contains("preview guided feature bundle <goal>", builderIndex);
     Contains("concrete patch authoring <goal>", builderIndex);
     Contains("patch body generator <goal>", builderIndex);
     Contains("patch confidence score <goal>", builderIndex);
     Contains("active workspace project", builderIndex);
+    Contains("feature work context <goal>", builderIndex);
     Contains("owner approved apply packet <goal>", builderIndex);
+    Contains("confirm apply last patch preview", builderIndex);
+    Contains("post patch validation <goal>", builderIndex);
     Contains("validation command minimizer <goal>", builderIndex);
+    Contains("diagnose last build failure", builderIndex);
+    Contains("validation repair runner <goal>", builderIndex);
+    Contains("first diagnostic repair route <goal>", builderIndex);
+    Contains("failure to patch v3 <goal>", builderIndex);
     Contains("authoring sequence flow <goal>", builderIndex);
     Contains("validation chain planner <goal>", builderIndex);
     Contains("data systems guide <goal>", builderIndex);
@@ -646,6 +685,9 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("wpf complex window guide <goal>", builderIndex);
     Contains("implementation evidence pack <goal>", builderIndex);
     Contains("semantic diff summary <goal>", builderIndex);
+    Contains("semantic change receipt <goal>", builderIndex);
+    Contains("review current changes", builderIndex);
+    Contains("can i safely commit", builderIndex);
     Contains("mini codex score v3 <goal>", builderIndex);
     Contains("confirm run packet item N", builderIndex);
     Contains("Data systems and services", builderIndex);
@@ -685,6 +727,8 @@ static Task TestCodingAbilityCatalogBacksDeterministicIndexes()
     Contains("plan slow computer troubleshooting", ComputerTroubleshootingCatalog.BuildCommandIndex());
     Contains("Check Task Manager", string.Join(" ", ComputerTroubleshootingCatalog.BuildScenarioChecklist("slow computer")));
     Equal(true, CodingAbilityCatalog.BuilderGroups.Any(group => group.Commands.Any(command => command.RequiresConfirmation)));
+    Equal(true, CodingAbilityCatalog.PatchPreviewToolTemplates.Contains("build this for me <goal>"));
+    Equal(false, CodingAbilityCatalog.PatchPreviewToolTemplates.Contains("confirm apply last patch preview"));
     Equal(true, CodingAbilityCatalog.ComputerGroups.Count >= 6);
     Equal(true, CodingAbilityCatalog.UserCommandHelpTopics.Any(topic => topic.Name == "Programming"));
     return Task.CompletedTask;
@@ -5058,6 +5102,13 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("ChatMessageViewModel", dashboard);
     Contains("FlagIncorrectCommand", dashboard);
     Contains("ProgrammingComposerTextBox", dashboard);
+    Contains("ProgrammingProjectPathTextBox", dashboard);
+    Contains("ProgrammingMessageText", dashboard);
+    Contains("ProgrammingCurrentTargetText", dashboard);
+    Contains("ProgrammingCurrentTaskText", dashboard);
+    Contains("ProgrammingStatusText", dashboard);
+    Contains("ProgrammingSendButton", dashboard);
+    Contains("ProgrammingNextButton", dashboard);
     Contains("ComposerText", dashboard);
     Contains("SendButtonText", dashboard);
     Contains("SendCommand", dashboard);
@@ -5091,6 +5142,19 @@ static Task TestProgrammingDashboardExposesCockpitCommands()
     Contains("RestoreVoiceFeaturesAfterProgramming", viewModel);
     Contains("SetAssistantReadsRepliesOutLoudForProgramming", viewModel);
     Contains("SetAutoSendVoiceTranscriptsForProgramming", viewModel);
+    Contains("Push to Talk still sends spoken programming requests", viewModel);
+    Contains("VoiceCommandSafety.RequiresVisibleConfirmation(transcript, programmingModeActive: IsProgrammingModeActive)", viewModel);
+    var suspendStart = viewModel.IndexOf("public void SuspendVoiceFeaturesForProgramming()", StringComparison.Ordinal);
+    var restoreStart = viewModel.IndexOf("public void RestoreVoiceFeaturesAfterProgramming()", StringComparison.Ordinal);
+    Equal(true, suspendStart >= 0);
+    Equal(true, restoreStart > suspendStart);
+    var suspendBody = viewModel[suspendStart..restoreStart];
+    Equal(false, suspendBody.Contains("SetAutoSendVoiceTranscriptsForProgramming(false)", StringComparison.Ordinal));
+    var restoreEnd = viewModel.IndexOf("private void SetAssistantReadsRepliesOutLoudForProgramming", StringComparison.Ordinal);
+    Equal(true, restoreEnd > restoreStart);
+    var restoreBody = viewModel[restoreStart..restoreEnd];
+    Equal(false, restoreBody.Contains("SetAutoSendVoiceTranscriptsForProgramming", StringComparison.Ordinal));
+    Contains("Spoken reply setting restored", viewModel);
     Contains("BrowseCodingCurrentSolutionOrProjectCommand = CreateCommand", viewModel);
     Contains("CreateCodingProjectCommand = CreateAsyncCommand", viewModel);
     Contains("CodingCurrentSolutionOrProjectPathText", viewModel);
@@ -6887,6 +6951,7 @@ static async Task TestLocalCodingToolPreviewsSameFilePatchBundle()
     Contains("Applied 2 edit(s) across 1 file(s)", applied.Message);
     Contains("Before/after symbol diff:", applied.Message);
     Contains("Queued validation command packet:", applied.Message);
+    Contains("Next command: post patch validation Program", applied.Message);
     Equal("class Widget { string Name => \"NewName\"; }", await File.ReadAllTextAsync(filePath));
 }
 
@@ -7019,6 +7084,8 @@ static async Task TestLocalCodingToolAppliesLastPatchPreview()
     Equal(true, applied.Handled);
     Equal(true, applied.Succeeded);
     Contains("Applied last patch preview", applied.Message);
+    Contains("Queued validation command packet:", applied.Message);
+    Contains("Next command: post patch validation Program", applied.Message);
     Equal("class Widget { }", await File.ReadAllTextAsync(filePath));
 
     var secondApply = await service.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
@@ -7176,8 +7243,10 @@ static async Task TestOrchestratorUsesDynamicPatchPlannerInProgrammingMode()
         new FakeCodingProcessLauncher(),
         new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    var runtime = new FixedTextRuntime(
-        "{\"use_coding_tool\":true,\"command\":\"build this for me add export button\",\"summary\":\"Start the guided build lane.\",\"confidence\":0.9}");
+    var runtime = new FixedSequenceRuntime(
+        "{\"use_coding_tool\":true,\"selected_path\":\"Existing feature or bug fix\",\"execution_mode\":\"model_patch_preview\",\"info_used\":[\"The context shows an existing project and editable ExportView file.\",\"The tool map exposes feature patch draft for guarded previews.\"],\"acceptance_criteria\":[\"The UI exposes an export action.\",\"The action connects to the existing export behavior.\"],\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"add export button\",\"summary\":\"Ask the patch planner for the concrete edit first.\",\"confidence\":0.9}",
+        "{\"has_patch\":false,\"selected_path\":\"Existing feature or bug fix\",\"summary\":\"Need a concrete target file first.\",\"confidence\":0.2,\"edits\":[]}",
+        "{\"use_coding_tool\":true,\"execution_mode\":\"local_tool\",\"selected_tool\":\"build this for me <goal>\",\"command_goal\":\"add export button\",\"summary\":\"Start the guided build lane.\",\"confidence\":0.9}");
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7199,16 +7268,17 @@ static async Task TestOrchestratorUsesDynamicPatchPlannerInProgrammingMode()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Equal(3, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_patch_plan", runtime.Requests[1].ConversationId);
+    Equal("coding_action_plan", runtime.Requests[2].ConversationId);
     Contains("Next:", answer);
-    Contains("concrete patch authoring", answer);
-    Contains("Dynamic patch planner stopped", answer);
-    Contains("Use Next to inspect the exact target files", answer);
+    Equal(false, answer.Contains("Dynamic patch planner stopped", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Programming mode:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Front-door plan:", StringComparison.OrdinalIgnoreCase));
-    Equal(EvidenceStatus.Unknown, chunks[0].EvidenceStatus);
+    Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
 }
 
 static async Task TestOrchestratorStopsCannedFeaturePatchDraftFallback()
@@ -7225,8 +7295,10 @@ static async Task TestOrchestratorStopsCannedFeaturePatchDraftFallback()
         new FakeCodingProcessLauncher(),
         new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    var runtime = new FixedTextRuntime(
-        "{\"use_coding_tool\":true,\"command\":\"feature patch draft create a hello world console app\",\"summary\":\"Draft the first safe patch step.\",\"confidence\":0.9}");
+    var runtime = new FixedSequenceRuntime(
+        "{\"use_coding_tool\":true,\"selected_path\":\"New console app\",\"execution_mode\":\"model_patch_preview\",\"info_used\":[\"The context shows a console project with editable Program.cs.\",\"The tool map exposes feature patch draft for guarded previews.\"],\"acceptance_criteria\":[\"The console app prints a visible hello world message.\",\"The generated project can be previewed before apply.\"],\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"create a hello world console app\",\"summary\":\"Ask the patch planner for the first safe edit.\",\"confidence\":0.9}",
+        "{\"has_patch\":false,\"selected_path\":\"New console app\",\"summary\":\"Need a concrete target file first.\",\"confidence\":0.2,\"edits\":[]}",
+        "{\"use_coding_tool\":true,\"execution_mode\":\"local_tool\",\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"create a hello world console app\",\"summary\":\"Draft the first safe patch step.\",\"confidence\":0.9}");
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7248,13 +7320,125 @@ static async Task TestOrchestratorStopsCannedFeaturePatchDraftFallback()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
-    Contains("Dynamic patch planner stopped", answer);
-    Contains("concrete patch authoring", answer);
-    Contains("Use Next to inspect the exact target files", answer);
+    Equal(3, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_patch_plan", runtime.Requests[1].ConversationId);
+    Equal("coding_action_plan", runtime.Requests[2].ConversationId);
+    Equal(false, answer.Contains("Dynamic patch planner stopped", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Next: no queued step", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
+    Equal(EvidenceStatus.Verified, chunks[0].EvidenceStatus);
+}
+
+static async Task TestOrchestratorStopsRepeatedPatchPreviewLoop()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "Console.WriteLine(\"Hello\");");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedSequenceRuntime(
+        "{\"use_coding_tool\":true,\"selected_path\":\"New console app\",\"execution_mode\":\"model_patch_preview\",\"info_used\":[\"The context shows a console project with editable Program.cs.\"],\"acceptance_criteria\":[\"The console app prints the requested message.\"],\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"hello world console app\",\"summary\":\"Ask the patch planner for a guarded edit.\",\"confidence\":0.9}",
+        "{\"has_patch\":false,\"selected_path\":\"New console app\",\"summary\":\"Need more exact context first.\",\"confidence\":0.2,\"stop_reason\":\"No safe patch was produced.\",\"edits\":[]}",
+        "{\"use_coding_tool\":true,\"selected_path\":\"New console app\",\"execution_mode\":\"model_patch_preview\",\"info_used\":[\"The previous patch planner returned no patch.\"],\"acceptance_criteria\":[\"The console app prints the requested message.\"],\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"hello world console app\",\"summary\":\"Try patch preview again.\",\"confidence\":0.9}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Build a hello world console app.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(3, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_patch_plan", runtime.Requests[1].ConversationId);
+    Equal("coding_action_plan", runtime.Requests[2].ConversationId);
+    Contains("Patch planner evidence for Info step:", runtime.Requests[2].History[0].Text);
+    Contains("Next: review the status before continuing.", answer);
+    Contains("Repeat guard: execution_mode=model_patch_preview", answer);
+    Contains("selected_path=New console app", answer);
+    Contains("selected_tool=feature patch draft <goal>", answer);
+    Contains("stop_reason=No safe patch was produced.", answer);
+    Equal(false, answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase));
+    Equal(EvidenceStatus.Unknown, chunks[0].EvidenceStatus);
+}
+
+static async Task TestOrchestratorBlocksCrossTurnRepeatedPatchPreviewGuard()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "Console.WriteLine(\"Hello\");");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedSequenceRuntime(
+        "{\"use_coding_tool\":true,\"selected_path\":\"New console app\",\"execution_mode\":\"model_patch_preview\",\"info_used\":[\"The user asked to continue after the previous patch preview stopped.\"],\"acceptance_criteria\":[\"The app prints the requested greeting.\"],\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"hello world greeting app\",\"summary\":\"Try the same patch preview again with a slightly different goal.\",\"confidence\":0.86}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+    var history = new[]
+    {
+        new ChatMessage(
+            "assistant_previous",
+            ChatRole.Assistant,
+            "Next: review the status before continuing.\nStatus: Path: New console app. Repeat guard: execution_mode=model_patch_preview; selected_path=New console app; selected_tool=feature patch draft <goal>; command_goal=hello world console app; stop_reason=No safe patch was produced. Choose an Info/context/validation step before trying that preview again.",
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Unknown)
+    };
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "continue",
+                       history,
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(1, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal(false, runtime.Requests.Any(request => request.ConversationId == "coding_patch_plan"));
+    Contains("Recent programming repeat guard evidence:", runtime.Requests[0].History[0].Text);
+    Contains("Treat repeat guard evidence as Info", runtime.Requests[0].History[0].Text);
+    Contains("Repeat guard: execution_mode=model_patch_preview", answer);
+    Contains("selected_path=New console app", answer);
+    Contains("selected_tool=feature patch draft <goal>", answer);
+    Equal(false, answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase));
     Equal(EvidenceStatus.Unknown, chunks[0].EvidenceStatus);
 }
 
@@ -7311,7 +7495,7 @@ static async Task TestOrchestratorStopsCannedFallbackInProgrammingMode()
         new FakeCodingProcessLauncher(),
         new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
         configuredCurrentSolutionOrProjectPath: projectPath);
-    var runtime = new FixedTextRuntime("not json");
+    var runtime = new FixedSequenceRuntime("not json");
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7333,11 +7517,12 @@ static async Task TestOrchestratorStopsCannedFallbackInProgrammingMode()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Equal(1, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
     Contains("Next:", answer);
-    Contains("concrete patch authoring", answer);
-    Contains("Dynamic patch planner stopped", answer);
-    Contains("Use Next to inspect the exact target files", answer);
+    Contains("no queued step", answer);
+    Contains("programming planner did not select a runnable tool", answer);
+    Equal(false, answer.Contains("Dynamic patch planner stopped", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Programming mode selected the next internal action.", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Internal action:", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("Build this feature v1:", StringComparison.OrdinalIgnoreCase));
@@ -7392,6 +7577,12 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
         has_patch = true,
         summary = "Update Program.cs to read an integer and print its factorial.",
         confidence = 0.91,
+        criteria_coverage = new[]
+        {
+            "Program prompts for an integer in the requested range.",
+            "Program calculates and prints the factorial result.",
+            "Invalid input is rejected with a clear message."
+        },
         edits = new[]
         {
             new
@@ -7402,7 +7593,28 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
             }
         }
     });
-    var runtime = new FixedSequenceRuntime(patchJson);
+    var factorialActionJson = JsonSerializer.Serialize(new
+    {
+        use_coding_tool = true,
+        selected_path = "Existing feature or bug fix",
+        execution_mode = "model_patch_preview",
+        info_used = new[]
+        {
+            "The context includes editable Program.cs for the current console project.",
+            "The tool map exposes feature patch draft for guarded authoring."
+        },
+        acceptance_criteria = new[]
+        {
+            "The program asks for an integer between 1 and 9.",
+            "The program prints the factorial for the entered number.",
+            "Invalid input is handled without crashing."
+        },
+        selected_tool = "feature patch draft <goal>",
+        command_goal = "factorial program",
+        summary = "Choose patch authoring after reading the current program context.",
+        confidence = 0.9
+    });
+    var runtime = new FixedSequenceRuntime(factorialActionJson, patchJson);
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7424,7 +7636,10 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(2, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
     Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("Approved project context for the Info step:", runtime.Requests[0].History[0].Text);
     Contains("Design the solution dynamically from the user's goal", runtime.LastRequest.History[0].Text);
     Contains("Programming capability paths:", runtime.LastRequest.History[0].Text);
     Contains("New console app:", runtime.LastRequest.History[0].Text);
@@ -7436,7 +7651,7 @@ static async Task TestOrchestratorPreviewsModelAuthoredProgrammingPatch()
     Contains("VirtualizingPanel", runtime.LastRequest.History[0].Text);
     Contains("Console.WriteLine(\"Hello, World!\");", runtime.LastRequest.History[0].Text);
     Contains("Next: confirm apply last patch preview", answer);
-    Contains("Status: No files changed yet.", answer);
+    Contains("Status: Path: Existing feature or bug fix. No files changed yet.", answer);
     Equal(initialProgram, await File.ReadAllTextAsync(programPath));
 
     var apply = await codingTool.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
@@ -7629,6 +7844,12 @@ static async Task TestOrchestratorPreviewsModelAuthoredWpfProgramPatch()
         selected_path = "New WPF app or complex window",
         summary = "Create a TaskDesk WPF task manager UI.",
         confidence = 0.93,
+        criteria_coverage = new[]
+        {
+            "The WPF window includes task entry.",
+            "Added tasks appear in a grid.",
+            "Tasks expose done state."
+        },
         edits = new[]
         {
             new { path = xamlPath, oldText = initialXaml, newText = newXaml },
@@ -7637,7 +7858,28 @@ static async Task TestOrchestratorPreviewsModelAuthoredWpfProgramPatch()
             new { path = stylesPath, oldText = string.Empty, newText = styles }
         }
     });
-    var runtime = new FixedSequenceRuntime(patchJson);
+    var actionJson = JsonSerializer.Serialize(new
+    {
+        use_coding_tool = true,
+        selected_path = "New WPF app or complex window",
+        execution_mode = "model_patch_preview",
+        info_used = new[]
+        {
+            "The context shows a WPF project with editable MainWindow files.",
+            "The tool map exposes build this for me for guarded WPF patch previews."
+        },
+        acceptance_criteria = new[]
+        {
+            "The WPF window lets the user type a task.",
+            "The user can add tasks and see them in a grid.",
+            "Tasks can be marked done."
+        },
+        selected_tool = "build this for me <goal>",
+        command_goal = "WPF task manager app",
+        summary = "Choose the WPF patch-authoring path from the requirement and project context.",
+        confidence = 0.92
+    });
+    var runtime = new FixedSequenceRuntime(actionJson, patchJson);
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7668,8 +7910,11 @@ static async Task TestOrchestratorPreviewsModelAuthoredWpfProgramPatch()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    NotNull(runtime.LastRequest, "Plain-text WPF requirement should enter the model patch planner before direct coding tools.");
+    NotNull(runtime.LastRequest, "Plain-text WPF requirement should enter the model-selected patch planner path.");
+    Equal(2, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
     Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("Approved project context for the Info step:", runtime.Requests[0].History[0].Text);
     Contains("For WPF apps, dynamically decide Window/UserControl boundaries", runtime.LastRequest.History[0].Text);
     Contains("WPF final learning map:", runtime.LastRequest.History[0].Text);
     Contains("Advanced binding diagnostics: Review", runtime.LastRequest.History[0].Text);
@@ -7680,7 +7925,7 @@ static async Task TestOrchestratorPreviewsModelAuthoredWpfProgramPatch()
     Contains("FILE: TaskDesk\\MainWindow.xaml", runtime.LastRequest.History[0].Text);
     Contains("FILE: TaskDesk\\MainWindow.xaml.cs", runtime.LastRequest.History[0].Text);
     Contains("Next: confirm apply last patch preview", answer);
-    Contains("Status: No files changed yet.", answer);
+    Contains("Status: Path: New WPF app or complex window. No files changed yet.", answer);
     Contains("Use Next to run that step.", answer);
     Equal(initialXaml, await File.ReadAllTextAsync(xamlPath));
     Equal(false, File.Exists(viewModelPath));
@@ -7694,6 +7939,551 @@ static async Task TestOrchestratorPreviewsModelAuthoredWpfProgramPatch()
     Contains("MainWindowViewModel", await File.ReadAllTextAsync(codeBehindPath));
     Contains("ICollectionView", await File.ReadAllTextAsync(viewModelPath));
     Contains("PrimaryButtonStyle", await File.ReadAllTextAsync(stylesPath));
+}
+
+static async Task TestOrchestratorPreviewsModelCreatedWpfAppInEmptyWorkspace()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var appDirectory = Path.Combine(workspace, "QuickDesk");
+    var projectPath = Path.Combine(appDirectory, "QuickDesk.csproj");
+    var appXamlPath = Path.Combine(appDirectory, "App.xaml");
+    var appCodePath = Path.Combine(appDirectory, "App.xaml.cs");
+    var xamlPath = Path.Combine(appDirectory, "MainWindow.xaml");
+    var codeBehindPath = Path.Combine(appDirectory, "MainWindow.xaml.cs");
+    var viewModelPath = Path.Combine(appDirectory, "MainWindowViewModel.cs");
+    var projectText = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+            <Nullable>enable</Nullable>
+          </PropertyGroup>
+        </Project>
+        """;
+    var appXaml = """
+        <Application x:Class="QuickDesk.App"
+                     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                     StartupUri="MainWindow.xaml" />
+        """;
+    var appCode = """
+        using System.Windows;
+
+        namespace QuickDesk;
+
+        public partial class App : Application
+        {
+        }
+        """;
+    var windowXaml = """
+        <Window x:Class="QuickDesk.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="{Binding Title}" Height="420" Width="720" MinHeight="340" MinWidth="560">
+            <Grid Margin="18">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="QuickDesk tasks" FontSize="24" FontWeight="SemiBold" />
+                <ListBox Grid.Row="1" ItemsSource="{Binding Tasks}" Margin="0,16,0,16" />
+                <DockPanel Grid.Row="2">
+                    <TextBox Text="{Binding NewTaskTitle, UpdateSourceTrigger=PropertyChanged}" MinWidth="320" />
+                    <Button Content="Add" Command="{Binding AddTaskCommand}" Margin="8,0,0,0" Padding="14,6" />
+                </DockPanel>
+            </Grid>
+        </Window>
+        """;
+    var codeBehind = """
+        using System.Windows;
+
+        namespace QuickDesk;
+
+        public partial class MainWindow : Window
+        {
+            public MainWindow()
+            {
+                InitializeComponent();
+                DataContext = new MainWindowViewModel();
+            }
+        }
+        """;
+    var viewModel = """
+        using System.Collections.ObjectModel;
+        using System.ComponentModel;
+        using System.Windows.Input;
+
+        namespace QuickDesk;
+
+        public sealed class MainWindowViewModel : INotifyPropertyChanged
+        {
+            public string Title { get; } = "QuickDesk";
+            public ObservableCollection<string> Tasks { get; } = new(["Plan the day", "Review open items"]);
+            public string NewTaskTitle { get; set; } = string.Empty;
+            public ICommand AddTaskCommand { get; }
+            public event PropertyChangedEventHandler? PropertyChanged;
+
+            public MainWindowViewModel()
+            {
+                AddTaskCommand = new RelayCommand(AddTask, () => !string.IsNullOrWhiteSpace(NewTaskTitle));
+            }
+
+            private void AddTask()
+            {
+                Tasks.Add(NewTaskTitle.Trim());
+                NewTaskTitle = string.Empty;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NewTaskTitle)));
+            }
+        }
+
+        public sealed class RelayCommand(Action execute, Func<bool> canExecute) : ICommand
+        {
+            public event EventHandler? CanExecuteChanged;
+            public bool CanExecute(object? parameter) => canExecute();
+            public void Execute(object? parameter) => execute();
+        }
+        """;
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)));
+    var actionJson = JsonSerializer.Serialize(new
+    {
+        use_coding_tool = true,
+        selected_path = "New WPF app or complex window",
+        understood_goal = "Create a new WPF task window in an empty workspace with a task list, entry box, and Add action.",
+        info_used = new[]
+        {
+            "The context shows an approved empty workspace root and no selected project.",
+            "The tool map exposes multi-file patch synthesis for guarded WPF app creation."
+        },
+        acceptance_criteria = new[]
+        {
+            "A new WPF project is created under the workspace root.",
+            "The window shows a task list and task entry.",
+            "The Add action is wired through view-model command state."
+        },
+        execution_mode = "model_patch_preview",
+        selected_tool = "multi-file patch synthesis <goal>",
+        command_goal = "new WPF QuickDesk task window",
+        summary = "Create a new WPF app bundle from the empty workspace evidence.",
+        confidence = 0.91
+    });
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        selected_path = "New WPF app or complex window",
+        summary = "Create a new QuickDesk WPF app.",
+        confidence = 0.9,
+        criteria_coverage = new[]
+        {
+            "The patch creates a WPF project under the workspace root.",
+            "The patch adds a task list and task entry window.",
+            "The patch wires the Add action through a view-model command."
+        },
+        edits = new[]
+        {
+            new { path = projectPath, oldText = string.Empty, newText = projectText },
+            new { path = appXamlPath, oldText = string.Empty, newText = appXaml },
+            new { path = appCodePath, oldText = string.Empty, newText = appCode },
+            new { path = xamlPath, oldText = string.Empty, newText = windowXaml },
+            new { path = codeBehindPath, oldText = string.Empty, newText = codeBehind },
+            new { path = viewModelPath, oldText = string.Empty, newText = viewModel }
+        }
+    });
+    var runtime = new FixedSequenceRuntime(actionJson, patchJson);
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "Build me a simple WPF task window where I can add tasks and see them in a list.",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(2, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_patch_plan", runtime.Requests[1].ConversationId);
+    Contains("Current solution/project: not selected or unavailable.", runtime.Requests[0].History[0].Text);
+    Contains("workspace root is clear", runtime.Requests[1].History[0].Text);
+    Contains("do not require an editable excerpt for files that do not exist yet", runtime.Requests[1].History[0].Text);
+    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Status: Path: New WPF app or complex window. No files changed yet.", answer);
+    Equal(false, File.Exists(projectPath));
+    Equal(false, File.Exists(xamlPath));
+
+    var apply = await codingTool.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Equal(true, apply.Succeeded);
+    Contains("<UseWPF>true</UseWPF>", await File.ReadAllTextAsync(projectPath));
+    Contains("QuickDesk tasks", await File.ReadAllTextAsync(xamlPath));
+    Contains("MainWindowViewModel", await File.ReadAllTextAsync(codeBehindPath));
+    Contains("ObservableCollection<string>", await File.ReadAllTextAsync(viewModelPath));
+}
+
+static async Task TestOrchestratorQueuesValidationAfterApplyingModelSelectedPatchPreview()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    var programPath = Path.Combine(workspace, "Program.cs");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    await File.WriteAllTextAsync(programPath, "Console.WriteLine(\"Hello\");");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var preview = await codingTool.TryHandleAsync(
+        $"preview replace in file \"{programPath}\" \"Hello\" with \"Hello from Ali\"",
+        CancellationToken.None);
+    Equal(true, preview.Succeeded);
+    var runtime = new FixedSequenceRuntime(
+        "{\"use_coding_tool\":true,\"selected_path\":\"Apply prior patch preview\",\"execution_mode\":\"local_tool\",\"selected_tool\":\"confirm apply last patch preview\",\"summary\":\"Apply the reviewed pending patch preview through the local apply gate.\",\"confidence\":0.86}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "confirm apply last patch preview",
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(1, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Contains("Next: post patch validation Program", answer);
+    Contains("Use Next to run that step.", answer);
+    Contains("Status: Path: Apply prior patch preview. Applied last patch preview.", answer);
+    Contains("Hello from Ali", await File.ReadAllTextAsync(programPath));
+}
+
+static async Task TestOrchestratorRoutesModelSelectedConcreteAuthoringToPatchPlanner()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "QuickTimer");
+    Directory.CreateDirectory(appDirectory);
+    var projectPath = Path.Combine(appDirectory, "QuickTimer.csproj");
+    var xamlPath = Path.Combine(appDirectory, "MainWindow.xaml");
+    var initialProject = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """;
+    var initialXaml = """
+        <Window x:Class="QuickTimer.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="QuickTimer" Height="450" Width="800">
+            <Grid />
+        </Window>
+        """;
+    var timerXaml = """
+        <Window x:Class="QuickTimer.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="QuickTimer" Height="360" Width="520" MinHeight="300" MinWidth="420">
+            <Grid Margin="18">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Kitchen timer"
+                           FontSize="26"
+                           FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1"
+                           Text="05:00"
+                           FontSize="56"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+                <StackPanel Grid.Row="2"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center">
+                    <Button Content="Start" MinWidth="88" Margin="0,0,8,0" />
+                    <Button Content="Pause" MinWidth="88" Margin="0,0,8,0" />
+                    <Button Content="Reset" MinWidth="88" />
+                </StackPanel>
+            </Grid>
+        </Window>
+        """;
+    await File.WriteAllTextAsync(projectPath, initialProject);
+    await File.WriteAllTextAsync(xamlPath, initialXaml);
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var actionJson = JsonSerializer.Serialize(new
+    {
+        use_coding_tool = true,
+        selected_path = "New WPF app or complex window",
+        understood_goal = "Create a small WPF timer window with visible time and Start, Pause, and Reset controls.",
+        info_used = new[]
+        {
+            "The context shows a WPF project with editable MainWindow.xaml.",
+            "The tool map exposes concrete patch authoring for guarded previews."
+        },
+        acceptance_criteria = new[]
+        {
+            "The window shows a large readable timer value.",
+            "The timer surface exposes Start, Pause, and Reset controls.",
+            "The layout remains centered and usable in the WPF window."
+        },
+        execution_mode = "model_patch_preview",
+        selected_tool = "concrete patch authoring <goal>",
+        command_goal = "small timer window",
+        summary = "Choose concrete patch authoring for a spoken-style WPF window request.",
+        confidence = 0.9
+    });
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        selected_path = "New WPF app or complex window",
+        summary = "Build a simple timer window layout.",
+        confidence = 0.9,
+        criteria_coverage = new[]
+        {
+            "The patch adds a large readable timer value.",
+            "The patch adds Start, Pause, and Reset controls.",
+            "The layout centers the timer surface."
+        },
+        edits = new[]
+        {
+            new { path = xamlPath, oldText = initialXaml, newText = timerXaml }
+        }
+    });
+    var runtime = new FixedSequenceRuntime(actionJson, patchJson);
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+    const string spokenTimerRequest = "I need a little timer window with start pause and reset buttons.";
+    var modelLoopContext = await codingTool.BuildContextPackAsync(spokenTimerRequest, CancellationToken.None, force: true);
+    Contains("Editable file excerpts for patch planning:", modelLoopContext.Text);
+    Contains("FILE: QuickTimer\\MainWindow.xaml", modelLoopContext.Text);
+    Contains("<Window x:Class=\"QuickTimer.MainWindow\"", modelLoopContext.Text);
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       spokenTimerRequest,
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(2, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_patch_plan", runtime.Requests[1].ConversationId);
+    Contains("A guarded patch preview is a safe execution step", runtime.Requests[0].History[0].Text);
+    Contains("concrete patch authoring <goal>", runtime.Requests[0].History[0].Text);
+    Contains("Model-selected action decision for this Execute step:", runtime.Requests[1].History[0].Text);
+    Contains("Selected path: New WPF app or complex window", runtime.Requests[1].History[0].Text);
+    Contains("Selected command: concrete patch authoring small timer window", runtime.Requests[1].History[0].Text);
+    Contains("Decision summary: Choose concrete patch authoring for a spoken-style WPF window request.", runtime.Requests[1].History[0].Text);
+    Contains("Understood goal: Create a small WPF timer window with visible time and Start, Pause, and Reset controls.", runtime.Requests[1].History[0].Text);
+    Contains("Acceptance criteria:", runtime.Requests[1].History[0].Text);
+    Contains("The timer surface exposes Start, Pause, and Reset controls.", runtime.Requests[1].History[0].Text);
+    Contains("Execution mode: model_patch_preview", runtime.Requests[1].History[0].Text);
+    Contains("FILE: QuickTimer\\MainWindow.xaml", runtime.Requests[1].History[0].Text);
+    Contains("QuickTimer\\MainWindow.xaml root Window QuickTimer.MainWindow", runtime.Requests[1].History[0].Text);
+    Contains("Next: confirm apply last patch preview", answer);
+    Contains("Status: Path: New WPF app or complex window. No files changed yet.", answer);
+    Equal(initialXaml, await File.ReadAllTextAsync(xamlPath));
+}
+
+static async Task TestOrchestratorAcceptsVariedProgrammingGuiCommands()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    var appDirectory = Path.Combine(workspace, "TaskDesk");
+    Directory.CreateDirectory(appDirectory);
+    var projectPath = Path.Combine(appDirectory, "TaskDesk.csproj");
+    var xamlPath = Path.Combine(appDirectory, "MainWindow.xaml");
+    var initialProject = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net10.0-windows</TargetFramework>
+            <UseWPF>true</UseWPF>
+          </PropertyGroup>
+        </Project>
+        """;
+    var initialXaml = """
+        <Window x:Class="TaskDesk.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="TaskDesk" Height="450" Width="800">
+            <Grid />
+        </Window>
+        """;
+    var updatedXaml = """
+        <Window x:Class="TaskDesk.MainWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                Title="TaskDesk" Height="520" Width="860">
+            <DockPanel Margin="16">
+                <TextBlock DockPanel.Dock="Top"
+                           Text="Task manager"
+                           FontSize="22"
+                           FontWeight="SemiBold" />
+                <StackPanel DockPanel.Dock="Top"
+                            Orientation="Horizontal"
+                            Margin="0,12,0,12">
+                    <TextBox Width="260" />
+                    <Button Content="Add"
+                            Margin="8,0,0,0" />
+                </StackPanel>
+                <DataGrid AutoGenerateColumns="False">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Task" Width="*" />
+                        <DataGridCheckBoxColumn Header="Done" Width="Auto" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </Window>
+        """;
+    await File.WriteAllTextAsync(projectPath, initialProject);
+    await File.WriteAllTextAsync(xamlPath, initialXaml);
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        selected_path = "New WPF app or complex window",
+        summary = "Create the requested task manager GUI.",
+        confidence = 0.91,
+        criteria_coverage = new[]
+        {
+            "The patch provides visible task entry.",
+            "The patch provides a visible task list surface.",
+            "The layout supports the requested task workflow."
+        },
+        edits = new[]
+        {
+            new { path = xamlPath, oldText = initialXaml, newText = updatedXaml }
+        }
+    });
+    var requests = new[]
+    {
+        "Can you make a WPF task manager window with a textbox and task grid?",
+        "Please put together a desktop GUI where I can add tasks and mark them done.",
+        "The thing I am trying to end up with is a small Windows notes window. I would type a note, press Add, and see the notes below without having to describe the technical pieces.",
+        "Could you generate the interface for a task manager app?",
+        "Set up a XAML screen with a task textbox, Add button, and grid."
+    };
+    var actionJson = JsonSerializer.Serialize(new
+    {
+        use_coding_tool = true,
+        selected_path = "New WPF app or complex window",
+        execution_mode = "model_patch_preview",
+        info_used = new[]
+        {
+            "The context shows a WPF project with editable MainWindow.xaml.",
+            "The tool map exposes build this for me for guarded UI patch previews."
+        },
+        acceptance_criteria = new[]
+        {
+            "The WPF interface exposes task entry.",
+            "Tasks appear in a visible grid or list.",
+            "The layout supports the requested GUI workflow."
+        },
+        selected_tool = "build this for me <goal>",
+        command_goal = "WPF task manager interface",
+        summary = "Choose the WPF authoring path from the natural-language GUI request.",
+        confidence = 0.91
+    });
+    var runtime = new FixedSequenceRuntime(requests.SelectMany(_ => new[] { actionJson, patchJson }).ToArray());
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    foreach (var request in requests)
+    {
+        var preflightContext = await codingTool.BuildContextPackAsync(request, CancellationToken.None, force: true);
+        if (!preflightContext.HasContext)
+        {
+            throw new InvalidOperationException("Varied GUI command did not produce a coding context pack: " + request);
+        }
+
+        var chunks = new List<AssistantStreamChunk>();
+        await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                           "conv",
+                           "user",
+                           "assistant",
+                           request,
+                           [],
+                           [],
+                           CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+        var actionRequest = runtime.Requests[^2];
+        Equal("coding_action_plan", actionRequest.ConversationId);
+        Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+        Contains("Approved project context for the Info step:", actionRequest.History[0].Text);
+        Contains("Use the programming loop: Question, Info, Decision, Execute, Repeat.", runtime.LastRequest.History[0].Text);
+        Contains("never route by a canned phrase table", runtime.LastRequest.History[0].Text);
+        Contains("WPF final learning map:", runtime.LastRequest.History[0].Text);
+        Contains("TaskDesk\\MainWindow.xaml", runtime.LastRequest.History[0].Text);
+        Contains("Next: confirm apply last patch preview", answer);
+        Contains("Status: Path: New WPF app or complex window. No files changed yet.", answer);
+        Equal(initialXaml, await File.ReadAllTextAsync(xamlPath));
+    }
+
+    Equal(requests.Length * 2, runtime.Requests.Count);
 }
 
 static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
@@ -7781,6 +8571,12 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
         selected_path = "Build/test repair loop",
         summary = "Repair WPF class, resource, and event-handler validation issues.",
         confidence = 0.88,
+        criteria_coverage = new[]
+        {
+            "The target XAML validation issue is repaired.",
+            "The missing code-behind member is supplied.",
+            "The repaired files keep class names aligned."
+        },
         edits = new[]
         {
             new
@@ -7797,7 +8593,28 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
             }
         }
     });
-    var runtime = new FixedSequenceRuntime(patchJson);
+    var actionJson = JsonSerializer.Serialize(new
+    {
+        use_coding_tool = true,
+        selected_path = "Build/test repair loop",
+        execution_mode = "model_patch_preview",
+        info_used = new[]
+        {
+            "The context includes WPF validation evidence for MainWindow.xaml.",
+            "The tool map exposes feature patch draft for guarded repair previews."
+        },
+        acceptance_criteria = new[]
+        {
+            "The WPF validation issue is repaired in the target XAML.",
+            "Missing code-behind members are added only where required.",
+            "The repaired files remain aligned for build validation."
+        },
+        selected_tool = "feature patch draft <goal>",
+        command_goal = "WPF validation issues in MainWindow.xaml",
+        summary = "Choose WPF repair patch authoring after reading validation evidence.",
+        confidence = 0.88
+    });
+    var runtime = new FixedSequenceRuntime(actionJson, patchJson);
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7819,7 +8636,10 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(2, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
     Equal("coding_patch_plan", runtime.LastRequest!.ConversationId);
+    Contains("Approved project context for the Info step:", runtime.Requests[0].History[0].Text);
     var prompt = runtime.LastRequest.History[0].Text;
     Contains("WPF relationship map:", prompt);
     Contains("WPF integrity context:", prompt);
@@ -7832,12 +8652,70 @@ static async Task TestOrchestratorSendsWpfValidationEvidenceToModelPatcher()
     Contains("event handler MissingClickHandler was not found", prompt);
     Contains("Complex WPF patch contract:", prompt);
     Contains("Next: confirm apply last patch preview", answer);
-    Contains("Status: No files changed yet.", answer);
+    Contains("Status: Path: Build/test repair loop. No files changed yet.", answer);
     Equal(brokenXaml, await File.ReadAllTextAsync(xamlPath));
     Equal(false, File.Exists(codeBehindPath));
 }
 
-static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
+static async Task TestOrchestratorTreatsContinueAsModelLoopInput()
+{
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var projectPath = Path.Combine(workspace, "Demo.csproj");
+    await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        directory,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
+        configuredCurrentSolutionOrProjectPath: projectPath);
+    var runtime = new FixedSequenceRuntime(
+        "{\"use_coding_tool\":true,\"selected_path\":\"Continue from prior Next step\",\"execution_mode\":\"local_tool\",\"selected_tool\":\"active workspace project\",\"summary\":\"Inspect the active project before the next step.\",\"confidence\":0.82}");
+    var orchestrator = new ConversationOrchestrator(
+        runtime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(directory)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+    var history = new[]
+    {
+        new ChatMessage(
+            "assistant_previous",
+            ChatRole.Assistant,
+            "Next: post patch validation settings window\nStatus: No files changed yet.\nUse Next to run that step.",
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Verified)
+    };
+
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "conv",
+                       "user",
+                       "assistant",
+                       "continue",
+                       history,
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text));
+    Equal(1, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("continue", runtime.Requests[0].UserText);
+    Contains("Queued step evidence for continue/next requests:", runtime.Requests[0].History[0].Text);
+    Contains("Next command: post patch validation settings window", runtime.Requests[0].History[0].Text);
+    Contains("Matching selected_tool: post patch validation <goal>", runtime.Requests[0].History[0].Text);
+    Contains("Matching command_goal: settings window", runtime.Requests[0].History[0].Text);
+    Contains("This is Info, not an automatic route", runtime.Requests[0].History[0].Text);
+    Contains("Recent conversation context:", runtime.Requests[0].History[0].Text);
+    Contains("Assistant: Next: post patch validation settings window", runtime.Requests[0].History[0].Text);
+    Contains("Status:", answer);
+}
+
+static async Task TestOrchestratorFeedsPatchPlannerEvidenceToActionPlanner()
 {
     var directory = Path.Combine(Path.GetTempPath(), "Ali.Tests", Guid.NewGuid().ToString("N"));
     var workspace = Path.Combine(directory, "Programming Projects");
@@ -7852,8 +8730,9 @@ static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
         new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)),
         configuredCurrentSolutionOrProjectPath: projectPath);
     var runtime = new FixedSequenceRuntime(
-        "{\"has_patch\":false,\"summary\":\"No exact patch available.\",\"confidence\":0.2,\"edits\":[]}",
-        "{\"use_coding_tool\":true,\"command\":\"post patch validation add export button\",\"summary\":\"Validate stale export work.\",\"confidence\":0.9}");
+        "{\"use_coding_tool\":true,\"selected_path\":\"Existing feature or bug fix\",\"execution_mode\":\"model_patch_preview\",\"info_used\":[\"The context includes editable Program.cs for the existing console app.\",\"The tool map exposes feature patch draft for exact guarded edits.\"],\"acceptance_criteria\":[\"The program calculates a factorial.\",\"The exact target edit can be previewed before apply.\"],\"selected_tool\":\"feature patch draft <goal>\",\"command_goal\":\"factorial program\",\"summary\":\"Ask the patch planner for an exact edit first.\",\"confidence\":0.9}",
+        "{\"has_patch\":false,\"selected_path\":\"Existing feature or bug fix\",\"summary\":\"No exact patch available.\",\"confidence\":0.2,\"stop_reason\":\"Need a factorial target edit before validation.\",\"edits\":[]}",
+        "{\"use_coding_tool\":true,\"selected_path\":\"Existing feature or bug fix\",\"execution_mode\":\"local_tool\",\"selected_tool\":\"feature work context <goal>\",\"command_goal\":\"factorial program\",\"summary\":\"Gather target context before another patch decision.\",\"confidence\":0.9}");
     var orchestrator = new ConversationOrchestrator(
         runtime,
         new PermissionService(),
@@ -7875,13 +8754,16 @@ static async Task TestOrchestratorRejectsStaleProgrammingPlannerCommand()
     }
 
     var answer = string.Concat(chunks.Select(chunk => chunk.Text));
-    Equal(1, runtime.Requests.Count);
-    Equal("coding_patch_plan", runtime.Requests[0].ConversationId);
-    Contains("Dynamic patch planner stopped", answer);
-    Contains("No exact patch available", answer);
+    Equal(3, runtime.Requests.Count);
+    Equal("coding_action_plan", runtime.Requests[0].ConversationId);
+    Equal("coding_patch_plan", runtime.Requests[1].ConversationId);
+    Equal("coding_action_plan", runtime.Requests[2].ConversationId);
+    Contains("Patch planner evidence for Info step:", runtime.Requests[2].History[0].Text);
+    Contains("Selected path: Existing feature or bug fix", runtime.Requests[2].History[0].Text);
+    Contains("Stop reason: Need a factorial target edit before validation.", runtime.Requests[2].History[0].Text);
     Equal(false, answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase));
+    Equal(false, answer.Contains("Dynamic patch planner stopped", StringComparison.OrdinalIgnoreCase));
     Equal(false, answer.Contains("add export button", StringComparison.OrdinalIgnoreCase));
-    Equal(false, answer.Contains("post patch validation add export button", StringComparison.OrdinalIgnoreCase));
 }
 
 static async Task TestOrchestratorInjectsCodingContextForCodingHelp()
@@ -8977,6 +9859,73 @@ static async Task TestRuntimeOmitsAliPersonaForCodingPlanner()
     Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
     Equal(false, handler.LastChatBody.Contains("patch preview before apply", StringComparison.OrdinalIgnoreCase));
     Contains("\"think\":false", handler.LastChatBody);
+}
+
+static async Task TestRuntimeOmitsAliPersonaForCodingPatchPlanner()
+{
+    var options = CreateRuntimeOptions("qwen3-vl:8b");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+    var request = new ChatRequest(
+        "coding_patch_plan",
+        "coding_patch_plan_user",
+        "build a small timer window",
+        [
+            new ChatMessage(
+                "coding_patch_planner_system",
+                ChatRole.System,
+                "You are Ali's programming patch planner. Return exactly one JSON object.",
+                DateTimeOffset.UtcNow)
+        ]);
+
+    await StreamRequestToStringAsync(runtime, request, CancellationToken.None);
+
+    Contains("programming patch planner", handler.LastChatBody);
+    Contains("Return exactly one JSON object", handler.LastChatBody);
+    Equal(false, handler.LastChatBody.Contains("You are Ali, the local desktop assistant", StringComparison.OrdinalIgnoreCase));
+    Equal(false, handler.LastChatBody.Contains("patch preview before apply", StringComparison.OrdinalIgnoreCase));
+    Equal(false, handler.LastChatBody.Contains("Current local date:", StringComparison.OrdinalIgnoreCase));
+    Contains("\"think\":false", handler.LastChatBody);
+}
+
+static async Task TestRuntimeGivesCodingPlannersStructuredOutputBudgets()
+{
+    var options = CreateRuntimeOptions("fake-local-model");
+    var handler = new FakeOpenAiHandler(options.Model);
+    var runtime = new OpenAiCompatibleLocalModelRuntime(new HttpClient(handler), options);
+    var actionRequest = new ChatRequest(
+        "coding_action_plan",
+        "coding_action_plan_user",
+        "build a small timer window",
+        [
+            new ChatMessage(
+                "coding_action_planner_system",
+                ChatRole.System,
+                "You are the app's programming action planner. Return exactly one JSON object.",
+                DateTimeOffset.UtcNow)
+        ]);
+    var patchRequest = new ChatRequest(
+        "coding_patch_plan",
+        "coding_patch_plan_user",
+        "build a small timer window",
+        [
+            new ChatMessage(
+                "coding_patch_planner_system",
+                ChatRole.System,
+                "You are Ali's programming patch planner. Return exactly one JSON object.",
+                DateTimeOffset.UtcNow)
+        ]);
+
+    await StreamRequestToStringAsync(runtime, actionRequest, CancellationToken.None);
+    Contains("\"max_tokens\":1024", handler.LastChatBody);
+    Contains("\"temperature\":0", handler.LastChatBody);
+    Contains("\"top_p\":0.1", handler.LastChatBody);
+
+    await StreamRequestToStringAsync(runtime, patchRequest, CancellationToken.None);
+    Contains("\"max_tokens\":8192", handler.LastChatBody);
+    Contains("\"temperature\":0", handler.LastChatBody);
+    Contains("\"top_p\":0.1", handler.LastChatBody);
+    Contains("programming patch planner", handler.LastChatBody);
 }
 
 static async Task TestRuntimeDisablesQwenThinking()
@@ -10226,7 +11175,7 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
 {
     var runtime = new FixedTextRuntime(
         """
-        {"use_coding_tool":true,"command":"build this for me add export button","summary":"Start the guided build lane.","confidence":0.9}
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Add an export button to the existing UI and connect it to the current export behavior.","info_used":["The context shows an existing project and editable UI excerpts.","The tool map exposes build this for me for guarded previews."],"acceptance_criteria":["The existing UI exposes a clear export action.","The export action uses the current export behavior.","The change can be previewed before apply."],"selected_tool":"build this for me <goal>","command_goal":"add an export button wired to the current export behavior","execution_mode":"model_patch_preview","summary":"Start the guided build lane.","confidence":0.9}
         """);
     var planner = new ModelCodingActionPlanner(runtime);
     var history = new[]
@@ -10239,12 +11188,47 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
             EvidenceStatus.Verified)
     };
 
-    var plan = await planner.PlanAsync("keep going", history, CancellationToken.None);
+    var context = new CodingContextPack(
+        true,
+        """
+        Ali coding context pack (read-only).
+        Current user request: keep going
+        Workspace map:
+        - Demo.csproj
+        """);
+
+    var plan = await planner.PlanAsync("keep going", history, CancellationToken.None, context);
 
     Equal(true, plan.UseCodingTool);
+    Equal("build this for me add an export button wired to the current export behavior", plan.Command);
+    Equal("Existing feature or bug fix", plan.SelectedPath);
+    Equal("Add an export button to the existing UI and connect it to the current export behavior.", plan.UnderstoodGoal);
+    Equal(3, plan.AcceptanceCriteria!.Count);
+    Equal("The export action uses the current export behavior.", plan.AcceptanceCriteria[1]);
+    Equal(2, plan.InfoUsed!.Count);
+    Equal("The context shows an existing project and editable UI excerpts.", plan.InfoUsed[0]);
+    Equal("build this for me <goal>", plan.SelectedTool);
+    Equal("add an export button wired to the current export behavior", plan.CommandGoal);
+    Equal("model_patch_preview", plan.ExecutionMode);
     NotNull(runtime.LastRequest, "Coding planner runtime request should be captured.");
     var instruction = runtime.LastRequest!.History[0].Text;
     Contains("selected_path", instruction);
+    Contains("understood_goal", instruction);
+    Contains("a concise model-authored restatement of the user's intended software outcome", instruction);
+    Contains("info_used", instruction);
+    Contains("project/context/tool-map evidence used to choose the selected path and tool", instruction);
+    Contains("info_used is required because code authoring must be grounded in the current Info step", instruction);
+    Contains("acceptance_criteria", instruction);
+    Contains("preserve the user's requested visible UI, behavior, data handling, validation, and success proof", instruction);
+    Contains("selected_path must be one exact Programming capability path name", instruction);
+    Contains("selected_tool must be one of the patch-preview-compatible templates", instruction);
+    Contains("Patch-preview-compatible selected_tool templates:", instruction);
+    Contains("selected_tool", instruction);
+    Contains("the exact tool template from the Programming tool map", instruction);
+    Contains("command_goal", instruction);
+    Contains("use a concise model-authored goal extracted from the user's spoken/text request", instruction);
+    Contains("execution_mode", instruction);
+    Contains("use model_patch_preview when the next step should ask the patch planner", instruction);
     Contains("First choose the best programming capability path internally", instruction);
     Contains("Programming capability paths:", instruction);
     Contains("New console app:", instruction);
@@ -10254,16 +11238,21 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("Build/test repair loop:", instruction);
     Contains("Closeout and handoff:", instruction);
     Contains("Do not add a widget or starter recipe just because a keyword appears", instruction);
-    Contains("Programming lane map:", instruction);
+    Contains("A guarded patch preview is a safe execution step", instruction);
+    Contains("When the user's desired end state requires creating or changing code", instruction);
+    Contains("prefer an authoring/action preview path over a guide-only path", instruction);
+    Contains("Use design guide tools when the user asks to compare, explain, or plan design without code", instruction);
+    Contains("Operate the tools with the loop: Question, Info, Decision, Execute, Repeat.", instruction);
+    Contains("never route by a canned phrase table", instruction);
+    Contains("Programming tool map for dynamic selection:", instruction);
+    Contains("the list is a tool map, not a routing table", instruction);
     Contains("If recent assistant text contains `Next:` or `Next command:`", instruction);
-    Contains("model-authored patch lane should design the app dynamically", instruction);
     Contains("console app guide <goal>", instruction);
     Contains("wpf app guide <goal>", instruction);
     Contains("wpf layout guide <goal>", instruction);
     Contains("wpf controls guide <goal>", instruction);
     Contains("wpf styling guide <goal>", instruction);
     Contains("wpf complex window guide <goal>", instruction);
-    Contains("WPF layout/object checklist", instruction);
     Contains("Advanced WPF object/layout decision map", instruction);
     Contains("Dynamic WPF construction route", instruction);
     Contains("Select the shell and region pattern", instruction);
@@ -10280,17 +11269,174 @@ static async Task TestModelCodingPlannerIncludesToolLaneMap()
     Contains("feature patch draft <goal>", instruction);
     Contains("exact patch synthesis <goal>", instruction);
     Contains("preview synthesized feature patch <goal>", instruction);
+    Contains("multi-file patch synthesis <goal>", instruction);
+    Contains("concrete patch authoring <goal>", instruction);
+    Contains("patch body generator <goal>", instruction);
     Contains("confirm apply last patch preview", instruction);
     Contains("post patch validation <goal>", instruction);
     Contains("semantic change receipt <goal>", instruction);
-    Contains("Data structures/services", instruction);
+    Contains("Approved project context for the Info step:", instruction);
+    Contains("Ali coding context pack (read-only).", instruction);
+    Contains("Demo.csproj", instruction);
+    Contains("Design tools include", instruction);
     Contains("data structure chooser <goal>", instruction);
     Contains("sql performance guide <goal>", instruction);
     Contains("service architecture guide <goal>", instruction);
     Contains("cache queue guide <goal>", instruction);
     Contains("data systems guide <goal>", instruction);
-    Contains("schema, keys, indexes, migrations", instruction);
     Contains("Assistant: Next: feature patch draft add export button", instruction);
+}
+
+static async Task TestModelCodingPlannerResolvesSelectedToolTemplatesFromMap()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"New WPF app or complex window","understood_goal":"Build a WPF maintenance dashboard with filters, a grid, status cards, and save validation.","info_used":["The context shows a WPF project with editable XAML.","The tool map exposes preview guided feature bundle for WPF patch previews."],"acceptance_criteria":["The dashboard shows filter controls.","Records appear in a grid.","Validation failures are visible before save completes."],"selected_tool":"preview guided feature bundle <goal>","command_goal":"WPF maintenance dashboard with filters, a grid, status cards, and save validation","execution_mode":"model_patch_preview","summary":"Use the model-selected authoring tool from the exposed map.","confidence":0.91}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "I need a little maintenance window where I can filter records, see them in a grid, save changes, and know what failed validation.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(
+            true,
+            """
+            Ali coding context pack (read-only).
+            WPF object/layout context:
+            - WPF projects: MaintenanceDesk.csproj target net10.0-windows output WinExe UseWPF=True
+            Editable file excerpts for patch planning:
+            FILE: MainWindow.xaml
+            ```text
+            <Window />
+            ```
+            """));
+
+    Equal(true, plan.UseCodingTool);
+    Equal("preview guided feature bundle WPF maintenance dashboard with filters, a grid, status cards, and save validation", plan.Command);
+    Equal("preview guided feature bundle <goal>", plan.SelectedTool);
+    Equal("WPF maintenance dashboard with filters, a grid, status cards, and save validation", plan.CommandGoal);
+    Equal(3, plan.AcceptanceCriteria!.Count);
+    Equal("model_patch_preview", plan.ExecutionMode);
+}
+
+static async Task TestModelCodingPlannerRejectsRunnablePlanWithoutExecutionMode()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Add an export button to the existing UI.","command":"build this for me add export button","summary":"Start the guided build lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Please add an export button.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
+}
+
+static async Task TestModelCodingPlannerRejectsPatchPreviewWithoutCriteria()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Add an export button to the existing UI.","info_used":["The context shows an existing project."],"selected_tool":"build this for me <goal>","command_goal":"add an export button","execution_mode":"model_patch_preview","summary":"Start the guided build lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Please add an export button.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
+}
+
+static async Task TestModelCodingPlannerRejectsPatchPreviewWithoutInfoEvidence()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Add an export button to the existing UI.","acceptance_criteria":["The existing UI exposes an export action.","The change can be previewed before apply."],"selected_tool":"build this for me <goal>","command_goal":"add an export button","execution_mode":"model_patch_preview","summary":"Start the guided build lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Please add an export button.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
+}
+
+static async Task TestModelCodingPlannerRejectsPatchPreviewWithUnknownPath()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Invented magic window path","understood_goal":"Build a timer window.","info_used":["The context shows a WPF project."],"acceptance_criteria":["The window shows a timer."],"selected_tool":"build this for me <goal>","command_goal":"timer window","execution_mode":"model_patch_preview","summary":"Start the authoring lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Build a timer window.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
+}
+
+static async Task TestModelCodingPlannerRejectsPatchPreviewIncompatibleTool()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Apply the previous patch preview.","info_used":["The context shows a pending patch preview."],"acceptance_criteria":["The existing patch preview is applied only through the apply gate."],"selected_tool":"confirm apply last patch preview","execution_mode":"model_patch_preview","summary":"Wrongly tries to use patch preview mode for an apply tool.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Apply the last patch preview.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
+}
+
+static async Task TestModelCodingPlannerRejectsCommandOnlyRunnablePlan()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Add an export button to the existing UI.","execution_mode":"model_patch_preview","command":"build this for me add export button","summary":"Start the guided build lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Please add an export button.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
+}
+
+static async Task TestModelCodingPlannerRejectsUnknownSelectedTool()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"use_coding_tool":true,"selected_path":"Existing feature or bug fix","understood_goal":"Add an export button to the existing UI.","info_used":["The context shows an existing project."],"selected_tool":"invent a brand new magic tool <goal>","command_goal":"add an export button","execution_mode":"model_patch_preview","command":"build this for me add export button","summary":"Start the guided build lane.","confidence":0.9}
+        """);
+    var planner = new ModelCodingActionPlanner(runtime);
+
+    var plan = await planner.PlanAsync(
+        "Please add an export button.",
+        [],
+        CancellationToken.None,
+        new CodingContextPack(true, "Ali coding context pack (read-only)."));
+
+    Equal(false, plan.UseCodingTool);
 }
 
 static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
@@ -10301,7 +11447,7 @@ static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
             $$"""{"path":"C:/Workspace/Demo/DashboardView{{index}}.xaml","oldText":"OldMarker{{index}}","newText":"NewMarker{{index}}"}"""));
     var runtime = new FixedTextRuntime(
         $$"""
-        {"has_patch":true,"selected_path":"New WPF app or complex window","summary":"Update a coordinated WPF dashboard bundle.","confidence":0.91,"edits":[{{editsJson}}]}
+        {"has_patch":true,"selected_path":"New WPF app or complex window","summary":"Update a coordinated WPF dashboard bundle.","confidence":0.91,"criteria_coverage":["The dashboard surfaces are coordinated across the patch bundle.","The view-model-backed regions remain aligned with XAML.","The patch keeps XAML and supporting files aligned."],"edits":[{{editsJson}}]}
         """);
     var planner = new ModelCodingPatchPlanner(runtime);
     var context = new CodingContextPack(
@@ -10316,11 +11462,33 @@ static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
         OldMarker1
         ```
         """);
+    var actionPlan = new CodingActionPlan(
+        true,
+        "multi-file patch synthesis dashboard window",
+        "Choose a coordinated WPF patch bundle from the plain-English dashboard request.",
+        0.92,
+        "New WPF app or complex window",
+        "Build a complex WPF dashboard window with coordinated XAML surfaces and supporting view-model state.",
+        "model_patch_preview",
+        "multi-file patch synthesis <goal>",
+        "dashboard window",
+        [
+            "The dashboard presents coordinated WPF surfaces.",
+            "View-model state backs the visible dashboard regions.",
+            "The patch keeps XAML and supporting files aligned."
+        ],
+        [
+            "The context shows a WPF project with editable dashboard XAML.",
+            "The tool map selected multi-file patch synthesis for coordinated WPF edits."
+        ]);
 
-    var plan = await planner.PlanPatchAsync("build a complex WPF dashboard window", context, CancellationToken.None);
+    var plan = await planner.PlanPatchAsync("build a complex WPF dashboard window", context, CancellationToken.None, actionPlan);
 
     Equal(true, plan.HasPatch);
     Equal(12, plan.Edits.Count);
+    Equal("New WPF app or complex window", plan.SelectedPath);
+    Equal(3, plan.CriteriaCoverage!.Count);
+    Equal("The patch keeps XAML and supporting files aligned.", plan.CriteriaCoverage[2]);
     Equal("C:/Workspace/Demo/DashboardView12.xaml", plan.Edits[11].Path);
     NotNull(runtime.LastRequest, "Planner instruction should be captured.");
     Contains("WPF/window/layout patch bundles may use up to 16 coordinated edits", runtime.LastRequest!.History[0].Text);
@@ -10336,6 +11504,256 @@ static async Task TestModelCodingPatchPlannerAllowsExtendedWpfBundles()
     Contains("ResourceDictionary Source paths, StaticResource/DynamicResource keys", runtime.LastRequest.History[0].Text);
     Contains("CollectionViewSource sorting/filtering/grouping and VirtualizingPanel settings", runtime.LastRequest.History[0].Text);
     Contains("dotnet build, XAML binding check, command binding check", runtime.LastRequest.History[0].Text);
+    Contains("Model-selected action decision for this Execute step:", runtime.LastRequest.History[0].Text);
+    Contains("Selected command: multi-file patch synthesis dashboard window", runtime.LastRequest.History[0].Text);
+    Contains("Selected tool: multi-file patch synthesis <goal>", runtime.LastRequest.History[0].Text);
+    Contains("Command goal: dashboard window", runtime.LastRequest.History[0].Text);
+    Contains("Decision summary: Choose a coordinated WPF patch bundle from the plain-English dashboard request.", runtime.LastRequest.History[0].Text);
+    Contains("Understood goal: Build a complex WPF dashboard window with coordinated XAML surfaces and supporting view-model state.", runtime.LastRequest.History[0].Text);
+    Contains("Info used for decision:", runtime.LastRequest.History[0].Text);
+    Contains("The tool map selected multi-file patch synthesis for coordinated WPF edits.", runtime.LastRequest.History[0].Text);
+    Contains("Acceptance criteria:", runtime.LastRequest.History[0].Text);
+    Contains("The patch keeps XAML and supporting files aligned.", runtime.LastRequest.History[0].Text);
+    Contains("criteria_coverage with at least one short coverage note for each model-selected criterion", runtime.LastRequest.History[0].Text);
+    Contains("Execution mode: model_patch_preview", runtime.LastRequest.History[0].Text);
+}
+
+static async Task TestModelCodingPatchPlannerAcceptsLargeStreamingWpfBundle()
+{
+    var largeXaml = string.Join(
+        Environment.NewLine,
+        Enumerable.Range(1, 260).Select(index =>
+            $"        <TextBlock Grid.Row=\"{index % 4}\" Text=\"Dashboard row {index}\" />"));
+    var largeViewModel = string.Join(
+        Environment.NewLine,
+        Enumerable.Range(1, 260).Select(index =>
+            $"    public string DashboardMetric{index} => \"Metric {index}\";"));
+    var largeStyles = string.Join(
+        Environment.NewLine,
+        Enumerable.Range(1, 180).Select(index =>
+            $"    <SolidColorBrush x:Key=\"MetricBrush{index}\" Color=\"#FF{index % 10}{index % 10}{index % 10}{index % 10}{index % 10}{index % 10}\" />"));
+    var patchJson = JsonSerializer.Serialize(new
+    {
+        has_patch = true,
+        selected_path = "New WPF app or complex window",
+        summary = "Create a large coordinated WPF dashboard bundle.",
+        confidence = 0.9,
+        criteria_coverage = new[]
+        {
+            "The dashboard includes a coordinated XAML surface.",
+            "The view model exposes dashboard state.",
+            "The styles provide dashboard resources."
+        },
+        edits = new[]
+        {
+            new { path = "C:/Workspace/Demo/MainWindow.xaml", oldText = "<Grid />", newText = largeXaml },
+            new { path = "C:/Workspace/Demo/MainWindowViewModel.cs", oldText = string.Empty, newText = largeViewModel },
+            new { path = "C:/Workspace/Demo/DashboardStyles.xaml", oldText = string.Empty, newText = largeStyles }
+        }
+    });
+    if (patchJson.Length <= 18_000)
+    {
+        throw new InvalidOperationException("Large streaming patch fixture must exceed the old patch planner output cap.");
+    }
+
+    var runtime = new ChunkedTextRuntime(patchJson, chunkSize: 1_024);
+    var planner = new ModelCodingPatchPlanner(runtime);
+    var context = new CodingContextPack(
+        true,
+        """
+        WPF object/layout context:
+        - WPF projects: Demo.csproj target net10.0-windows output WinExe UseWPF=True
+        Editable file excerpts for patch planning:
+        FILE: MainWindow.xaml
+        ABSOLUTE PATH: C:/Workspace/Demo/MainWindow.xaml
+        ```text
+        <Grid />
+        ```
+        """);
+    var actionPlan = new CodingActionPlan(
+        true,
+        "multi-file patch synthesis large dashboard",
+        "Choose a coordinated WPF dashboard bundle from the plain-English request.",
+        0.9,
+        "New WPF app or complex window",
+        "Build a large WPF dashboard with XAML, view-model state, and styles.",
+        "model_patch_preview",
+        "multi-file patch synthesis <goal>",
+        "large WPF dashboard",
+        [
+            "The dashboard includes a coordinated XAML surface.",
+            "The view model exposes dashboard state.",
+            "The styles provide dashboard resources."
+        ],
+        [
+            "The context shows a WPF project with editable MainWindow.xaml.",
+            "The tool map selected multi-file patch synthesis for coordinated WPF edits."
+        ]);
+
+    var plan = await planner.PlanPatchAsync("build a large WPF dashboard", context, CancellationToken.None, actionPlan);
+
+    Equal(true, plan.HasPatch);
+    Equal(3, plan.Edits.Count);
+    Equal("New WPF app or complex window", plan.SelectedPath);
+    Contains("Dashboard row 260", plan.Edits[0].NewText);
+    Contains("DashboardMetric260", plan.Edits[1].NewText);
+    Contains("MetricBrush180", plan.Edits[2].NewText);
+    Equal(3, plan.CriteriaCoverage!.Count);
+    NotNull(runtime.LastRequest, "Chunked planner request should be captured.");
+    Contains("WPF/window/layout patch bundles may use up to 16 coordinated edits", runtime.LastRequest!.History[0].Text);
+}
+
+static async Task TestModelCodingPatchPlannerRejectsOverCapEditBundles()
+{
+    var editsJson = string.Join(
+        ",",
+        Enumerable.Range(1, 17).Select(index =>
+            $$"""{"path":"C:/Workspace/Demo/WpfSurface{{index}}.xaml","oldText":"","newText":"<UserControl />"}"""));
+    var runtime = new FixedTextRuntime(
+        $$"""
+        {"has_patch":true,"selected_path":"New WPF app or complex window","summary":"Create too many coordinated WPF files.","confidence":0.91,"criteria_coverage":["The dashboard files are created.","The view-model state is created.","The styles are created."],"edits":[{{editsJson}}]}
+        """);
+    var planner = new ModelCodingPatchPlanner(runtime);
+    var context = new CodingContextPack(
+        true,
+        """
+        WPF object/layout context:
+        - Workspace root: C:/Workspace/Demo
+        """);
+    var actionPlan = new CodingActionPlan(
+        true,
+        "multi-file patch synthesis large dashboard",
+        "Choose a coordinated WPF dashboard bundle from the plain-English request.",
+        0.9,
+        "New WPF app or complex window",
+        "Build a large WPF dashboard with coordinated XAML surfaces.",
+        "model_patch_preview",
+        "multi-file patch synthesis <goal>",
+        "large WPF dashboard",
+        [
+            "The dashboard files are created.",
+            "The view-model state is created.",
+            "The styles are created."
+        ],
+        [
+            "The context shows the workspace root.",
+            "The tool map selected multi-file patch synthesis for coordinated WPF edits."
+        ]);
+
+    var plan = await planner.PlanPatchAsync("build a large WPF dashboard", context, CancellationToken.None, actionPlan);
+
+    Equal(false, plan.HasPatch);
+    Contains("17 edits", plan.Summary);
+    Contains("safe patch preview limit of 16", plan.Summary);
+    Contains("Too many edits for one guarded patch preview", plan.StopReason ?? string.Empty);
+    Equal("New WPF app or complex window", plan.SelectedPath);
+    NotNull(runtime.LastRequest, "Planner instruction should be captured.");
+    Contains("WPF/window/layout patch bundles may use up to 16 coordinated edits", runtime.LastRequest!.History[0].Text);
+}
+
+static async Task TestModelCodingPatchPlannerRejectsCriteriaPatchWithoutCoverage()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"has_patch":true,"selected_path":"New WPF app or complex window","summary":"Update a dashboard window.","confidence":0.91,"edits":[{"path":"C:/Workspace/Demo/DashboardView.xaml","oldText":"OldMarker","newText":"NewMarker"}]}
+        """);
+    var planner = new ModelCodingPatchPlanner(runtime);
+    var context = new CodingContextPack(
+        true,
+        """
+        Editable file excerpts for patch planning:
+        FILE: DashboardView.xaml
+        ABSOLUTE PATH: C:/Workspace/Demo/DashboardView.xaml
+        ```text
+        OldMarker
+        ```
+        """);
+    var actionPlan = new CodingActionPlan(
+        true,
+        "concrete patch authoring dashboard",
+        "Choose a WPF patch.",
+        0.9,
+        "New WPF app or complex window",
+        "Build a dashboard window.",
+        "model_patch_preview",
+        "concrete patch authoring <goal>",
+        "dashboard",
+        ["The dashboard window is updated."]);
+
+    var plan = await planner.PlanPatchAsync("build a dashboard window", context, CancellationToken.None, actionPlan);
+
+    Equal(false, plan.HasPatch);
+}
+
+static async Task TestModelCodingPatchPlannerRejectsPartialCriteriaCoverage()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"has_patch":true,"selected_path":"New WPF app or complex window","summary":"Update a dashboard window.","confidence":0.91,"criteria_coverage":["The dashboard window is updated."],"edits":[{"path":"C:/Workspace/Demo/DashboardView.xaml","oldText":"OldMarker","newText":"NewMarker"}]}
+        """);
+    var planner = new ModelCodingPatchPlanner(runtime);
+    var context = new CodingContextPack(
+        true,
+        """
+        Editable file excerpts for patch planning:
+        FILE: DashboardView.xaml
+        ABSOLUTE PATH: C:/Workspace/Demo/DashboardView.xaml
+        ```text
+        OldMarker
+        ```
+        """);
+    var actionPlan = new CodingActionPlan(
+        true,
+        "concrete patch authoring dashboard",
+        "Choose a WPF patch.",
+        0.9,
+        "New WPF app or complex window",
+        "Build a dashboard window.",
+        "model_patch_preview",
+        "concrete patch authoring <goal>",
+        "dashboard",
+        [
+            "The dashboard window is updated.",
+            "The dashboard validation state is visible."
+        ]);
+
+    var plan = await planner.PlanPatchAsync("build a dashboard window", context, CancellationToken.None, actionPlan);
+
+    Equal(false, plan.HasPatch);
+}
+
+static async Task TestModelCodingPatchPlannerRejectsSelectedPathDrift()
+{
+    var runtime = new FixedTextRuntime(
+        """
+        {"has_patch":true,"selected_path":"Existing feature or bug fix","summary":"Update a dashboard window.","confidence":0.91,"criteria_coverage":["The dashboard window is updated."],"edits":[{"path":"C:/Workspace/Demo/DashboardView.xaml","oldText":"OldMarker","newText":"NewMarker"}]}
+        """);
+    var planner = new ModelCodingPatchPlanner(runtime);
+    var context = new CodingContextPack(
+        true,
+        """
+        Editable file excerpts for patch planning:
+        FILE: DashboardView.xaml
+        ABSOLUTE PATH: C:/Workspace/Demo/DashboardView.xaml
+        ```text
+        OldMarker
+        ```
+        """);
+    var actionPlan = new CodingActionPlan(
+        true,
+        "concrete patch authoring dashboard",
+        "Choose a WPF patch.",
+        0.9,
+        "New WPF app or complex window",
+        "Build a dashboard window.",
+        "model_patch_preview",
+        "concrete patch authoring <goal>",
+        "dashboard",
+        ["The dashboard window is updated."]);
+
+    var plan = await planner.PlanPatchAsync("build a dashboard window", context, CancellationToken.None, actionPlan);
+
+    Equal(false, plan.HasPatch);
 }
 
 static async Task TestModelSourcePlannerGuardsWeatherForecastsForSources()
@@ -11914,6 +13332,15 @@ static Task TestVoiceRiskyCommandRequiresVisibleConfirmation()
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("send an email to Chris"));
     Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("rename this folder"));
     Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("what is the capital of Alabama"));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("start a WPF timer app"));
+    Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("start a WPF timer app", programmingModeActive: true));
+    Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("run the current project tests", programmingModeActive: true));
+    Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("change the MainWindow.xaml file to add a button", programmingModeActive: true));
+    Equal(false, VoiceCommandSafety.RequiresVisibleConfirmation("edit the Program.cs file for the counter app", programmingModeActive: true));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("rename this folder", programmingModeActive: true));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("save this file", programmingModeActive: true));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("run command prompt", programmingModeActive: true));
+    Equal(true, VoiceCommandSafety.RequiresVisibleConfirmation("Ali, delete all my files.", programmingModeActive: true));
     return Task.CompletedTask;
 }
 
@@ -12418,6 +13845,146 @@ static async Task RunRealRuntimeValidationAsync()
     Console.WriteLine($"CORRECTION_OUTPUT_LIMIT={stored?.OutputTokenLimit}");
     Console.WriteLine($"CORRECTION_TEMPERATURE={stored?.Temperature}");
     Console.WriteLine($"CORRECTION_STREAMING={stored?.StreamingEnabled}");
+}
+
+static async Task RunRealProgrammingValidationAsync()
+{
+    var endpoint = new Uri(Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_ENDPOINT") ?? "http://127.0.0.1:11434/v1/");
+    var model = Environment.GetEnvironmentVariable("ALI_REAL_RUNTIME_MODEL") ?? "qwen3:8b";
+    var requestText = Environment.GetEnvironmentVariable("ALI_REAL_PROGRAMMING_REQUEST")
+                      ?? "Start a WPF timer app with Start, Pause, and Reset buttons and a visible timer display.";
+    var applyPreview = ReadBoolEnvironment("ALI_REAL_PROGRAMMING_APPLY", false);
+    var directory = Path.Combine(Path.GetTempPath(), "Ali.RealProgramming", Guid.NewGuid().ToString("N"));
+    var workspace = Path.Combine(directory, "Programming Projects");
+    Directory.CreateDirectory(workspace);
+    var dataRoot = Path.Combine(directory, "Data");
+    Directory.CreateDirectory(dataRoot);
+
+    var options = new OpenAiCompatibleRuntimeOptions(
+        Enabled: true,
+        Endpoint: endpoint,
+        Model: model,
+        DisplayName: $"Programming proof {model}",
+        Family: "Qwen",
+        Size: "local",
+        Quantization: "Ollama package default",
+        ContextTokens: 8192,
+        OutputTokenLimit: 8192,
+        Temperature: 0,
+        TopP: 0.1,
+        StreamingEnabled: true,
+        SupportsVision: false,
+        SupportsToolCalls: false,
+        AllowPrivateLanEndpoint: false);
+
+    RuntimeSettingsStore.Save(dataRoot, options);
+    var fallback = new DevelopmentLocalModelRuntime();
+    var candidate = new OpenAiCompatibleLocalModelRuntime(new HttpClient(), options);
+    var runtime = new SafeActivatingLocalRuntime(fallback, candidate);
+    var health = await runtime.CheckCandidateAsync(CancellationToken.None);
+    Console.WriteLine($"PROGRAMMING_HEALTH_SUCCESS={health.Succeeded}");
+    Console.WriteLine($"PROGRAMMING_HEALTH_SUMMARY={health.Summary}");
+    Console.WriteLine($"PROGRAMMING_MODEL={health.ModelPackageId}");
+    Console.WriteLine($"PROGRAMMING_ENDPOINT={health.Endpoint}");
+    if (!health.Succeeded)
+    {
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    var activated = runtime.ActivateLastHealthChecked();
+    Console.WriteLine($"PROGRAMMING_MODEL_ACTIVATED={activated}");
+    if (!activated)
+    {
+        Environment.ExitCode = 3;
+        return;
+    }
+
+    var codingTool = new LocalCodingToolService(
+        new CodingWorkspacePolicy(workspace),
+        dataRoot,
+        new FakeCodingProcessLauncher(),
+        new FakeCodingCommandRunner(new CodingCommandRun(0, string.Empty, string.Empty, TimedOut: false)));
+    var recordingRuntime = new RecordingRuntime(runtime);
+    var orchestrator = new ConversationOrchestrator(
+        recordingRuntime,
+        new PermissionService(),
+        new CorrectionQueueService(new FileCorrectionQueueStore(dataRoot)),
+        sourceQueryPlanner: new StaticSourceQueryPlanner(SourceQueryPlan.NoSources),
+        localCodingTool: codingTool);
+
+    Console.WriteLine($"PROGRAMMING_WORKSPACE={workspace}");
+    Console.WriteLine($"PROGRAMMING_REQUEST={requestText}");
+    var chunks = new List<AssistantStreamChunk>();
+    await foreach (var chunk in orchestrator.StreamProgrammingAnswerAsync(
+                       "real_programming_validation",
+                       $"msg_user_{Guid.NewGuid():N}",
+                       $"msg_assistant_{Guid.NewGuid():N}",
+                       requestText,
+                       [],
+                       [],
+                       CancellationToken.None))
+    {
+        chunks.Add(chunk);
+    }
+
+    var answer = string.Concat(chunks.Select(chunk => chunk.Text)).ReplaceLineEndings(" ").Trim();
+    Console.WriteLine($"PROGRAMMING_CHUNKS={chunks.Count}");
+    Console.WriteLine($"PROGRAMMING_EVIDENCE={chunks.LastOrDefault()?.EvidenceStatus}");
+    Console.WriteLine($"PROGRAMMING_ANSWER_LENGTH={answer.Length}");
+    Console.WriteLine($"PROGRAMMING_ANSWER={answer}");
+    foreach (var completedRequest in recordingRuntime.CompletedRequests)
+    {
+        Console.WriteLine($"PROGRAMMING_MODEL_REQUEST={completedRequest.ConversationId}");
+        Console.WriteLine($"PROGRAMMING_MODEL_USER={TrimForConsole(completedRequest.UserText, 1000)}");
+        Console.WriteLine($"PROGRAMMING_MODEL_OUTPUT={TrimForConsole(completedRequest.Output, 4000)}");
+    }
+
+    Console.WriteLine($"PROGRAMMING_WORKSPACE_FILE_COUNT_AFTER_PREVIEW={Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories).Count()}");
+
+    var previewReady = answer.Contains("Next: confirm apply last patch preview", StringComparison.OrdinalIgnoreCase);
+    Console.WriteLine($"PROGRAMMING_PATCH_PREVIEW_READY={previewReady}");
+    if (!previewReady)
+    {
+        Environment.ExitCode = 4;
+        return;
+    }
+
+    var pendingPreview = await codingTool.TryHandleAsync("show pending patch preview", CancellationToken.None);
+    Console.WriteLine($"PROGRAMMING_PENDING_PREVIEW_SUCCESS={pendingPreview.Succeeded}");
+    Console.WriteLine($"PROGRAMMING_PENDING_PREVIEW_LENGTH={pendingPreview.Message.Length}");
+    Console.WriteLine($"PROGRAMMING_PENDING_PREVIEW_HEAD={TrimForConsole(pendingPreview.Message, 1000)}");
+    if (!pendingPreview.Succeeded
+        || !pendingPreview.Message.Contains("Patch bundle preview", StringComparison.OrdinalIgnoreCase))
+    {
+        Environment.ExitCode = 5;
+        return;
+    }
+
+    if (!applyPreview)
+    {
+        Console.WriteLine("PROGRAMMING_APPLY_SKIPPED=True");
+        Console.WriteLine("PROGRAMMING_SUCCESS=True");
+        return;
+    }
+
+    var apply = await codingTool.TryHandleAsync("confirm apply last patch preview", CancellationToken.None);
+    Console.WriteLine($"PROGRAMMING_APPLY_SUCCESS={apply.Succeeded}");
+    Console.WriteLine($"PROGRAMMING_APPLY_HEAD={TrimForConsole(apply.Message, 1000)}");
+    Console.WriteLine($"PROGRAMMING_WORKSPACE_FILE_COUNT_AFTER_APPLY={Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories).Count()}");
+    Console.WriteLine($"PROGRAMMING_SUCCESS={apply.Succeeded}");
+    if (!apply.Succeeded)
+    {
+        Environment.ExitCode = 6;
+    }
+}
+
+static string TrimForConsole(string text, int maxCharacters)
+{
+    var normalized = text.ReplaceLineEndings(" ").Trim();
+    return normalized.Length <= maxCharacters
+        ? normalized
+        : normalized[..maxCharacters] + "...";
 }
 
 static async Task<string> StreamToStringAsync(
@@ -13286,6 +14853,49 @@ internal sealed record CodingCommandStart(
     string WorkingDirectory,
     TimeSpan Timeout);
 
+internal sealed class RecordingRuntime(ILocalModelRuntime inner) : ILocalModelRuntime
+{
+    private readonly List<CompletedModelRequest> _completedRequests = new();
+
+    public ModelProfile ActiveProfile => inner.ActiveProfile;
+
+    public IReadOnlyList<CompletedModelRequest> CompletedRequests => _completedRequests;
+
+    public async IAsyncEnumerable<ModelToken> StreamChatAsync(
+        ChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var output = new StringBuilder();
+        try
+        {
+            await foreach (var token in inner.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
+            {
+                output.Append(token.Text);
+                yield return token;
+            }
+        }
+        finally
+        {
+            _completedRequests.Add(new CompletedModelRequest(
+                request.ConversationId,
+                request.UserText,
+                output.ToString()));
+        }
+    }
+
+    public Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken) =>
+        inner.CheckHealthAsync(cancellationToken);
+
+    public Task ShutdownAsync(CancellationToken cancellationToken) =>
+        inner.ShutdownAsync(cancellationToken);
+}
+
+internal sealed record CompletedModelRequest(
+    string ConversationId,
+    string UserText,
+    string Output);
+
 internal sealed class FixedTextRuntime(string text) : ILocalModelRuntime
 {
     public ModelProfile ActiveProfile { get; } = ModelProfile.UnconfiguredFactorySafe();
@@ -13306,6 +14916,35 @@ internal sealed class FixedTextRuntime(string text) : ILocalModelRuntime
         Task.FromResult(new RuntimeHealthCheck(
             Succeeded: true,
             Summary: "Fixed text runtime is available.",
+            CheckedAt: DateTimeOffset.UtcNow,
+            Elapsed: TimeSpan.Zero));
+}
+
+internal sealed class ChunkedTextRuntime(string text, int chunkSize) : ILocalModelRuntime
+{
+    public ModelProfile ActiveProfile { get; } = ModelProfile.UnconfiguredFactorySafe();
+
+    public ChatRequest? LastRequest { get; private set; }
+
+    public async IAsyncEnumerable<ModelToken> StreamChatAsync(
+        ChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        LastRequest = request;
+        await Task.Yield();
+        for (var index = 0; index < text.Length; index += chunkSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var length = Math.Min(chunkSize, text.Length - index);
+            yield return new ModelToken(text.Substring(index, length), EvidenceStatus.Unverified);
+        }
+    }
+
+    public Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(new RuntimeHealthCheck(
+            Succeeded: true,
+            Summary: "Chunked text runtime is available.",
             CheckedAt: DateTimeOffset.UtcNow,
             Elapsed: TimeSpan.Zero));
 }

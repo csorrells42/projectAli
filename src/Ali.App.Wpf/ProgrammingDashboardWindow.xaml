@@ -58,15 +58,19 @@
             </Grid.ColumnDefinitions>
 
             <TextBox Grid.Column="0"
+                     AutomationProperties.AutomationId="ProgrammingProjectPathTextBox"
                      Text="{Binding CodingCurrentSolutionOrProjectPathText, UpdateSourceTrigger=PropertyChanged}"
                      ToolTip="Current .sln, .slnx, or .csproj Ali should work on." />
             <Button Grid.Column="2"
+                    AutomationProperties.AutomationId="ProgrammingSelectProjectButton"
                     Content="Select Project"
                     Command="{Binding BrowseCodingCurrentSolutionOrProjectCommand}" />
             <Button Grid.Column="4"
+                    AutomationProperties.AutomationId="ProgrammingNewProjectButton"
                     Content="New Project"
                     Command="{Binding CreateCodingProjectCommand}" />
             <Button Grid.Column="6"
+                    AutomationProperties.AutomationId="ProgrammingCloseButton"
                     Content="Close"
                     Click="CloseButtonClick" />
         </Grid>
@@ -92,7 +96,8 @@
                                 <StackPanel Margin="0,0,0,18"
                                             MaxWidth="780"
                                             HorizontalAlignment="{Binding MessageAlignment}">
-                                    <TextBlock Text="{Binding Text}"
+                                    <TextBlock AutomationProperties.AutomationId="ProgrammingMessageText"
+                                               Text="{Binding Text}"
                                                TextWrapping="Wrap"
                                                TextAlignment="{Binding MessageTextAlignment}"
                                                Foreground="{StaticResource TextBrush}"
@@ -141,17 +146,31 @@
                                FontSize="18"
                                FontWeight="SemiBold" />
                     <StackPanel Grid.Row="1" Margin="0,10,0,10">
-                        <TextBlock Text="{Binding CodingDashboardCurrentTargetText}"
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingCurrentTargetText"
+                                   Text="{Binding CodingDashboardCurrentTargetText}"
                                    Foreground="{StaticResource SubtleTextBrush}"
                                    TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding CodingDashboardCurrentTaskText}"
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingCurrentTaskText"
+                                   Text="{Binding CodingDashboardCurrentTaskText}"
                                    Foreground="{StaticResource SubtleTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,3,0,0" />
-                        <TextBlock Text="{Binding StatusText}"
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingStatusText"
+                                   Text="{Binding StatusText}"
                                    Foreground="{StaticResource MutedTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,8,0,0" />
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingActiveRuntimeStatusText"
+                                   Text="{Binding ActiveRuntimeStatus}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0" />
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingModelConnectionStatusText"
+                                   Text="{Binding ModelConnectionStatusText}"
+                                   Foreground="{Binding ModelConnectionStatusBrush}"
+                                   TextWrapping="Wrap"
+                                   FontWeight="SemiBold"
+                                   Margin="0,3,0,0" />
                     </StackPanel>
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <TextBlock Text="{Binding MaintenanceStatusText}"
@@ -184,6 +203,7 @@
                     CornerRadius="24"
                     Padding="6">
                 <TextBox x:Name="ProgrammingComposerTextBox"
+                         AutomationProperties.AutomationId="ProgrammingComposerTextBox"
                          MinHeight="42"
                          MaxHeight="130"
                          VerticalScrollBarVisibility="Auto"
@@ -197,6 +217,7 @@
                          PreviewKeyDown="ProgrammingComposerTextBox_OnPreviewKeyDown" />
             </Border>
             <Button Grid.Column="2"
+                    AutomationProperties.AutomationId="ProgrammingSendButton"
                     Content="{Binding SendButtonText}"
                     Command="{Binding SendCommand}"
                     ToolTip="{Binding SendButtonToolTip}"
@@ -218,9 +239,11 @@
                        TextWrapping="Wrap"
                        VerticalAlignment="Center" />
             <Button Grid.Column="1"
+                    AutomationProperties.AutomationId="ProgrammingCancelButton"
                     Content="Cancel"
                     Command="{Binding StopCommand}" />
             <Button Grid.Column="3"
+                    AutomationProperties.AutomationId="ProgrammingNextButton"
                     Content="Next"
                     Command="{Binding SendProgrammingNextCommand}"
                     BorderBrush="#1E6B49"

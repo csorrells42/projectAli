@@ -83,7 +83,10 @@ public static class CodingAbilityCatalog
                 "coding context packet <goal>",
                 "semantic edit plan <goal>",
                 "roslyn edit planner <goal>",
+                "feature patch draft <goal>",
+                "exact patch synthesis <goal>",
                 "multi-file patch synthesis <goal>",
+                "concrete patch authoring <goal>",
                 "preview synthesized feature patch <goal>",
                 "confirm apply last patch preview",
                 "post patch validation <goal>"
@@ -117,6 +120,7 @@ public static class CodingAbilityCatalog
             [
                 "diagnose last build failure",
                 "first diagnostic repair route <goal>",
+                "suggest patch from last failure",
                 "validation repair runner <goal>",
                 "preview synthesized feature patch <goal>",
                 "confirm apply last patch preview",
@@ -146,16 +150,26 @@ public static class CodingAbilityCatalog
         "feature intake <goal>",
         "autonomous feature orchestrator <goal>",
         "roslyn edit planner <goal>",
+        "feature patch draft <goal>",
+        "exact patch synthesis <goal>",
         "multi-file patch synthesis <goal>",
         "preview synthesized feature patch <goal>",
+        "preview guided feature bundle <goal>",
         "concrete patch authoring <goal>",
         "patch body generator <goal>",
         "patch confidence score <goal>",
         "active workspace project",
+        "feature work context <goal>",
         "owner approved apply packet <goal>",
+        "confirm apply last patch preview",
+        "post patch validation <goal>",
         "validation command minimizer <goal>",
         "authoring sequence flow <goal>",
         "validation chain planner <goal>",
+        "diagnose last build failure",
+        "validation repair runner <goal>",
+        "first diagnostic repair route <goal>",
+        "failure to patch v3 <goal>",
         "data systems guide <goal>",
         "data structure chooser <goal>",
         "sql performance guide <goal>",
@@ -177,11 +191,26 @@ public static class CodingAbilityCatalog
         "coding context packet",
         "show next coding action",
         "semantic diff summary <goal>",
+        "semantic change receipt <goal>",
+        "review current changes",
+        "can i safely commit",
         "implementation evidence pack <goal>",
         "mini codex score v3 <goal>",
         "show execution packet",
         "validation plan"
     ];
+
+    public static IReadOnlySet<string> PatchPreviewToolTemplates { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "build this for me <goal>",
+        "feature patch draft <goal>",
+        "exact patch synthesis <goal>",
+        "multi-file patch synthesis <goal>",
+        "preview synthesized feature patch <goal>",
+        "preview guided feature bundle <goal>",
+        "concrete patch authoring <goal>",
+        "patch body generator <goal>"
+    };
 
     public static IReadOnlyList<string> DataSystemsKnowledge { get; } =
     [
