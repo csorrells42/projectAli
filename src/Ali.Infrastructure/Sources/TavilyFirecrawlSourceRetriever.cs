@@ -52,7 +52,12 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 plan.RequiresSourceGrounding);
         }
 
-        var results = await SearchWithTavilyAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
+        var results = await ScrapeDirectUrlsAsync(plan, warnings, cancellationToken).ConfigureAwait(false);
+        if (results.Count == 0)
+        {
+            results = await SearchWithTavilyAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
+        }
+
         if (results.Count == 0)
         {
             results = await SearchWithFirecrawlAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
@@ -80,6 +85,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
             var excerpt = result.Content;
             if (settings.UseFirecrawlForPageExtraction
                 && excerpts.Count < maxExtractedPages
+                && !result.Provider.Equals("Firecrawl", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(result.Url))
             {
                 var scraped = await TryScrapeWithFirecrawlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);
@@ -114,6 +120,39 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 warnings.Count == 0 ? ["Internet search results did not include usable text."] : warnings,
                 plan.RequiresSourceGrounding)
             : new SourceRetrievalResult(excerpts, warnings, plan.RequiresSourceGrounding);
+    }
+
+    private async Task<IReadOnlyList<WebSearchResult>> ScrapeDirectUrlsAsync(
+        SourceQueryPlan plan,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var urls = ExtractDirectUrls(plan).ToArray();
+        if (urls.Length == 0)
+        {
+            return Array.Empty<WebSearchResult>();
+        }
+
+        var results = new List<WebSearchResult>();
+        foreach (var url in urls.Take(Math.Clamp(settings.MaxSearchResults, 1, 10)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var scraped = await TryScrapeWithFirecrawlAsync(url, warnings, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(scraped))
+            {
+                continue;
+            }
+
+            results.Add(new WebSearchResult(
+                BuildDirectUrlTitle(url),
+                url,
+                scraped,
+                null,
+                null,
+                "Firecrawl"));
+        }
+
+        return results;
     }
 
     private async Task<IReadOnlyList<WebSearchResult>> SearchWithTavilyAsync(
@@ -291,10 +330,49 @@ public sealed class TavilyFirecrawlSourceRetriever(
         return string.IsNullOrWhiteSpace(query) ? plan.SearchText : query;
     }
 
+    private static IReadOnlyList<string> ExtractDirectUrls(SourceQueryPlan plan) =>
+        new[] { plan.Topic }
+            .Concat(plan.QueryTerms)
+            .SelectMany(ExtractDirectUrls)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+
+    private static IEnumerable<string> ExtractDirectUrls(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            yield break;
+        }
+
+        foreach (var token in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var start = token.IndexOf("https://", StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+            {
+                start = token.IndexOf("http://", StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (start < 0)
+            {
+                continue;
+            }
+
+            var candidate = token[start..].TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'');
+            if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+                && (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                    || uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                yield return uri.ToString();
+            }
+        }
+    }
+
     private static bool IsLocalDocumentPlan(SourceQueryPlan plan) =>
-        string.Equals(plan.Intent, "local_documents", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(plan.Topic, "local_documents", StringComparison.OrdinalIgnoreCase)
-        || plan.PreferredSourceTopics.Any(topic => string.Equals(topic, "local_documents", StringComparison.OrdinalIgnoreCase));
+        ExtractDirectUrls(plan).Count == 0
+        && (string.Equals(plan.Intent, "local_documents", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(plan.Topic, "local_documents", StringComparison.OrdinalIgnoreCase)
+            || plan.PreferredSourceTopics.Any(topic => string.Equals(topic, "local_documents", StringComparison.OrdinalIgnoreCase)));
 
     private static string ResolveTopic(SourceQueryPlan plan) =>
         plan.PreferredSourceTopics.FirstOrDefault(topic => !string.IsNullOrWhiteSpace(topic))
@@ -353,6 +431,11 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
         return new Uri($"{trimmedBase}/{trimmedPath}", UriKind.Absolute);
     }
+
+    private static string BuildDirectUrlTitle(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            ? $"{uri.Host}{uri.AbsolutePath}"
+            : url;
 
     private static string BuildExcerptBody(WebSearchResult result, string excerpt)
     {

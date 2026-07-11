@@ -444,6 +444,12 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
             return false;
         }
 
+        var text = BuildSearchText(plan);
+        if (ContainsHttpUrl(text))
+        {
+            return false;
+        }
+
         if (string.Equals(plan.Intent, LocalDocumentsTopic, StringComparison.OrdinalIgnoreCase)
             || string.Equals(plan.Topic, LocalDocumentsTopic, StringComparison.OrdinalIgnoreCase)
             || plan.PreferredSourceTopics.Any(topic => string.Equals(topic, LocalDocumentsTopic, StringComparison.OrdinalIgnoreCase)))
@@ -451,7 +457,6 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
             return true;
         }
 
-        var text = BuildSearchText(plan);
         if (TryExtractDirectFilePath(text) is not null)
         {
             return true;
@@ -519,6 +524,10 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
                 .Concat(plan.PreferredSourceTopics)
                 .Where(item => !string.IsNullOrWhiteSpace(item)));
 
+    private static bool ContainsHttpUrl(string text) =>
+        text.Contains("https://", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("http://", StringComparison.OrdinalIgnoreCase);
+
     private static string? TryExtractDirectFilePath(string text)
     {
         foreach (var segment in ExtractQuotedSegments(text))
@@ -531,7 +540,10 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
         for (var i = 0; i + 2 < text.Length; i++)
         {
-            if (!char.IsLetter(text[i]) || text[i + 1] != ':' || (text[i + 2] != '\\' && text[i + 2] != '/'))
+            if ((i > 0 && char.IsLetterOrDigit(text[i - 1]))
+                || !char.IsLetter(text[i])
+                || text[i + 1] != ':'
+                || (text[i + 2] != '\\' && text[i + 2] != '/'))
             {
                 continue;
             }
