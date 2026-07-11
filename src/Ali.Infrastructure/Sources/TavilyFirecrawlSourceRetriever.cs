@@ -324,7 +324,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
             }
 
             AddWarningOnce(warnings, response.Data?.Warning ?? string.Empty);
-            return response?.Data?.Markdown;
+            return ResolveFirecrawlScrapeText(response.Data);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
         {
@@ -462,6 +462,24 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
     private static string NormalizeTavilySearchDepth(string? value) =>
         string.Equals(value, "basic", StringComparison.OrdinalIgnoreCase) ? "basic" : "advanced";
+
+    private static string? ResolveFirecrawlScrapeText(FirecrawlScrapeData? data)
+    {
+        if (data is null)
+        {
+            return null;
+        }
+
+        foreach (var candidate in new[] { data.Markdown, data.Summary, data.Answer, data.Highlights })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
 
     private Uri BuildTavilyEndpoint(string path) =>
         BuildEndpoint(settings.TavilyBaseUrl, "https://api.tavily.com", path);
@@ -720,6 +738,12 @@ public sealed class TavilyFirecrawlSourceRetriever(
     private sealed class FirecrawlScrapeData
     {
         public string? Markdown { get; set; }
+
+        public string? Summary { get; set; }
+
+        public string? Answer { get; set; }
+
+        public string? Highlights { get; set; }
 
         public string? Warning { get; set; }
     }
