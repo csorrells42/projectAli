@@ -177,15 +177,11 @@ public sealed class ConversationOrchestrator(
         if (!sourceResult.HasSources)
         {
             var directAnswer = await CollectRuntimeAnswerAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!sourcePlan.UseSources && ShouldRetryWithSourceLookup(directAnswer.Text))
+            var retryPlan = !sourcePlan.UseSources
+                ? await TryPlanSourceRetryFromAnswerAsync(userText, answerHistory, directAnswer, cancellationToken).ConfigureAwait(false)
+                : SourceQueryPlan.NoSources;
+            if (retryPlan.UseSources)
             {
-                var retryPlan = new SourceQueryPlan(
-                    true,
-                    true,
-                    "general_sources",
-                    userText,
-                    [userText],
-                    Array.Empty<string>());
                 var retrySourceResult = await Sources.RetrieveAsync(retryPlan, cancellationToken).ConfigureAwait(false);
                 if (retrySourceResult.HasSources || retrySourceResult.Warnings.Count > 0)
                 {
@@ -1441,26 +1437,40 @@ public sealed class ConversationOrchestrator(
         return new CollectedRuntimeAnswer(answer.ToString(), evidenceStatus, finishReason);
     }
 
-    private static bool ShouldRetryWithSourceLookup(string answer)
+    private async Task<SourceQueryPlan> TryPlanSourceRetryFromAnswerAsync(
+        string userText,
+        IReadOnlyList<ChatMessage> answerHistory,
+        CollectedRuntimeAnswer directAnswer,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(answer))
+        if (string.IsNullOrWhiteSpace(directAnswer.Text))
         {
-            return false;
+            return SourceQueryPlan.NoSources;
         }
 
-        var normalized = answer.ReplaceLineEndings(" ");
-        return normalized.Contains("don't have real-time access", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("do not have real-time access", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("no real-time access", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("don't have access to current", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("do not have access to current", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("don't have internet access", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("do not have internet access", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("cannot browse", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("can't browse", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("check reliable news sources", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("search engines", StringComparison.OrdinalIgnoreCase)
-               || normalized.Contains("latest information yourself", StringComparison.OrdinalIgnoreCase);
+        var retryHistory = answerHistory
+            .Append(new ChatMessage(
+                $"msg_source_retry_draft_{Guid.NewGuid():N}",
+                ChatRole.Assistant,
+                BuildSourceRetryDraftContext(directAnswer.Text),
+                DateTimeOffset.UtcNow,
+                directAnswer.EvidenceStatus))
+            .ToList();
+
+        var retryPlan = await SourcePlanner.PlanAsync(userText, retryHistory, cancellationToken).ConfigureAwait(false);
+        return retryPlan.UseSources ? retryPlan : SourceQueryPlan.NoSources;
+    }
+
+    private static string BuildSourceRetryDraftContext(string answer)
+    {
+        var normalized = answer.ReplaceLineEndings(" ").Trim();
+        var excerpt = normalized.Length <= 1_200 ? normalized : normalized[..1_200];
+        return string.Join(
+            Environment.NewLine,
+            "Draft answer produced before Ali's final source decision.",
+            "If this draft shows that the user needs current, live, official, internet, web, or source-backed evidence, decide that source retrieval is needed.",
+            "Draft answer:",
+            excerpt);
     }
 
     private static string BuildSourceLookupFailureAnswer(SourceRetrievalResult result)
