@@ -235,7 +235,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 scrapeOptions = settings.UseFirecrawlSearchScrapeOptions
                     ? new
                     {
-                        formats = new[] { "markdown" },
+                        formats = new[] { new FirecrawlFormat("markdown") },
                         onlyMainContent = true,
                         timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000
                     }
@@ -247,6 +247,19 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 apiKey,
                 cancellationToken).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<FirecrawlSearchResponse>(body, JsonOptions);
+            if (response is null)
+            {
+                warnings.Add("Firecrawl fallback search returned an empty response.");
+                return Array.Empty<WebSearchResult>();
+            }
+
+            if (response.Success is false)
+            {
+                warnings.Add($"Firecrawl fallback search failed: {BuildFirecrawlFailureDetail(response.Error, response.Code)}{BuildFirecrawlKeyHint()}");
+                return Array.Empty<WebSearchResult>();
+            }
+
+            AddWarningOnce(warnings, response.Warning ?? string.Empty);
             var results = (response?.Data?.Web ?? [])
                 .Concat(response?.Data?.News ?? [])
                 .Where(result => !string.IsNullOrWhiteSpace(result.Url))
@@ -298,6 +311,19 @@ public sealed class TavilyFirecrawlSourceRetriever(
                 apiKey,
                 cancellationToken).ConfigureAwait(false);
             var response = JsonSerializer.Deserialize<FirecrawlScrapeResponse>(body, JsonOptions);
+            if (response is null)
+            {
+                warnings.Add($"Firecrawl could not extract {url}: empty response.");
+                return null;
+            }
+
+            if (response.Success is false)
+            {
+                warnings.Add($"Firecrawl could not extract {url}: {BuildFirecrawlFailureDetail(response.Error, response.Code)}{BuildFirecrawlKeyHint()}");
+                return null;
+            }
+
+            AddWarningOnce(warnings, response.Data?.Warning ?? string.Empty);
             return response?.Data?.Markdown;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
@@ -491,6 +517,21 @@ public sealed class TavilyFirecrawlSourceRetriever(
             ? $" Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json."
             : string.Empty;
 
+    private static string BuildFirecrawlFailureDetail(string? error, string? code)
+    {
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            return TrimError(error);
+        }
+
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            return code.Trim();
+        }
+
+        return "request did not succeed";
+    }
+
     private bool CanCallFirecrawl(out string? apiKey, out string missingKeyWarning)
     {
         apiKey = settings.ResolveFirecrawlApiKey();
@@ -557,6 +598,8 @@ public sealed class TavilyFirecrawlSourceRetriever(
         string? PublishedDate,
         string Provider);
 
+    private sealed record FirecrawlFormat(string Type);
+
     private sealed class TavilySearchResponse
     {
         public List<TavilySearchResult>? Results { get; set; }
@@ -579,7 +622,15 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
     private sealed class FirecrawlSearchResponse
     {
+        public bool? Success { get; set; }
+
         public FirecrawlSearchData? Data { get; set; }
+
+        public string? Warning { get; set; }
+
+        public string? Code { get; set; }
+
+        public string? Error { get; set; }
     }
 
     private sealed class FirecrawlSearchData
@@ -606,11 +657,19 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
     private sealed class FirecrawlScrapeResponse
     {
+        public bool? Success { get; set; }
+
         public FirecrawlScrapeData? Data { get; set; }
+
+        public string? Code { get; set; }
+
+        public string? Error { get; set; }
     }
 
     private sealed class FirecrawlScrapeData
     {
         public string? Markdown { get; set; }
+
+        public string? Warning { get; set; }
     }
 }
