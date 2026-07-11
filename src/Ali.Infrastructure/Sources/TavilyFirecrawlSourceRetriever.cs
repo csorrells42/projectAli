@@ -222,7 +222,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            warnings.Add($"Firecrawl fallback search failed: {ex.Message}");
+            warnings.Add($"Firecrawl fallback search failed: {ex.Message}{BuildFirecrawlKeyHint()}");
             return Array.Empty<WebSearchResult>();
         }
     }
@@ -249,7 +249,7 @@ public sealed class TavilyFirecrawlSourceRetriever(
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            warnings.Add($"Firecrawl could not extract {url}: {ex.Message}");
+            warnings.Add($"Firecrawl could not extract {url}: {ex.Message}{BuildFirecrawlKeyHint()}");
             return null;
         }
     }
@@ -380,8 +380,51 @@ public sealed class TavilyFirecrawlSourceRetriever(
 
     private static string TrimError(string text)
     {
-        var normalized = text.ReplaceLineEndings(" ").Trim();
-        return normalized.Length <= 240 ? normalized : normalized[..240];
+        var normalized = (TryReadApiError(text) ?? text)
+            .ReplaceLineEndings(" ")
+            .Trim();
+        if (normalized.Contains("without an API key", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("API key", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "API key required or unauthenticated access blocked.";
+        }
+
+        return normalized.Length <= 240 ? normalized : $"{normalized[..237].TrimEnd()}...";
+    }
+
+    private string BuildFirecrawlKeyHint() =>
+        string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey())
+            ? $" Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json."
+            : string.Empty;
+
+    private static string? TryReadApiError(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.String)
+            {
+                return error.GetString();
+            }
+
+            if (document.RootElement.TryGetProperty("message", out var message)
+                && message.ValueKind == JsonValueKind.String)
+            {
+                return message.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     private sealed record WebSearchResult(
