@@ -192,6 +192,7 @@ public sealed class AliServices
         var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
         WebSourceBackendSettingsStore.WriteExample(dataRoot);
+        WebSourceBackendSettingsStore.WriteDefaultIfMissing(dataRoot);
         LocalVectorLibrarySettingsStore.WriteExample(dataRoot);
         CodingToolSettingsStore.WriteExample(dataRoot);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, httpClient);

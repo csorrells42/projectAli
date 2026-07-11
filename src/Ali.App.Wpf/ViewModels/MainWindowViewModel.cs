@@ -3638,7 +3638,8 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeSettingsStore.WriteExample(_services.DataRoot);
         messages.Add("Runtime settings example verified; selected runtime model was not changed.");
         WebSourceBackendSettingsStore.WriteExample(_services.DataRoot);
-        messages.Add("Internet source backend settings example verified.");
+        WebSourceBackendSettingsStore.WriteDefaultIfMissing(_services.DataRoot);
+        messages.Add("Internet source backend settings example verified; default settings file verified.");
         LocalVectorLibrarySettingsStore.WriteExample(_services.DataRoot);
         _services.CreateLocalVectorLibraryRetriever().WriteExample();
         messages.Add("Local library settings and index folders verified.");

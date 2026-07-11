@@ -94,6 +94,17 @@ public static class WebSourceBackendSettingsStore
         JsonSerializer.Serialize(stream, settings, JsonOptions);
     }
 
+    public static void WriteDefaultIfMissing(string dataRoot)
+    {
+        var path = GetSettingsPath(dataRoot);
+        if (File.Exists(path))
+        {
+            return;
+        }
+
+        Save(dataRoot, new WebSourceBackendSettings());
+    }
+
     public static void WriteExample(string dataRoot)
     {
         var path = GetExamplePath(dataRoot);

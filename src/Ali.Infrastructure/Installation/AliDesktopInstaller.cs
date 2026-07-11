@@ -557,12 +557,14 @@ public sealed class AliDesktopInstaller
     {
         try
         {
-            WebSourceBackendSettingsStore.WriteExample(Path.Combine(options.LocalAliRoot, "BootstrapData"));
-            dependencyMessages.Add("Internet source backend settings example verified.");
+            var dataRoot = Path.Combine(options.LocalAliRoot, "BootstrapData");
+            WebSourceBackendSettingsStore.WriteExample(dataRoot);
+            WebSourceBackendSettingsStore.WriteDefaultIfMissing(dataRoot);
+            dependencyMessages.Add("Internet source backend settings example verified; default settings file verified.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {
-            warnings.Add($"Internet source backend settings example could not be verified: {ex.Message}");
+            warnings.Add($"Internet source backend settings could not be verified: {ex.Message}");
         }
     }
 
