@@ -25633,7 +25633,7 @@ public sealed partial class LocalCodingToolService(
 
         if (normalized.Contains("/Sources/", StringComparison.OrdinalIgnoreCase))
         {
-            return "source planner and internet backend tests";
+            return "actual Ali UI source-routing automation with provider call evidence";
         }
 
         return "focused regression test near the changed behavior";
