@@ -110,12 +110,14 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             "Return exactly one JSON object and no other text.",
             "Do not answer the user.",
             "Decide whether Ali should call source tools before answering.",
+            $"Current date/time for interpreting relative dates: {BuildCurrentTimestampForPlanner()}",
             "Set use_sources to true when the user asks for current, recent, live, official, source-backed, weather, sports, prices, laws, regulations, public figures, product availability, internet, news, web page, documentation, or local document/library information.",
             "Set use_sources to false for stable explanations, math, definitions, creative writing, casual chat, or ordinary background knowledge that does not depend on current facts.",
             "When the user asks about current events or news, choose intent current_news and preferred_source_topics news.",
             "When the user asks about a direct URL, website, docs, or an online source, choose intent docs or research and copy exact URLs verbatim into query_terms.",
             "When the user asks about local files, folders, documents, manuals, or the local RAG library, choose intent local_documents and preferred_source_topics local_documents.",
             "When the user asks about weather, sports scores, officeholders, prices, or regulations, use sources because those facts change.",
+            "For relative dates such as today, yesterday, this week, or this month, resolve them against the current date/time before choosing query_terms; include an absolute date when it makes the search more precise.",
             "Use query_terms as the search query Ali should send to the source backend. Keep them short and specific.",
             "preferred_source_topics should contain broad routing labels only, such as news, weather, sports, health, ai, software, government, finance, law, reference, local_documents.",
             "requires_source_grounding should be true whenever the answer must come from retrieved evidence instead of memory.",
@@ -151,10 +153,12 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             "Return exactly one JSON object and no other text.",
             "Do not answer the user.",
             "Your only job is to decide if Ali must retrieve current/source evidence before answering.",
+            $"Current date/time for interpreting relative dates: {BuildCurrentTimestampForPlanner()}",
             "If the user's answer depends on what is happening now, recent events, live facts, official pages, news, weather, sports, prices, laws, regulations, public figures, websites, documentation, products, or local documents, set use_sources true.",
             "If the user's answer is stable background knowledge, math, definitions, creative writing, or casual chat, set use_sources false.",
             "When use_sources is true, provide intent, topic, query_terms, and preferred_source_topics for the source backend. If the user gave a URL, copy the exact URL verbatim into query_terms.",
             "For current events and news, use intent current_news and preferred_source_topics news.",
+            "For relative dates such as today, yesterday, this week, or this month, resolve them against the current date/time before choosing query_terms; include an absolute date when it makes the search more precise.",
             "For local files/documents/library questions, use intent local_documents and preferred_source_topics local_documents.",
             "JSON shape:",
             "{\"use_sources\":true,\"requires_source_grounding\":true,\"intent\":\"current_news\",\"topic\":\"openai latest headlines\",\"query_terms\":[\"OpenAI latest headlines\"],\"preferred_source_topics\":[\"news\"]}",
@@ -258,6 +262,9 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
     private static bool ContainsPair(string text, string left, string right) =>
         text.Contains(left, StringComparison.OrdinalIgnoreCase)
         && text.Contains(right, StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildCurrentTimestampForPlanner() =>
+        $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}";
 
     private static bool ReadBool(JsonElement root, string snakeName, string camelName) =>
         (root.TryGetProperty(snakeName, out var snakeValue) && ReadFlexibleBool(snakeValue))
