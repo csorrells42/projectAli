@@ -128,6 +128,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _activeRuntimeStatus = "Using safe deterministic stub.";
     private string _modelConnectionStatusText = "model offline";
     private System.Windows.Media.Brush _modelConnectionStatusBrush = MediaBrushes.Red;
+    private bool _internetBackendEnabled = true;
+    private string _internetTavilyApiKeyText = string.Empty;
+    private string _internetFirecrawlApiKeyText = string.Empty;
+    private string _internetBackendStatusText = "Internet backend settings not loaded yet.";
     private string _attachmentStatus = "Screenshots are temporary by default.";
     private string _voiceStatus = "Voice idle.";
     private string _sttStatus = "STT status loading.";
@@ -220,6 +224,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CommitConversationRenameCommand = CreateCommand(CommitConversationRename);
         FlagIncorrectCommand = CreateCommand(FlagIncorrect);
         SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
+        SaveInternetBackendSettingsCommand = CreateCommand(_ => SaveInternetBackendSettings());
         CheckRuntimeCommand = CreateAsyncCommand(CheckRuntimeAsync, () => !IsBusy);
         RefreshRuntimeModelsCommand = CreateAsyncCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
         RecommendRuntimeSettingsCommand = CreateCommand(_ => ShowRuntimeOptimizationReport());
@@ -449,6 +454,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ReplaceChoices(CodingPdfModifyModeChoices, CodingPdfModifyModeChoiceValues);
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
+        LoadInternetBackendSettings();
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
@@ -698,6 +704,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand FlagIncorrectCommand { get; }
 
     public ICommand SaveRuntimeSettingsCommand { get; }
+
+    public ICommand SaveInternetBackendSettingsCommand { get; }
 
     public ICommand CheckRuntimeCommand { get; }
 
@@ -1029,7 +1037,33 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string RuntimeSettingsPath => _services.RuntimeSettingsPath;
 
+    public string InternetBackendSettingsPath => _services.InternetBackendSettingsPath;
+
     public string CodingToolSettingsPath => _services.CodingToolSettingsPath;
+
+    public bool InternetBackendEnabled
+    {
+        get => _internetBackendEnabled;
+        set => SetProperty(ref _internetBackendEnabled, value);
+    }
+
+    public string InternetTavilyApiKeyText
+    {
+        get => _internetTavilyApiKeyText;
+        set => SetProperty(ref _internetTavilyApiKeyText, value);
+    }
+
+    public string InternetFirecrawlApiKeyText
+    {
+        get => _internetFirecrawlApiKeyText;
+        set => SetProperty(ref _internetFirecrawlApiKeyText, value);
+    }
+
+    public string InternetBackendStatusText
+    {
+        get => _internetBackendStatusText;
+        private set => SetProperty(ref _internetBackendStatusText, value);
+    }
 
     public string MaintenanceReceiptPath => Path.Combine(_services.DataRoot, "Receipts", "maintenance-actions.jsonl");
 
@@ -3044,7 +3078,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
             var componentLines = new List<string>
             {
-                DescribeSourceCatalogHealth()
+                DescribeSourceCatalogHealth(),
+                DescribeInternetBackendHealth()
             };
 
             foreach (var check in new[]
@@ -3611,6 +3646,8 @@ public sealed class MainWindowViewModel : ObservableObject
         RepairStarterSources(messages, warnings);
         RuntimeSettingsStore.WriteExample(_services.DataRoot);
         messages.Add("Runtime settings example verified; selected runtime model was not changed.");
+        WebSourceBackendSettingsStore.WriteExample(_services.DataRoot);
+        messages.Add("Internet source backend settings example verified.");
         LocalVectorLibrarySettingsStore.WriteExample(_services.DataRoot);
         _services.CreateLocalVectorLibraryRetriever().WriteExample();
         messages.Add("Local library settings and index folders verified.");
@@ -3709,6 +3746,34 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
             return ComponentStatus("Sources & Topics", false, ShortMaintenanceDetail(ex.Message));
+        }
+    }
+
+    private string DescribeInternetBackendHealth()
+    {
+        try
+        {
+            var settings = _services.LoadWebSourceBackendSettings();
+            if (!settings.Enabled)
+            {
+                return ComponentStatus("Internet source backend", false, "disabled");
+            }
+
+            var tavilyConfigured = !string.IsNullOrWhiteSpace(settings.ResolveTavilyApiKey());
+            var firecrawlConfigured = !string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey());
+            if (!tavilyConfigured)
+            {
+                return ComponentStatus("Internet source backend", false, $"missing {settings.TavilyApiKeyEnvironmentVariable}");
+            }
+
+            return ComponentStatus(
+                "Internet source backend",
+                true,
+                firecrawlConfigured ? "Tavily and Firecrawl configured" : "Tavily configured; Firecrawl will try unauthenticated/fallback extraction");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return ComponentStatus("Internet source backend", false, ShortMaintenanceDetail(ex.Message));
         }
     }
 
@@ -5849,6 +5914,66 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeHealthResult = $"Loaded settings from {RuntimeSettingsPath}";
         StatusText = "Runtime settings loaded.";
         UpdateRuntimeStatus();
+    }
+
+    private void LoadInternetBackendSettings()
+    {
+        var settings = _services.LoadWebSourceBackendSettings();
+        InternetBackendEnabled = settings.Enabled;
+        InternetTavilyApiKeyText = settings.TavilyApiKey ?? string.Empty;
+        InternetFirecrawlApiKeyText = settings.FirecrawlApiKey ?? string.Empty;
+        InternetBackendStatusText = DescribeInternetBackendSettings(settings);
+    }
+
+    private void SaveInternetBackendSettings()
+    {
+        var existing = _services.LoadWebSourceBackendSettings();
+        var settings = new WebSourceBackendSettings
+        {
+            Enabled = InternetBackendEnabled,
+            TavilyBaseUrl = existing.TavilyBaseUrl,
+            TavilyApiKeyEnvironmentVariable = existing.TavilyApiKeyEnvironmentVariable,
+            TavilyApiKey = NullIfWhiteSpace(InternetTavilyApiKeyText),
+            TavilySearchDepth = existing.TavilySearchDepth,
+            FirecrawlBaseUrl = existing.FirecrawlBaseUrl,
+            FirecrawlApiKeyEnvironmentVariable = existing.FirecrawlApiKeyEnvironmentVariable,
+            FirecrawlApiKey = NullIfWhiteSpace(InternetFirecrawlApiKeyText),
+            UseFirecrawlForPageExtraction = existing.UseFirecrawlForPageExtraction,
+            MaxSearchResults = existing.MaxSearchResults,
+            MaxExtractedPages = existing.MaxExtractedPages,
+            MaxExcerptCharacters = existing.MaxExcerptCharacters,
+            RequestTimeoutSeconds = existing.RequestTimeoutSeconds
+        };
+        _services.SaveWebSourceBackendSettings(settings);
+        InternetBackendStatusText = DescribeInternetBackendSettings(settings);
+        StatusText = "Internet source backend settings saved.";
+    }
+
+    private static string DescribeInternetBackendSettings(WebSourceBackendSettings settings)
+    {
+        if (!settings.Enabled)
+        {
+            return "Internet source backend is disabled.";
+        }
+
+        var tavilyConfigured = !string.IsNullOrWhiteSpace(settings.ResolveTavilyApiKey());
+        var firecrawlConfigured = !string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey());
+        if (tavilyConfigured && firecrawlConfigured)
+        {
+            return "Tavily search and Firecrawl extraction are configured.";
+        }
+
+        if (tavilyConfigured)
+        {
+            return "Tavily search is configured. Firecrawl extraction will need an API key if unauthenticated fallback is blocked.";
+        }
+
+        if (firecrawlConfigured)
+        {
+            return "Firecrawl is configured, but Tavily search is still missing.";
+        }
+
+        return "Missing Tavily and Firecrawl API keys. Set environment variables or save keys here.";
     }
 
     private void SaveRuntimeSettings()

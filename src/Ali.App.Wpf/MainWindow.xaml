@@ -262,6 +262,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0"
+                               AutomationProperties.AutomationId="MainChatStatusText"
                                Text="{Binding StatusText}"
                                Foreground="{StaticResource MutedTextBrush}"
                                Margin="0,0,14,0"
@@ -281,6 +282,7 @@
                                      Margin="0,0,6,0"
                                      VerticalAlignment="Center" />
                             <TextBlock Text="{Binding ModelConnectionStatusText}"
+                                       AutomationProperties.AutomationId="MainChatModelConnectionStatusText"
                                        Foreground="{Binding ModelConnectionStatusBrush}"
                                        FontSize="12"
                                        FontWeight="SemiBold"
@@ -370,6 +372,7 @@
                                         MaxWidth="760"
                                         HorizontalAlignment="{Binding MessageAlignment}">
                                 <TextBlock Text="{Binding Text}"
+                                           AutomationProperties.AutomationId="MainChatMessageText"
                                            TextWrapping="Wrap"
                                            TextAlignment="{Binding MessageTextAlignment}"
                                            Foreground="{StaticResource TextBrush}"
@@ -443,6 +446,7 @@
                         </Grid.ColumnDefinitions>
 
                         <TextBox x:Name="ComposerTextBox"
+                                 AutomationProperties.AutomationId="MainChatComposerTextBox"
                                  Grid.Column="0"
                                  MinHeight="44"
                                  MaxHeight="150"
@@ -465,6 +469,7 @@
                                 Style="{StaticResource ComposerButton}"
                                 MinWidth="116" />
                         <Button Grid.Column="2"
+                                AutomationProperties.AutomationId="MainChatSendButton"
                                 Content="{Binding SendButtonText}"
                                 Command="{Binding SendCommand}"
                                 ToolTip="{Binding SendButtonToolTip}"

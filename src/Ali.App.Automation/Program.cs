@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Windows.Automation;
 
@@ -20,13 +19,71 @@ internal static class Program
             return 0;
         }
 
-        if (!options.Mode.Equals("programming", StringComparison.OrdinalIgnoreCase))
-        {
-            Console.Error.WriteLine("Only the programming automation mode is supported.");
-            Console.WriteLine(AutomationOptions.HelpText);
-            return 2;
-        }
+        return options.Mode.Equals("chat", StringComparison.OrdinalIgnoreCase)
+            ? RunChatAutomation(options)
+            : options.Mode.Equals("programming", StringComparison.OrdinalIgnoreCase)
+                ? RunProgrammingAutomation(options)
+                : FailWithHelp($"Unknown automation mode: {options.Mode}");
+    }
 
+    private static int RunChatAutomation(AutomationOptions options)
+    {
+        Process? launchedProcess = null;
+        AutomationElement? window = null;
+        var steps = new List<ChatAutomationStep>();
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(options.AppPath))
+            {
+                launchedProcess = LaunchAli(options, openProgramming: false);
+            }
+
+            window = WaitForMainChatWindow(launchedProcess?.Id, options.Timeout);
+            steps.Add(new ChatAutomationStep("attached", CaptureChatSnapshot(window)));
+
+            if (options.RequireLiveRuntime)
+            {
+                WaitForChatLiveRuntime(window, options.Timeout);
+                steps.Add(new ChatAutomationStep("live-runtime-ready", CaptureChatSnapshot(window)));
+            }
+
+            for (var sendIndex = 0; sendIndex < options.SendTexts.Count; sendIndex++)
+            {
+                var beforeMessages = CountChatMessages(window);
+                SetValue(FindRequired(window, "MainChatComposerTextBox"), options.SendTexts[sendIndex]);
+                steps.Add(new ChatAutomationStep($"send-{sendIndex + 1}-text-entered", CaptureChatSnapshot(window)));
+                Invoke(FindRequired(window, "MainChatSendButton"), options.Timeout);
+                WaitForChatIdle(window, options.Timeout, beforeMessages + 2);
+                steps.Add(new ChatAutomationStep($"send-{sendIndex + 1}-complete", CaptureChatSnapshot(window)));
+            }
+
+            var screenshotPath = CaptureScreenshotIfRequested(window, options);
+            Console.WriteLine(JsonSerializer.Serialize(
+                new ChatAutomationRun(CaptureChatSnapshot(window), steps, screenshotPath, string.Empty),
+                new JsonSerializerOptions { WriteIndented = true }));
+            ShutdownIfRequested(options, launchedProcess);
+            return 0;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or System.ComponentModel.Win32Exception)
+        {
+            if (window is not null)
+            {
+                var snapshot = CaptureChatSnapshot(window);
+                steps.Add(new ChatAutomationStep("error", snapshot));
+                var screenshotPath = CaptureScreenshotIfRequested(window, options);
+                Console.WriteLine(JsonSerializer.Serialize(
+                    new ChatAutomationRun(snapshot, steps, screenshotPath, ex.Message),
+                    new JsonSerializerOptions { WriteIndented = true }));
+            }
+
+            ShutdownIfRequested(options, launchedProcess);
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+
+    private static int RunProgrammingAutomation(AutomationOptions options)
+    {
         Process? launchedProcess = null;
         AutomationElement? window = null;
         var steps = new List<ProgrammingAutomationStep>();
@@ -34,62 +91,59 @@ internal static class Program
         {
             if (!string.IsNullOrWhiteSpace(options.AppPath))
             {
-                launchedProcess = LaunchAli(options);
+                launchedProcess = LaunchAli(options, openProgramming: true);
             }
 
             window = WaitForProgrammingWindow(launchedProcess?.Id, options.Timeout);
-            steps.Add(new ProgrammingAutomationStep("attached", CaptureSnapshot(window)));
+            steps.Add(new ProgrammingAutomationStep("attached", CaptureProgrammingSnapshot(window)));
             if (!string.IsNullOrWhiteSpace(options.ProjectPath))
             {
                 SetValue(FindRequired(window, "ProgrammingProjectPathTextBox"), options.ProjectPath);
-                steps.Add(new ProgrammingAutomationStep("project-set", CaptureSnapshot(window)));
+                steps.Add(new ProgrammingAutomationStep("project-set", CaptureProgrammingSnapshot(window)));
             }
 
             if (options.RequireLiveRuntime)
             {
-                WaitForLiveRuntime(window, options.Timeout);
-                steps.Add(new ProgrammingAutomationStep("live-runtime-ready", CaptureSnapshot(window)));
+                WaitForProgrammingLiveRuntime(window, options.Timeout);
+                steps.Add(new ProgrammingAutomationStep("live-runtime-ready", CaptureProgrammingSnapshot(window)));
             }
 
             for (var sendIndex = 0; sendIndex < options.SendTexts.Count; sendIndex++)
             {
-                var beforeMessages = CountMessages(window);
+                var beforeMessages = CountProgrammingMessages(window);
                 SetValue(FindRequired(window, "ProgrammingComposerTextBox"), options.SendTexts[sendIndex]);
-                steps.Add(new ProgrammingAutomationStep($"send-{sendIndex + 1}-text-entered", CaptureSnapshot(window)));
+                steps.Add(new ProgrammingAutomationStep($"send-{sendIndex + 1}-text-entered", CaptureProgrammingSnapshot(window)));
                 Invoke(FindRequired(window, "ProgrammingSendButton"), options.Timeout);
-                WaitForIdle(window, options.Timeout, beforeMessages + 2);
-                steps.Add(new ProgrammingAutomationStep($"send-{sendIndex + 1}-complete", CaptureSnapshot(window)));
+                WaitForProgrammingIdle(window, options.Timeout, beforeMessages + 2);
+                steps.Add(new ProgrammingAutomationStep($"send-{sendIndex + 1}-complete", CaptureProgrammingSnapshot(window)));
             }
 
             for (var index = 0; index < options.NextCount; index++)
             {
                 if (options.NextOnlyIfEnabled && !FindRequired(window, "ProgrammingNextButton").Current.IsEnabled)
                 {
-                    steps.Add(new ProgrammingAutomationStep($"next-{index + 1}-skipped-disabled", CaptureSnapshot(window)));
+                    steps.Add(new ProgrammingAutomationStep($"next-{index + 1}-skipped-disabled", CaptureProgrammingSnapshot(window)));
                     continue;
                 }
 
-                var beforeMessages = CountMessages(window);
+                var beforeMessages = CountProgrammingMessages(window);
                 Invoke(FindRequired(window, "ProgrammingNextButton"), options.Timeout);
-                WaitForIdle(window, options.Timeout, beforeMessages + 2);
-                steps.Add(new ProgrammingAutomationStep($"next-{index + 1}-complete", CaptureSnapshot(window)));
+                WaitForProgrammingIdle(window, options.Timeout, beforeMessages + 2);
+                steps.Add(new ProgrammingAutomationStep($"next-{index + 1}-complete", CaptureProgrammingSnapshot(window)));
             }
 
             var screenshotPath = CaptureScreenshotIfRequested(window, options);
-            var run = new ProgrammingAutomationRun(CaptureSnapshot(window), steps, screenshotPath, string.Empty);
-            Console.WriteLine(JsonSerializer.Serialize(run, new JsonSerializerOptions { WriteIndented = true }));
-            if (options.ShutdownLaunchedApp && launchedProcess is not null && !launchedProcess.HasExited)
-            {
-                launchedProcess.Kill(entireProcessTree: true);
-            }
-
+            Console.WriteLine(JsonSerializer.Serialize(
+                new ProgrammingAutomationRun(CaptureProgrammingSnapshot(window), steps, screenshotPath, string.Empty),
+                new JsonSerializerOptions { WriteIndented = true }));
+            ShutdownIfRequested(options, launchedProcess);
             return 0;
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or System.ComponentModel.Win32Exception)
         {
             if (window is not null)
             {
-                var snapshot = CaptureSnapshot(window);
+                var snapshot = CaptureProgrammingSnapshot(window);
                 steps.Add(new ProgrammingAutomationStep("error", snapshot));
                 var screenshotPath = CaptureScreenshotIfRequested(window, options);
                 Console.WriteLine(JsonSerializer.Serialize(
@@ -97,23 +151,30 @@ internal static class Program
                     new JsonSerializerOptions { WriteIndented = true }));
             }
 
-            if (options.ShutdownLaunchedApp && launchedProcess is not null && !launchedProcess.HasExited)
-            {
-                launchedProcess.Kill(entireProcessTree: true);
-            }
-
+            ShutdownIfRequested(options, launchedProcess);
             Console.Error.WriteLine(ex.Message);
             return 1;
         }
     }
 
-    private static Process LaunchAli(AutomationOptions options)
+    private static int FailWithHelp(string message)
     {
-        var arguments = new List<string> { "--open-programming" };
-        if (!string.IsNullOrWhiteSpace(options.ProjectPath))
+        Console.Error.WriteLine(message);
+        Console.WriteLine(AutomationOptions.HelpText);
+        return 2;
+    }
+
+    private static Process LaunchAli(AutomationOptions options, bool openProgramming)
+    {
+        var arguments = new List<string>();
+        if (openProgramming)
         {
-            arguments.Add("--programming-project");
-            arguments.Add(options.ProjectPath);
+            arguments.Add("--open-programming");
+            if (!string.IsNullOrWhiteSpace(options.ProjectPath))
+            {
+                arguments.Add("--programming-project");
+                arguments.Add(options.ProjectPath);
+            }
         }
 
         var startInfo = new ProcessStartInfo
@@ -156,13 +217,46 @@ internal static class Program
         throw new TimeoutException("Timed out waiting for the Programming window.");
     }
 
-    private static AutomationElement FindRequired(AutomationElement root, string automationId)
+    private static AutomationElement WaitForMainChatWindow(int? processId, TimeSpan timeout)
     {
-        var element = root.FindFirst(
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            foreach (var window in FindTopLevelWindows(processId))
+            {
+                if (FindOptional(window, "MainChatComposerTextBox") is not null
+                    && FindOptional(window, "MainChatSendButton") is not null)
+                {
+                    return window;
+                }
+            }
+
+            Thread.Sleep(250);
+        }
+
+        throw new TimeoutException("Timed out waiting for the main Ali chat window.");
+    }
+
+    private static IEnumerable<AutomationElement> FindTopLevelWindows(int? processId)
+    {
+        Condition condition = processId is null
+            ? new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window)
+            : new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window),
+                new PropertyCondition(AutomationElement.ProcessIdProperty, processId.Value));
+        return AutomationElement.RootElement
+            .FindAll(TreeScope.Children, condition)
+            .Cast<AutomationElement>();
+    }
+
+    private static AutomationElement FindRequired(AutomationElement root, string automationId) =>
+        FindOptional(root, automationId)
+        ?? throw new InvalidOperationException($"Could not find automation element '{automationId}'.");
+
+    private static AutomationElement? FindOptional(AutomationElement root, string automationId) =>
+        root.FindFirst(
             TreeScope.Descendants,
             new PropertyCondition(AutomationElement.AutomationIdProperty, automationId));
-        return element ?? throw new InvalidOperationException($"Could not find automation element '{automationId}'.");
-    }
 
     private static IReadOnlyList<string> FindTextValues(AutomationElement root, string automationId)
     {
@@ -208,14 +302,35 @@ internal static class Program
         throw new TimeoutException($"Timed out waiting for '{element.Current.AutomationId}' to become enabled.");
     }
 
-    private static void WaitForIdle(AutomationElement window, TimeSpan timeout, int minimumMessageCount)
+    private static void WaitForChatIdle(AutomationElement window, TimeSpan timeout, int minimumMessageCount)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var status = ReadOptionalName(window, "MainChatStatusText");
+            var sendButton = FindRequired(window, "MainChatSendButton");
+            var messageCount = CountChatMessages(window);
+            if (messageCount >= minimumMessageCount
+                && sendButton.Current.IsEnabled
+                && !status.Contains("Streaming", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Thread.Sleep(300);
+        }
+
+        throw new TimeoutException("Timed out waiting for main chat automation to become idle.");
+    }
+
+    private static void WaitForProgrammingIdle(AutomationElement window, TimeSpan timeout, int minimumMessageCount)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
             var status = ReadOptionalName(window, "ProgrammingStatusText");
             var nextButton = FindRequired(window, "ProgrammingNextButton");
-            var messageCount = CountMessages(window);
+            var messageCount = CountProgrammingMessages(window);
             if (messageCount >= minimumMessageCount
                 && (!status.Contains("Streaming", StringComparison.OrdinalIgnoreCase)
                     || status.Contains("Response complete", StringComparison.OrdinalIgnoreCase)
@@ -231,14 +346,43 @@ internal static class Program
         throw new TimeoutException("Timed out waiting for Programming automation to become idle.");
     }
 
-    private static void WaitForLiveRuntime(AutomationElement window, TimeSpan timeout)
+    private static void WaitForChatLiveRuntime(AutomationElement window, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        ChatAutomationSnapshot lastSnapshot;
+        do
+        {
+            lastSnapshot = CaptureChatSnapshot(window);
+            if (IsLiveRuntime(lastSnapshot.ActiveRuntimeStatus, lastSnapshot.ModelConnectionStatus))
+            {
+                return;
+            }
+
+            if (lastSnapshot.Status.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                || lastSnapshot.Status.Contains("not configured", StringComparison.OrdinalIgnoreCase)
+                || lastSnapshot.Status.Contains("cancelled", StringComparison.OrdinalIgnoreCase)
+                || lastSnapshot.ModelConnectionStatus.Contains("offline", StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            Thread.Sleep(500);
+        }
+        while (DateTimeOffset.UtcNow < deadline);
+
+        throw new TimeoutException(
+            "Timed out waiting for Ali to connect the configured live runtime. "
+            + $"Connection='{lastSnapshot.ModelConnectionStatus}', Status='{lastSnapshot.Status}'.");
+    }
+
+    private static void WaitForProgrammingLiveRuntime(AutomationElement window, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         ProgrammingAutomationSnapshot lastSnapshot;
         do
         {
-            lastSnapshot = CaptureSnapshot(window);
-            if (IsLiveRuntime(lastSnapshot))
+            lastSnapshot = CaptureProgrammingSnapshot(window);
+            if (IsLiveRuntime(lastSnapshot.ActiveRuntimeStatus, lastSnapshot.ModelConnectionStatus))
             {
                 return;
             }
@@ -260,14 +404,28 @@ internal static class Program
             + $"Runtime='{lastSnapshot.ActiveRuntimeStatus}', Connection='{lastSnapshot.ModelConnectionStatus}', Status='{lastSnapshot.Status}'.");
     }
 
-    private static bool IsLiveRuntime(ProgrammingAutomationSnapshot snapshot) =>
-        !snapshot.ActiveRuntimeStatus.Contains("deterministic stub", StringComparison.OrdinalIgnoreCase)
-        && snapshot.ModelConnectionStatus.Equals("connected to model", StringComparison.OrdinalIgnoreCase);
+    private static bool IsLiveRuntime(string activeRuntimeStatus, string modelConnectionStatus) =>
+        !activeRuntimeStatus.Contains("deterministic stub", StringComparison.OrdinalIgnoreCase)
+        && modelConnectionStatus.Equals("connected to model", StringComparison.OrdinalIgnoreCase);
 
-    private static int CountMessages(AutomationElement window) =>
+    private static int CountChatMessages(AutomationElement window) =>
+        FindTextValues(window, "MainChatMessageText").Count;
+
+    private static int CountProgrammingMessages(AutomationElement window) =>
         FindTextValues(window, "ProgrammingMessageText").Count;
 
-    private static ProgrammingAutomationSnapshot CaptureSnapshot(AutomationElement window)
+    private static ChatAutomationSnapshot CaptureChatSnapshot(AutomationElement window)
+    {
+        var messages = FindTextValues(window, "MainChatMessageText");
+        return new ChatAutomationSnapshot(
+            ReadOptionalName(window, "MainChatStatusText"),
+            ReadOptionalName(window, "MainChatModelConnectionStatusText"),
+            messages,
+            messages.LastOrDefault() ?? string.Empty,
+            FindRequired(window, "MainChatSendButton").Current.IsEnabled);
+    }
+
+    private static ProgrammingAutomationSnapshot CaptureProgrammingSnapshot(AutomationElement window)
     {
         var messages = FindTextValues(window, "ProgrammingMessageText");
         return new ProgrammingAutomationSnapshot(
@@ -285,9 +443,7 @@ internal static class Program
 
     private static string ReadOptionalName(AutomationElement root, string automationId)
     {
-        var element = root.FindFirst(
-            TreeScope.Descendants,
-            new PropertyCondition(AutomationElement.AutomationIdProperty, automationId));
+        var element = FindOptional(root, automationId);
         return element is null ? string.Empty : ReadName(element);
     }
 
@@ -327,7 +483,7 @@ internal static class Program
         var rectangle = window.Current.BoundingRectangle;
         if (rectangle.Width <= 0 || rectangle.Height <= 0)
         {
-            throw new InvalidOperationException("Programming window bounds are not available for screenshot capture.");
+            throw new InvalidOperationException("Window bounds are not available for screenshot capture.");
         }
 
         var path = Path.GetFullPath(options.ScreenshotPath);
@@ -343,7 +499,35 @@ internal static class Program
         bitmap.Save(path, ImageFormat.Png);
         return path;
     }
+
+    private static void ShutdownIfRequested(AutomationOptions options, Process? launchedProcess)
+    {
+        if (options.ShutdownLaunchedApp && launchedProcess is not null && !launchedProcess.HasExited)
+        {
+            launchedProcess.Kill(entireProcessTree: true);
+        }
+    }
 }
+
+internal sealed record ChatAutomationSnapshot(
+    string Status,
+    string ModelConnectionStatus,
+    IReadOnlyList<string> Messages,
+    string LastMessage,
+    bool SendEnabled)
+{
+    public string ActiveRuntimeStatus => ModelConnectionStatus;
+}
+
+internal sealed record ChatAutomationStep(
+    string Name,
+    ChatAutomationSnapshot Snapshot);
+
+internal sealed record ChatAutomationRun(
+    ChatAutomationSnapshot Final,
+    IReadOnlyList<ChatAutomationStep> Steps,
+    string ScreenshotPath,
+    string Error);
 
 internal sealed record ProgrammingAutomationSnapshot(
     string ProjectPath,
@@ -382,13 +566,15 @@ internal sealed record AutomationOptions(
 {
     public const string HelpText = """
     Usage:
+      Ali.App.Automation chat --app <Ali.App.Wpf.exe> --send "what happened today?" [--require-live-runtime] [--screenshot <path.png>] [--timeout-ms 120000] [--shutdown-launched-app]
+      Ali.App.Automation chat --send "..." [--screenshot <path.png>]
       Ali.App.Automation programming --app <Ali.App.Wpf.exe> --project <path.csproj> --send "make a simple WPF window..." [--require-live-runtime] [--next-count 1] [--next-if-enabled] [--screenshot <path.png>] [--timeout-ms 120000] [--shutdown-launched-app]
       Ali.App.Automation programming --send "..." [--send "diagnose last build failure"] [--next-count 1] [--next-if-enabled] [--screenshot <path.png>]
 
-    If --app is supplied, the runner launches Ali with --open-programming and optional --programming-project.
-    If --app is omitted, the runner attaches to an existing Programming window.
-    --send may be supplied more than once; messages are sent in order in the same Programming window.
-    If --require-live-runtime is supplied, the runner waits until Ali's Programming window reports an active non-stub runtime before entering text.
+    If --app is supplied, the runner launches Ali. Programming mode opens the Programming window.
+    If --app is omitted, the runner attaches to an existing matching Ali window.
+    --send may be supplied more than once; messages are sent in order in the same window.
+    If --require-live-runtime is supplied, the runner waits until Ali reports an active non-stub runtime before entering text.
     """;
 
     public static AutomationOptions Parse(IReadOnlyList<string> args)

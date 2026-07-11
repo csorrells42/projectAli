@@ -69,6 +69,10 @@ public sealed class AliServices
 
     public string CuratedSourcesCatalogPath => CreateFileSourceRetriever().CatalogPath;
 
+    public string InternetBackendSettingsPath => WebSourceBackendSettingsStore.GetSettingsPath(DataRoot);
+
+    public string InternetBackendSettingsExamplePath => WebSourceBackendSettingsStore.GetExamplePath(DataRoot);
+
     public string CodingToolSettingsPath => CodingToolSettingsStore.GetSettingsPath(DataRoot);
 
     public SafeActivatingLocalRuntime RuntimeController { get; }
@@ -120,6 +124,15 @@ public sealed class AliServices
 
     public FileSourceRetriever CreateFileSourceRetriever() =>
         new(DataRoot, _httpClient);
+
+    public WebSourceBackendSettings LoadWebSourceBackendSettings() =>
+        WebSourceBackendSettingsStore.LoadOrDefault(DataRoot);
+
+    public void SaveWebSourceBackendSettings(WebSourceBackendSettings settings) =>
+        WebSourceBackendSettingsStore.Save(DataRoot, settings);
+
+    public TavilyFirecrawlSourceRetriever CreateWebSourceRetriever() =>
+        new(_httpClient, LoadWebSourceBackendSettings());
 
     public IReadOnlyList<SourceCatalogEntry> LoadCuratedSources() =>
         CreateFileSourceRetriever().LoadCatalog();
@@ -182,6 +195,7 @@ public sealed class AliServices
         httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
         var sourceStore = new FileSourceRetriever(dataRoot, httpClient);
         sourceStore.WriteExample();
+        WebSourceBackendSettingsStore.WriteExample(dataRoot);
         LocalVectorLibrarySettingsStore.WriteExample(dataRoot);
         CodingToolSettingsStore.WriteExample(dataRoot);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, httpClient);
@@ -205,7 +219,11 @@ public sealed class AliServices
             runtime,
             permissions,
             correctionQueue,
-            new CompositeSourceRetriever(localLibrary, sourceStore.CreateRetriever()),
+            new CompositeSourceRetriever(
+                localLibrary,
+                new TavilyFirecrawlSourceRetriever(
+                    httpClient,
+                    WebSourceBackendSettingsStore.LoadOrDefault(dataRoot))),
             memoryStore: memories,
             localCodingTool: localCodingTool);
 

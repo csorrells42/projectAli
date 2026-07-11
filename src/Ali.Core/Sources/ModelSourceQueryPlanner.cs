@@ -1,7 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Globalization;
-using System.Text.RegularExpressions;
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
 
@@ -10,171 +8,6 @@ namespace Ali.Core.Sources;
 public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourceQueryPlanner
 {
     private const int MaxPlannerOutputCharacters = 4096;
-    private static readonly char[] RoutingTokenSeparators =
-        [' ', ',', '.', '?', '!', ':', ';', '/', '\\', '-', '_', '(', ')', '[', ']', '"', '\''];
-    private static readonly HashSet<string> SportsSubjectTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "alabama",
-        "baseball",
-        "basketball",
-        "braves",
-        "crimson",
-        "football",
-        "game",
-        "games",
-        "mlb",
-        "nba",
-        "ncaa",
-        "nfl",
-        "sec",
-        "sports",
-        "team",
-        "teams",
-        "tide",
-        "titans"
-    };
-    private static readonly HashSet<string> SportsChangingTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "against",
-        "current",
-        "game",
-        "games",
-        "last",
-        "loss",
-        "losses",
-        "next",
-        "played",
-        "playing",
-        "record",
-        "result",
-        "results",
-        "schedule",
-        "score",
-        "scores",
-        "season",
-        "standings",
-        "this",
-        "today",
-        "tonight",
-        "upcoming",
-        "win",
-        "wins",
-        "won",
-        "year"
-    };
-    private static readonly HashSet<string> GovernmentOfficeTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "administration",
-        "cabinet",
-        "congressman",
-        "congresswoman",
-        "governor",
-        "justice",
-        "mayor",
-        "president",
-        "representative",
-        "secretary",
-        "senator",
-        "speaker"
-    };
-    private static readonly HashSet<string> CurrentOfficeholderTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "are",
-        "current",
-        "currently",
-        "is",
-        "now",
-        "office",
-        "serves",
-        "serving",
-        "today",
-        "who"
-    };
-    private static readonly HashSet<string> LocalDocumentSubjectTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "document",
-        "documents",
-        "doc",
-        "file",
-        "files",
-        "folder",
-        "library",
-        "local",
-        "manual",
-        "rag"
-    };
-    private static readonly HashSet<string> LocalDocumentActionTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "about",
-        "according",
-        "answer",
-        "based",
-        "contains",
-        "does",
-        "find",
-        "in",
-        "inside",
-        "read",
-        "search",
-        "say",
-        "says",
-        "summarize",
-        "tell",
-        "what",
-        "where"
-    };
-    private static readonly HashSet<string> WeatherSubjectTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "forecast",
-        "weather",
-        "rain",
-        "storm",
-        "storms",
-        "temperature",
-        "temps"
-    };
-    private static readonly HashSet<string> WeatherTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "forecast",
-        "weather",
-        "rain",
-        "storm",
-        "storms",
-        "temperature",
-        "temps",
-        "tomorrow",
-        "tomorrows",
-        "today",
-        "tonight",
-        "week",
-        "five",
-        "day",
-        "days"
-    };
-    private static readonly HashSet<string> StateLocationTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "ak", "al", "ar", "az", "ca", "co", "ct", "dc", "de", "fl", "ga", "hi", "ia", "id", "il", "in", "ks", "ky", "la", "ma", "md", "me", "mi", "mn", "mo", "ms", "mt", "nc", "nd", "ne", "nh", "nj", "nm", "nv", "ny", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "va", "vt", "wa", "wi", "wv", "wy",
-        "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan", "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada", "hampshire", "jersey", "mexico", "york", "carolina", "dakota", "ohio", "oklahoma", "oregon", "pennsylvania", "rhode", "tennessee", "texas", "utah", "vermont", "virginia", "washington", "wisconsin", "wyoming"
-    };
-    private static readonly HashSet<string> LocationStopTerms = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "around",
-        "for",
-        "forecast",
-        "in",
-        "near",
-        "rain",
-        "temperature",
-        "temps",
-        "the",
-        "weather"
-    };
-    private static readonly Regex ExplicitWeatherLocationRegex = new(
-        @"\b(?:weather|forecast|temperature|temps|rain)\b.*?(?:\b(?:in|for|near|around)\s+)?([a-z][a-z .'-]{1,50}?)\s*,?\s+(ak|al|ar|az|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new\s+hampshire|new\s+jersey|new\s+mexico|new\s+york|north\s+carolina|north\s+dakota|ohio|oklahoma|oregon|pennsylvania|rhode\s+island|south\s+carolina|south\s+dakota|tennessee|texas|utah|vermont|virginia|washington|west\s+virginia|wisconsin|wyoming)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex SavedLocationMemoryRegex = new(
-        @"\b(?:we\s+are|we're|i\s+am|i'm|my\s+location\s+is|current\s+location\s+is|located)\s+(?:in|near|around)?\s*([a-z][a-z .'-]{1,50}?)\s*,?\s+(ak|al|ar|az|ca|co|ct|dc|de|fl|ga|hi|ia|id|il|in|ks|ky|la|ma|md|me|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy|alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new\s+hampshire|new\s+jersey|new\s+mexico|new\s+york|north\s+carolina|north\s+dakota|ohio|oklahoma|oregon|pennsylvania|rhode\s+island|south\s+carolina|south\s+dakota|tennessee|texas|utah|vermont|virginia|washington|west\s+virginia|wisconsin|wyoming)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public async Task<SourceQueryPlan> PlanAsync(
         string userText,
@@ -184,12 +17,6 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         if (string.IsNullOrWhiteSpace(userText))
         {
             return SourceQueryPlan.NoSources;
-        }
-
-        var guardedPlan = TryBuildGuardedSourcePlan(userText, history);
-        if (guardedPlan is not null)
-        {
-            return guardedPlan;
         }
 
         var plannerHistory = new List<ChatMessage>
@@ -219,7 +46,15 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
                 }
             }
 
-            return TryParsePlan(output.ToString()) ?? SourceQueryPlan.NoSources;
+            var plan = TryParsePlan(output.ToString(), userText);
+            if (plan is { UseSources: true })
+            {
+                return plan;
+            }
+
+            return await TryPlanWithSourceNeedDecisionAsync(userText, history, cancellationToken).ConfigureAwait(false)
+                   ?? plan
+                   ?? SourceQueryPlan.NoSources;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException or OperationCanceledException)
         {
@@ -227,25 +62,67 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         }
     }
 
+    private async Task<SourceQueryPlan?> TryPlanWithSourceNeedDecisionAsync(
+        string userText,
+        IReadOnlyList<ChatMessage> history,
+        CancellationToken cancellationToken)
+    {
+        var plannerHistory = new List<ChatMessage>
+        {
+            new(
+                "source_need_decision_system",
+                ChatRole.System,
+                BuildSourceNeedDecisionInstruction(history),
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Unverified)
+        };
+        var request = new ChatRequest(
+            ConversationId: "source_need_decision",
+            UserMessageId: "source_need_decision_user",
+            UserText: userText,
+            History: plannerHistory);
+
+        try
+        {
+            var output = new StringBuilder();
+            await foreach (var token in runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
+            {
+                output.Append(token.Text);
+                if (output.Length > MaxPlannerOutputCharacters)
+                {
+                    break;
+                }
+            }
+
+            return TryParsePlan(output.ToString(), userText);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException or OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
     private static string BuildPlannerInstruction(IReadOnlyList<ChatMessage> history)
     {
         var lines = new List<string>
         {
-            "You are the app's source query planner.",
+            "You are Ali's source and internet tool planner.",
             "Return exactly one JSON object and no other text.",
             "Do not answer the user.",
-            "Do not say you lack internet access; decide whether the app should try approved local source retrieval.",
-            "Set use_sources to true only when the current user message needs live, current, official, source-backed, weather, scores, prices, news, web, local document/library, or app-approved source information.",
-            "Direct file paths, local library questions, RAG folder questions, and document/manual questions require sources with intent local_documents and preferred_source_topics local_documents.",
-            "Sports scores, schedules, standings, team records, season records, and relative-date sports questions such as last year, this year, next game, or current season require sources.",
-            "Current public or political officeholders require sources, including the current president, governor, mayor, senator, representative, secretary, justice, cabinet, or administration.",
-            "Set use_sources to false for stable explanations, math, physics, definitions, casual chat, creative writing, or ordinary background knowledge.",
-            "When use_sources is true, choose concise topic/query terms that will find approved catalog sources.",
+            "Decide whether Ali should call source tools before answering.",
+            "Set use_sources to true when the user asks for current, recent, live, official, source-backed, weather, sports, prices, laws, regulations, public figures, product availability, internet, news, web page, documentation, or local document/library information.",
+            "Set use_sources to false for stable explanations, math, definitions, creative writing, casual chat, or ordinary background knowledge that does not depend on current facts.",
+            "When the user asks about current events or news, choose intent current_news and preferred_source_topics news.",
+            "When the user asks about a direct URL, website, docs, or an online source, choose intent docs or research and include concise query_terms for that source.",
+            "When the user asks about local files, folders, documents, manuals, or the local RAG library, choose intent local_documents and preferred_source_topics local_documents.",
+            "When the user asks about weather, sports scores, officeholders, prices, or regulations, use sources because those facts change.",
+            "Use query_terms as the search query Ali should send to the source backend. Keep them short and specific.",
+            "preferred_source_topics should contain broad routing labels only, such as news, weather, sports, health, ai, software, government, finance, law, reference, local_documents.",
+            "requires_source_grounding should be true whenever the answer must come from retrieved evidence instead of memory.",
             "JSON shape:",
             "{\"use_sources\":false,\"requires_source_grounding\":false,\"intent\":\"stable_knowledge\",\"topic\":\"\",\"query_terms\":[],\"preferred_source_topics\":[]}",
             "Allowed intents include stable_knowledge, current_news, weather, sports_score, official_info, docs, research, local_documents, local_app, general_sources.",
-            "preferred_source_topics should use broad catalog topics such as news, weather, sports, health, ai, software, government, education, science, finance, law, reference, local_documents.",
-            "Recent conversation context for location or pronouns:"
+            "Recent conversation context for location, pronouns, and continuity:"
         };
 
         foreach (var message in history
@@ -266,258 +143,59 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static SourceQueryPlan? TryBuildGuardedSourcePlan(string userText, IReadOnlyList<ChatMessage> history)
+    private static string BuildSourceNeedDecisionInstruction(IReadOnlyList<ChatMessage> history)
     {
-        var tokens = TokenizeForRouting(userText);
-        var weatherPlan = TryBuildWeatherPlan(userText, tokens, history);
-        if (weatherPlan is not null)
+        var lines = new List<string>
         {
-            return weatherPlan;
+            "You are Ali's internet/source routing decider.",
+            "Return exactly one JSON object and no other text.",
+            "Do not answer the user.",
+            "Your only job is to decide if Ali must retrieve current/source evidence before answering.",
+            "If the user's answer depends on what is happening now, recent events, live facts, official pages, news, weather, sports, prices, laws, regulations, public figures, websites, documentation, products, or local documents, set use_sources true.",
+            "If the user's answer is stable background knowledge, math, definitions, creative writing, or casual chat, set use_sources false.",
+            "When use_sources is true, provide intent, topic, query_terms, and preferred_source_topics for the source backend.",
+            "For current events and news, use intent current_news and preferred_source_topics news.",
+            "For local files/documents/library questions, use intent local_documents and preferred_source_topics local_documents.",
+            "JSON shape:",
+            "{\"use_sources\":true,\"requires_source_grounding\":true,\"intent\":\"current_news\",\"topic\":\"openai latest headlines\",\"query_terms\":[\"OpenAI latest headlines\"],\"preferred_source_topics\":[\"news\"]}",
+            "Recent conversation context:"
+        };
+
+        foreach (var message in history
+                     .Where(message => message.Role is ChatRole.User or ChatRole.Assistant)
+                     .TakeLast(4))
+        {
+            lines.Add($"{message.Role}: {TrimForPlanner(message.Text)}");
         }
 
-        var localDocumentPlan = TryBuildLocalDocumentPlan(userText, tokens);
-        if (localDocumentPlan is not null)
-        {
-            return localDocumentPlan;
-        }
-
-        var governmentPlan = TryBuildGovernmentOfficeholderPlan(tokens);
-        if (governmentPlan is not null)
-        {
-            return governmentPlan;
-        }
-
-        return TryBuildSportsPlan(tokens);
+        return string.Join(Environment.NewLine, lines);
     }
 
-    private static SourceQueryPlan? TryBuildWeatherPlan(
-        string userText,
-        IReadOnlySet<string> tokens,
-        IReadOnlyList<ChatMessage> history)
-    {
-        if (!tokens.Overlaps(WeatherSubjectTerms))
-        {
-            return null;
-        }
-
-        var queryTerms = tokens.ToList();
-        queryTerms.AddRange(["weather", "forecast"]);
-        var memoryText = string.Join(
-            Environment.NewLine,
-            history
-                .Where(message => message.Role is ChatRole.System
-                                  && message.Text.Contains("Saved local user memories", StringComparison.OrdinalIgnoreCase))
-                .Select(message => message.Text));
-        var locationTerms = ExtractWeatherLocationTerms(userText);
-        if (locationTerms.Count == 0)
-        {
-            locationTerms = ExtractWeatherLocationTerms(memoryText, fromSavedMemory: true);
-        }
-
-        queryTerms.AddRange(locationTerms);
-
-        if (tokens.Contains("tomorrow") || tokens.Contains("tomorrows"))
-        {
-            queryTerms.Add("tomorrow");
-        }
-
-        if ((tokens.Contains("five") || tokens.Contains("5")) && (tokens.Contains("day") || tokens.Contains("days")))
-        {
-            queryTerms.AddRange(["5", "day", "five", "days"]);
-        }
-
-        var distinctTerms = queryTerms
-            .Where(term => !string.IsNullOrWhiteSpace(term))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(16)
-            .ToList();
-
-        return new SourceQueryPlan(
-            true,
-            true,
-            "weather",
-            string.Join(' ', distinctTerms),
-            distinctTerms,
-            ["weather"]);
-    }
-
-    private static SourceQueryPlan? TryBuildLocalDocumentPlan(string userText, IReadOnlySet<string> tokens)
-    {
-        if (!LooksLikeWindowsPath(userText)
-            && (!tokens.Overlaps(LocalDocumentSubjectTerms) || !tokens.Overlaps(LocalDocumentActionTerms)))
-        {
-            return null;
-        }
-
-        var terms = tokens
-            .Concat(["local", "document", "library"])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(16)
-            .ToList();
-
-        return new SourceQueryPlan(
-            true,
-            true,
-            "local_documents",
-            userText,
-            terms,
-            ["local_documents"]);
-    }
-
-    private static SourceQueryPlan? TryBuildGovernmentOfficeholderPlan(IReadOnlySet<string> tokens)
-    {
-        if (!tokens.Overlaps(GovernmentOfficeTerms))
-        {
-            return null;
-        }
-
-        var isUnitedStatesQuestion = tokens.Contains("united")
-                                     || tokens.Contains("states")
-                                     || tokens.Contains("america")
-                                     || tokens.Contains("usa")
-                                     || tokens.Contains("us");
-        var isCurrentOfficeholderQuestion = tokens.Overlaps(CurrentOfficeholderTerms);
-        if (!isCurrentOfficeholderQuestion && !(tokens.Contains("president") && isUnitedStatesQuestion))
-        {
-            return null;
-        }
-
-        var queryTerms = tokens.ToList();
-        queryTerms.AddRange(["official", "current", "government"]);
-        if (tokens.Contains("president") && isUnitedStatesQuestion)
-        {
-            queryTerms.AddRange(["white", "house", "administration", "president", "united", "states"]);
-            if (tokens.Contains("vice"))
-            {
-                queryTerms.Add("vice");
-            }
-        }
-
-        var distinctTerms = queryTerms
-            .Where(term => !string.IsNullOrWhiteSpace(term))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(16)
-            .ToList();
-
-        return new SourceQueryPlan(
-            true,
-            true,
-            "official_info",
-            string.Join(' ', distinctTerms),
-            distinctTerms,
-            ["government"]);
-    }
-
-    private static SourceQueryPlan? TryBuildSportsPlan(IReadOnlySet<string> tokens)
-    {
-        if (!tokens.Overlaps(SportsSubjectTerms) || !tokens.Overlaps(SportsChangingTerms))
-        {
-            return null;
-        }
-
-        var queryTerms = tokens.ToList();
-        if (tokens.Contains("alabama") && tokens.Contains("football"))
-        {
-            queryTerms.AddRange(["crimson", "tide", "rolltide", "college", "sec", "schedule", "record"]);
-        }
-
-        if (tokens.Contains("last") && tokens.Contains("year"))
-        {
-            queryTerms.Add((DateTimeOffset.Now.Year - 1).ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (tokens.Contains("this") && tokens.Contains("year"))
-        {
-            queryTerms.Add(DateTimeOffset.Now.Year.ToString(CultureInfo.InvariantCulture));
-        }
-
-        if (tokens.Contains("next") || tokens.Contains("upcoming"))
-        {
-            queryTerms.Add(DateTimeOffset.Now.Year.ToString(CultureInfo.InvariantCulture));
-            queryTerms.Add((DateTimeOffset.Now.Year + 1).ToString(CultureInfo.InvariantCulture));
-        }
-
-        var distinctTerms = queryTerms
-            .Where(term => !string.IsNullOrWhiteSpace(term))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(16)
-            .ToList();
-
-        return new SourceQueryPlan(
-            true,
-            true,
-            "sports_score",
-            string.Join(' ', distinctTerms),
-            distinctTerms,
-            ["sports"]);
-    }
-
-    private static HashSet<string> TokenizeForRouting(string text) =>
-        text.Split(RoutingTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(NormalizeRoutingToken)
-            .Where(token => token.Length >= 3
-                            || token.Equals("is", StringComparison.OrdinalIgnoreCase)
-                            || token.Equals("us", StringComparison.OrdinalIgnoreCase)
-                            || StateLocationTerms.Contains(token))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-    private static string NormalizeRoutingToken(string token) =>
-        new string(token.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-
-    private static IReadOnlyList<string> ExtractWeatherLocationTerms(string text, bool fromSavedMemory = false)
-    {
-        var match = (fromSavedMemory ? SavedLocationMemoryRegex : ExplicitWeatherLocationRegex).Match(text);
-        if (!match.Success)
-        {
-            return Array.Empty<string>();
-        }
-
-        var location = match.Groups[1].Value;
-        var state = match.Groups[2].Value;
-        return TokenizeForRouting($"{location} {state}")
-            .Where(term => !LocationStopTerms.Contains(term))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
-
-    private static bool LooksLikeWindowsPath(string text)
-    {
-        for (var i = 0; i + 2 < text.Length; i++)
-        {
-            if (char.IsLetter(text[i]) && text[i + 1] == ':' && (text[i + 2] == '\\' || text[i + 2] == '/'))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static SourceQueryPlan? TryParsePlan(string text)
+    private static SourceQueryPlan? TryParsePlan(string text, string fallbackUserText)
     {
         var json = ExtractJsonObject(text);
         if (string.IsNullOrWhiteSpace(json))
         {
-            return null;
+            return TryParseLoosePlan(text, fallbackUserText);
         }
 
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        var useSources = ReadBool(root, "use_sources");
-        var requiresSourceGrounding = ReadBool(root, "requires_source_grounding") || useSources;
-        var intent = ReadString(root, "intent", useSources ? "general_sources" : "stable_knowledge");
-        var topic = ReadString(root, "topic", string.Empty);
-        var queryTerms = ReadStringArray(root, "query_terms");
-        var preferredSourceTopics = ReadStringArray(root, "preferred_source_topics");
-
+        var useSources = ReadBool(root, "use_sources", "useSources");
         if (!useSources)
         {
             return SourceQueryPlan.NoSources;
         }
 
+        var requiresSourceGrounding = ReadBool(root, "requires_source_grounding", "requiresSourceGrounding") || useSources;
+        var intent = ReadString(root, "intent", "general_sources");
+        var topic = ReadString(root, "topic", string.Empty);
+        var queryTerms = ReadStringArray(root, "query_terms", "queryTerms").ToList();
+        var preferredSourceTopics = ReadStringArray(root, "preferred_source_topics", "preferredSourceTopics");
+
         if (queryTerms.Count == 0 && string.IsNullOrWhiteSpace(topic))
         {
-            return SourceQueryPlan.NoSources;
+            queryTerms.Add(fallbackUserText.Trim());
         }
 
         return new SourceQueryPlan(
@@ -538,17 +216,90 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             : null;
     }
 
-    private static bool ReadBool(JsonElement root, string propertyName) =>
-        root.TryGetProperty(propertyName, out var value) && value.ValueKind is JsonValueKind.True;
+    private static SourceQueryPlan? TryParseLoosePlan(string text, string fallbackUserText)
+    {
+        var normalized = text.ReplaceLineEndings(" ").Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        var saysUseSources = ContainsPair(normalized, "use_sources", "true")
+                             || ContainsPair(normalized, "useSources", "true")
+                             || ContainsPair(normalized, "requires_source", "true")
+                             || ContainsPair(normalized, "source", "needed")
+                             || ContainsPair(normalized, "source", "required")
+                             || ContainsPair(normalized, "retrieve", "sources");
+        var saysNoSources = ContainsPair(normalized, "use_sources", "false")
+                            || ContainsPair(normalized, "useSources", "false")
+                            || ContainsPair(normalized, "source", "not needed")
+                            || ContainsPair(normalized, "no", "sources");
+        if (!saysUseSources || saysNoSources)
+        {
+            return null;
+        }
+
+        var intent = normalized.Contains("current_news", StringComparison.OrdinalIgnoreCase)
+                     || normalized.Contains("news", StringComparison.OrdinalIgnoreCase)
+            ? "current_news"
+            : "general_sources";
+        var preferredTopics = intent.Equals("current_news", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "news" }
+            : Array.Empty<string>();
+        return new SourceQueryPlan(
+            true,
+            true,
+            intent,
+            fallbackUserText.Trim(),
+            [fallbackUserText.Trim()],
+            preferredTopics);
+    }
+
+    private static bool ContainsPair(string text, string left, string right) =>
+        text.Contains(left, StringComparison.OrdinalIgnoreCase)
+        && text.Contains(right, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ReadBool(JsonElement root, string snakeName, string camelName) =>
+        (root.TryGetProperty(snakeName, out var snakeValue) && ReadFlexibleBool(snakeValue))
+        || (root.TryGetProperty(camelName, out var camelValue) && ReadFlexibleBool(camelValue));
+
+    private static bool ReadFlexibleBool(JsonElement value) =>
+        value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => value.TryGetInt32(out var number) && number != 0,
+            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed)
+                                    ? parsed
+                                    : string.Equals(value.GetString(), "yes", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
 
     private static string ReadString(JsonElement root, string propertyName, string fallback) =>
         root.TryGetProperty(propertyName, out var value) && value.ValueKind is JsonValueKind.String
             ? value.GetString() ?? fallback
             : fallback;
 
-    private static IReadOnlyList<string> ReadStringArray(JsonElement root, string propertyName)
+    private static IReadOnlyList<string> ReadStringArray(JsonElement root, string snakeName, string camelName)
     {
-        if (!root.TryGetProperty(propertyName, out var value) || value.ValueKind is not JsonValueKind.Array)
+        var value = root.TryGetProperty(snakeName, out var snakeValue)
+            ? snakeValue
+            : root.TryGetProperty(camelName, out var camelValue)
+                ? camelValue
+                : default;
+
+        if (value.ValueKind is JsonValueKind.String)
+        {
+            return value.GetString()?
+                       .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                       .Where(item => !string.IsNullOrWhiteSpace(item))
+                       .Distinct(StringComparer.OrdinalIgnoreCase)
+                       .Take(12)
+                       .ToList()
+                   ?? [];
+        }
+
+        if (value.ValueKind is not JsonValueKind.Array)
         {
             return Array.Empty<string>();
         }

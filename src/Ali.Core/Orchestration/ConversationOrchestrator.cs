@@ -61,21 +61,6 @@ public sealed class ConversationOrchestrator(
     private static readonly Regex SourcesCheckedRegex = new(
         @"(?:\r?\n){0,2}\s*Sources checked:\s*.*\z",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
-    private static readonly Regex MultiDayForecastRegex = new(
-        @"\b(?:5|five|3|three|4|four|7|seven|10|ten)\s*-?\s*day\b|\bweek(?:ly|end)?\s+forecast\b|\bforecast\s+(?:for\s+)?(?:the\s+)?(?:week|next\s+week)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex PresidentRegex = new(
-        @"President\s+Donald\s+J\.?\s+Trump",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex VicePresidentRegex = new(
-        @"Vice\s+President\s+JD\s+Vance",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex CurrentPresidentQuestionRegex = new(
-        @"\b(?:who(?:'s|\s+is)|whos|current|today|now)\b.*\bpresident\b|\bpresident\b.*\b(?:united\s+states|u\.?\s*s\.?|america|current|today|now)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex CurrentVicePresidentQuestionRegex = new(
-        @"\b(?:who(?:'s|\s+is)|whos|current|today|now)\b.*\b(?:vice\s+president|vp)\b|\b(?:vice\s+president|vp)\b.*\b(?:united\s+states|u\.?\s*s\.?|america|current|today|now)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     public ILocalModelRuntime Runtime { get; } = runtime;
 
     public PermissionService Permissions { get; } = permissionService;
@@ -138,29 +123,6 @@ public sealed class ConversationOrchestrator(
         var sourceResult = sourcePlan.UseSources
             ? await Sources.RetrieveAsync(sourcePlan, cancellationToken).ConfigureAwait(false)
             : SourceRetrievalResult.Empty;
-        var deterministicSourceAnswer = TryBuildDeterministicSourceAnswer(userText, sourcePlan, sourceResult);
-        if (!string.IsNullOrWhiteSpace(deterministicSourceAnswer))
-        {
-            yield return new AssistantStreamChunk(
-                conversationId,
-                userMessageId,
-                assistantMessageId,
-                deterministicSourceAnswer,
-                EvidenceStatus.Verified);
-
-            var deterministicSourceAppendix = SourcePromptFormatter.BuildAnswerAppendix(sourceResult);
-            if (!string.IsNullOrWhiteSpace(deterministicSourceAppendix))
-            {
-                yield return new AssistantStreamChunk(
-                    conversationId,
-                    userMessageId,
-                    assistantMessageId,
-                    $"{Environment.NewLine}{Environment.NewLine}{deterministicSourceAppendix}",
-                    EvidenceStatus.Verified);
-            }
-
-            yield break;
-        }
 
         var answerHistory = ShouldIncludeSavedMemoriesInAnswer(userText, sourcePlan)
             ? plannerHistory
@@ -196,6 +158,17 @@ public sealed class ConversationOrchestrator(
                 .ToList();
         }
 
+        if (sourcePlan.UseSources && !sourceResult.HasSources && sourceResult.Warnings.Count > 0)
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                BuildSourceLookupFailureAnswer(sourceResult),
+                EvidenceStatus.Verified);
+            yield break;
+        }
+
         var request = new ChatRequest(conversationId, userMessageId, userText, enrichedHistory)
         {
             Attachments = attachments
@@ -203,15 +176,101 @@ public sealed class ConversationOrchestrator(
 
         if (!sourceResult.HasSources)
         {
-            await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
+            var directAnswer = await CollectRuntimeAnswerAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!sourcePlan.UseSources && ShouldRetryWithSourceLookup(directAnswer.Text))
+            {
+                var retryPlan = new SourceQueryPlan(
+                    true,
+                    true,
+                    "general_sources",
+                    userText,
+                    [userText],
+                    Array.Empty<string>());
+                var retrySourceResult = await Sources.RetrieveAsync(retryPlan, cancellationToken).ConfigureAwait(false);
+                if (retrySourceResult.HasSources || retrySourceResult.Warnings.Count > 0)
+                {
+                    if (!retrySourceResult.HasSources && retrySourceResult.Warnings.Count > 0)
+                    {
+                        yield return new AssistantStreamChunk(
+                            conversationId,
+                            userMessageId,
+                            assistantMessageId,
+                            BuildSourceLookupFailureAnswer(retrySourceResult),
+                            EvidenceStatus.Verified);
+                        yield break;
+                    }
+
+                    var retryHistory = answerHistory;
+                    if (retrySourceResult.HasSources)
+                    {
+                        retryHistory = retryHistory
+                            .Append(new ChatMessage(
+                                $"msg_sources_instruction_retry_{Guid.NewGuid():N}",
+                                ChatRole.System,
+                                SourcePromptFormatter.BuildPromptInstruction(retrySourceResult),
+                                DateTimeOffset.UtcNow,
+                                EvidenceStatus.Verified))
+                            .Append(new ChatMessage(
+                                $"msg_sources_context_retry_{Guid.NewGuid():N}",
+                                ChatRole.User,
+                                SourcePromptFormatter.BuildUntrustedExcerptContext(retrySourceResult),
+                                DateTimeOffset.UtcNow,
+                                EvidenceStatus.Verified))
+                            .ToList();
+                    }
+                    else
+                    {
+                        retryHistory = retryHistory
+                            .Append(new ChatMessage(
+                                $"msg_sources_empty_retry_{Guid.NewGuid():N}",
+                                ChatRole.System,
+                                SourcePromptFormatter.BuildNoSourceResultContext(retryPlan, retrySourceResult),
+                                DateTimeOffset.UtcNow,
+                                EvidenceStatus.Verified))
+                            .ToList();
+                    }
+
+                    var retryRequest = new ChatRequest(conversationId, userMessageId, userText, retryHistory)
+                    {
+                        Attachments = attachments
+                    };
+                    var retryAnswer = await CollectRuntimeAnswerAsync(retryRequest, cancellationToken).ConfigureAwait(false);
+                    var cleanedRetryAnswer = StripModelGeneratedSourceAppendix(retryAnswer.Text);
+                    if (!string.IsNullOrWhiteSpace(cleanedRetryAnswer))
+                    {
+                        yield return new AssistantStreamChunk(
+                            conversationId,
+                            userMessageId,
+                            assistantMessageId,
+                            cleanedRetryAnswer,
+                            retryAnswer.EvidenceStatus,
+                            retryAnswer.FinishReason);
+                    }
+
+                    var retrySourceAppendix = SourcePromptFormatter.BuildAnswerAppendix(retrySourceResult);
+                    if (!string.IsNullOrWhiteSpace(retrySourceAppendix))
+                    {
+                        yield return new AssistantStreamChunk(
+                            conversationId,
+                            userMessageId,
+                            assistantMessageId,
+                            $"{Environment.NewLine}{Environment.NewLine}{retrySourceAppendix}",
+                            EvidenceStatus.Verified);
+                    }
+
+                    yield break;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(directAnswer.Text))
             {
                 yield return new AssistantStreamChunk(
                     conversationId,
                     userMessageId,
                     assistantMessageId,
-                    token.Text,
-                    token.EvidenceStatus,
-                    token.FinishReason);
+                    directAnswer.Text,
+                    directAnswer.EvidenceStatus,
+                    directAnswer.FinishReason);
             }
 
             yield break;
@@ -1362,96 +1421,74 @@ public sealed class ConversationOrchestrator(
             .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
     }
 
-    private static bool IsDisabledMultiDayForecastRequest(string userText) =>
-        MultiDayForecastRegex.IsMatch(userText);
-
-    private static string? TryBuildDeterministicSourceAnswer(
-        string userText,
-        SourceQueryPlan sourcePlan,
-        SourceRetrievalResult sourceResult)
+    private async Task<CollectedRuntimeAnswer> CollectRuntimeAnswerAsync(
+        ChatRequest request,
+        CancellationToken cancellationToken)
     {
-        if (!sourceResult.HasSources)
+        var answer = new StringBuilder();
+        var evidenceStatus = EvidenceStatus.Unverified;
+        string? finishReason = null;
+        await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
         {
-            return null;
+            answer.Append(token.Text);
+            evidenceStatus = token.EvidenceStatus;
+            if (!string.IsNullOrWhiteSpace(token.FinishReason))
+            {
+                finishReason = token.FinishReason;
+            }
         }
 
-        if (string.Equals(sourcePlan.Intent, "official_info", StringComparison.OrdinalIgnoreCase))
-        {
-            return TryBuildDeterministicOfficeholderAnswer(userText, sourceResult);
-        }
-
-        if (!string.Equals(sourcePlan.Intent, "weather", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var forecast = sourceResult.Excerpts.FirstOrDefault(excerpt =>
-            excerpt.Excerpt.Contains("National Weather Service local forecast:", StringComparison.OrdinalIgnoreCase));
-        if (forecast is null)
-        {
-            return null;
-        }
-
-        return BuildCurrentDayOnlyForecast(
-            forecast.Excerpt,
-            includeMultiDayReworkNote: IsDisabledMultiDayForecastRequest(userText));
+        return new CollectedRuntimeAnswer(answer.ToString(), evidenceStatus, finishReason);
     }
 
-    private static string BuildCurrentDayOnlyForecast(string forecastExcerpt, bool includeMultiDayReworkNote)
+    private static bool ShouldRetryWithSourceLookup(string answer)
     {
-        var lines = forecastExcerpt
-            .Split([Environment.NewLine, "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(line => line.TrimEnd('\r'))
-            .ToList();
-        var currentLine = lines.FirstOrDefault(line =>
-            line.StartsWith("Today:", StringComparison.OrdinalIgnoreCase)
-            || line.StartsWith("This Afternoon:", StringComparison.OrdinalIgnoreCase)
-            || line.StartsWith("Tonight:", StringComparison.OrdinalIgnoreCase));
-        if (string.IsNullOrWhiteSpace(currentLine))
+        if (string.IsNullOrWhiteSpace(answer))
         {
-            currentLine = lines.FirstOrDefault(line =>
-                !line.StartsWith("National Weather Service local forecast", StringComparison.OrdinalIgnoreCase));
+            return false;
         }
 
-        var answer = string.IsNullOrWhiteSpace(currentLine)
-            ? "Current-day forecast details were not available in the approved weather source."
-            : $"Current-day forecast: {currentLine}";
-        return includeMultiDayReworkNote
-            ? $"{answer}{Environment.NewLine}Multi-day forecasts are being reworked for this release, so I am only showing the current-day forecast right now."
-            : answer;
+        var normalized = answer.ReplaceLineEndings(" ");
+        return normalized.Contains("don't have real-time access", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("do not have real-time access", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("no real-time access", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("don't have access to current", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("do not have access to current", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("don't have internet access", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("do not have internet access", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("cannot browse", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("can't browse", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("check reliable news sources", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("search engines", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("latest information yourself", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? TryBuildDeterministicOfficeholderAnswer(string userText, SourceRetrievalResult sourceResult)
+    private static string BuildSourceLookupFailureAnswer(SourceRetrievalResult result)
     {
-        var asksVicePresident = CurrentVicePresidentQuestionRegex.IsMatch(userText);
-        var asksPresident = !asksVicePresident && CurrentPresidentQuestionRegex.IsMatch(userText);
-        if (!asksPresident && !asksVicePresident)
+        var lines = new List<string>
         {
-            return null;
+            "I tried the source lookup for this current/source-backed question, but the internet backend did not return usable source excerpts."
+        };
+
+        if (result.Warnings.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add("Source backend warnings:");
+            foreach (var warning in result.Warnings.Take(5))
+            {
+                lines.Add($"- {warning}");
+            }
         }
 
-        var administration = sourceResult.Excerpts.FirstOrDefault(excerpt =>
-            excerpt.Name.Contains("White House", StringComparison.OrdinalIgnoreCase)
-            || excerpt.Url.Contains("whitehouse.gov/administration", StringComparison.OrdinalIgnoreCase)
-            || excerpt.Excerpt.Contains("The Administration", StringComparison.OrdinalIgnoreCase));
-        if (administration is null)
-        {
-            return null;
-        }
-
-        var lines = new List<string>();
-        if (asksPresident && PresidentRegex.IsMatch(administration.Excerpt))
-        {
-            lines.Add("The current President of the United States is Donald J. Trump, the 45th and 47th President of the United States.");
-        }
-
-        if (asksVicePresident && VicePresidentRegex.IsMatch(administration.Excerpt))
-        {
-            lines.Add("The current Vice President of the United States is JD Vance.");
-        }
-
-        return lines.Count == 0 ? null : string.Join(Environment.NewLine, lines);
+        lines.Add(string.Empty);
+        lines.Add("Configure the internet backend settings or API keys, then ask again.");
+        return string.Join(Environment.NewLine, lines);
     }
+
+    private sealed record CollectedRuntimeAnswer(
+        string Text,
+        EvidenceStatus EvidenceStatus,
+        string? FinishReason);
 
     private static IReadOnlyList<ChatMessage> AddCodingContext(
         IReadOnlyList<ChatMessage> history,

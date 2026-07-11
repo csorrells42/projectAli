@@ -563,6 +563,7 @@ public sealed class AliDesktopInstaller
                 httpClient);
             var result = sourceStore.RepairStarterCatalog();
             sourceStore.WriteExample();
+            WebSourceBackendSettingsStore.WriteExample(Path.Combine(options.LocalAliRoot, "BootstrapData"));
 
             if (result.CatalogCreated)
             {

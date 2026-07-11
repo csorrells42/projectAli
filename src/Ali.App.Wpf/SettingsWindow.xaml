@@ -622,6 +622,67 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="Internet">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource AppBackgroundBrush}">
+                    <Border Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrushDark}"
+                            BorderThickness="1"
+                            Padding="16"
+                            Margin="0,12,10,0">
+                        <StackPanel>
+                            <TextBlock Text="Internet Source Backend"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextBrush}" />
+                            <TextBlock Text="{Binding InternetBackendStatusText}"
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="12"
+                                       Margin="0,4,0,12" />
+
+                            <CheckBox Content="Enable internet source backend"
+                                      IsChecked="{Binding InternetBackendEnabled}"
+                                      Margin="0,0,0,12" />
+
+                            <TextBlock Text="Tavily API key" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding InternetTavilyApiKeyText, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,2,0,2" />
+                            <TextBlock Text="Primary current-events/news search. Leave blank to use TAVILY_API_KEY from the environment."
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       Foreground="{StaticResource SubtleTextBrush}"
+                                       Margin="0,0,0,10" />
+
+                            <TextBlock Text="Firecrawl API key" Style="{StaticResource FieldLabel}" />
+                            <TextBox Text="{Binding InternetFirecrawlApiKeyText, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,2,0,2" />
+                            <TextBlock Text="Page extraction and fallback search. Leave blank to use FIRECRAWL_API_KEY from the environment."
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       Foreground="{StaticResource SubtleTextBrush}"
+                                       Margin="0,0,0,12" />
+
+                            <StackPanel Orientation="Horizontal"
+                                        HorizontalAlignment="Right">
+                                <Button Content="Save"
+                                        Command="{Binding SaveInternetBackendSettingsCommand}"
+                                        Width="86"
+                                        Margin="0" />
+                            </StackPanel>
+
+                            <Border BorderBrush="{StaticResource BorderBrushDark}"
+                                    BorderThickness="1"
+                                    Padding="10"
+                                    Margin="0,12,0,0">
+                                <TextBlock Text="{Binding InternetBackendSettingsPath}"
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource TextBrush}" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="Voice / Mic">
                 <Grid Background="#05070A" Margin="0,12,0,0">
                     <Grid.RowDefinitions>
