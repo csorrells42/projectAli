@@ -129,7 +129,7 @@ public sealed class AliServices
         WebSourceBackendSettingsStore.Save(DataRoot, settings);
 
     public TavilyFirecrawlSourceRetriever CreateWebSourceRetriever() =>
-        new(_httpClient, LoadWebSourceBackendSettings());
+        new(_httpClient, LoadWebSourceBackendSettings);
 
     public UserDataBackupService CreateUserDataBackupService() =>
         new(DataRoot, ProfileDataRoot);
@@ -220,7 +220,7 @@ public sealed class AliServices
                 localLibrary,
                 new TavilyFirecrawlSourceRetriever(
                     httpClient,
-                    WebSourceBackendSettingsStore.LoadOrDefault(dataRoot))),
+                    () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot))),
             memoryStore: memories,
             localCodingTool: localCodingTool);
 

@@ -5,14 +5,28 @@ using Ali.Core.Sources;
 
 namespace Ali.Infrastructure.Sources;
 
-public sealed class TavilyFirecrawlSourceRetriever(
-    HttpClient httpClient,
-    WebSourceBackendSettings settings) : ISourceRetriever
+public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 {
+    private readonly HttpClient httpClient;
+    private readonly Func<WebSourceBackendSettings> settingsProvider;
+    private WebSourceBackendSettings settings;
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
     };
+
+    public TavilyFirecrawlSourceRetriever(HttpClient httpClient, WebSourceBackendSettings settings)
+        : this(httpClient, () => settings)
+    {
+    }
+
+    public TavilyFirecrawlSourceRetriever(HttpClient httpClient, Func<WebSourceBackendSettings> settingsProvider)
+    {
+        this.httpClient = httpClient;
+        this.settingsProvider = settingsProvider;
+        this.settings = settingsProvider() ?? new WebSourceBackendSettings();
+    }
 
     public Task<SourceRetrievalResult> RetrieveAsync(string userText, CancellationToken cancellationToken) =>
         RetrieveAsync(
@@ -29,6 +43,8 @@ public sealed class TavilyFirecrawlSourceRetriever(
         SourceQueryPlan plan,
         CancellationToken cancellationToken)
     {
+        settings = settingsProvider() ?? new WebSourceBackendSettings();
+
         if (!plan.UseSources || IsLocalDocumentPlan(plan))
         {
             return SourceRetrievalResult.Empty;
