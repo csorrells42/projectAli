@@ -7,6 +7,7 @@ using Ali.Core.Evidence;
 using Ali.Core.Identity;
 using Ali.Core.Models;
 using Ali.Core.Runtime;
+using Ali.Core.Time;
 
 namespace Ali.Infrastructure.Runtime;
 
@@ -21,6 +22,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const int MaxAutomaticLengthContinuations = 1;
     private const string HealthProbeExpectedResponse = "OK";
     private const string SourcePlannerConversationId = "source_query_plan";
+    private const string SourceAnswerVerifierConversationId = "source_answer_verifier";
     private const string CodingActionPlannerConversationId = "coding_action_plan";
     private const string CodingPatchPlannerConversationId = "coding_patch_plan";
     private const string VisibleOutputRetryInstruction =
@@ -672,8 +674,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     private static string BuildCurrentDateInstruction()
     {
-        var now = DateTimeOffset.Now;
-        return $"Current local date: {now:dddd, MMMM d, yyyy}. Current local time: {now:HH:mm zzz}. Use this date for relative-date questions. Do not answer from an old training cutoff when current app-provided source evidence or the current local date is relevant.";
+        return CurrentDateTimeSnapshot.Capture().BuildSystemInstruction();
     }
 
     private static string BuildCodingModeInstruction()
@@ -728,6 +729,9 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private static bool IsSourcePlannerRequest(ChatRequest request) =>
         string.Equals(request.ConversationId, SourcePlannerConversationId, StringComparison.Ordinal);
 
+    private static bool IsSourceAnswerVerifierRequest(ChatRequest request) =>
+        string.Equals(request.ConversationId, SourceAnswerVerifierConversationId, StringComparison.Ordinal);
+
     private static bool IsCodingActionPlannerRequest(ChatRequest request) =>
         string.Equals(request.ConversationId, CodingActionPlannerConversationId, StringComparison.Ordinal);
 
@@ -735,7 +739,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         string.Equals(request.ConversationId, CodingPatchPlannerConversationId, StringComparison.Ordinal);
 
     private static bool IsPlannerRequest(ChatRequest request) =>
-        IsSourcePlannerRequest(request) || IsCodingActionPlannerRequest(request) || IsCodingPatchPlannerRequest(request);
+        IsSourcePlannerRequest(request)
+        || IsSourceAnswerVerifierRequest(request)
+        || IsCodingActionPlannerRequest(request)
+        || IsCodingPatchPlannerRequest(request);
 
     private bool ShouldDisableThinking() =>
         IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);

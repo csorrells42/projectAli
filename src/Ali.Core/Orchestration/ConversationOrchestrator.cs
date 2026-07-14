@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Ali.Core.Coding;
 using Ali.Core.Evidence;
@@ -8,6 +10,7 @@ using Ali.Core.Memory;
 using Ali.Core.Permissions;
 using Ali.Core.Runtime;
 using Ali.Core.Sources;
+using Ali.Core.Time;
 
 namespace Ali.Core.Orchestration;
 
@@ -61,6 +64,22 @@ public sealed class ConversationOrchestrator(
     private static readonly Regex SourcesCheckedRegex = new(
         @"(?:\r?\n){0,2}\s*Sources checked:\s*.*\z",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+    private static readonly Regex SourcesCheckedHeaderRegex = new(
+        @"^\s*Sources checked\s*:\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex SourceListLineRegex = new(
+        @"^\s*(?:[-*]\s*)?(?:\[\d+\]|\d+[\.)])\s+",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex SourceContinuationLineRegex = new(
+        @"^\s*(?:https?://|www\.|[\w.-]+\.[a-z]{2,}/)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex DatedEvidenceFactRegex = new(
+        @"Source \[(?<source>\d+)\] date (?<date>\d{4}-\d{2}-\d{2})(?:: (?<context>.*))?",
+        RegexOptions.CultureInvariant);
+    private static readonly Regex AnswerMonthDateRegex = new(
+        @"\b(?<month>Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t)?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(?<day>\d{1,2})(?:,\s*(?<year>20\d{2}))\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex AnswerIsoDateRegex = new(@"\b(?<date>20\d{2}-\d{2}-\d{2})\b", RegexOptions.CultureInvariant);
     public ILocalModelRuntime Runtime { get; } = runtime;
 
     public PermissionService Permissions { get; } = permissionService;
@@ -231,7 +250,12 @@ public sealed class ConversationOrchestrator(
                         Attachments = attachments
                     };
                     var retryAnswer = await CollectRuntimeAnswerAsync(retryRequest, cancellationToken).ConfigureAwait(false);
-                    var cleanedRetryAnswer = StripModelGeneratedSourceAppendix(retryAnswer.Text);
+                    var cleanedRetryAnswer = await FinalizeSourceGroundedAnswerAsync(
+                        userText,
+                        retryPlan,
+                        retrySourceResult,
+                        retryAnswer.Text,
+                        cancellationToken).ConfigureAwait(false);
                     if (!string.IsNullOrWhiteSpace(cleanedRetryAnswer))
                     {
                         yield return new AssistantStreamChunk(
@@ -285,7 +309,12 @@ public sealed class ConversationOrchestrator(
             }
         }
 
-        var cleanedAnswer = StripModelGeneratedSourceAppendix(answer.ToString());
+        var cleanedAnswer = await FinalizeSourceGroundedAnswerAsync(
+            userText,
+            sourcePlan,
+            sourceResult,
+            answer.ToString(),
+            cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(cleanedAnswer))
         {
             yield return new AssistantStreamChunk(
@@ -386,8 +415,331 @@ public sealed class ConversationOrchestrator(
             EvidenceStatus.Unknown);
     }
 
-    private static string StripModelGeneratedSourceAppendix(string answer) =>
-        SourcesCheckedRegex.Replace(answer, string.Empty).TrimEnd();
+    private async Task<string> FinalizeSourceGroundedAnswerAsync(
+        string userText,
+        SourceQueryPlan sourcePlan,
+        SourceRetrievalResult sourceResult,
+        string draftAnswer,
+        CancellationToken cancellationToken)
+    {
+        var cleanedDraft = StripModelGeneratedSourceAppendix(draftAnswer);
+        if (!sourceResult.HasSources || string.IsNullOrWhiteSpace(cleanedDraft))
+        {
+            return cleanedDraft;
+        }
+
+        var verifierHistory = new List<ChatMessage>
+        {
+            new(
+                "source_answer_verifier_system",
+                ChatRole.System,
+                BuildSourceAnswerVerifierInstruction(sourceResult),
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Verified),
+            new(
+                "source_answer_verifier_sources",
+                ChatRole.User,
+                SourcePromptFormatter.BuildUntrustedExcerptContext(sourceResult),
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Verified)
+        };
+        var verifierRequest = new ChatRequest(
+            ConversationId: "source_answer_verifier",
+            UserMessageId: "source_answer_verifier_user",
+            UserText: BuildSourceAnswerVerifierUserText(userText, cleanedDraft),
+            History: verifierHistory);
+
+        try
+        {
+            var verified = await CollectRuntimeAnswerAsync(verifierRequest, cancellationToken).ConfigureAwait(false);
+            var finalAnswer = TryReadVerifiedSourceAnswer(verified.Text);
+            var candidateAnswer = string.IsNullOrWhiteSpace(finalAnswer)
+                ? cleanedDraft
+                : StripModelGeneratedSourceAppendix(finalAnswer);
+            return ApplyTemporalEvidenceGuard(userText, sourcePlan, sourceResult, candidateAnswer);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or JsonException or OperationCanceledException)
+        {
+            return ApplyTemporalEvidenceGuard(userText, sourcePlan, sourceResult, cleanedDraft);
+        }
+    }
+
+    private static string StripModelGeneratedSourceAppendix(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            return string.Empty;
+        }
+
+        var withoutTrailingAppendix = SourcesCheckedRegex.Replace(answer, string.Empty);
+        var lines = withoutTrailingAppendix.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var cleaned = new List<string>();
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!SourcesCheckedHeaderRegex.IsMatch(lines[index]))
+            {
+                cleaned.Add(lines[index]);
+                continue;
+            }
+
+            index++;
+            while (index < lines.Length
+                   && (string.IsNullOrWhiteSpace(lines[index])
+                       || SourceListLineRegex.IsMatch(lines[index])
+                       || SourceContinuationLineRegex.IsMatch(lines[index])))
+            {
+                index++;
+            }
+
+            index--;
+        }
+
+        return string.Join(Environment.NewLine, cleaned).Trim();
+    }
+
+    private static string ApplyTemporalEvidenceGuard(
+        string userText,
+        SourceQueryPlan sourcePlan,
+        SourceRetrievalResult sourceResult,
+        string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer) || !sourceResult.HasSources || !sourceResult.RequiresSourceGrounding)
+        {
+            return answer;
+        }
+
+        var clock = CurrentDateTimeSnapshot.Capture();
+        var currentDate = clock.LocalDate;
+        var sourceFacts = ExtractDatedSourceFacts(sourceResult)
+            .Where(fact => fact.Date >= currentDate)
+            .OrderBy(fact => fact.Date)
+            .ToArray();
+        if (sourceFacts.Length == 0)
+        {
+            return answer;
+        }
+
+        if (string.Equals(sourcePlan.TemporalSelection, "earliest_after_reference", StringComparison.OrdinalIgnoreCase))
+        {
+            var answerDates = ExtractDates(answer).ToHashSet();
+            return answerDates.Contains(sourceFacts[0].Date)
+                ? answer
+                : BuildTemporalCorrectedAnswer(sourceFacts[0], clock);
+        }
+
+        var sourceDates = sourceFacts.Select(fact => fact.Date).ToHashSet();
+        var unsupportedEarlierAnswerDates = ExtractDates(answer)
+            .Where(date => date < sourceFacts[0].Date && !sourceDates.Contains(date))
+            .ToArray();
+        if (unsupportedEarlierAnswerDates.Length == 0)
+        {
+            return answer;
+        }
+
+        var userYears = ExtractYears(userText).ToHashSet();
+        if (unsupportedEarlierAnswerDates.Any(date => date.Year < currentDate.Year && userYears.Contains(date.Year)))
+        {
+            return answer;
+        }
+
+        return BuildTemporalCorrectedAnswer(sourceFacts[0], clock);
+    }
+
+    private static IEnumerable<DatedSourceFact> ExtractDatedSourceFacts(SourceRetrievalResult sourceResult)
+    {
+        foreach (var fact in SourcePromptFormatter.BuildDatedEvidenceFacts(sourceResult))
+        {
+            var match = DatedEvidenceFactRegex.Match(fact);
+            if (!match.Success
+                || !DateOnly.TryParseExact(
+                    match.Groups["date"].Value,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var date)
+                || !int.TryParse(match.Groups["source"].Value, CultureInfo.InvariantCulture, out var sourceIndex))
+            {
+                continue;
+            }
+
+            yield return new DatedSourceFact(
+                date,
+                sourceIndex,
+                match.Groups["context"].Value.Trim());
+        }
+    }
+
+    private static IEnumerable<DateOnly> ExtractDates(string text)
+    {
+        foreach (Match match in AnswerIsoDateRegex.Matches(text))
+        {
+            if (DateOnly.TryParseExact(
+                match.Groups["date"].Value,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed))
+            {
+                yield return parsed;
+            }
+        }
+
+        foreach (Match match in AnswerMonthDateRegex.Matches(text))
+        {
+            if (!TryReadMonth(match.Groups["month"].Value, out var month)
+                || !int.TryParse(match.Groups["day"].Value, CultureInfo.InvariantCulture, out var day)
+                || !int.TryParse(match.Groups["year"].Value, CultureInfo.InvariantCulture, out var year))
+            {
+                continue;
+            }
+
+            if (TryCreateDateOnly(year, month, day, out var parsed))
+            {
+                yield return parsed;
+            }
+        }
+    }
+
+    private static bool TryCreateDateOnly(int year, int month, int day, out DateOnly date)
+    {
+        try
+        {
+            date = new DateOnly(year, month, day);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            date = default;
+            return false;
+        }
+    }
+
+    private static IEnumerable<int> ExtractYears(string text)
+    {
+        foreach (Match match in Regex.Matches(text, @"\b(20\d{2})\b", RegexOptions.CultureInvariant))
+        {
+            if (int.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out var year))
+            {
+                yield return year;
+            }
+        }
+    }
+
+    private static string BuildTemporalCorrectedAnswer(
+        DatedSourceFact sourceFact,
+        CurrentDateTimeSnapshot clock)
+    {
+        var context = NormalizeDatedFactContext(sourceFact.Context);
+        var dateText = sourceFact.Date.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
+        var currentDateText = clock.LocalDate.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
+        return string.IsNullOrWhiteSpace(context)
+            ? $"Based on the retrieved source excerpts and the current local date ({currentDateText}), the earliest source-supported upcoming dated item is {dateText} [{sourceFact.SourceIndex}]."
+            : $"Based on the retrieved source excerpts and the current local date ({currentDateText}), the earliest source-supported upcoming dated item is {dateText}: {context} [{sourceFact.SourceIndex}].";
+    }
+
+    private static string NormalizeDatedFactContext(string context)
+    {
+        if (string.IsNullOrWhiteSpace(context))
+        {
+            return string.Empty;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var parts = context
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .Where(part => !AnswerMonthDateRegex.IsMatch(part))
+            .Where(part => seen.Add(part))
+            .Take(5)
+            .ToArray();
+        return string.Join("; ", parts);
+    }
+
+    private static bool TryReadMonth(string value, out int month)
+    {
+        var normalized = value.Trim().TrimEnd('.').ToLowerInvariant();
+        var monthNames = CultureInfo.InvariantCulture.DateTimeFormat;
+        for (var index = 1; index <= 12; index++)
+        {
+            if (normalized.Equals(monthNames.GetMonthName(index).ToLowerInvariant(), StringComparison.Ordinal)
+                || normalized.Equals(monthNames.GetAbbreviatedMonthName(index).ToLowerInvariant(), StringComparison.Ordinal)
+                || (index == 9 && normalized.Equals("sept", StringComparison.Ordinal)))
+            {
+                month = index;
+                return true;
+            }
+        }
+
+        month = 0;
+        return false;
+    }
+
+    private static string BuildSourceAnswerVerifierInstruction(SourceRetrievalResult sourceResult)
+    {
+        var clock = CurrentDateTimeSnapshot.Capture();
+        var retrievedAt = sourceResult.Excerpts.Count == 0
+            ? clock.LocalNow
+            : sourceResult.Excerpts.Max(source => source.RetrievedAt).ToLocalTime();
+        return string.Join(
+            Environment.NewLine,
+            [
+                "You are Ali's source-grounded answer verifier and cleanup pass.",
+                "Return exactly one JSON object and no other text.",
+                "Do not answer from memory, training data, or the draft answer when source excerpts disagree.",
+                clock.BuildSystemInstruction(),
+                $"Latest source retrieval time: {retrievedAt:yyyy-MM-dd HH:mm:ss zzz}.",
+                "Use only the current user message and the provided source excerpts for current, official, schedule, sports, price, weather, news, or web-page claims.",
+                "Treat the draft answer as untrusted. It may contain wrong dates, repeated paragraphs, stale claims, or a model-generated source list.",
+                "Remove duplicate/repeated content and all source-list sections. Do not write a Sources checked section; the app appends the verified source list.",
+                "For next, upcoming, following, or after-date questions, choose the earliest source-supported event/date that is not before the relevant current or requested date. If the excerpts do not support such an event/date, say the source excerpts do not contain enough information.",
+                "Never output a past date as the answer to a next/upcoming/future question unless the user explicitly asked about the past.",
+                "Keep citations inline using bracket numbers like [1].",
+                "JSON shape: {\"answer\":\"final concise answer with inline citations only\",\"supported\":true,\"diagnostic\":\"short internal note\"}"
+            ]);
+    }
+
+    private static string BuildSourceAnswerVerifierUserText(string userText, string cleanedDraft) =>
+        string.Join(
+            Environment.NewLine,
+            "Current user message:",
+            userText,
+            string.Empty,
+            "Draft answer to verify and rewrite if needed:",
+            cleanedDraft,
+            string.Empty,
+            "Return the final answer once, with no duplicate paragraphs and no Sources checked section.");
+
+    private static string? TryReadVerifiedSourceAnswer(string text)
+    {
+        var json = ExtractJsonObject(text);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        foreach (var propertyName in new[] { "answer", "final_answer", "finalAnswer" })
+        {
+            if (root.TryGetProperty(propertyName, out var value)
+                && value.ValueKind is JsonValueKind.String)
+            {
+                var answer = value.GetString();
+                return string.IsNullOrWhiteSpace(answer) ? null : answer.Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ExtractJsonObject(string text)
+    {
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        return start >= 0 && end > start
+            ? text[start..(end + 1)]
+            : null;
+    }
 
     private async Task<ProgrammingToolSelectionResult> TryRunModelSelectedProgrammingToolAsync(
         string userText,
@@ -1499,6 +1851,11 @@ public sealed class ConversationOrchestrator(
         string Text,
         EvidenceStatus EvidenceStatus,
         string? FinishReason);
+
+    private sealed record DatedSourceFact(
+        DateOnly Date,
+        int SourceIndex,
+        string Context);
 
     private static IReadOnlyList<ChatMessage> AddCodingContext(
         IReadOnlyList<ChatMessage> history,

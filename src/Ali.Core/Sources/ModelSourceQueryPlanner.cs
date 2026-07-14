@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Ali.Core.Evidence;
 using Ali.Core.Runtime;
+using Ali.Core.Time;
 
 namespace Ali.Core.Sources;
 
@@ -119,11 +120,12 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             "When the user asks about local files, folders, documents, manuals, or the local RAG library, choose intent local_documents and preferred_source_topics local_documents.",
             "When the user asks about weather, sports scores, officeholders, prices, or regulations, use sources because those facts change.",
             "For relative dates such as today, yesterday, this week, or this month, resolve them against the current date/time before choosing query_terms; include an absolute date when it makes the search more precise.",
+            "If the user's meaning requires the first dated result after the current/requested reference date, set temporal_selection to earliest_after_reference. If it requires the latest dated result before the reference date, set temporal_selection to latest_before_reference. Otherwise use none.",
             "Use query_terms as the search query Ali should send to the source backend. Keep them short and specific.",
             "preferred_source_topics should contain broad routing labels only, such as news, weather, sports, health, ai, software, government, finance, law, reference, local_documents.",
             "requires_source_grounding should be true whenever the answer must come from retrieved evidence instead of memory.",
             "JSON shape:",
-            "{\"use_sources\":false,\"requires_source_grounding\":false,\"intent\":\"stable_knowledge\",\"topic\":\"\",\"query_terms\":[],\"preferred_source_topics\":[]}",
+            "{\"use_sources\":false,\"requires_source_grounding\":false,\"intent\":\"stable_knowledge\",\"topic\":\"\",\"query_terms\":[],\"preferred_source_topics\":[],\"temporal_selection\":\"none\"}",
             "Allowed intents include stable_knowledge, current_news, weather, sports_score, official_info, docs, research, local_documents, local_app, general_sources.",
             "Recent conversation context for location, pronouns, and continuity:"
         };
@@ -161,9 +163,10 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             "For current events and news, use intent current_news and preferred_source_topics news.",
             "For current market, stock, crypto, commodity, rate, or financial questions, use preferred_source_topics finance. If finance and news both seem relevant, choose finance.",
             "For relative dates such as today, yesterday, this week, or this month, resolve them against the current date/time before choosing query_terms; include an absolute date when it makes the search more precise.",
+            "If the user's meaning requires the first dated result after the current/requested reference date, set temporal_selection to earliest_after_reference. If it requires the latest dated result before the reference date, set temporal_selection to latest_before_reference. Otherwise use none.",
             "For local files/documents/library questions, use intent local_documents and preferred_source_topics local_documents.",
             "JSON shape:",
-            "{\"use_sources\":true,\"requires_source_grounding\":true,\"intent\":\"current_news\",\"topic\":\"openai latest headlines\",\"query_terms\":[\"OpenAI latest headlines\"],\"preferred_source_topics\":[\"news\"]}",
+            "{\"use_sources\":true,\"requires_source_grounding\":true,\"intent\":\"current_news\",\"topic\":\"openai latest headlines\",\"query_terms\":[\"OpenAI latest headlines\"],\"preferred_source_topics\":[\"news\"],\"temporal_selection\":\"none\"}",
             "Recent conversation context:"
         };
 
@@ -198,6 +201,7 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         var topic = ReadString(root, "topic", string.Empty);
         var queryTerms = ReadStringArray(root, "query_terms", "queryTerms").ToList();
         var preferredSourceTopics = ReadStringArray(root, "preferred_source_topics", "preferredSourceTopics");
+        var temporalSelection = NormalizeTemporalSelection(ReadString(root, "temporal_selection", "temporalSelection", "none"));
 
         if (queryTerms.Count == 0 && string.IsNullOrWhiteSpace(topic))
         {
@@ -210,7 +214,10 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
             intent,
             topic,
             queryTerms,
-            preferredSourceTopics);
+            preferredSourceTopics)
+        {
+            TemporalSelection = temporalSelection
+        };
     }
 
     private static string? ExtractJsonObject(string text)
@@ -266,7 +273,7 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         && text.Contains(right, StringComparison.OrdinalIgnoreCase);
 
     private static string BuildCurrentTimestampForPlanner() =>
-        $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}";
+        CurrentDateTimeSnapshot.Capture().BuildCompactFactLine();
 
     private static bool ReadBool(JsonElement root, string snakeName, string camelName) =>
         (root.TryGetProperty(snakeName, out var snakeValue) && ReadFlexibleBool(snakeValue))
@@ -285,9 +292,32 @@ public sealed class ModelSourceQueryPlanner(ILocalModelRuntime runtime) : ISourc
         };
 
     private static string ReadString(JsonElement root, string propertyName, string fallback) =>
-        root.TryGetProperty(propertyName, out var value) && value.ValueKind is JsonValueKind.String
-            ? value.GetString() ?? fallback
-            : fallback;
+        ReadString(root, propertyName, propertyName, fallback);
+
+    private static string ReadString(JsonElement root, string snakeName, string camelName, string fallback)
+    {
+        if (root.TryGetProperty(snakeName, out var snakeValue)
+            && snakeValue.ValueKind is JsonValueKind.String)
+        {
+            return snakeValue.GetString() ?? fallback;
+        }
+
+        if (root.TryGetProperty(camelName, out var camelValue)
+            && camelValue.ValueKind is JsonValueKind.String)
+        {
+            return camelValue.GetString() ?? fallback;
+        }
+
+        return fallback;
+    }
+
+    private static string NormalizeTemporalSelection(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant().Replace('-', '_');
+        return normalized is "earliest_after_reference" or "latest_before_reference"
+            ? normalized
+            : "none";
+    }
 
     private static IReadOnlyList<string> ReadStringArray(JsonElement root, string snakeName, string camelName)
     {
