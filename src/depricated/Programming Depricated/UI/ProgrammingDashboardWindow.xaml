@@ -1,0 +1,253 @@
+<Window x:Class="Ali.App.Wpf.ProgrammingDashboardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Ali.App.Wpf.ViewModels"
+        Title="Programming"
+        Height="760"
+        MinHeight="620"
+        Width="1220"
+        MinWidth="940"
+        Background="#0B0B0D"
+        FontFamily="Segoe UI">
+    <Window.Resources>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B0B0D" />
+        <SolidColorBrush x:Key="PanelBrush" Color="#18181B" />
+        <SolidColorBrush x:Key="PanelAltBrush" Color="#202024" />
+        <SolidColorBrush x:Key="InputBrush" Color="#0F0F11" />
+        <SolidColorBrush x:Key="BorderBrushDark" Color="#323236" />
+        <SolidColorBrush x:Key="TextBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#D0D5DD" />
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#9DA4AE" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#00BEE6" />
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#2A2A2E" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="MinHeight" Value="34" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Background" Value="{StaticResource InputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
+            <Setter Property="MinHeight" Value="34" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{StaticResource AppBackgroundBrush}" Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="132" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="116" />
+                <ColumnDefinition Width="10" />
+                <ColumnDefinition Width="82" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox Grid.Column="0"
+                     AutomationProperties.AutomationId="ProgrammingProjectPathTextBox"
+                     Text="{Binding CodingCurrentSolutionOrProjectPathText, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="Current .sln, .slnx, or .csproj Ali should work on." />
+            <Button Grid.Column="2"
+                    AutomationProperties.AutomationId="ProgrammingSelectProjectButton"
+                    Content="Select Project"
+                    Command="{Binding BrowseCodingCurrentSolutionOrProjectCommand}" />
+            <Button Grid.Column="4"
+                    AutomationProperties.AutomationId="ProgrammingNewProjectButton"
+                    Content="New Project"
+                    Command="{Binding CreateCodingProjectCommand}" />
+            <Button Grid.Column="6"
+                    AutomationProperties.AutomationId="ProgrammingCloseButton"
+                    Content="Close"
+                    Click="CloseButtonClick" />
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="310" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrushDark}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                <ScrollViewer x:Name="MessagesScrollViewer"
+                              VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Messages}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
+                                <StackPanel Margin="0,0,0,18"
+                                            MaxWidth="780"
+                                            HorizontalAlignment="{Binding MessageAlignment}">
+                                    <TextBlock AutomationProperties.AutomationId="ProgrammingMessageText"
+                                               Text="{Binding Text}"
+                                               TextWrapping="Wrap"
+                                               TextAlignment="{Binding MessageTextAlignment}"
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontSize="15"
+                                               LineHeight="22" />
+                                    <StackPanel Orientation="Horizontal"
+                                                Margin="0,8,0,0"
+                                                HorizontalAlignment="{Binding MessageAlignment}">
+                                        <Button Content="Flag as incorrect"
+                                                Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Height="28"
+                                                MinHeight="28"
+                                                Padding="9,0"
+                                                FontSize="12"
+                                                Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                        <TextBlock Text="Flagged for correction"
+                                                   Margin="8,6,0,0"
+                                                   Foreground="#FBBF24"
+                                                   FontSize="12"
+                                                   Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Background="{StaticResource PanelAltBrush}"
+                    BorderBrush="{StaticResource BorderBrushDark}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Activity"
+                               Foreground="{StaticResource TextBrush}"
+                               FontSize="18"
+                               FontWeight="SemiBold" />
+                    <StackPanel Grid.Row="1" Margin="0,10,0,10">
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingCurrentTargetText"
+                                   Text="{Binding CodingDashboardCurrentTargetText}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingCurrentTaskText"
+                                   Text="{Binding CodingDashboardCurrentTaskText}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,3,0,0" />
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingStatusText"
+                                   Text="{Binding StatusText}"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0" />
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingActiveRuntimeStatusText"
+                                   Text="{Binding ActiveRuntimeStatus}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0" />
+                        <TextBlock AutomationProperties.AutomationId="ProgrammingModelConnectionStatusText"
+                                   Text="{Binding ModelConnectionStatusText}"
+                                   Foreground="{Binding ModelConnectionStatusBrush}"
+                                   TextWrapping="Wrap"
+                                   FontWeight="SemiBold"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                        <TextBlock Text="{Binding MaintenanceStatusText}"
+                                   Foreground="{StaticResource TextBrush}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   LineHeight="18" />
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="3"
+                               Text="{Binding MaintenanceReceiptPath, StringFormat=Receipts: {0}}"
+                               Foreground="{StaticResource SubtleTextBrush}"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Margin="0,12,0,0" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="92" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="#242426"
+                    BorderBrush="#38383D"
+                    BorderThickness="1"
+                    CornerRadius="24"
+                    Padding="6">
+                <TextBox x:Name="ProgrammingComposerTextBox"
+                         AutomationProperties.AutomationId="ProgrammingComposerTextBox"
+                         MinHeight="42"
+                         MaxHeight="130"
+                         VerticalScrollBarVisibility="Auto"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         Padding="8,9"
+                         FontSize="15"
+                         Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
+                         PreviewKeyDown="ProgrammingComposerTextBox_OnPreviewKeyDown" />
+            </Border>
+            <Button Grid.Column="2"
+                    AutomationProperties.AutomationId="ProgrammingSendButton"
+                    Content="{Binding SendButtonText}"
+                    Command="{Binding SendCommand}"
+                    ToolTip="{Binding SendButtonToolTip}"
+                    Background="{Binding SendButtonBackground}"
+                    BorderBrush="{Binding SendButtonBorderBrush}"
+                    MinHeight="48" />
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="128" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="128" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding AttachmentStatus}"
+                       Foreground="{StaticResource SubtleTextBrush}"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center" />
+            <Button Grid.Column="1"
+                    AutomationProperties.AutomationId="ProgrammingCancelButton"
+                    Content="Cancel"
+                    Command="{Binding StopCommand}" />
+            <Button Grid.Column="3"
+                    AutomationProperties.AutomationId="ProgrammingNextButton"
+                    Content="Next"
+                    Command="{Binding SendProgrammingNextCommand}"
+                    BorderBrush="#1E6B49"
+                    Background="#152A22" />
+        </Grid>
+    </Grid>
+</Window>

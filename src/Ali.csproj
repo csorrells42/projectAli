@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Ali</AssemblyName>
+    <RootNamespace>Ali</RootNamespace>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="depricated\**\*.cs" />
+    <EmbeddedResource Remove="depricated\**\*" />
+    <None Remove="depricated\**\*" />
+    <Page Remove="depricated\**\*.xaml" />
+    <Resource Remove="depricated\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Modules\Voice\Tools\local_kitten_tts.py" />
+    <None Remove="Modules\Voice\Tools\local_whisper_stt.py" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Modules\Voice\Tools\local_kitten_tts.py"
+             Link="lib\voice\local_kitten_tts.py"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Modules\Voice\Tools\local_whisper_stt.py"
+             Link="lib\voice\local_whisper_stt.py"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
+
