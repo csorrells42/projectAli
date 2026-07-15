@@ -2,6 +2,7 @@ bin/
 obj/
 .vs/
 .nuget_scratch/
+artifacts/
 TestResults/
 *.user
 *.suo
@@ -9,7 +10,6 @@ TestResults/
 outputs/
 work/
 tmp/
-src/Ali.App.Installer/Payload/
 lib/voice/python-venv/
 lib/voice/piper/*.onnx
 lib/voice/piper/*.onnx.json
