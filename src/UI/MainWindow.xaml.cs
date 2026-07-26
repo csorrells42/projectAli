@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     private bool _closing;
     private Task? _startupTask;
     private IInputElement? _prePushToTalkFocus;
+    private ExpandedViewportWindow? _expandedViewportWindow;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
@@ -30,7 +31,8 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel viewModel)
         {
             _startupTask = viewModel.StartLocalRuntimeAsync();
-            await _startupTask.ConfigureAwait(true);
+            var visionStartup = viewModel.InitializeVisionAsync();
+            await Task.WhenAll(_startupTask, visionStartup).ConfigureAwait(true);
         }
     }
 
@@ -238,6 +240,34 @@ public partial class MainWindow : Window
         {
             viewModel.SelectedCommandExplorerNode = node;
         }
+    }
+
+    private void CloseMenuItem_OnClick(object sender, RoutedEventArgs e) => Close();
+
+    private void ExpandWebcam_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_expandedViewportWindow is { IsVisible: true } existing)
+        {
+            existing.Activate();
+            return;
+        }
+        if (DataContext is not MainWindowViewModel viewModel
+            || viewModel.DetachVisionViewport() is not { } viewport)
+        {
+            return;
+        }
+        var popup = new ExpandedViewportWindow(viewport) { Owner = this };
+        _expandedViewportWindow = popup;
+        popup.Closed += (_, _) =>
+        {
+            var returningViewport = popup.DetachViewport();
+            _expandedViewportWindow = null;
+            if (returningViewport is not null)
+            {
+                viewModel.RestoreVisionViewport(returningViewport);
+            }
+        };
+        popup.Show();
     }
 
 }

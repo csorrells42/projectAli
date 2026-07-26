@@ -50,7 +50,12 @@ public sealed record VoiceTurnMetadata(
     string? RejectionReason = null,
     double? InputPeak = null,
     double? InputRms = null,
-    string? InputLevelState = null);
+    string? InputLevelState = null,
+    string? PersonIdentityId = null,
+    string? ParticipantDisplayName = null,
+    double? VisualIdentityConfidence = null,
+    double? VoiceIdentityConfidence = null,
+    string? AttentionSource = null);
 
 public interface IVoiceRecorder
 {

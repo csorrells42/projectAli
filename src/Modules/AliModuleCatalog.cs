@@ -5,6 +5,8 @@ public static class AliModuleIds
     public const string Internet = "ali.internet";
     public const string Rag = "ali.rag";
     public const string Voice = "ali.voice";
+    public const string Webcam = "ali.webcam";
+    public const string Attention = "ali.attention";
     public const string Memory = "ali.memory";
     public const string Time = "ali.time";
     public const string Conversation = "ali.conversation";
@@ -31,6 +33,8 @@ public static class AliModuleCatalog
         new(AliModuleIds.Internet, "Internet", "Current web lookup, source retrieval, scrape-backed answering, and citation evidence.", ["sources", "search", "scrape"]),
         new(AliModuleIds.Rag, "RAG", "Local document indexing, retrieval, source excerpts, and grounded local-library answers.", ["documents", "retrieval", "citations"]),
         new(AliModuleIds.Voice, "Voice", "Speech input, speech output, voice calibration, and audio-device behavior.", ["speech-to-text", "text-to-speech", "audio"]),
+        new(AliModuleIds.Webcam, "Webcam", "Reusable camera discovery, preview, recording, controls, profiles, and GPU preview helpers.", ["camera", "preview", "recording", "media-foundation", "directshow", "dx12"]),
+        new(AliModuleIds.Attention, "Attention", "Local face, gaze, and speech-turn gating for deliberate hands-free conversations.", ["mediapipe", "gaze", "voice-activity", "conversation-gating"]),
         new(AliModuleIds.Memory, "Memory", "User, workspace, and conversation memory behavior with clear scope boundaries.", ["memory", "profile", "recall"]),
         new(AliModuleIds.Time, "Time", "Current clock context, date reasoning, reminders, and schedule grounding.", ["clock", "dates", "schedules"]),
         new(AliModuleIds.Conversation, "Conversation", "Chat sessions, titles, history, and conversation records.", ["chat", "history"]),

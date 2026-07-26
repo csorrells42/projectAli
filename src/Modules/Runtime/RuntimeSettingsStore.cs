@@ -24,7 +24,7 @@ public static class RuntimeSettingsStore
             Family: "local",
             Size: "unknown",
             Quantization: "Q4",
-            ContextTokens: 2048,
+            ContextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
             OutputTokenLimit: 256,
             Temperature: 0.2,
             TopP: null,
@@ -44,7 +44,8 @@ public static class RuntimeSettingsStore
             try
             {
                 var json = File.ReadAllText(filePath);
-                return JsonSerializer.Deserialize<OpenAiCompatibleRuntimeOptions>(json, JsonOptions);
+                var options = JsonSerializer.Deserialize<OpenAiCompatibleRuntimeOptions>(json, JsonOptions);
+                return options is null ? null : OllamaRuntimeSafetyPolicy.Normalize(options);
             }
             catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -60,7 +61,7 @@ public static class RuntimeSettingsStore
             return null;
         }
 
-        return new OpenAiCompatibleRuntimeOptions(
+        return OllamaRuntimeSafetyPolicy.Normalize(new OpenAiCompatibleRuntimeOptions(
             Enabled: true,
             Endpoint: new Uri(endpoint),
             Model: model,
@@ -68,20 +69,22 @@ public static class RuntimeSettingsStore
             Family: Environment.GetEnvironmentVariable("ALI_OPENAI_FAMILY") ?? "local",
             Size: Environment.GetEnvironmentVariable("ALI_OPENAI_SIZE") ?? "unknown",
             Quantization: Environment.GetEnvironmentVariable("ALI_OPENAI_QUANTIZATION") ?? "Q4",
-            ContextTokens: ReadIntEnvironment("ALI_OPENAI_CONTEXT", 2048),
+            ContextTokens: ReadIntEnvironment("ALI_OPENAI_CONTEXT", OllamaRuntimeSafetyPolicy.DefaultContextTokens),
             OutputTokenLimit: ReadIntEnvironment("ALI_OPENAI_OUTPUT_LIMIT", 256),
             Temperature: ReadDoubleEnvironment("ALI_OPENAI_TEMPERATURE", 0.2),
             TopP: ReadNullableDoubleEnvironment("ALI_OPENAI_TOP_P"),
             StreamingEnabled: ReadBoolEnvironment("ALI_OPENAI_STREAMING", true),
             SupportsVision: ReadBoolEnvironment("ALI_OPENAI_SUPPORTS_VISION", false),
             SupportsToolCalls: ReadBoolEnvironment("ALI_OPENAI_SUPPORTS_TOOL_CALLS", false),
-            AllowPrivateLanEndpoint: ReadBoolEnvironment("ALI_ALLOW_PRIVATE_LAN_RUNTIME", false));
+            AllowPrivateLanEndpoint: ReadBoolEnvironment("ALI_ALLOW_PRIVATE_LAN_RUNTIME", false)));
     }
 
     public static void Save(string dataDirectory, OpenAiCompatibleRuntimeOptions options)
     {
         Directory.CreateDirectory(dataDirectory);
-        File.WriteAllText(GetSettingsPath(dataDirectory), JsonSerializer.Serialize(options, JsonOptions));
+        File.WriteAllText(
+            GetSettingsPath(dataDirectory),
+            JsonSerializer.Serialize(OllamaRuntimeSafetyPolicy.Normalize(options), JsonOptions));
     }
 
     public static void WriteDefaultIfMissing(string dataDirectory)

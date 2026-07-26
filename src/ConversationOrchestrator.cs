@@ -19,7 +19,9 @@ public sealed record AssistantStreamChunk(
     string AssistantMessageId,
     string Text,
     EvidenceStatus EvidenceStatus,
-    string? FinishReason = null)
+    string? FinishReason = null,
+    bool IsActivity = false,
+    bool IsReasoning = false)
 {
     public bool ReachedOutputLimit =>
         string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase);
@@ -97,7 +99,7 @@ public sealed class ConversationOrchestrator(
 
     public ISourceRetriever Sources { get; } = sourceRetriever ?? new NoOpSourceRetriever();
 
-    public ISourceQueryPlanner SourcePlanner { get; } = sourceQueryPlanner ?? new ModelSourceQueryPlanner(runtime);
+    public ISourceQueryPlanner SourcePlanner { get; } = sourceQueryPlanner ?? new RuleBasedSourceQueryPlanner();
 
     public IMemoryStore? Memories { get; } = memoryStore;
 
@@ -115,9 +117,27 @@ public sealed class ConversationOrchestrator(
         ArgumentException.ThrowIfNullOrWhiteSpace(assistantMessageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userText);
 
+        yield return new AssistantStreamChunk(
+            conversationId,
+            userMessageId,
+            assistantMessageId,
+            "Preparing context...",
+            EvidenceStatus.Unknown,
+            IsActivity: true);
+
         var plannerHistory = AddSavedMemories(history);
         var sourcePlan = await SourcePlanner.PlanAsync(userText, plannerHistory, cancellationToken).ConfigureAwait(false);
         var includeVisibleSources = ShouldIncludeVisibleSources(userText);
+        if (sourcePlan.UseSources)
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Retrieving current sources...",
+                EvidenceStatus.Unknown,
+                IsActivity: true);
+        }
         var sourceResult = sourcePlan.UseSources
             ? await Sources.RetrieveAsync(sourcePlan, cancellationToken).ConfigureAwait(false)
             : SourceRetrievalResult.Empty;
@@ -171,12 +191,55 @@ public sealed class ConversationOrchestrator(
             Attachments = attachments
         };
 
+        if (!sourceResult.HasSources && UseSingleGenerationStreamingPath())
+        {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Waiting for the local model...",
+                EvidenceStatus.Unknown,
+                IsActivity: true);
+
+            await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
+            {
+                if (token.IsThinking)
+                {
+                    yield return new AssistantStreamChunk(
+                        conversationId,
+                        userMessageId,
+                        assistantMessageId,
+                        token.Text,
+                        token.EvidenceStatus,
+                        token.FinishReason,
+                        IsActivity: true,
+                        IsReasoning: true);
+                    continue;
+                }
+
+                yield return new AssistantStreamChunk(
+                    conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    token.Text,
+                    token.EvidenceStatus,
+                    token.FinishReason);
+            }
+
+            yield break;
+        }
+
         if (!sourceResult.HasSources)
         {
+            yield return new AssistantStreamChunk(
+                conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Waiting for the local model...",
+                EvidenceStatus.Unknown,
+                IsActivity: true);
             var directAnswer = await CollectRuntimeAnswerAsync(request, cancellationToken).ConfigureAwait(false);
-            var retryPlan = !sourcePlan.UseSources
-                ? await TryPlanSourceRetryFromAnswerAsync(userText, answerHistory, directAnswer, cancellationToken).ConfigureAwait(false)
-                : SourceQueryPlan.NoSources;
+            var retryPlan = SourceQueryPlan.NoSources;
             if (retryPlan.UseSources)
             {
                 var retrySourceResult = await Sources.RetrieveAsync(retryPlan, cancellationToken).ConfigureAwait(false);
@@ -280,8 +343,29 @@ public sealed class ConversationOrchestrator(
         var answer = new StringBuilder();
         var evidenceStatus = EvidenceStatus.Unverified;
         string? finishReason = null;
+        yield return new AssistantStreamChunk(
+            conversationId,
+            userMessageId,
+            assistantMessageId,
+            "Reasoning with retrieved sources...",
+            EvidenceStatus.Unknown,
+            IsActivity: true);
         await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
         {
+            if (token.IsThinking)
+            {
+                yield return new AssistantStreamChunk(
+                    conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    token.Text,
+                    token.EvidenceStatus,
+                    token.FinishReason,
+                    IsActivity: true,
+                    IsReasoning: true);
+                continue;
+            }
+
             answer.Append(token.Text);
             evidenceStatus = token.EvidenceStatus;
             if (!string.IsNullOrWhiteSpace(token.FinishReason))
@@ -339,6 +423,17 @@ public sealed class ConversationOrchestrator(
         if (IsCurrentNewsPlan(sourcePlan))
         {
             return BuildExtractiveSourceAnswer(sourcePlan, sourceResult, includeVisibleSources);
+        }
+
+        if (!ShouldRunSourceAnswerVerifier())
+        {
+            var guardedDraft = ApplyTemporalEvidenceGuard(userText, sourcePlan, sourceResult, cleanedDraft);
+            var visibleDraft = includeVisibleSources ? guardedDraft : StripVisibleSourceArtifacts(guardedDraft);
+            return ReplaceSourceRefusalWithExtractiveAnswer(
+                sourcePlan,
+                sourceResult,
+                visibleDraft,
+                includeVisibleSources);
         }
 
         var verifierHistory = new List<ChatMessage>
@@ -755,6 +850,10 @@ public sealed class ConversationOrchestrator(
             : null;
     }
 
+    private static bool UseSingleGenerationStreamingPath() => true;
+
+    private static bool ShouldRunSourceAnswerVerifier() => false;
+
     private async Task<CollectedRuntimeAnswer> CollectRuntimeAnswerAsync(
         ChatRequest request,
         CancellationToken cancellationToken)
@@ -764,6 +863,11 @@ public sealed class ConversationOrchestrator(
         string? finishReason = null;
         await foreach (var token in Runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
         {
+            if (token.IsThinking)
+            {
+                continue;
+            }
+
             answer.Append(token.Text);
             evidenceStatus = token.EvidenceStatus;
             if (!string.IsNullOrWhiteSpace(token.FinishReason))

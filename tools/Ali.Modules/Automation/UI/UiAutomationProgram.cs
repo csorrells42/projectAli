@@ -59,6 +59,16 @@ internal static class UiAutomationProgram
                 settingsWindow = VerifyInternetSettings(window, options.TestConfiguredInternetBackends, options.Timeout, steps);
             }
 
+            if (options.CheckWebcamSettings)
+            {
+                settingsWindow = VerifyWebcamSettings(window, options.Timeout, steps);
+            }
+
+            if (options.ExerciseAttentiveChat)
+            {
+                ExerciseAttentiveChat(window, options.Timeout, steps);
+            }
+
             if (options.PushToTalkHoldMilliseconds > 0)
             {
                 HoldPushToTalk(window, options.PushToTalkHoldMilliseconds, options.Timeout, steps);
@@ -104,6 +114,46 @@ internal static class UiAutomationProgram
         Console.Error.WriteLine(message);
         Console.WriteLine(AutomationOptions.HelpText);
         return 2;
+    }
+
+    private static void ExerciseAttentiveChat(
+        AutomationElement window,
+        TimeSpan timeout,
+        ICollection<ChatAutomationStep> steps)
+    {
+        var toggle = FindRequired(window, "MainChatAttentiveChatCheckBox");
+        SetToggle(toggle, ToggleState.On);
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var status = ReadOptionalName(window, "MainChatAttentionStatusText");
+            if (!string.IsNullOrWhiteSpace(status)
+                && !status.Equals("Attentive chat is off.", StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(new ChatAutomationStep("attentive-chat-on", CaptureChatSnapshot(window)));
+                SetToggle(toggle, ToggleState.Off);
+                steps.Add(new ChatAutomationStep("attentive-chat-off", CaptureChatSnapshot(window)));
+                return;
+            }
+
+            Thread.Sleep(200);
+        }
+
+        throw new TimeoutException("Timed out waiting for attentive chat to report its camera state.");
+    }
+
+    private static void SetToggle(AutomationElement element, ToggleState desired)
+    {
+        if (!element.TryGetCurrentPattern(TogglePattern.Pattern, out var patternObject))
+        {
+            throw new InvalidOperationException("The attentive chat control does not support toggling.");
+        }
+
+        var pattern = (TogglePattern)patternObject;
+        if (pattern.Current.ToggleState != desired)
+        {
+            pattern.Toggle();
+        }
     }
 
     private static Process LaunchAli(AutomationOptions options)
@@ -394,6 +444,26 @@ internal static class UiAutomationProgram
         return settingsWindow;
     }
 
+    private static AutomationElement VerifyWebcamSettings(
+        AutomationElement window,
+        TimeSpan timeout,
+        List<ChatAutomationStep> steps)
+    {
+        var settingsWindow = OpenSettingsWindow(window, timeout);
+        SelectElement(FindRequired(settingsWindow, "SettingsWebcamTab"), timeout);
+        WaitForWebcamSettingsReady(settingsWindow, timeout);
+        steps.Add(new ChatAutomationStep("webcam-settings-opened", CaptureChatSnapshot(window, settingsWindow)));
+
+        Invoke(FindRequired(settingsWindow, "SettingsWebcamRefreshButton"), timeout);
+        WaitForWebcamSettingsReady(settingsWindow, timeout);
+        FindRequired(settingsWindow, "SettingsWebcamSourceComboBox");
+        FindRequired(settingsWindow, "SettingsWebcamModeComboBox");
+        FindRequired(settingsWindow, "SettingsWebcamToggleButton");
+        FindRequired(settingsWindow, "SettingsWebcamStatusText");
+        steps.Add(new ChatAutomationStep("webcam-settings-refreshed", CaptureChatSnapshot(window, settingsWindow)));
+        return settingsWindow;
+    }
+
     private static AutomationElement OpenSettingsWindow(AutomationElement window, TimeSpan timeout)
     {
         Invoke(FindRequired(window, "MainChatSettingsButton"), timeout);
@@ -568,6 +638,30 @@ internal static class UiAutomationProgram
         throw new TimeoutException("Timed out waiting for configured internet provider tests to complete.");
     }
 
+    private static void WaitForWebcamSettingsReady(AutomationElement settingsWindow, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var status = ReadOptionalName(settingsWindow, "SettingsWebcamStatusText");
+            var toggle = FindOptional(settingsWindow, "SettingsWebcamToggleButton");
+            var source = FindOptional(settingsWindow, "SettingsWebcamSourceComboBox");
+            var mode = FindOptional(settingsWindow, "SettingsWebcamModeComboBox");
+            if (toggle is not null
+                && source is not null
+                && mode is not null
+                && !status.Contains("Looking for cameras", StringComparison.OrdinalIgnoreCase)
+                && !status.Contains("Loading modes", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            Thread.Sleep(250);
+        }
+
+        throw new TimeoutException("Timed out waiting for Webcam settings to become ready.");
+    }
+
     private static void WaitForEnabled(AutomationElement element, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
@@ -664,6 +758,8 @@ internal static class UiAutomationProgram
             ReadOptionalName(window, "MainChatStatusText"),
             ReadOptionalName(window, "MainChatModelConnectionStatusText"),
             ReadOptionalName(window, "MainChatVoiceStatusText"),
+            ReadOptionalName(window, "MainChatAttentionStatusText"),
+            ReadOptionalToggleState(window, "MainChatAttentiveChatCheckBox"),
             ReadOptionalName(window, "MainChatPushToTalkButton"),
             settingsWindow is null ? Array.Empty<string>() : FindTabNames(settingsWindow),
             settingsWindow is null ? false : IsLastTab(settingsWindow, "Internet"),
@@ -676,6 +772,10 @@ internal static class UiAutomationProgram
             settingsWindow is null ? string.Empty : ReadOptionalName(settingsWindow, "SettingsInternetFirecrawlUsageText"),
             settingsWindow is null ? string.Empty : ReadOptionalName(settingsWindow, "SettingsInternetBraveSearchUsageText"),
             settingsWindow is null ? string.Empty : ReadOptionalName(settingsWindow, "SettingsInternetSerperUsageText"),
+            settingsWindow is null ? string.Empty : ReadOptionalName(settingsWindow, "SettingsWebcamStatusText"),
+            settingsWindow is null ? string.Empty : ReadOptionalSelectedComboBoxItem(settingsWindow, "SettingsWebcamSourceComboBox"),
+            settingsWindow is null ? string.Empty : ReadOptionalSelectedComboBoxItem(settingsWindow, "SettingsWebcamModeComboBox"),
+            settingsWindow is null ? string.Empty : ReadOptionalName(settingsWindow, "SettingsWebcamToggleButton"),
             messages,
             messages.LastOrDefault() ?? string.Empty,
             FindRequired(window, "MainChatSendButton").Current.IsEnabled,
@@ -730,6 +830,26 @@ internal static class UiAutomationProgram
     {
         var element = FindOptional(root, automationId);
         return element is null ? string.Empty : ReadName(element);
+    }
+
+    private static string ReadOptionalToggleState(AutomationElement root, string automationId)
+    {
+        var element = FindOptional(root, automationId);
+        if (element is null)
+        {
+            return "missing";
+        }
+
+        try
+        {
+            return element.TryGetCurrentPattern(TogglePattern.Pattern, out var pattern)
+                ? ((TogglePattern)pattern).Current.ToggleState.ToString()
+                : "unsupported";
+        }
+        catch (InvalidOperationException)
+        {
+            return "unavailable";
+        }
     }
 
     private static string ReadName(AutomationElement element)
@@ -799,6 +919,8 @@ internal sealed record ChatAutomationSnapshot(
     string Status,
     string ModelConnectionStatus,
     string VoiceStatus,
+    string AttentionStatus,
+    string AttentiveChatState,
     string PushToTalkButtonText,
     IReadOnlyList<string> SettingsTabNames,
     bool InternetTabIsLast,
@@ -811,6 +933,10 @@ internal sealed record ChatAutomationSnapshot(
     string InternetFirecrawlUsage,
     string InternetBraveSearchUsage,
     string InternetSerperUsage,
+    string WebcamStatus,
+    string WebcamSelectedSource,
+    string WebcamSelectedMode,
+    string WebcamToggleText,
     IReadOnlyList<string> Messages,
     string LastMessage,
     bool SendEnabled,
@@ -841,6 +967,8 @@ internal sealed record AutomationOptions(
     string? VoiceSampleEngine,
     bool CheckInternetSettings,
     bool TestConfiguredInternetBackends,
+    bool CheckWebcamSettings,
+    bool ExerciseAttentiveChat,
     bool ShutdownLaunchedApp,
     bool ShowHelp)
 {
@@ -851,6 +979,8 @@ internal sealed record AutomationOptions(
       Ali.Modules.Automation chat --app <Ali.exe> --ptt-hold-ms 2500 [--screenshot <path.png>]
       Ali.Modules.Automation chat --app <Ali.exe> --voice-sample-engine KittenTTS [--screenshot <path.png>]
       Ali.Modules.Automation chat --app <Ali.exe> --check-internet-settings [--test-configured-internet] [--screenshot <path.png>]
+      Ali.Modules.Automation chat --app <Ali.exe> --check-webcam-settings [--screenshot <path.png>]
+      Ali.Modules.Automation chat --app <Ali.exe> --exercise-attentive-chat [--screenshot <path.png>]
 
     If --app is supplied, the runner launches Ali.
     If --app is omitted, the runner attaches to an existing matching Ali window.
@@ -860,6 +990,8 @@ internal sealed record AutomationOptions(
     --voice-sample-engine opens Settings, selects the requested TTS engine, clicks Hear Sample, and reports voice status.
     --check-internet-settings opens Settings, selects Internet, and reports provider status and tab order.
     --test-configured-internet clicks the Internet tab's Test configured button and waits for completion.
+    --check-webcam-settings opens Settings, selects Webcam, refreshes cameras, and reports source/mode/status.
+    --exercise-attentive-chat turns the main toggle on, records its live camera status, then restores it off.
     If --require-live-runtime is supplied, the runner waits until Ali reports an active non-stub runtime before entering text.
     """;
 
@@ -867,7 +999,7 @@ internal sealed record AutomationOptions(
     {
         if (args.Count == 0 || args.Any(arg => arg is "-h" or "--help" or "/?"))
         {
-            return new AutomationOptions("help", null, Array.Empty<string>(), TimeSpan.FromSeconds(90), false, null, null, 0, null, false, false, false, true);
+            return new AutomationOptions("help", null, Array.Empty<string>(), TimeSpan.FromSeconds(90), false, null, null, 0, null, false, false, false, false, false, true);
         }
 
         var mode = args[0];
@@ -881,6 +1013,8 @@ internal sealed record AutomationOptions(
         string? voiceSampleEngine = null;
         var checkInternetSettings = false;
         var testConfiguredInternet = false;
+        var checkWebcamSettings = false;
+        var exerciseAttentiveChat = false;
         var shutdownLaunchedApp = false;
 
         for (var index = 1; index < args.Count; index++)
@@ -938,6 +1072,14 @@ internal sealed record AutomationOptions(
                 checkInternetSettings = true;
                 testConfiguredInternet = true;
             }
+            else if (arg.Equals("--check-webcam-settings", StringComparison.OrdinalIgnoreCase))
+            {
+                checkWebcamSettings = true;
+            }
+            else if (arg.Equals("--exercise-attentive-chat", StringComparison.OrdinalIgnoreCase))
+            {
+                exerciseAttentiveChat = true;
+            }
             else if (arg.Equals("--shutdown-launched-app", StringComparison.OrdinalIgnoreCase))
             {
                 shutdownLaunchedApp = true;
@@ -948,6 +1090,6 @@ internal sealed record AutomationOptions(
             }
         }
 
-        return new AutomationOptions(mode, appPath, sendTexts, timeout, requireLiveRuntime, screenshotPath, localRoot, pushToTalkHoldMilliseconds, voiceSampleEngine, checkInternetSettings, testConfiguredInternet, shutdownLaunchedApp, false);
+        return new AutomationOptions(mode, appPath, sendTexts, timeout, requireLiveRuntime, screenshotPath, localRoot, pushToTalkHoldMilliseconds, voiceSampleEngine, checkInternetSettings, testConfiguredInternet, checkWebcamSettings, exerciseAttentiveChat, shutdownLaunchedApp, false);
     }
 }

@@ -167,7 +167,7 @@ public sealed class AliServices
         Directory.CreateDirectory(DesktopSettingsRoot);
         Directory.CreateDirectory(DesktopUserDataRoot);
         Directory.CreateDirectory(Path.Combine(LocalAliRoot, "Backups"));
-        Directory.CreateDirectory(Path.Combine(LocalAliRoot, "Logs"));
+        Directory.CreateDirectory(Path.Combine(DesktopUserDataRoot, "Logs"));
 
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(LocalAliRootEnvironmentVariable)))
         {
@@ -184,7 +184,7 @@ public sealed class AliServices
         CopyMissingFiles(Path.Combine(legacyRoot, "BootstrapData"), DesktopSettingsRoot);
         CopyMissingFiles(Path.Combine(legacyRoot, "Profiles"), Path.Combine(DesktopUserDataRoot, "Profiles"));
         CopyMissingFiles(Path.Combine(legacyRoot, "Backups"), Path.Combine(LocalAliRoot, "Backups"));
-        CopyMissingFiles(Path.Combine(legacyRoot, "Logs"), Path.Combine(LocalAliRoot, "Logs"));
+        CopyMissingFiles(Path.Combine(legacyRoot, "Logs"), Path.Combine(DesktopUserDataRoot, "Logs"));
         CopyMissingFiles(LocalVectorLibrarySettings.LegacyDefaultRootDirectory(), Path.Combine(DesktopUserDataRoot, "RAG", "Library"));
         CopyMissingFile(
             Path.Combine(DesktopSettingsRoot, "Sources", "local_vector_library_index.json"),

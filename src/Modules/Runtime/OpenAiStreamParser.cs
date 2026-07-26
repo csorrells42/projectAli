@@ -5,7 +5,8 @@ namespace Ali.Modules.Runtime;
 public sealed record OpenAiStreamEvent(
     string? Content,
     string? FinishReason,
-    bool IsDone);
+    bool IsDone,
+    string? Thinking = null);
 
 public sealed record OpenAiMessageResult(
     string? Content,
