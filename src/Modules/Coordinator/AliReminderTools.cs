@@ -1,12 +1,10 @@
 using System.ComponentModel;
-using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 
 namespace Ali.Modules.Coordinator;
 
 internal sealed class AliReminderTools(
     IReminderStore reminders,
-    PermissionService permissions,
     Func<CoordinatorTurnContext?> turnAccessor)
 {
     public Task<CoordinatorReminderResult> CreateAsync(
@@ -21,16 +19,6 @@ internal sealed class AliReminderTools(
             return Task.FromResult(new CoordinatorReminderResult(
                 false,
                 "The reminder was not saved because its title or due time was invalid."));
-        }
-
-        var permission = permissions.Evaluate(PermissionRequest.Create(
-            "reminder.write",
-            PermissionRisk.FileWrite,
-            "Create an explicitly requested local reminder.",
-            userConfirmed: true));
-        if (permission.Kind != PermissionDecisionKind.Allow)
-        {
-            return Task.FromResult(new CoordinatorReminderResult(false, permission.Reason));
         }
 
         var now = DateTimeOffset.UtcNow;

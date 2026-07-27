@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Ali.Modules.Conversation;
+using Ali.Modules.Coordinator;
 using Ali.Modules.Evidence;
 using Ali.Modules.Feedback;
 using Ali.Modules.Memory;
@@ -187,6 +188,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _visionStatus = "Camera off.";
     private string _pendingAssistantName = string.Empty;
     private string _assistantRenameStatus = "Changing the name preserves this assistant profile and takes effect after restart.";
+    private bool _isAgentActivityExpanded = true;
+    private string _agentActivitySummary = "Ready for the next request.";
 
     public MainWindowViewModel(AliServices services)
     {
@@ -199,6 +202,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SendCommand = CreateAsyncCommand(SendAsync, () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
+        ClearAgentActivityCommand = CreateCommand(_ => ClearAgentActivity());
         NewChatCommand = CreateCommand(_ => StartNewChat());
         EraseHistoryCommand = CreateCommand(_ => EraseHistory());
         EraseConversationCommand = CreateCommand(EraseConversation);
@@ -367,6 +371,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
 
+    public ObservableCollection<AgentActivityItemViewModel> AgentActivities { get; } = new();
+
     public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
 
     public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
@@ -528,6 +534,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
+
+    public ICommand ClearAgentActivityCommand { get; }
 
     public ICommand NewChatCommand { get; }
 
@@ -2104,6 +2112,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         IsBusy = true;
         StatusText = "Streaming local response...";
+        ClearAgentActivity();
+        IsAgentActivityExpanded = true;
         EnsureActiveConversationHistoryItem();
         ApplyFirstMessageTitleIfNeeded(text);
 
@@ -2140,7 +2150,6 @@ public sealed class MainWindowViewModel : ObservableObject
         var completed = false;
         var reachedOutputLimit = false;
         var pendingVisibleText = new StringBuilder();
-        var reasoningText = new StringBuilder();
         var answerStarted = false;
         var lastVisibleTextFlush = DateTimeOffset.UtcNow;
 
@@ -2184,22 +2193,25 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 if (chunk.IsActivity)
                 {
-                    if (!answerStarted)
+                    AddAgentActivity(chunk);
+                    if (chunk.ApprovalPrompt is { } approvalPrompt)
                     {
-                        if (chunk.IsReasoning)
+                        var choice = AgentToolApprovalWindow.Show(
+                            System.Windows.Application.Current?.MainWindow,
+                            approvalPrompt);
+                        if (!_services.Orchestrator.ResolveToolApproval(new AgentToolApprovalDecision(
+                                approvalPrompt.RequestId,
+                                choice)))
                         {
-                            reasoningText.Append(chunk.Text);
-                            const int maximumVisibleReasoningCharacters = 2_000;
-                            if (reasoningText.Length > maximumVisibleReasoningCharacters)
-                            {
-                                reasoningText.Remove(0, reasoningText.Length - maximumVisibleReasoningCharacters);
-                            }
-
-                            assistantMessage.Text = $"Reasoning...{Environment.NewLine}{reasoningText}";
-                        }
-                        else
-                        {
-                            assistantMessage.Text = chunk.Text;
+                            AddAgentActivity(new AssistantStreamChunk(
+                                chunk.ConversationId,
+                                chunk.UserMessageId,
+                                chunk.AssistantMessageId,
+                                "Approval response expired",
+                                EvidenceStatus.Unknown,
+                                IsActivity: true,
+                                ActivityKind: AgentActivityKind.Warning,
+                                ActivityDetail: "The agent run was no longer waiting for this permission decision."));
                         }
                     }
 
@@ -2210,7 +2222,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 {
                     answerStarted = true;
                     assistantMessage.Text = string.Empty;
-                    reasoningText.Clear();
                 }
 
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
@@ -2252,6 +2263,14 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             assistantMessage.Text += "\n\nStopped by user.";
+            AddAgentActivity(new AssistantStreamChunk(
+                _conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Stopped by user",
+                EvidenceStatus.Unknown,
+                IsActivity: true,
+                ActivityKind: AgentActivityKind.Warning));
             CancelStreamingSpeech(streamingSpeech);
             StatusText = "Response stopped.";
         }
@@ -2259,6 +2278,15 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            AddAgentActivity(new AssistantStreamChunk(
+                _conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Model communication failed",
+                EvidenceStatus.Unknown,
+                IsActivity: true,
+                ActivityKind: AgentActivityKind.Error,
+                ActivityDetail: ex.Message));
             CancelStreamingSpeech(streamingSpeech);
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
             StatusText = $"Local model communication failed: {ex.Message}";
@@ -2278,6 +2306,23 @@ public sealed class MainWindowViewModel : ObservableObject
             UpdateRuntimeStatus();
             RefreshMemoryReminders();
         }
+    }
+
+    private void AddAgentActivity(AssistantStreamChunk chunk)
+    {
+        AgentActivities.Add(new AgentActivityItemViewModel(chunk));
+        while (AgentActivities.Count > 200)
+        {
+            AgentActivities.RemoveAt(0);
+        }
+
+        AgentActivitySummary = chunk.Text;
+    }
+
+    private void ClearAgentActivity()
+    {
+        AgentActivities.Clear();
+        AgentActivitySummary = "Ready for the next request.";
     }
 
     private void Stop()
@@ -2371,6 +2416,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
+        ClearAgentActivity();
         _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
         _activeConversationHistoryItem = null;
         SelectHistoryItemWithoutLoading(null);
@@ -2450,6 +2496,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
+        ClearAgentActivity();
         var session = ConversationSessionFactory.Reopen(conversation);
         foreach (var message in session.Messages)
         {
@@ -3985,6 +4032,18 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             AssistantRenameStatus = $"Assistant name was not saved: {ex.Message}";
         }
+    }
+
+    public bool IsAgentActivityExpanded
+    {
+        get => _isAgentActivityExpanded;
+        set => SetProperty(ref _isAgentActivityExpanded, value);
+    }
+
+    public string AgentActivitySummary
+    {
+        get => _agentActivitySummary;
+        private set => SetProperty(ref _agentActivitySummary, value);
     }
 
     private void SaveRuntimeSettings()

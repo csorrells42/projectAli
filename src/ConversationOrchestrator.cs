@@ -14,7 +14,11 @@ public sealed record AssistantStreamChunk(
     EvidenceStatus EvidenceStatus,
     string? FinishReason = null,
     bool IsActivity = false,
-    bool IsReasoning = false)
+    bool IsReasoning = false,
+    AgentActivityKind? ActivityKind = null,
+    string? ActivityDetail = null,
+    double? ElapsedMilliseconds = null,
+    AgentToolApprovalPrompt? ApprovalPrompt = null)
 {
     public bool ReachedOutputLimit =>
         string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase);
@@ -32,6 +36,9 @@ public sealed class ConversationOrchestrator(
     public ILocalModelRuntime Runtime { get; } = runtime;
 
     public CorrectionQueueService Corrections { get; } = correctionQueue;
+
+    public bool ResolveToolApproval(AgentToolApprovalDecision decision) =>
+        coordinator.ResolveToolApproval(decision);
 
     public async IAsyncEnumerable<AssistantStreamChunk> StreamAnswerAsync(
         string conversationId,

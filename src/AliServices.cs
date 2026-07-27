@@ -1,7 +1,6 @@
 using System.Net.Http;
 using Ali.Modules.Feedback;
 using Ali.Modules.Identity;
-using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Ali.Modules.Internet;
 using Ali.Modules.RAG;
@@ -230,7 +229,6 @@ public sealed class AliServices
             : null;
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
-        var permissions = new PermissionService();
         var webSources = new TavilyFirecrawlSourceRetriever(
             httpClient,
             () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
@@ -241,7 +239,6 @@ public sealed class AliServices
             webSources,
             memories,
             reminders,
-            permissions,
             profile);
         var orchestrator = new ConversationOrchestrator(
             runtime,

@@ -125,6 +125,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 parallel_tool_calls = tools.Length == 0
                     ? (bool?)null
                     : options?.AllowMultipleToolCalls ?? false,
+                response_format = ResolveResponseFormat(options?.ResponseFormat),
                 stream = false,
                 max_tokens = maxTokens,
                 temperature = _options.Temperature,
@@ -247,6 +248,23 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             _ => "auto"
         };
     }
+
+    private static object? ResolveResponseFormat(ChatResponseFormat? responseFormat) => responseFormat switch
+    {
+        ChatResponseFormatJson { Schema: { } schema } json => new
+        {
+            type = "json_schema",
+            json_schema = new
+            {
+                name = string.IsNullOrWhiteSpace(json.SchemaName) ? "response" : json.SchemaName,
+                description = json.SchemaDescription,
+                strict = true,
+                schema
+            }
+        },
+        ChatResponseFormatJson => new { type = "json_object" },
+        _ => null
+    };
 
     private static string SerializeToolResult(object? result) =>
         result switch

@@ -1,13 +1,11 @@
 using System.ComponentModel;
 using System.Text;
 using Ali.Modules.Memory;
-using Ali.Modules.Permissions;
 
 namespace Ali.Modules.Coordinator;
 
 internal sealed class AliMemoryTools(
     IMemoryStore memories,
-    PermissionService permissions,
     Func<CoordinatorTurnContext?> turnAccessor)
 {
     private const int MaximumResults = 8;
@@ -58,16 +56,6 @@ internal sealed class AliMemoryTools(
                 "Potentially sensitive information requires direct user review and was not saved automatically."));
         }
 
-        var permission = permissions.Evaluate(PermissionRequest.Create(
-            "memory.write",
-            PermissionRisk.FileWrite,
-            "Save an explicitly requested local memory.",
-            userConfirmed: true));
-        if (permission.Kind != PermissionDecisionKind.Allow)
-        {
-            return Task.FromResult(new CoordinatorMemoryWriteResult(false, permission.Reason));
-        }
-
         var now = DateTimeOffset.UtcNow;
         var context = turnAccessor();
         var saved = memories.Save(new MemoryEntry(
@@ -81,7 +69,7 @@ internal sealed class AliMemoryTools(
             Active: true,
             context?.ConversationId,
             context?.UserMessageId,
-            "Saved by the Extensions.AI memory tool after an explicit user request."));
+            "Saved by the Agent Framework memory tool after framework approval."));
         return Task.FromResult(new CoordinatorMemoryWriteResult(true, "Memory saved locally.", saved.MemoryId));
     }
 
