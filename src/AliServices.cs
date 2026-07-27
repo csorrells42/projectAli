@@ -245,13 +245,8 @@ public sealed class AliServices
             profile);
         var orchestrator = new ConversationOrchestrator(
             runtime,
-            permissions,
             correctionQueue,
-            new CompositeSourceRetriever(
-                localLibrary,
-                webSources),
-            memoryStore: memories,
-            coordinator: coordinator);
+            coordinator);
 
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();
