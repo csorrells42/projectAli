@@ -47,7 +47,14 @@ public static class LocalVoiceResourceLocator
 
     public static string? FindWhisperPythonExecutable(string appBaseDirectory, string? searchRoot = null)
     {
-        return FindPythonExecutable(appBaseDirectory, searchRoot);
+        var voicePython = FindPythonExecutable(appBaseDirectory, searchRoot);
+        if (voicePython is not null)
+        {
+            return voicePython;
+        }
+
+        var bundledPython = Path.Combine(appBaseDirectory, "runtime", "python", "python.exe");
+        return File.Exists(bundledPython) ? Path.GetFullPath(bundledPython) : null;
     }
 
     public static string? FindWhisperModelRoot(string appBaseDirectory, string? searchRoot = null)
@@ -401,5 +408,3 @@ public static class LocalVoiceResourceLocator
     private static string? NullIfWhiteSpace(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
-
-

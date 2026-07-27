@@ -51,11 +51,6 @@ public sealed class AliInteractionRuntime : IDisposable
     {
         const string mediaPipePythonVariable = "AVATAR_BUILDER_MEDIAPIPE_PYTHON";
         var configuredPython = Environment.GetEnvironmentVariable(mediaPipePythonVariable);
-        if (!string.IsNullOrWhiteSpace(configuredPython) && File.Exists(configuredPython))
-        {
-            return;
-        }
-
         var python = Path.Combine(AppContext.BaseDirectory, "runtime", "python", "python.exe");
         var packages = Path.Combine(AppContext.BaseDirectory, "runtime", "python-packages");
         if (!File.Exists(python) || !Directory.Exists(packages))
@@ -63,12 +58,28 @@ public sealed class AliInteractionRuntime : IDisposable
             return;
         }
 
-        Environment.SetEnvironmentVariable(mediaPipePythonVariable, python);
-        var currentPythonPath = Environment.GetEnvironmentVariable("PYTHONPATH");
-        var pythonPath = string.IsNullOrWhiteSpace(currentPythonPath)
-            ? packages
-            : $"{packages}{Path.PathSeparator}{currentPythonPath}";
-        Environment.SetEnvironmentVariable("PYTHONPATH", pythonPath);
+        if (string.IsNullOrWhiteSpace(configuredPython) || !File.Exists(configuredPython))
+        {
+            Environment.SetEnvironmentVariable(mediaPipePythonVariable, python);
+        }
+
+        var bundledPackageRoots = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "runtime", "whisper-packages"),
+            packages
+        };
+        var pythonPathEntries = (Environment.GetEnvironmentVariable("PYTHONPATH") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        foreach (var packageRoot in bundledPackageRoots.Reverse())
+        {
+            if (Directory.Exists(packageRoot)
+                && !pythonPathEntries.Contains(packageRoot, StringComparer.OrdinalIgnoreCase))
+            {
+                pythonPathEntries.Insert(0, packageRoot);
+            }
+        }
+        Environment.SetEnvironmentVariable("PYTHONPATH", string.Join(Path.PathSeparator, pythonPathEntries));
     }
 
     public string DataFolder { get; }

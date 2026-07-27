@@ -7,6 +7,8 @@ using AvatarBuilder.Modules.Audio.WakeWord;
 using AvatarBuilder.Modules.Confidence;
 using AvatarBuilder.Modules.Pipeline;
 using AvatarBuilder.Modules.Security;
+using AvatarBuilder.Modules.Vision.Attention;
+using AvatarBuilder.Modules.Vision.TargetSelection;
 
 namespace Ali.Modules.Interaction;
 
@@ -27,6 +29,8 @@ public sealed class AliSpeechIngressPipeline : IDisposable
     private readonly WakeWordModule _wakeWord;
     private readonly ParakeetEnrollmentTranscriber _parakeetEnrollment = new();
     private readonly WhisperEnrollmentTranscriber _whisperEnrollment = new();
+    private readonly ModuleOutputBroadcaster<TargetSelectionOutput> _cameraOffTarget = new();
+    private readonly ModuleOutputBroadcaster<AttentionOutput> _cameraOffAttention = new();
     private readonly string _dataFolder;
     private AliSecurityModule? _security;
     private ISpeechToTextModule? _speechToText;
@@ -79,6 +83,10 @@ public sealed class AliSpeechIngressPipeline : IDisposable
             return;
         }
         _started = true;
+        if (_security is null)
+        {
+            RebuildSecurityTail();
+        }
         _voiceActivity.Start();
         _speaker.Start();
         _wakeWord.Start();
@@ -111,19 +119,7 @@ public sealed class AliSpeechIngressPipeline : IDisposable
             return;
         }
         _vision = vision;
-        DisposeTail();
-        if (vision is null)
-        {
-            return;
-        }
-        _security = new AliSecurityModule(
-            vision.TargetSelection,
-            vision.Attention,
-            _speaker,
-            _wakeWord);
-        _security.UpdatePushToTalk(_pttEnabled, _pttPressed);
-        _security.Start();
-        BuildSpeechToText();
+        RebuildSecurityTail();
     }
 
     public void UpdatePushToTalk(bool enabled, bool pressed)
@@ -183,21 +179,55 @@ public sealed class AliSpeechIngressPipeline : IDisposable
         });
     }
 
-    private void DisposeTail()
+    private void RebuildSecurityTail()
     {
-        _transcripts?.Dispose();
-        _transcripts = null;
-        var logger = _logger;
-        var speechToText = _speechToText;
-        var security = _security;
-        _logger = null;
-        _speechToText = null;
-        _security = null;
+        var newSecurity = new AliSecurityModule(
+            _vision?.TargetSelection ?? _cameraOffTarget,
+            _vision?.Attention ?? _cameraOffAttention,
+            _speaker,
+            _wakeWord);
+        newSecurity.UpdatePushToTalk(_pttEnabled, _pttPressed);
+
+        ISpeechToTextModule? newSpeechToText = null;
+        IModuleOutputSubscription<TranscriptionOutput>? newTranscripts = null;
+        InteractionConfidenceModule? newLogger = null;
+        try
+        {
+            newSpeechToText = _engine == AliSpeechToTextEngine.Parakeet
+                ? new ParakeetSpeechToTextModule(newSecurity)
+                : new SpeechToTextModule(newSecurity);
+            newTranscripts = newSpeechToText.Subscribe();
+            newLogger = new InteractionConfidenceModule(newSpeechToText, _dataFolder);
+            newSecurity.Start();
+            newLogger.Start();
+            newSpeechToText.Start();
+        }
+        catch
+        {
+            newTranscripts?.Dispose();
+            newLogger?.Dispose();
+            newSpeechToText?.Dispose();
+            newSecurity.Dispose();
+            throw;
+        }
+
+        var oldTranscripts = _transcripts;
+        var oldLogger = _logger;
+        var oldSpeechToText = _speechToText;
+        var oldSecurity = _security;
+        _security = newSecurity;
+        _speechToText = newSpeechToText;
+        _transcripts = newTranscripts;
+        _logger = newLogger;
+
+        // A vision pipeline can be disposed immediately after this returns.
+        // Stop its consumers synchronously so none retain a disposed camera signal.
+        oldSecurity?.Dispose();
+        oldTranscripts?.Dispose();
         _ = Task.Run(() =>
         {
-            logger?.Dispose();
-            speechToText?.Dispose();
-            security?.Dispose();
+            oldLogger?.Dispose();
+            oldSpeechToText?.Dispose();
         });
     }
 
@@ -218,5 +248,7 @@ public sealed class AliSpeechIngressPipeline : IDisposable
         _whisperEnrollment.Dispose();
         _voiceActivity.Dispose();
         _microphone.Dispose();
+        _cameraOffAttention.Dispose();
+        _cameraOffTarget.Dispose();
     }
 }
