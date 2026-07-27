@@ -27,6 +27,7 @@ public sealed class AliToolCoordinator
         IChatClient chatClient,
         ISourceRetriever localLibrary,
         ISourceRetriever webSources,
+        McpWebResearchClient webResearch,
         IMemoryStore memories,
         IReminderStore reminders,
         AssistantProfile assistantProfile)
@@ -34,6 +35,7 @@ public sealed class AliToolCoordinator
         var catalog = new AliToolCatalog(
             localLibrary,
             webSources,
+            webResearch,
             memories,
             reminders,
             assistantProfile,

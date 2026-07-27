@@ -40,6 +40,10 @@ public sealed class WebSourceBackendSettings
 
     public bool UseFirecrawlSearchScrapeOptions { get; set; } = true;
 
+    public bool UseMcpResearch { get; set; } = true;
+
+    public int McpResearchTimeoutSeconds { get; set; } = 120;
+
     public int MaxSearchResults { get; set; } = 5;
 
     public int MaxExtractedPages { get; set; } = 3;

@@ -13,6 +13,9 @@
     <MediaPipeRuntimeAssetRoot>$(MSBuildProjectDirectory)\..\lib\vision\mediapipe-runtime</MediaPipeRuntimeAssetRoot>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Ali.Framework.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Remove="depricated\**\*.cs" />
     <EmbeddedResource Remove="depricated\**\*" />
     <None Remove="depricated\**\*" />
@@ -28,6 +31,12 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageReference Include="Microsoft.Agents.AI.Harness" Version="1.15.0" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.8.1" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
+    <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
+    <PackageReference Include="AngleSharp" Version="1.5.2" />
+    <PackageReference Include="SmartReader" Version="0.11.1" />
+    <PackageReference Include="ReverseMarkdown" Version="6.1.0" />
+    <PackageReference Include="Meziantou.Framework.HtmlSanitizer" Version="3.0.0" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260602" />
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260602" />

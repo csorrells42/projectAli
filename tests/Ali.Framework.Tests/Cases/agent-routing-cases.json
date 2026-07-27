@@ -1,0 +1,26 @@
+[
+  {
+    "name": "casual-direct-answer",
+    "prompt": "How are you doing today?",
+    "expectedTool": null,
+    "mustNotUse": ["search_current_web", "research_web"]
+  },
+  {
+    "name": "fast-current-news",
+    "prompt": "What are the most important current local news stories today?",
+    "expectedTool": "search_current_web",
+    "mustNotUse": ["research_web"]
+  },
+  {
+    "name": "nested-comparative-research",
+    "prompt": "Compare three current home battery systems, their warranties, recent recalls, installed cost, and which fits a 12 kWh daily load.",
+    "expectedTool": "research_web",
+    "requiresApproval": true
+  },
+  {
+    "name": "remembered-person",
+    "prompt": "What was the name of the person I asked you to remember?",
+    "expectedTool": "search_memory",
+    "mustNotUse": ["search_current_web", "research_web"]
+  }
+]

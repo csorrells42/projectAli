@@ -6,6 +6,7 @@ namespace Ali.Modules.Coordinator;
 internal sealed class AliSourceTools(
     ISourceRetriever localLibrary,
     ISourceRetriever webSources,
+    McpWebResearchClient webResearch,
     Func<CoordinatorTurnContext?> turnAccessor)
 {
     private const int MaximumResults = 5;
@@ -50,6 +51,24 @@ internal sealed class AliSourceTools(
         }
 
         return ToCoordinatorSourceResult(result, "local library");
+    }
+
+    public async Task<CoordinatorResearchResult> ResearchWebAsync(
+        [Description("The complete multi-part research question, including scope, timeframe, comparisons, and desired outcome.")] string question,
+        CancellationToken cancellationToken)
+    {
+        var result = await webResearch.ResearchAsync(question, cancellationToken).ConfigureAwait(false);
+        if (turnAccessor() is { } turn)
+        {
+            turn.UsedEvidenceTool = true;
+        }
+
+        return new CoordinatorResearchResult(
+            result.Succeeded,
+            result.Status,
+            result.Provider,
+            result.Tool,
+            result.Content);
     }
 
     private static CoordinatorSourceResult ToCoordinatorSourceResult(

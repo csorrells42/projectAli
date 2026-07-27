@@ -16,7 +16,8 @@ public sealed class AliServices
     private const string LocalAliRootFolderName = "AliFiles";
     private const string LegacyLocalAliRootFolderName = "Ali";
 
-    private readonly HttpClient _httpClient;
+    private readonly HttpClient _runtimeHttpClient;
+    private readonly HttpClient _internetHttpClient;
 
     public AliServices(
         string dataRoot,
@@ -25,7 +26,8 @@ public sealed class AliServices
         AssistantProfile assistantProfile,
         SafeActivatingLocalRuntime runtimeController,
         ConversationOrchestrator orchestrator,
-        HttpClient httpClient,
+        HttpClient runtimeHttpClient,
+        HttpClient internetHttpClient,
         IVoiceRecorder voiceRecorder,
         ISpeechToTextProvider speechToText,
         ITextToSpeechProvider textToSpeech,
@@ -40,7 +42,8 @@ public sealed class AliServices
         AssistantProfile = assistantProfile.Normalize();
         RuntimeController = runtimeController;
         Orchestrator = orchestrator;
-        _httpClient = httpClient;
+        _runtimeHttpClient = runtimeHttpClient;
+        _internetHttpClient = internetHttpClient;
         VoiceRecorder = voiceRecorder;
         SpeechToText = speechToText;
         TextToSpeech = textToSpeech;
@@ -103,7 +106,7 @@ public sealed class AliServices
         LocalVectorLibrarySettingsStore.Save(DataRoot, settings);
 
     public LocalVectorLibraryRetriever CreateLocalVectorLibraryRetriever() =>
-        new(DataRoot, _httpClient, LoadLocalVectorLibrarySettings());
+        new(DataRoot, _runtimeHttpClient, LoadLocalVectorLibrarySettings());
 
     public WebSourceBackendSettings LoadWebSourceBackendSettings() =>
         WebSourceBackendSettingsStore.LoadOrDefault(DataRoot);
@@ -112,7 +115,7 @@ public sealed class AliServices
         WebSourceBackendSettingsStore.Save(DataRoot, settings);
 
     public TavilyFirecrawlSourceRetriever CreateWebSourceRetriever() =>
-        new(_httpClient, LoadWebSourceBackendSettings);
+        new(_internetHttpClient, LoadWebSourceBackendSettings);
 
     public UserDataBackupService CreateUserDataBackupService() =>
         new(DataRoot, UserDataRoot);
@@ -120,7 +123,7 @@ public sealed class AliServices
     public void ConfigureRuntimeCandidate(OpenAiCompatibleRuntimeOptions options)
     {
         ILocalModelRuntime? candidateRuntime = options.Enabled
-            ? new OpenAiCompatibleLocalModelRuntime(_httpClient, options, AssistantProfile)
+            ? new OpenAiCompatibleLocalModelRuntime(_runtimeHttpClient, options, AssistantProfile)
             : null;
 
         RuntimeController.ConfigureCandidate(candidateRuntime);
@@ -220,23 +223,27 @@ public sealed class AliServices
 
         var fallbackRuntime = new DevelopmentLocalModelRuntime();
         var configuredOptions = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot);
-        var httpClient = new HttpClient();
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
-        var localLibrary = new LocalVectorLibraryRetriever(dataRoot, httpClient);
+        var runtimeHttpClient = new HttpClient();
+        runtimeHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
+        var internetHttpClient = InternetHttpClientFactory.CreateClient();
+        var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
-            ? new OpenAiCompatibleLocalModelRuntime(httpClient, configuredOptions, profile)
+            ? new OpenAiCompatibleLocalModelRuntime(runtimeHttpClient, configuredOptions, profile)
             : null;
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
         var webSources = new TavilyFirecrawlSourceRetriever(
-            httpClient,
+            internetHttpClient,
+            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+        var webResearch = new McpWebResearchClient(
             () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
         var coordinator = new AliToolCoordinator(
             runtime,
             runtime,
             localLibrary,
             webSources,
+            webResearch,
             memories,
             reminders,
             profile);
@@ -258,7 +265,8 @@ public sealed class AliServices
             profile,
             runtime,
             orchestrator,
-            httpClient,
+            runtimeHttpClient,
+            internetHttpClient,
             voiceRecorder,
             speechToText,
             textToSpeech,

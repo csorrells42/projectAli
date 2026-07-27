@@ -28,6 +28,13 @@ public sealed record CoordinatorSourceItem(
     DateTimeOffset RetrievedAt,
     string Excerpt);
 
+public sealed record CoordinatorResearchResult(
+    bool Succeeded,
+    string Status,
+    string Provider,
+    string Tool,
+    string Evidence);
+
 public sealed record CoordinatorReminderResult(
     bool Saved,
     string Message,

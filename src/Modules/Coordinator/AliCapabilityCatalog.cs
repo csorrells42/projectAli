@@ -8,6 +8,7 @@ public static class AliCapabilityCatalog
     public const string SearchMemoryName = "search_memory";
     public const string RememberFactName = "remember_fact";
     public const string SearchCurrentWebName = "search_current_web";
+    public const string ResearchWebName = "research_web";
     public const string SearchLocalLibraryName = "search_local_library";
     public const string CreateReminderName = "create_reminder";
     public const string GetAssistantIdentityName = "get_assistant_identity";
@@ -19,6 +20,7 @@ public static class AliCapabilityCatalog
         new(SearchMemoryName, "Search Ali's saved local memories for personal facts, preferences, prior instructions, relationships, and remembered details."),
         new(RememberFactName, "Save a fact in Ali's local memory after an explicit user request."),
         new(SearchCurrentWebName, "Search the configured live internet backends for current or source-dependent information."),
+        new(ResearchWebName, "Run provider-managed, multi-source web research for complex nested or comparative questions."),
         new(SearchLocalLibraryName, "Search the user's indexed local RAG library and reference documents."),
         new(CreateReminderName, "Create a local reminder after an explicit user request."),
         new(GetAssistantIdentityName, "Return Ali's configured local assistant identity."),

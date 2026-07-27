@@ -25,6 +25,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         try
         {
             EnsureEndpointAllowed();
+            await EnsureLemonadeModelLoadedAsync(cancellationToken).ConfigureAwait(false);
             var messageList = messages.ToList();
             var useNativeOllama = IsNativeOllamaEndpoint();
             var uri = useNativeOllama ? BuildOllamaApiUri("chat") : BuildUri("chat/completions");
@@ -39,7 +40,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             if (!response.IsSuccessStatusCode)
             {
                 throw new HttpRequestException(
-                    $"Tool-capable chat completion failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
+                    FormatChatHttpError(response.StatusCode, body));
             }
 
             return ParseExtensionsAiResponse(body, useNativeOllama);

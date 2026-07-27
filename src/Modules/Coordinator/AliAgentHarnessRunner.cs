@@ -42,6 +42,10 @@ internal sealed class AliAgentHarnessRunner
             Name = assistantProfile.Normalize().AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, and clock tools.",
             MaximumIterationsPerRequest = MaximumToolIterations,
+#pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
+            MaxContextWindowTokens = profile.ContextTokens,
+            MaxOutputTokens = profile.OutputTokenLimit,
+#pragma warning restore MAAI001
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableAgentSkillsProvider = true,

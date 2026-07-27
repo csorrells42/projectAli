@@ -33,6 +33,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan UnloadVerificationInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan UnloadVerificationTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan LemonadeLoadTimeout = TimeSpan.FromMinutes(5);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -44,8 +45,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     private readonly OpenAiCompatibleRuntimeOptions _options;
     private readonly AssistantProfile _assistantProfile;
     private readonly EndpointValidationResult _endpointValidation;
+    private readonly SemaphoreSlim _lemonadeLoadGate = new(1, 1);
     private string _reasoningEffort;
     private int? _lastHealthProbeCompletionTokens;
+    private bool _nativeToolCallingAdvertised;
+    private int _lemonadeModelPrepared;
     private int _requestInFlight;
 
     public OpenAiCompatibleLocalModelRuntime(
@@ -94,6 +98,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         try
         {
         EnsureEndpointAllowed();
+        await EnsureLemonadeModelLoadedAsync(cancellationToken).ConfigureAwait(false);
 
         if (!_options.StreamingEnabled)
         {
@@ -204,7 +209,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             }
 
             yield return new ModelToken(
-                $"Unknown: local model runtime returned HTTP {(int)response.StatusCode}. {TrimForUser(error)}",
+                $"Unknown: {FormatChatHttpError(response.StatusCode, error)}",
                 EvidenceStatus.Verified);
             yield break;
         }
@@ -371,7 +376,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 return FailureHealth(started, "Cancellation probe did not cancel cleanly.", streamingSupported);
             }
 
-            ActiveProfile = _options.ToModelProfile(isLastKnownGood: true);
+            ActiveProfile = _options.ToModelProfile(isLastKnownGood: true) with
+            {
+                SupportsToolCalls = _options.SupportsToolCalls || _nativeToolCallingAdvertised
+            };
             var reasoningVerification = IsGptOssRuntime()
                 ? $" GPT-OSS reasoning effort '{ReasoningEffort}' was sent explicitly"
                   + (_lastHealthProbeCompletionTokens.HasValue
@@ -421,6 +429,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 break;
             case LocalRuntimeEngines.Lemonade:
                 await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
+                Volatile.Write(ref _lemonadeModelPrepared, 0);
                 break;
             default:
                 throw new InvalidOperationException(
@@ -434,6 +443,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         await PostJsonAndRequireSuccessAsync(
             unloadUri,
             new { model = _options.Model, keep_alive = 0, stream = false },
+            "Ollama model unload",
             cancellationToken).ConfigureAwait(false);
 
         await WaitForModelReleaseAsync(
@@ -448,6 +458,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         await PostJsonAndRequireSuccessAsync(
             unloadUri,
             new { model = _options.Model },
+            "llama.cpp model unload",
             cancellationToken).ConfigureAwait(false);
 
         await WaitForModelReleaseAsync(
@@ -462,6 +473,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         await PostJsonAndRequireSuccessAsync(
             unloadUri,
             new { model_name = _options.Model },
+            "Lemonade model unload",
             cancellationToken).ConfigureAwait(false);
 
         await WaitForModelReleaseAsync(
@@ -470,25 +482,80 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task PostJsonAndRequireSuccessAsync(Uri uri, object payload, CancellationToken cancellationToken)
+    private async Task EnsureLemonadeModelLoadedAsync(CancellationToken cancellationToken)
+    {
+        if (LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) != LocalRuntimeEngines.Lemonade
+            || Volatile.Read(ref _lemonadeModelPrepared) != 0)
+        {
+            return;
+        }
+
+        await _lemonadeLoadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Volatile.Read(ref _lemonadeModelPrepared) != 0)
+            {
+                return;
+            }
+
+            var healthUri = BuildServerRootUri("api/v1/health");
+            using (var healthRequest = new HttpRequestMessage(HttpMethod.Get, healthUri))
+            using (var healthResponse = await _httpClient.SendAsync(healthRequest, cancellationToken).ConfigureAwait(false))
+            {
+                if (healthResponse.IsSuccessStatusCode)
+                {
+                    var healthBody = await healthResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    if (LemonadeListsModelAsLoaded(healthBody, _options.Model))
+                    {
+                        await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+
+            using var loadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            loadCancellation.CancelAfter(LemonadeLoadTimeout);
+            await PostJsonAndRequireSuccessAsync(
+                BuildServerRootUri("api/v1/load"),
+                new
+                {
+                    model_name = _options.Model,
+                    ctx_size = OllamaRuntimeSafetyPolicy.ClampContextTokens(_options.ContextTokens),
+                    save_options = false
+                },
+                $"Lemonade model load with {_options.ContextTokens:N0}-token context",
+                loadCancellation.Token).ConfigureAwait(false);
+
+            Volatile.Write(ref _lemonadeModelPrepared, 1);
+        }
+        finally
+        {
+            _lemonadeLoadGate.Release();
+        }
+    }
+
+    private async Task PostJsonAndRequireSuccessAsync(
+        Uri uri,
+        object payload,
+        string operation,
+        CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, uri)
         {
             Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json")
         };
 
-        WriteHealthLog($"model-switch unload request runtime={RuntimeIdentity} endpoint={uri}");
+        WriteHealthLog($"runtime operation='{operation}' request runtime={RuntimeIdentity} endpoint={uri}");
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             WriteHealthLog(
-                $"model-switch unload failed runtime={RuntimeIdentity} status={(int)response.StatusCode} error={TrimForUser(error)}");
+                $"runtime operation='{operation}' failed runtime={RuntimeIdentity} status={(int)response.StatusCode} error={TrimForUser(error)}");
             throw new HttpRequestException(
-                $"Runtime unload failed with HTTP {(int)response.StatusCode}. {TrimForUser(error)}");
+                $"{operation} failed with HTTP {(int)response.StatusCode}. {TrimForUser(error)}");
         }
 
-        WriteHealthLog($"model-switch unload accepted runtime={RuntimeIdentity} status={(int)response.StatusCode}");
+        WriteHealthLog($"runtime operation='{operation}' accepted runtime={RuntimeIdentity} status={(int)response.StatusCode}");
     }
 
     private async Task WaitForModelReleaseAsync(
@@ -603,9 +670,55 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             return ModelsCheckResult.Failure($"Models endpoint failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
         }
 
-        return body.Contains(_options.Model, StringComparison.OrdinalIgnoreCase)
-            ? ModelsCheckResult.Success("Selected model was listed by the models endpoint.")
-            : ModelsCheckResult.Failure($"Endpoint responded, but model '{_options.Model}' was not listed.");
+        if (!body.Contains(_options.Model, StringComparison.OrdinalIgnoreCase))
+        {
+            return ModelsCheckResult.Failure($"Endpoint responded, but model '{_options.Model}' was not listed.");
+        }
+
+        _nativeToolCallingAdvertised = ModelAdvertisesToolCalling(body, _options.Model);
+        return ModelsCheckResult.Success(
+            _nativeToolCallingAdvertised
+                ? "Selected model was listed and advertises native tool calling."
+                : "Selected model was listed by the models endpoint.");
+    }
+
+    internal static bool ModelAdvertisesToolCalling(string body, string model)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return FindModelWithToolCallingLabel(document.RootElement, model);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool FindModelWithToolCallingLabel(JsonElement element, string model)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var matchesModel = new[] { "id", "model", "model_name", "name" }
+                .Any(property => element.TryGetProperty(property, out var value)
+                    && value.ValueKind == JsonValueKind.String
+                    && string.Equals(value.GetString(), model, StringComparison.OrdinalIgnoreCase));
+            if (matchesModel
+                && element.TryGetProperty("labels", out var labels)
+                && labels.ValueKind == JsonValueKind.Array
+                && labels.EnumerateArray().Any(label =>
+                    label.ValueKind == JsonValueKind.String
+                    && label.GetString()?.Contains("tool", StringComparison.OrdinalIgnoreCase) == true))
+            {
+                return true;
+            }
+
+            return element.EnumerateObject().Any(property =>
+                FindModelWithToolCallingLabel(property.Value, model));
+        }
+
+        return element.ValueKind == JsonValueKind.Array
+            && element.EnumerateArray().Any(item => FindModelWithToolCallingLabel(item, model));
     }
 
     private async Task<string> SendNonStreamingPromptAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -661,6 +774,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         bool isHealthCheck,
         CancellationToken cancellationToken)
     {
+        await EnsureLemonadeModelLoadedAsync(cancellationToken).ConfigureAwait(false);
         var useNativeOllama = IsNativeOllamaEndpoint();
         var uri = useNativeOllama ? BuildOllamaApiUri("chat") : BuildUri("chat/completions");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri);
@@ -677,7 +791,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException($"Chat completion failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
+            throw new HttpRequestException(FormatChatHttpError(response.StatusCode, body));
         }
 
         if (isHealthCheck)
@@ -840,6 +954,19 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         };
 
         return builder.Uri;
+    }
+
+    private string FormatChatHttpError(System.Net.HttpStatusCode statusCode, string body)
+    {
+        if (statusCode == System.Net.HttpStatusCode.BadRequest
+            && (body.Contains("context_length_exceeded", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("exceeds the available context", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("exceed context", StringComparison.OrdinalIgnoreCase)))
+        {
+            return $"The conversation exceeded Lemonade's active context window. Ali requested {_options.ContextTokens:N0} context tokens and reserves {_options.OutputTokenLimit:N0} for the answer. Start a fresh conversation if compaction cannot reduce this unusually large turn. Runtime detail: {TrimForUser(body)}";
+        }
+
+        return $"Local model runtime returned HTTP {(int)statusCode}. {TrimForUser(body)}";
     }
 
     private bool IsNativeOllamaEndpoint() =>

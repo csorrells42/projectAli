@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ali.Modules.Internet;
+using Ali.Modules.Internet.Extraction;
 
 namespace Ali.Modules.Internet;
 
@@ -26,6 +27,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 {
     private readonly HttpClient httpClient;
     private readonly Func<WebSourceBackendSettings> settingsProvider;
+    private readonly IWebContentExtractor contentExtractor;
     private WebSourceBackendSettings settings;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -34,14 +36,18 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     };
 
     public TavilyFirecrawlSourceRetriever(HttpClient httpClient, WebSourceBackendSettings settings)
-        : this(httpClient, () => settings)
+        : this(httpClient, () => settings, new WebContentExtractor())
     {
     }
 
-    public TavilyFirecrawlSourceRetriever(HttpClient httpClient, Func<WebSourceBackendSettings> settingsProvider)
+    public TavilyFirecrawlSourceRetriever(
+        HttpClient httpClient,
+        Func<WebSourceBackendSettings> settingsProvider,
+        IWebContentExtractor? contentExtractor = null)
     {
         this.httpClient = httpClient;
         this.settingsProvider = settingsProvider;
+        this.contentExtractor = contentExtractor ?? new WebContentExtractor();
         this.settings = settingsProvider() ?? new WebSourceBackendSettings();
     }
 
@@ -132,6 +138,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 && !string.IsNullOrWhiteSpace(result.Url))
             {
                 var scraped = await TryScrapeWithFirecrawlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);
+                scraped ??= await TryExtractDirectHtmlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(scraped))
                 {
                     excerpt = scraped;
@@ -264,6 +271,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         {
             cancellationToken.ThrowIfCancellationRequested();
             var scraped = await TryScrapeWithFirecrawlAsync(url, warnings, cancellationToken).ConfigureAwait(false);
+            scraped ??= await TryExtractDirectHtmlAsync(url, warnings, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(scraped))
             {
                 continue;
@@ -275,7 +283,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 scraped,
                 null,
                 null,
-                "Firecrawl"));
+                "Extracted page"));
         }
 
         return results;
@@ -555,6 +563,84 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         {
             warnings.Add($"Firecrawl could not extract {url}: {ex.Message}{BuildFirecrawlKeyHint()}");
             return null;
+        }
+    }
+
+    private async Task<string?> TryExtractDirectHtmlAsync(
+        string url,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || !await PublicWebEndpointPolicy.IsAllowedAsync(uri, cancellationToken).ConfigureAwait(false))
+        {
+            AddWarningOnce(warnings, $"Ali refused to fetch an unsafe or unsupported web address: {url}");
+            return null;
+        }
+
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 5, 120)));
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9,text/plain;q=0.5");
+            using var response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            if (!string.IsNullOrWhiteSpace(mediaType)
+                && !mediaType.Contains("html", StringComparison.OrdinalIgnoreCase)
+                && !mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+            {
+                AddWarningOnce(warnings, $"Ali skipped non-HTML content at {url} ({mediaType}).");
+                return null;
+            }
+
+            if (response.Content.Headers.ContentLength is > 4_000_000)
+            {
+                AddWarningOnce(warnings, $"Ali skipped an oversized page at {url}.");
+                return null;
+            }
+
+            var html = await ReadBoundedTextAsync(response.Content, 4_000_000, timeout.Token).ConfigureAwait(false);
+            var extracted = await contentExtractor.ExtractAsync(uri, html, timeout.Token).ConfigureAwait(false);
+            return !string.IsNullOrWhiteSpace(extracted.Markdown)
+                ? extracted.Markdown
+                : extracted.PlainText;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or InvalidDataException)
+        {
+            AddWarningOnce(warnings, $"Direct page extraction failed for {url}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static async Task<string> ReadBoundedTextAsync(
+        HttpContent content,
+        int maximumCharacters,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var buffer = new char[8192];
+        var text = new StringBuilder(Math.Min(maximumCharacters, 64_000));
+        while (true)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                return text.ToString();
+            }
+
+            if (text.Length + read > maximumCharacters)
+            {
+                throw new InvalidDataException("The page exceeded Ali's maximum HTML extraction size.");
+            }
+
+            text.Append(buffer, 0, read);
         }
     }
 
