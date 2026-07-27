@@ -8,38 +8,14 @@ internal static class RuntimeModelChoiceCatalog
     public static IReadOnlyList<RuntimeModelChoice> KnownChoices() =>
     [
         RuntimeModelChoice.FromModelId(
-            "ali-deepseek-coder-v2:16b-low",
-            "Recommended technical Ali model",
-            displayName: "Ali DeepSeek Coder V2 16B - technical",
-            family: "DeepSeek Coder",
-            size: "16B",
-            quantization: "Q4 low-load",
-            contextTokens: 4096,
-            outputTokenLimit: 256),
-        RuntimeModelChoice.FromModelId(
-            "deepseek-coder-v2:16b",
-            "Known technical model",
-            displayName: "DeepSeek Coder V2 16B",
-            family: "DeepSeek Coder",
-            size: "16B",
-            quantization: "Ollama package default",
-            contextTokens: 4096,
-            outputTokenLimit: 256),
-        RuntimeModelChoice.FromModelId(
-            "gemma4:12b",
-            "Optional general-purpose model",
-            displayName: "Gemma 4 12B - general assistant",
-            family: "Gemma",
-            size: "12B",
-            quantization: "Ollama package default",
-            contextTokens: 4096,
-            outputTokenLimit: 256),
-        RuntimeModelChoice.FromModelId("qwen3:1.7b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:4b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:8b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:14b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:32b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3-vl:8b", "Known vision option")
+            "gpt-oss-20b-mxfp4-GGUF",
+            "Installed Lemonade reasoning model",
+            displayName: "GPT-OSS 20B - Lemonade",
+            family: "GPT-OSS",
+            size: "20B",
+            quantization: "MXFP4",
+            contextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
+            outputTokenLimit: 1024)
     ];
 
     public static IReadOnlyList<RuntimeModelChoice> ParseRuntimeModelChoices(string json)
@@ -116,6 +92,16 @@ internal sealed record RuntimeModelChoice(
             return null;
         }
 
+        if (TryGetProperty(item, "labels", out var labels)
+            && labels.ValueKind is JsonValueKind.Array
+            && labels.EnumerateArray().Any(label =>
+                label.ValueKind is JsonValueKind.String
+                && label.GetString() is { } value
+                && value is "embeddings" or "embedding" or "reranking" or "transcription" or "tts" or "image"))
+        {
+            return null;
+        }
+
         JsonElement? details = TryGetProperty(item, "details", out var detailsElement) && detailsElement.ValueKind == JsonValueKind.Object
             ? detailsElement
             : null;
@@ -158,7 +144,7 @@ internal sealed record RuntimeModelChoice(
                 || normalizedModel.Contains("vision", StringComparison.OrdinalIgnoreCase)
                 || normalizedModel.Contains("visual", StringComparison.OrdinalIgnoreCase));
         var contextChoices = BuildContextChoices(normalizedModel, contextTokens);
-        var outputChoices = BuildOutputChoices(outputTokenLimit);
+        var outputChoices = BuildOutputChoices(normalizedModel, outputTokenLimit);
         var quantizationChoices = new[]
         {
             string.IsNullOrWhiteSpace(quantization) ? "Installed package default" : quantization.Trim()
@@ -180,8 +166,10 @@ internal sealed record RuntimeModelChoice(
     private static IReadOnlyList<int> BuildContextChoices(string model, int? preferred)
     {
         var lower = model.ToLowerInvariant();
-        var values = lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("26b", StringComparison.Ordinal)
-            ? new[] { 2048, 4096 }
+        var values = lower.Contains("gpt-oss", StringComparison.Ordinal)
+            ? new[] { 4096, 8192, 16384, 32768 }
+            : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("26b", StringComparison.Ordinal)
+            ? new[] { 4096, 8192, 16384 }
             : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("12b", StringComparison.Ordinal)
                 ? new[] { 2048, 4096, 8192, 16384 }
                 : lower.Contains("32b", StringComparison.Ordinal)
@@ -193,8 +181,13 @@ internal sealed record RuntimeModelChoice(
         return AddPreferred(values, preferred, minimum: 512);
     }
 
-    private static IReadOnlyList<int> BuildOutputChoices(int? preferred) =>
-        AddPreferred([128, 256, 512], preferred, minimum: 1);
+    private static IReadOnlyList<int> BuildOutputChoices(string model, int? preferred) =>
+        AddPreferred(
+            model.Contains("gpt-oss", StringComparison.OrdinalIgnoreCase)
+                ? [512, 1024, 2048]
+                : [128, 256, 512],
+            preferred,
+            minimum: 1);
 
     private static IReadOnlyList<int> AddPreferred(IReadOnlyList<int> values, int? preferred, int minimum)
     {
@@ -210,6 +203,11 @@ internal sealed record RuntimeModelChoice(
     private static string InferDisplayName(string model, string size)
     {
         var lower = model.ToLowerInvariant();
+        if (lower.Contains("gpt-oss", StringComparison.Ordinal))
+        {
+            return $"GPT-OSS {size}";
+        }
+
         if (lower.Contains("qwen3-vl", StringComparison.Ordinal))
         {
             return $"Qwen3 VL {size}";
@@ -236,6 +234,11 @@ internal sealed record RuntimeModelChoice(
     private static string InferFamily(string model)
     {
         var lower = model.ToLowerInvariant();
+        if (lower.Contains("gpt-oss", StringComparison.Ordinal))
+        {
+            return "GPT-OSS";
+        }
+
         if (lower.Contains("qwen", StringComparison.Ordinal))
         {
             return "Qwen";
@@ -256,7 +259,7 @@ internal sealed record RuntimeModelChoice(
 
     private static string InferSize(string model)
     {
-        foreach (var size in new[] { "1.7B", "4B", "8B", "12B", "14B", "16B", "26B", "27B", "32B" })
+        foreach (var size in new[] { "1.7B", "4B", "8B", "12B", "14B", "16B", "20B", "26B", "27B", "32B", "120B" })
         {
             if (model.Contains(size, StringComparison.OrdinalIgnoreCase))
             {

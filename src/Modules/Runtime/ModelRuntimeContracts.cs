@@ -43,7 +43,8 @@ public enum ChatRole
 public sealed record ModelToken(
     string Text,
     EvidenceStatus EvidenceStatus,
-    string? FinishReason = null)
+    string? FinishReason = null,
+    bool IsThinking = false)
 {
     public bool ReachedOutputLimit =>
         string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase);
@@ -73,4 +74,18 @@ public interface ILocalModelRuntime
     Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken);
 
     Task ShutdownAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public interface IModelSwitchAwareRuntime
+{
+    string RuntimeIdentity { get; }
+
+    Task UnloadForModelSwitchAsync(CancellationToken cancellationToken);
+}
+
+public interface IReasoningEffortRuntime
+{
+    string ReasoningEffort { get; }
+
+    void SetReasoningEffort(string effort);
 }

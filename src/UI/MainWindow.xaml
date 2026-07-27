@@ -4,11 +4,12 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:Ali.UI.ViewModels"
+        xmlns:controls="clr-namespace:Ali.UI.Controls"
         mc:Ignorable="d"
         Title="{Binding AssistantWindowTitle}"
-        Height="820"
+        Height="980"
         MinHeight="820"
-        Width="1320"
+        Width="1600"
         MinWidth="1349"
         Background="#0B0B0D"
         FontFamily="Segoe UI">
@@ -48,9 +49,100 @@
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         </Style>
         <Style TargetType="ComboBox">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="8,5" />
             <Setter Property="Background" Value="{StaticResource InputBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
             <Setter Property="BorderBrush" Value="#46464D" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="MaxDropDownHeight" Value="260" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid SnapsToDevicePixels="True">
+                            <Border x:Name="ComboChrome"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" />
+                            <ToggleButton Background="Transparent"
+                                          BorderThickness="0"
+                                          Focusable="False"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" />
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                              HorizontalAlignment="Left"
+                                              IsHitTestVisible="False"
+                                              Margin="9,0,30,0"
+                                              RecognizesAccessKey="True"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"
+                                              VerticalAlignment="Center" />
+                            <Path Data="M 0 0 L 4 4 L 8 0 Z"
+                                  Fill="{StaticResource MutedTextBrush}"
+                                  HorizontalAlignment="Right"
+                                  IsHitTestVisible="False"
+                                  Margin="0,0,10,0"
+                                  Stretch="Fill"
+                                  VerticalAlignment="Center"
+                                  Width="8"
+                                  Height="4" />
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                                   Placement="Bottom">
+                                <Grid MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                      MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <Border Background="{StaticResource PanelAltBrush}"
+                                            BorderBrush="{StaticResource BorderBrushDark}"
+                                            BorderThickness="1">
+                                        <ScrollViewer CanContentScroll="True">
+                                            <ItemsPresenter />
+                                        </ScrollViewer>
+                                    </Border>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#5A5A63" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#8B929E" />
+                                <Setter TargetName="ComboChrome" Property="Background" Value="#151518" />
+                                <Setter TargetName="ComboChrome" Property="BorderBrush" Value="#303036" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{StaticResource PanelAltBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Padding" Value="9,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="#24404A" />
+                    <Setter Property="Foreground" Value="#FFFFFF" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#19546A" />
+                    <Setter Property="Foreground" Value="#FFFFFF" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="TreeView">
             <Setter Property="Background" Value="{StaticResource InputBrush}" />
@@ -97,10 +189,106 @@
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         </Style>
-        <Style TargetType="MenuItem">
-            <Setter Property="Background" Value="{StaticResource PanelAltBrush}" />
+        <Style TargetType="Menu">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="Padding" Value="10,6" />
+        </Style>
+        <Style TargetType="MenuItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Grid SnapsToDevicePixels="True">
+                            <Border x:Name="MenuItemBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1"
+                                    Padding="10,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0"
+                                                      ContentSource="Header"
+                                                      RecognizesAccessKey="True"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Center" />
+                                    <TextBlock x:Name="CheckIndicator"
+                                               Grid.Column="1"
+                                               Text="&#xE73E;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               Foreground="#8EE6B5"
+                                               Visibility="Collapsed"
+                                               Margin="14,0,0,0"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock x:Name="SubmenuIndicator"
+                                               Grid.Column="2"
+                                               Text="&#xE76C;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               Foreground="#B9D7EF"
+                                               Visibility="Collapsed"
+                                               Margin="14,0,0,0"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   Placement="Right"
+                                   PopupAnimation="Fade"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                                <Border Background="{StaticResource PanelAltBrush}"
+                                        BorderBrush="#4C7598"
+                                        BorderThickness="1"
+                                        MinWidth="190"
+                                        Padding="2">
+                                    <StackPanel IsItemsHost="True"
+                                                KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="#243F58" />
+                                <Setter TargetName="MenuItemBorder" Property="BorderBrush" Value="#4C7598" />
+                            </Trigger>
+                            <Trigger Property="IsSubmenuOpen" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="#183149" />
+                                <Setter TargetName="MenuItemBorder" Property="BorderBrush" Value="#4C7598" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckIndicator" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="TopLevelHeader">
+                                <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="SubmenuIndicator" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Separator">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Margin" Value="8,3" />
+            <Setter Property="Background" Value="{StaticResource BorderBrushDark}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1"
+                                Background="{TemplateBinding Background}"
+                                SnapsToDevicePixels="True" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style x:Key="ResourceMeterProgress" TargetType="ProgressBar">
             <Setter Property="Height" Value="4" />
@@ -113,13 +301,60 @@
     </Window.Resources>
 
     <Grid Background="{StaticResource AppBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="{Binding HistorySidebarColumnWidth}" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0"
+        <Menu Grid.Row="0"
+              Grid.Column="0"
+              Grid.ColumnSpan="3"
+              Background="{StaticResource PanelBrush}"
+              Foreground="{StaticResource TextBrush}">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Identity Review..." Click="OpenIdentityReviewMenuItem_OnClick" />
+                <MenuItem Header="_Choose Data Folder..." Click="OpenDataFolderMenuItem_OnClick" />
+                <MenuItem Header="_Identity Engine">
+                    <MenuItem Header="_CPU" IsCheckable="True" IsChecked="True" />
+                    <MenuItem Header="_DirectML GPU" IsCheckable="True" IsEnabled="False" ToolTip="GPU identity remains held back until its recognition path passes validation." />
+                </MenuItem>
+                <MenuItem Header="_Speech to Text">
+                    <MenuItem Header="_Parakeet"
+                              IsCheckable="True"
+                              IsChecked="{Binding ParakeetSpeechToTextSelected, Mode=OneWay}"
+                              Command="{Binding SelectParakeetSpeechToTextCommand}" />
+                    <MenuItem Header="_Whisper"
+                              IsCheckable="True"
+                              IsChecked="{Binding WhisperSpeechToTextSelected, Mode=OneWay}"
+                              Command="{Binding SelectWhisperSpeechToTextCommand}" />
+                </MenuItem>
+                <Separator />
+                <MenuItem Header="Frame Pipeline _Timing..."
+                          ToolTip="Opens a table that requests each module's current waited and worked times once per second."
+                          Click="OpenPipelineTimingMenuItem_OnClick" />
+                <Separator />
+                <MenuItem Header="E_xit" Click="CloseMenuItem_OnClick" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="Show _Tracking Overlay"
+                          IsCheckable="True"
+                          IsChecked="{Binding TrackingOverlayEnabled, Mode=TwoWay}" />
+                <MenuItem Header="Show Face _Mesh Overlay"
+                          IsCheckable="True"
+                          IsChecked="{Binding FaceMeshOverlayEnabled, Mode=TwoWay}" />
+                <Separator />
+                <MenuItem Header="_No Optional Overlays" Command="{Binding NoOptionalOverlaysCommand}" />
+                <MenuItem Header="Show _All Optional Overlays" Command="{Binding AllOptionalOverlaysCommand}" />
+            </MenuItem>
+        </Menu>
+
+        <Border Grid.Row="1"
+                Grid.Column="0"
                 Background="{StaticResource SidebarBrush}"
                 Padding="14"
                 Visibility="{Binding IsHistorySidebarVisible, Converter={StaticResource BoolToVisibilityConverter}}">
@@ -127,23 +362,81 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
+                <Border Grid.Row="0"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushDark}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="8"
+                        Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
+                        Background="#05070A"
+                        BorderBrush="{StaticResource BorderBrushDark}"
+                        BorderThickness="1"
+                        Margin="0,0,0,8"
+                        ClipToBounds="True">
+                    <controls:AspectRatioDecorator AspectRatio="1.7777777778">
+                        <Grid Background="#05070A">
+                            <ContentControl Content="{Binding VisionViewport}"
+                                            HorizontalContentAlignment="Stretch"
+                                            VerticalContentAlignment="Stretch" />
+                            <TextBlock Text="Camera off"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       FontSize="18"
+                                       FontWeight="SemiBold"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding VisionCameraOn}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                    </controls:AspectRatioDecorator>
+                        </Border>
+
+                        <Button Grid.Row="1"
+                        Content="Expand Webcam"
+                        Click="ExpandWebcam_OnClick"
+                        IsEnabled="{Binding VisionCameraOn}"
+                        HorizontalAlignment="Stretch"
+                        Margin="0"
+                        ToolTip="Available while the camera is on. Moves the existing viewport into a resizable window." />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushDark}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
                 <StackPanel Grid.Row="0">
-                    <TextBlock Text="{Binding AssistantName}" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-                    <TextBlock Text="This assistant can make mistakes. Check important info." Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,14" />
-
-                    <Button Content="New chat"
-                            Command="{Binding NewChatCommand}"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,0,0,8" />
-                    <TextBox Text="{Binding ConversationSearchText, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="Search saved local chat titles and message text"
-                             Margin="0,0,0,12"
-                             MinHeight="32" />
-
-                    <TextBlock Text="Recents" Foreground="{StaticResource MutedTextBrush}" FontWeight="SemiBold" Margin="0,4,0,6" />
+                    <TextBlock Text="Recents"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontWeight="SemiBold"
+                               Margin="0,4,0,6" />
                 </StackPanel>
 
                 <ListBox Grid.Row="1"
@@ -226,27 +519,78 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <Button Grid.Row="2"
-                        Content="Erase History"
-                        Command="{Binding EraseHistoryCommand}"
-                        HorizontalContentAlignment="Center"
-                        Margin="0"
-                        BorderBrush="#7F1D1D"
-                        Background="#2A1517"
-                        ToolTip="Erase saved local conversations and recent chat entries after confirmation." />
+                <StackPanel Grid.Row="2">
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Search"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                Content="New chat"
+                                Command="{Binding NewChatCommand}"
+                                HorizontalContentAlignment="Center"
+                                MinWidth="110"
+                                Margin="0" />
+                    </Grid>
+                    <TextBox Text="{Binding ConversationSearchText, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Search saved local chat titles and message text"
+                             Margin="0,0,0,8"
+                             MinHeight="32" />
+                    <Button Content="Erase History"
+                            Command="{Binding EraseHistoryCommand}"
+                            HorizontalContentAlignment="Center"
+                            Margin="0"
+                            BorderBrush="#7F1D1D"
+                            Background="#2A1517"
+                            ToolTip="Erase saved local conversations and recent chat entries after confirmation." />
+                </StackPanel>
+                    </Grid>
+                </Border>
             </Grid>
         </Border>
 
-        <Grid Grid.Column="1" Margin="30,18,30,18">
+        <Grid Grid.Row="1" Grid.Column="1" Margin="18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" MinHeight="240" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
+            <Border Grid.Row="1"
+                    Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrushDark}"
+                    BorderThickness="1"
+                    Padding="10"
+                    Margin="0,0,0,10"
+                    Visibility="{Binding IsCameraBarExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="280" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="280" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Camera" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding VisionCameras}" SelectedItem="{Binding SelectedVisionCamera}" />
+                    <TextBlock Grid.Column="2" Text="Mode" VerticalAlignment="Center" Margin="14,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                    <ComboBox Grid.Column="3" ItemsSource="{Binding VisionCameraModes}" SelectedItem="{Binding SelectedVisionCameraMode}" />
+                    <Button Grid.Column="4" Content="{Binding VisionCameraButtonText}" Command="{Binding ToggleVisionCameraCommand}" Margin="14,0,0,0" />
+                    <Button Grid.Column="5" Content="Refresh" Command="{Binding RefreshVisionCamerasCommand}" Margin="8,0,0,0" />
+                    <TextBlock Grid.Column="6" Text="{Binding VisionStatus}" VerticalAlignment="Center" Margin="14,0,0,0" Foreground="#B9D7EF" TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </Border>
+
             <Border Grid.Row="0"
                     Height="44"
-                    Margin="0,0,0,10"
+                    Margin="0,0,0,8"
                     Padding="14,0"
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrushDark}"
@@ -254,8 +598,6 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -323,38 +665,71 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <Button Grid.Column="3"
-                            Content="Maintenance"
-                            Command="{Binding OpenMaintenanceDashboardCommand}"
-                            Height="34"
-                            MinHeight="34"
-                            Margin="0,0,8,0"
-                            Padding="12,0"
-                            VerticalAlignment="Center"
-                            ToolTip="Open Ali's computer maintenance dashboard." />
+                    <ToggleButton Grid.Column="3"
+                                  AutomationProperties.AutomationId="MainChatCameraBarToggleButton"
+                                  AutomationProperties.Name="Camera controls"
+                                  IsChecked="{Binding IsCameraBarExpanded, Mode=TwoWay}"
+                                  Height="34"
+                                  Margin="0"
+                                  Cursor="Hand"
+                                  ToolTip="Show or hide camera controls.">
+                        <ToggleButton.Template>
+                            <ControlTemplate TargetType="ToggleButton">
+                                <Border x:Name="CameraToggleChrome"
+                                        Height="34"
+                                        Padding="12,0"
+                                        Background="#2A2A2E"
+                                        BorderBrush="#46464D"
+                                        BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Camera"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <Path x:Name="CameraToggleChevron"
+                                              Data="M 0 0 L 4 4 L 8 0 Z"
+                                              Fill="{StaticResource MutedTextBrush}"
+                                              Width="8"
+                                              Height="4"
+                                              Margin="8,0,0,0"
+                                              RenderTransformOrigin="0.5,0.5"
+                                              Stretch="Fill"
+                                              VerticalAlignment="Center">
+                                            <Path.RenderTransform>
+                                                <RotateTransform Angle="0" />
+                                            </Path.RenderTransform>
+                                        </Path>
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="CameraToggleChrome" Property="BorderBrush" Value="#5A5A63" />
+                                    </Trigger>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter TargetName="CameraToggleChrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                        <Setter TargetName="CameraToggleChevron" Property="RenderTransform">
+                                            <Setter.Value>
+                                                <RotateTransform Angle="180" />
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </ToggleButton.Template>
+                    </ToggleButton>
                     <Button Grid.Column="4"
-                            Content="{Binding CommandExplorerToggleText}"
-                            Command="{Binding ToggleCommandExplorerCommand}"
-                            Height="34"
-                            MinHeight="34"
-                            Margin="0,0,8,0"
-                            Padding="12,0"
-                            VerticalAlignment="Center"
-                            ToolTip="Open Ali's feature and command explorer." />
-                    <Button Grid.Column="5"
                             Content="Settings"
                             AutomationProperties.AutomationId="MainChatSettingsButton"
                             Command="{Binding OpenSettingsCommand}"
                             Height="34"
                             MinHeight="34"
-                            Margin="0"
+                            Margin="8,0,0,0"
                             Padding="12,0"
                             VerticalAlignment="Center" />
                 </Grid>
             </Border>
 
             <ScrollViewer x:Name="MessagesScrollViewer"
-                          Grid.Row="1"
+                          Grid.Row="2"
                           VerticalScrollBarVisibility="Auto"
                           Padding="0,8,0,8">
                 <ItemsControl ItemsSource="{Binding Messages}" MaxWidth="840" HorizontalAlignment="Center">
@@ -363,13 +738,12 @@
                             <StackPanel Margin="0,0,0,18"
                                         MaxWidth="760"
                                         HorizontalAlignment="{Binding MessageAlignment}">
-                                <TextBlock Text="{Binding Text}"
-                                           AutomationProperties.AutomationId="MainChatMessageText"
-                                           TextWrapping="Wrap"
-                                           TextAlignment="{Binding MessageTextAlignment}"
-                                           Foreground="{StaticResource TextBrush}"
-                                           FontSize="15"
-                                           LineHeight="22" />
+                                <controls:MarkdownMessageView Markdown="{Binding Text}"
+                                                              MessageTextAlignment="{Binding MessageTextAlignment}"
+                                                              AutomationProperties.AutomationId="MainChatMessageText"
+                                                              FontFamily="Segoe UI"
+                                                              FontSize="15"
+                                                              Foreground="{StaticResource TextBrush}" />
                                 <StackPanel Orientation="Horizontal"
                                             Margin="0,8,0,0"
                                             HorizontalAlignment="{Binding MessageAlignment}">
@@ -394,8 +768,9 @@
                 </ItemsControl>
             </ScrollViewer>
 
-            <Grid Grid.Row="2" HorizontalAlignment="Stretch" VerticalAlignment="Bottom">
+            <Grid Grid.Row="3" HorizontalAlignment="Stretch" VerticalAlignment="Bottom">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -423,7 +798,132 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Border Grid.Row="1"
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Expander Grid.Column="0"
+                          AutomationProperties.AutomationId="AliActivityPanel"
+                          IsExpanded="{Binding IsAgentActivityExpanded, Mode=TwoWay}"
+                          Foreground="{StaticResource TextBrush}"
+                          Background="#151517"
+                          BorderBrush="{StaticResource BorderBrushDark}"
+                          BorderThickness="1"
+                          MaxHeight="230"
+                          HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Stretch"
+                          Margin="0,0,12,8">
+                    <Expander.Header>
+                        <Grid Margin="8,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE8C3;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       Foreground="#C5B3FF"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0" />
+                            <TextBlock Grid.Column="1"
+                                       Text="Ali"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding AgentActivitySummary}"
+                                       Foreground="#E2E8F0"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Expander.Header>
+                    <Grid Margin="10,0,10,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Button Content="Clear"
+                                Command="{Binding ClearAgentActivityCommand}"
+                                HorizontalAlignment="Right"
+                                MinHeight="24"
+                                Height="24"
+                                Padding="8,0"
+                                Margin="0,0,0,4" />
+                        <ScrollViewer Grid.Row="1" MaxHeight="170" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding AgentActivities}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:AgentActivityItemViewModel}">
+                                        <Grid Margin="0,3">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="22" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Icon}"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       Foreground="{Binding Accent}"
+                                                       VerticalAlignment="Top" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Title}"
+                                                       Foreground="{Binding Accent}"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,0,10,0"
+                                                       VerticalAlignment="Top" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding Detail}"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Top" />
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding TimingText}"
+                                                       Foreground="{StaticResource SubtleTextBrush}"
+                                                       Margin="12,0,0,0"
+                                                       VerticalAlignment="Top" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                    </Expander>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Margin="0,9,8,8"
+                                ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
+                        <TextBlock Text="Effort"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,12,0" />
+                        <RadioButton Content="Low"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningLow}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,14,0" />
+                        <RadioButton Content="Medium"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningMedium}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,14,0" />
+                        <RadioButton Content="High"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningHigh}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="2"
                         Background="#242426"
                         BorderBrush="#38383D"
                         BorderThickness="1"
@@ -464,20 +964,37 @@
                                 PreviewMouseLeftButtonUp="PushToTalkButton_OnPreviewMouseLeftButtonUp"
                                 LostMouseCapture="PushToTalkButton_OnLostMouseCapture"
                                 Style="{StaticResource ComposerButton}"
+                                VerticalAlignment="Bottom"
                                 MinWidth="116" />
-                        <Button Grid.Column="2"
-                                AutomationProperties.AutomationId="MainChatSendButton"
-                                Content="{Binding SendButtonText}"
-                                Command="{Binding SendCommand}"
-                                ToolTip="{Binding SendButtonToolTip}"
-                                Style="{StaticResource ComposerButton}"
-                                Background="{Binding SendButtonBackground}"
-                                BorderBrush="{Binding SendButtonBorderBrush}"
-                                MinWidth="72" />
+                        <Grid Grid.Column="2"
+                              MinWidth="286"
+                              Margin="4,0,0,0"
+                              VerticalAlignment="Bottom">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    AutomationProperties.AutomationId="MainChatSendButton"
+                                    Content="{Binding SendButtonText}"
+                                    Command="{Binding SendCommand}"
+                                    ToolTip="{Binding SendButtonToolTip}"
+                                    Style="{StaticResource ComposerButton}"
+                                    Background="{Binding SendButtonBackground}"
+                                    BorderBrush="{Binding SendButtonBorderBrush}"
+                                    MinWidth="92" />
+                            <Button Grid.Column="1"
+                                    AutomationProperties.AutomationId="VisualAttentionToggleButton"
+                                    Content="{Binding VisualAttentionButtonText}"
+                                    Command="{Binding ToggleVisualAttentionCommand}"
+                                    ToolTip="{Binding VisualAttentionButtonToolTip}"
+                                    Style="{StaticResource ComposerButton}"
+                                    MinWidth="178" />
+                        </Grid>
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="2" Margin="6,8,6,0">
+                <Grid Grid.Row="3" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -520,18 +1037,27 @@
                                    MinWidth="40"
                                    VerticalAlignment="Center" />
                     </StackPanel>
-                    <TextBlock Grid.Column="2"
-                               AutomationProperties.AutomationId="MainChatVoiceStatusText"
-                               Text="{Binding VoiceStatus}"
-                               Foreground="{StaticResource SubtleTextBrush}"
-                               FontSize="12"
-                               TextWrapping="Wrap"
-                               TextAlignment="Right" />
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                        <TextBlock AutomationProperties.AutomationId="MainChatAttentionStatusText"
+                                   Text="{Binding AttentionStatus}"
+                                   Foreground="{StaticResource TextBrush}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   TextAlignment="Right" />
+                        <TextBlock AutomationProperties.AutomationId="MainChatVoiceStatusText"
+                                   Text="{Binding VoiceStatus}"
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"
+                                   TextAlignment="Right" />
+                    </StackPanel>
                 </Grid>
             </Grid>
         </Grid>
 
-        <Border Grid.Column="2"
+        <Border Grid.Row="1"
+                Grid.Column="2"
                 Width="560"
                 Background="{StaticResource SidebarBrush}"
                 BorderBrush="{StaticResource BorderBrushDark}"

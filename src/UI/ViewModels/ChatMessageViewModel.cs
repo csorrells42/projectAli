@@ -142,4 +142,3 @@ public sealed class ChatMessageViewModel : ObservableObject
             IsFlaggedForCorrection = !string.IsNullOrWhiteSpace(message.CorrectionId)
         };
 }
-

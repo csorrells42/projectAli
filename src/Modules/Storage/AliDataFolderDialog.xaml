@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window x:Class="Ali.Modules.Storage.AliDataFolderDialog" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Ali Data Folder" Width="700" MinWidth="560" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#080d12" Foreground="#f5f8fb" Loaded="WindowLoaded">
+  <FrameworkElement.Resources>
+    <ResourceDictionary>
+      <Style x:Key="{x:Type TextBlock}" TargetType="{x:Type TextBlock}">
+        <Setter Property="Foreground" Value="#f5f8fb" />
+      </Style>
+      <Style x:Key="{x:Type TextBox}" TargetType="{x:Type TextBox}">
+        <Setter Property="Background" Value="#0f1720" />
+        <Setter Property="Foreground" Value="#f5f8fb" />
+        <Setter Property="BorderBrush" Value="#37506a" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="9,6" />
+        <Setter Property="MinHeight" Value="34" />
+      </Style>
+      <Style x:Key="{x:Type Button}" TargetType="{x:Type Button}">
+        <Setter Property="Background" Value="#142130" />
+        <Setter Property="Foreground" Value="#f5f8fb" />
+        <Setter Property="BorderBrush" Value="#37506a" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="MinHeight" Value="34" />
+      </Style>
+    </ResourceDictionary>
+  </FrameworkElement.Resources>
+  <Border Margin="14" Background="#101820" BorderBrush="#243545" BorderThickness="1" Padding="18">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+      <TextBlock Text="Ali Data Folder" FontSize="18" FontWeight="SemiBold" />
+      <Grid Row="1" Margin="0,14,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBox Name="FolderPathTextBox" IsReadOnly="True" VerticalContentAlignment="Center" HorizontalScrollBarVisibility="Auto" />
+        <Button Grid.Column="1" Content="Choose Folder" Margin="8,0,0,0" Click="ChooseFolderClicked" />
+      </Grid>
+      <TextBlock Name="StorageCapacityText" Grid.Row="2" Foreground="#b9d7ef" TextWrapping="Wrap" Margin="0,8,0,0" />
+      <Button Grid.Row="3" Content="OK" MinWidth="100" HorizontalAlignment="Right" Margin="0,18,0,0" IsDefault="True" Click="OkClicked" />
+    </Grid>
+  </Border>
+</Window>

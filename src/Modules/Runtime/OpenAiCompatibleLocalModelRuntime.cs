@@ -13,13 +13,14 @@ using Ali;
 
 namespace Ali.Modules.Runtime;
 
-public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
+public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient
 {
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
+    private const int MaximumLowReasoningHealthProbeTokens = 256;
     private const int QwenVisibleOutputTokenFloor = 512;
     private const int QwenVisibleOutputRetryTokenLimit = 1024;
-    private const int MaxAutomaticLengthContinuations = 1;
+    private const int MaxAutomaticLengthContinuations = 0;
     private const string HealthProbeExpectedResponse = "OK";
     private const string SourcePlannerConversationId = "source_query_plan";
     private const string SourceAnswerVerifierConversationId = "source_answer_verifier";
@@ -30,6 +31,8 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private const string OutputLimitReachedNotice =
         "Response reached the configured output limit before the model finished. Ask me to continue or increase the Runtime output limit.";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan UnloadVerificationInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan UnloadVerificationTimeout = TimeSpan.FromSeconds(30);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -41,6 +44,9 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private readonly OpenAiCompatibleRuntimeOptions _options;
     private readonly AssistantProfile _assistantProfile;
     private readonly EndpointValidationResult _endpointValidation;
+    private string _reasoningEffort;
+    private int? _lastHealthProbeCompletionTokens;
+    private int _requestInFlight;
 
     public OpenAiCompatibleLocalModelRuntime(
         HttpClient httpClient,
@@ -51,15 +57,42 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         _options = options;
         _assistantProfile = (assistantProfile ?? AssistantProfile.CreateDefault()).Normalize();
         _endpointValidation = LocalEndpointPolicy.Validate(options.Endpoint, options.AllowPrivateLanEndpoint);
+        _reasoningEffort = OllamaRuntimeSafetyPolicy.ResolveReasoningEffort(options);
         ActiveProfile = options.ToModelProfile(isLastKnownGood: false);
     }
 
     public ModelProfile ActiveProfile { get; private set; }
 
+    public string RuntimeIdentity =>
+        $"{LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint)}|{_options.Endpoint}|{_options.Model}";
+
+    public string ReasoningEffort => Volatile.Read(ref _reasoningEffort);
+
+    public void SetReasoningEffort(string effort)
+    {
+        if (!OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Model)
+            && !OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Family))
+        {
+            return;
+        }
+
+        Volatile.Write(
+            ref _reasoningEffort,
+            OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(effort));
+    }
+
     public async IAsyncEnumerable<ModelToken> StreamChatAsync(
         ChatRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        if (Interlocked.CompareExchange(ref _requestInFlight, 1, 0) != 0)
+        {
+            throw new InvalidOperationException(
+                "The local model runtime already has one request in flight. Ali does not queue or overlap model generations.");
+        }
+
+        try
+        {
         EnsureEndpointAllowed();
 
         if (!_options.StreamingEnabled)
@@ -86,15 +119,8 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
         if (!firstAttempt.EmittedContent && !isHealthCheck)
         {
-            var fallbackContent = await SendVisibleOutputRetryAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(fallbackContent))
-            {
-                yield return new ModelToken(fallbackContent, EvidenceStatus.Unverified);
-                yield break;
-            }
-
             yield return new ModelToken(
-                "Unknown: local model runtime completed without visible assistant content. The model may have spent its output budget on hidden reasoning.",
+                "Unknown: local model runtime completed without visible assistant content. Ali did not automatically submit a second generation.",
                 EvidenceStatus.Unverified);
             yield break;
         }
@@ -129,6 +155,11 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 EvidenceStatus.Unknown,
                 FinishReason: "length");
         }
+        }
+        finally
+        {
+            Volatile.Write(ref _requestInFlight, 0);
+        }
     }
 
     private async IAsyncEnumerable<ModelToken> StreamChatAttemptAsync(
@@ -137,17 +168,23 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         StreamingAttemptState state,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var uri = BuildUri("chat/completions");
-        var payload = JsonSerializer.Serialize(
-            BuildChatPayload(request, maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null),
-            JsonOptions);
+        var useNativeOllama = IsNativeOllamaEndpoint();
+        var uri = useNativeOllama ? BuildOllamaApiUri("chat") : BuildUri("chat/completions");
+        var payload = SerializeChatPayload(
+            request,
+            stream: true,
+            maxTokens: isHealthCheck ? HealthProbeOutputTokenLimit : null,
+            useNativeOllama);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(
+            useNativeOllama ? "application/x-ndjson" : "text/event-stream"));
         httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-        if (isHealthCheck)
-        {
-            WriteHealthLog($"request STREAM POST {uri} payload={payload}");
-        }
+        WriteRequestMetadata(
+            uri,
+            request,
+            stream: true,
+            isHealthCheck,
+            isHealthCheck ? HealthProbeOutputTokenLimit : null);
 
         using var response = await _httpClient.SendAsync(
             httpRequest,
@@ -185,14 +222,21 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 break;
             }
 
-            if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            var streamEvent = useNativeOllama
+                ? ExtractNativeOllamaStreamEvent(line)
+                : line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                    ? OpenAiStreamParser.ExtractStreamEvent(
+                        line["data:".Length..],
+                        includeReasoning: isHealthCheck)
+                    : new OpenAiStreamEvent(null, null, IsDone: false);
+            if (isHealthCheck && !string.IsNullOrEmpty(streamEvent.Thinking))
             {
-                continue;
+                yield return new ModelToken(
+                    streamEvent.Thinking,
+                    EvidenceStatus.Unverified,
+                    IsThinking: true);
             }
 
-            var streamEvent = OpenAiStreamParser.ExtractStreamEvent(
-                line["data:".Length..],
-                includeReasoning: isHealthCheck);
             if (streamEvent.IsDone)
             {
                 break;
@@ -207,11 +251,6 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             {
                 state.EmittedContent = true;
                 state.Text.Append(streamEvent.Content);
-                if (isHealthCheck)
-                {
-                    WriteHealthLog($"response STREAM POST {uri} delta={streamEvent.Content}");
-                }
-
                 yield return new ModelToken(
                     streamEvent.Content,
                     EvidenceStatus.Unverified,
@@ -286,6 +325,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                 return FailureHealth(started, modelsResult.Summary, streamingSupported);
             }
 
+            _lastHealthProbeCompletionTokens = null;
             var nonStreamingText = await SendNonStreamingProbeWithRetryAsync(
                 BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text."),
                 cancellationToken).ConfigureAwait(false);
@@ -297,6 +337,12 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                     started,
                     $"Tiny non-streaming prompt did not return exactly OK after thinking-text cleanup. Raw: {TrimForUser(nonStreamingText)}",
                     streamingSupported);
+            }
+
+            var reasoningControlFailure = ValidateReasoningControlHealthProbe();
+            if (reasoningControlFailure is not null)
+            {
+                return FailureHealth(started, reasoningControlFailure, streamingSupported);
             }
 
             if (_options.StreamingEnabled)
@@ -326,9 +372,15 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             }
 
             ActiveProfile = _options.ToModelProfile(isLastKnownGood: true);
+            var reasoningVerification = IsGptOssRuntime()
+                ? $" GPT-OSS reasoning effort '{ReasoningEffort}' was sent explicitly"
+                  + (_lastHealthProbeCompletionTokens.HasValue
+                      ? $"; the tiny probe used {_lastHealthProbeCompletionTokens.Value:N0} completion tokens."
+                      : ".")
+                : string.Empty;
             return new RuntimeHealthCheck(
                 Succeeded: true,
-                Summary: $"Verified local OpenAI-compatible runtime with model '{_options.Model}'.",
+                Summary: $"Verified local runtime with model '{_options.Model}'.{reasoningVerification}",
                 CheckedAt: DateTimeOffset.UtcNow,
                 Elapsed: DateTimeOffset.UtcNow - started,
                 Endpoint: _options.Endpoint.ToString(),
@@ -347,37 +399,190 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
 
     public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
+        WriteHealthLog($"runtime shutdown runtime={RuntimeIdentity} action=unload-and-verify");
+        await UnloadForModelSwitchAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task UnloadForModelSwitchAsync(CancellationToken cancellationToken)
+    {
         if (string.IsNullOrWhiteSpace(_options.Model))
         {
             return;
         }
 
-        try
+        var engine = LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint);
+        switch (engine)
         {
-            var uri = BuildOllamaApiUri("generate");
-            var payload = JsonSerializer.Serialize(
-                new
-                {
-                    model = _options.Model,
-                    keep_alive = 0,
-                    stream = false
-                },
-                JsonOptions);
-            using var request = new HttpRequestMessage(HttpMethod.Post, uri)
-            {
-                Content = new StringContent(payload, Encoding.UTF8, "application/json")
-            };
-
-            WriteHealthLog($"request POST {uri} unload payload={payload}");
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            WriteHealthLog($"response POST {uri} unload status={(int)response.StatusCode} body={TrimForUser(body)}");
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
-        {
-            WriteHealthLog($"unload exception type={ex.GetType().Name} message={ex.Message}");
+            case LocalRuntimeEngines.Ollama:
+                await UnloadOllamaAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            case LocalRuntimeEngines.LlamaCpp:
+                await UnloadLlamaCppAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            case LocalRuntimeEngines.Lemonade:
+                await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Ali cannot verify model release for runtime engine '{engine}'. Select Ollama, llama.cpp, or Lemonade before switching engines.");
         }
     }
+
+    private async Task UnloadOllamaAsync(CancellationToken cancellationToken)
+    {
+        var unloadUri = BuildOllamaApiUri("generate");
+        await PostJsonAndRequireSuccessAsync(
+            unloadUri,
+            new { model = _options.Model, keep_alive = 0, stream = false },
+            cancellationToken).ConfigureAwait(false);
+
+        await WaitForModelReleaseAsync(
+            BuildOllamaApiUri("ps"),
+            body => !OllamaListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UnloadLlamaCppAsync(CancellationToken cancellationToken)
+    {
+        var unloadUri = BuildServerRootUri("models/unload");
+        await PostJsonAndRequireSuccessAsync(
+            unloadUri,
+            new { model = _options.Model },
+            cancellationToken).ConfigureAwait(false);
+
+        await WaitForModelReleaseAsync(
+            BuildServerRootUri("models"),
+            body => !LlamaCppListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UnloadLemonadeAsync(CancellationToken cancellationToken)
+    {
+        var unloadUri = BuildServerRootUri("api/v1/unload");
+        await PostJsonAndRequireSuccessAsync(
+            unloadUri,
+            new { model_name = _options.Model },
+            cancellationToken).ConfigureAwait(false);
+
+        await WaitForModelReleaseAsync(
+            BuildServerRootUri("api/v1/health"),
+            body => !LemonadeListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task PostJsonAndRequireSuccessAsync(Uri uri, object payload, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json")
+        };
+
+        WriteHealthLog($"model-switch unload request runtime={RuntimeIdentity} endpoint={uri}");
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            WriteHealthLog(
+                $"model-switch unload failed runtime={RuntimeIdentity} status={(int)response.StatusCode} error={TrimForUser(error)}");
+            throw new HttpRequestException(
+                $"Runtime unload failed with HTTP {(int)response.StatusCode}. {TrimForUser(error)}");
+        }
+
+        WriteHealthLog($"model-switch unload accepted runtime={RuntimeIdentity} status={(int)response.StatusCode}");
+    }
+
+    private async Task WaitForModelReleaseAsync(
+        Uri statusUri,
+        Func<string, bool> released,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + UnloadVerificationTimeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, statusUri);
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var releaseVerified = false;
+            if (response.IsSuccessStatusCode)
+            {
+                try
+                {
+                    releaseVerified = released(body);
+                }
+                catch (JsonException ex)
+                {
+                    WriteHealthLog(
+                        $"model-switch release probe returned invalid JSON runtime={RuntimeIdentity} endpoint={statusUri} error={ex.Message}");
+                }
+            }
+
+            if (releaseVerified)
+            {
+                WriteHealthLog($"model-switch release verified runtime={RuntimeIdentity} endpoint={statusUri}");
+                return;
+            }
+
+            await Task.Delay(UnloadVerificationInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new TimeoutException(
+            $"Runtime '{RuntimeIdentity}' accepted unload but did not verify model release within {UnloadVerificationTimeout.TotalSeconds:N0} seconds.");
+    }
+
+    private static bool OllamaListsModelAsLoaded(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.TryGetProperty("models", out var models)
+            && models.ValueKind == JsonValueKind.Array
+            && models.EnumerateArray().Any(item =>
+                MatchesModelProperty(item, "model", model) || MatchesModelProperty(item, "name", model));
+    }
+
+    private static bool LlamaCppListsModelAsLoaded(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("data", out var models) || models.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in models.EnumerateArray())
+        {
+            if (!MatchesModelProperty(item, "id", model))
+            {
+                continue;
+            }
+
+            if (!item.TryGetProperty("status", out var status)
+                || !status.TryGetProperty("value", out var value)
+                || value.ValueKind != JsonValueKind.String)
+            {
+                return true;
+            }
+
+            var statusValue = value.GetString();
+            return !string.Equals(statusValue, "unloaded", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(statusValue, "sleeping", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool LemonadeListsModelAsLoaded(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.TryGetProperty("all_models_loaded", out var models)
+            && models.ValueKind == JsonValueKind.Array
+            && models.EnumerateArray().Any(item =>
+                item.ValueKind == JsonValueKind.String
+                    ? string.Equals(item.GetString(), model, StringComparison.OrdinalIgnoreCase)
+                    : MatchesModelProperty(item, "model_name", model));
+    }
+
+    private static bool MatchesModelProperty(JsonElement element, string propertyName, string model) =>
+        element.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && string.Equals(value.GetString(), model, StringComparison.OrdinalIgnoreCase);
 
     private async Task<ModelsCheckResult> CheckModelsEndpointAsync(CancellationToken cancellationToken)
     {
@@ -456,25 +661,18 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         bool isHealthCheck,
         CancellationToken cancellationToken)
     {
-        var uri = BuildUri("chat/completions");
+        var useNativeOllama = IsNativeOllamaEndpoint();
+        var uri = useNativeOllama ? BuildOllamaApiUri("chat") : BuildUri("chat/completions");
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, uri);
-        var payload = JsonSerializer.Serialize(
-            BuildChatPayload(
-                request,
-                stream: false,
-                maxTokens: maxTokens),
-            JsonOptions);
+        var payload = SerializeChatPayload(request, stream: false, maxTokens, useNativeOllama);
         httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
-        if (isHealthCheck)
-        {
-            WriteHealthLog($"request POST {uri} payload={payload}");
-        }
+        WriteRequestMetadata(uri, request, stream: false, isHealthCheck, maxTokens);
 
         using var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (isHealthCheck)
         {
-            WriteHealthLog($"response POST {uri} status={(int)response.StatusCode} body={body}");
+            WriteHealthLog($"response POST {uri} status={(int)response.StatusCode} body_chars={body.Length}");
         }
 
         if (!response.IsSuccessStatusCode)
@@ -482,7 +680,14 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
             throw new HttpRequestException($"Chat completion failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
         }
 
-        var result = OpenAiStreamParser.ExtractMessageResult(body, includeReasoning: isHealthCheck);
+        if (isHealthCheck)
+        {
+            _lastHealthProbeCompletionTokens = ExtractCompletionTokens(body, useNativeOllama);
+        }
+
+        var result = useNativeOllama
+            ? ExtractNativeOllamaMessageResult(body)
+            : OpenAiStreamParser.ExtractMessageResult(body, includeReasoning: isHealthCheck);
         var content = result.Content ?? string.Empty;
         if (!isHealthCheck && IsLengthFinish(result.FinishReason) && !string.IsNullOrWhiteSpace(content))
         {
@@ -490,6 +695,45 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         }
 
         return content;
+    }
+
+    private string? ValidateReasoningControlHealthProbe()
+    {
+        if (!IsGptOssRuntime() || !string.Equals(ReasoningEffort, "low", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!_lastHealthProbeCompletionTokens.HasValue)
+        {
+            return "The runtime did not report completion-token usage for the low-effort startup probe, so Ali cannot verify that its GPT-OSS reasoning setting was honored.";
+        }
+
+        if (_lastHealthProbeCompletionTokens.Value > MaximumLowReasoningHealthProbeTokens)
+        {
+            return $"The tiny low-effort startup probe used {_lastHealthProbeCompletionTokens.Value:N0} completion tokens. The runtime may be ignoring GPT-OSS reasoning controls; activation is blocked above {MaximumLowReasoningHealthProbeTokens:N0} tokens.";
+        }
+
+        return null;
+    }
+
+    private static int? ExtractCompletionTokens(string json, bool nativeOllama)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (nativeOllama)
+        {
+            return root.TryGetProperty("eval_count", out var evalCount)
+                && evalCount.TryGetInt32(out var nativeTokens)
+                    ? nativeTokens
+                    : null;
+        }
+
+        return root.TryGetProperty("usage", out var usage)
+            && usage.TryGetProperty("completion_tokens", out var completionTokens)
+            && completionTokens.TryGetInt32(out var openAiTokens)
+                ? openAiTokens
+                : null;
     }
 
     private async Task<string> SendNonStreamingProbeWithRetryAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -518,7 +762,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
                            BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text."),
                            cancellationToken).ConfigureAwait(false))
         {
-            builder.Append(token.Text);
+            if (!token.IsThinking)
+            {
+                builder.Append(token.Text);
+            }
         }
 
         var streamedText = builder.ToString();
@@ -584,7 +831,225 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         return builder.Uri;
     }
 
+    private Uri BuildServerRootUri(string relativePath)
+    {
+        var builder = new UriBuilder(_options.Endpoint)
+        {
+            Path = $"/{relativePath.TrimStart('/')}",
+            Query = string.Empty
+        };
+
+        return builder.Uri;
+    }
+
+    private bool IsNativeOllamaEndpoint() =>
+        LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.Ollama;
+
+    private object ResolveNativeThinkingValue() =>
+        IsGptOssRuntime()
+            ? ReasoningEffort
+            : false;
+
+    private object? ResolveOpenAiChatTemplateKwargs()
+    {
+        if (IsGptOssRuntime())
+        {
+            return new Dictionary<string, object>
+            {
+                ["reasoning_effort"] = ReasoningEffort
+            };
+        }
+
+        if (ShouldDisableThinking())
+        {
+            return new Dictionary<string, object>
+            {
+                ["enable_thinking"] = false
+            };
+        }
+
+        return null;
+    }
+
+    private string ResolveOpenAiThinkingDescription() =>
+        IsGptOssRuntime()
+            ? $"chat_template_kwargs.reasoning_effort={ReasoningEffort}"
+            : ShouldDisableThinking()
+                ? "chat_template_kwargs.enable_thinking=false"
+                : "provider-managed";
+
+    private string ResolveNativeThinkingDescription() =>
+        ResolveNativeThinkingValue() is string effort ? effort : "false";
+
+    private bool IsExpectedNativeThinkingValue(JsonElement value)
+    {
+        var expected = ResolveNativeThinkingValue();
+        return expected switch
+        {
+            string effort => value.ValueKind == JsonValueKind.String
+                             && string.Equals(value.GetString(), effort, StringComparison.OrdinalIgnoreCase),
+            _ => value.ValueKind == JsonValueKind.False
+        };
+    }
+
+    private static OpenAiStreamEvent ExtractNativeOllamaStreamEvent(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new OpenAiStreamEvent(null, null, IsDone: false);
+        }
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var content = root.TryGetProperty("message", out var message)
+            && message.TryGetProperty("content", out var contentElement)
+            && contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString()
+                : null;
+        var thinking = root.TryGetProperty("message", out message)
+            && message.TryGetProperty("thinking", out var thinkingElement)
+            && thinkingElement.ValueKind == JsonValueKind.String
+                ? thinkingElement.GetString()
+                : null;
+        var done = root.TryGetProperty("done", out var doneElement)
+            && doneElement.ValueKind == JsonValueKind.True;
+        var finishReason = root.TryGetProperty("done_reason", out var reasonElement)
+            && reasonElement.ValueKind == JsonValueKind.String
+                ? reasonElement.GetString()
+                : done ? "stop" : null;
+
+        return new OpenAiStreamEvent(
+            content,
+            finishReason,
+            IsDone: done && string.IsNullOrEmpty(content) && string.IsNullOrEmpty(thinking),
+            Thinking: thinking);
+    }
+
+    private static OpenAiMessageResult ExtractNativeOllamaMessageResult(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var content = root.TryGetProperty("message", out var message)
+            && message.TryGetProperty("content", out var contentElement)
+            && contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString()
+                : null;
+        var finishReason = root.TryGetProperty("done_reason", out var reasonElement)
+            && reasonElement.ValueKind == JsonValueKind.String
+                ? reasonElement.GetString()
+                : null;
+        return new OpenAiMessageResult(content, finishReason);
+    }
+
+    private void WriteRequestMetadata(
+        Uri uri,
+        ChatRequest request,
+        bool stream,
+        bool isHealthCheck,
+        int? requestedMaxTokens)
+    {
+        var messageCount = request.History.Count + 1;
+        if (!isHealthCheck && !IsPlannerRequest(request))
+        {
+            messageCount += 2;
+        }
+
+        var promptCharacters = request.UserText.Length
+            + request.History.Sum(message => message.Text.Length);
+        var estimatedPromptTokens = Math.Max(1, (promptCharacters + 3) / 4);
+        var nativeOllama = IsNativeOllamaEndpoint();
+        var context = nativeOllama
+            ? ResolveSafeOllamaContextTokens().ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "provider-managed";
+        WriteHealthLog(
+            $"request POST {uri} model={_options.Model} stream={stream} "
+            + $"think={(nativeOllama ? ResolveNativeThinkingDescription() : ResolveOpenAiThinkingDescription())} keep_alive={(nativeOllama ? OllamaRuntimeSafetyPolicy.KeepAlive : "provider-managed")} "
+            + $"num_ctx={context} num_predict={ResolveMaxTokens(request, requestedMaxTokens)} messages={messageCount} "
+            + $"estimated_prompt_tokens={estimatedPromptTokens} health={isHealthCheck}");
+    }
+
+    private string SerializeChatPayload(
+        ChatRequest request,
+        bool stream,
+        int? maxTokens,
+        bool useNativeOllama)
+    {
+        var payload = JsonSerializer.Serialize(
+            useNativeOllama
+                ? BuildNativeOllamaChatPayload(request, stream, maxTokens)
+                : BuildChatPayload(request, stream, maxTokens),
+            JsonOptions);
+
+        if (useNativeOllama)
+        {
+            ValidateNativeOllamaPayload(payload);
+        }
+        else
+        {
+            ValidateOpenAiCompatiblePayload(payload);
+        }
+
+        return payload;
+    }
+
     private object BuildChatPayload(ChatRequest request, bool? stream = null, int? maxTokens = null)
+    {
+        var messages = BuildTextMessages(request);
+        messages[^1] = new
+        {
+            role = "user",
+            content = BuildUserContent(request)
+        };
+
+        var plannerRequest = IsPlannerRequest(request);
+        return new
+        {
+            model = _options.Model,
+            messages = messages.ToArray(),
+            stream = stream ?? _options.StreamingEnabled,
+            max_tokens = ResolveMaxTokens(request, maxTokens),
+            temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
+            top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP,
+            chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(),
+            think = ShouldDisableThinking() ? false : (bool?)null
+        };
+    }
+
+    private object BuildNativeOllamaChatPayload(ChatRequest request, bool stream, int? maxTokens)
+    {
+        var messages = BuildTextMessages(request);
+        if (request.Attachments.Any(item => item.Kind == AttachmentKind.Image))
+        {
+            messages[^1] = new
+            {
+                role = "user",
+                content = request.UserText,
+                images = request.Attachments
+                    .Where(item => item.Kind == AttachmentKind.Image)
+                    .Select(item => item.Base64Data)
+                    .ToArray()
+            };
+        }
+
+        var plannerRequest = IsPlannerRequest(request);
+        return new
+        {
+            model = _options.Model,
+            messages = messages.ToArray(),
+            stream,
+            think = ResolveNativeThinkingValue(),
+            keep_alive = OllamaRuntimeSafetyPolicy.KeepAlive,
+            options = new
+            {
+                num_ctx = ResolveSafeOllamaContextTokens(),
+                num_predict = ResolveMaxTokens(request, maxTokens),
+                temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
+                top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP
+            }
+        };
+    }
+
+    private List<object> BuildTextMessages(ChatRequest request)
     {
         var messages = new List<object>();
         if (!IsHealthCheckRequest(request) && !IsPlannerRequest(request))
@@ -610,20 +1075,80 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
         messages.Add(new
         {
             role = "user",
-            content = BuildUserContent(request)
+            content = (object)request.UserText
         });
 
-        var plannerRequest = IsPlannerRequest(request);
-        return new
+        return messages;
+    }
+
+    private int ResolveSafeOllamaContextTokens()
+    {
+        return OllamaRuntimeSafetyPolicy.ClampContextTokens(_options.ContextTokens);
+    }
+
+    private void ValidateNativeOllamaPayload(string payload)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("think", out var think)
+            || !IsExpectedNativeThinkingValue(think))
         {
-            model = _options.Model,
-            messages = messages.ToArray(),
-            stream = stream ?? _options.StreamingEnabled,
-            max_tokens = ResolveMaxTokens(request, maxTokens),
-            temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
-            top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP,
-            think = ShouldDisableThinking() ? false : (bool?)null
-        };
+            throw new InvalidOperationException(
+                $"Refusing to send Ollama request without the required thinking mode ({ResolveNativeThinkingDescription()}).");
+        }
+
+        if (!root.TryGetProperty("keep_alive", out var keepAlive)
+            || !string.Equals(keepAlive.GetString(), OllamaRuntimeSafetyPolicy.KeepAlive, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Refusing to send Ollama request without the bounded keep-alive policy.");
+        }
+
+        if (!root.TryGetProperty("options", out var options)
+            || !options.TryGetProperty("num_ctx", out var context)
+            || !context.TryGetInt32(out var contextTokens)
+            || contextTokens < 512
+            || contextTokens > OllamaRuntimeSafetyPolicy.MaximumContextTokens)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to send Ollama request without a context between 512 and {OllamaRuntimeSafetyPolicy.MaximumContextTokens} tokens.");
+        }
+    }
+
+    private void ValidateOpenAiCompatiblePayload(string payload)
+    {
+        if (!IsGptOssRuntime() && !ShouldDisableThinking())
+        {
+            return;
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("chat_template_kwargs", out var templateArguments)
+            || templateArguments.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException(
+                "Refusing to send an OpenAI-compatible reasoning-model request without explicit chat-template controls.");
+        }
+
+        if (IsGptOssRuntime())
+        {
+            if (!templateArguments.TryGetProperty("reasoning_effort", out var reasoningEffort)
+                || reasoningEffort.ValueKind != JsonValueKind.String
+                || !string.Equals(reasoningEffort.GetString(), ReasoningEffort, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to send a GPT-OSS request without reasoning effort {ReasoningEffort}.");
+            }
+
+            return;
+        }
+
+        if (!templateArguments.TryGetProperty("enable_thinking", out var enableThinking)
+            || enableThinking.ValueKind != JsonValueKind.False)
+        {
+            throw new InvalidOperationException(
+                "Refusing to send a Qwen reasoning-model request without thinking disabled.");
+        }
     }
 
     private int ResolveMaxTokens(ChatRequest request, int? requestedMaxTokens)
@@ -642,7 +1167,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private string BuildAssistantPersonaInstruction()
     {
         var assistantName = _assistantProfile.AssistantName;
-        return $"You are {assistantName}, the local desktop assistant in this application. If asked who you are or what your name is, identify yourself as {assistantName}. The assistant name is separate from the human user's name; never treat saved memories, user statements like my name is, or customer profile details as your own identity unless the app assistant profile explicitly names you. Do not prepend your name or identity to ordinary answers. Do not argue that your name is Qwen, the model package, or the model provider; those are implementation details. Answer in the user's language; for English prompts, answer only in English unless the user explicitly asks for translation or another language. If asked whether you are connected to the internet, answer as {assistantName}: you run on this computer and can use only the local app/runtime features that are enabled; do not claim live web browsing, training cutoffs, or internet limitations unless the user asks specifically about web access. If the app provides source excerpts, treat them as app-provided evidence and do not say you lack real-time data. Keep normal replies concise: usually one short paragraph or a few bullets. Avoid emoji and emoticons in normal replies.";
+        return $"You are {assistantName}, the local desktop assistant in this application. If asked who you are or what your name is, identify yourself as {assistantName}. The assistant name is separate from the human user's name; never treat saved memories, user statements like my name is, or customer profile details as your own identity unless the app assistant profile explicitly names you. Do not prepend your name or identity to ordinary answers. Do not argue that your name is GPT-OSS, Gemma, Qwen, the model package, or the model provider; those are implementation details. Answer in the user's language; for English prompts, answer only in English unless the user explicitly asks for translation or another language. If asked whether you are connected to the internet, answer as {assistantName}: you run on this computer and can use only the local app/runtime features that are enabled. If the app provides source excerpts, treat them as app-provided evidence and do not say you lack real-time data. Never claim that you generated, created, changed, sent, searched, opened, or controlled anything unless the current conversation contains an explicit tool or application result proving that action completed. Image attachments are inputs for inspection only; no image-generation tool is currently connected. You may explain how to create something, but clearly distinguish an explanation from actually performing the action. Keep normal replies concise: usually one short paragraph or a few bullets. Avoid emoji and emoticons in normal replies.";
     }
 
     private static string BuildCurrentDateInstruction()
@@ -707,6 +1232,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     private bool ShouldDisableThinking() =>
         IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);
 
+    private bool IsGptOssRuntime() =>
+        OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Model)
+        || OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Family);
+
     private static bool IsQwenThinkingRuntime(string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && (value.Contains("qwen", StringComparison.OrdinalIgnoreCase)
@@ -716,7 +1245,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime
     {
         try
         {
-            var root = AliServices.DesktopSettingsRoot;
+            var root = Path.Combine(AliServices.DesktopUserDataRoot, "Logs");
             Directory.CreateDirectory(root);
             File.AppendAllText(
                 Path.Combine(root, "runtime-health.log"),

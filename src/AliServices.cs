@@ -1,12 +1,12 @@
 using System.Net.Http;
 using Ali.Modules.Feedback;
 using Ali.Modules.Identity;
-using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Ali.Modules.Internet;
 using Ali.Modules.RAG;
 using Ali.Modules.Voice;
 using Ali.Modules.Storage;
+using Ali.Modules.Coordinator;
 
 namespace Ali;
 
@@ -146,9 +146,13 @@ public sealed class AliServices
         get
         {
             var configuredRoot = Environment.GetEnvironmentVariable(LocalAliRootEnvironmentVariable);
-            return string.IsNullOrWhiteSpace(configuredRoot)
-                ? Path.Combine(GetLocalApplicationDataRoot(), LocalAliRootFolderName)
-                : Path.GetFullPath(configuredRoot.Trim());
+            if (!string.IsNullOrWhiteSpace(configuredRoot))
+            {
+                return Path.GetFullPath(configuredRoot.Trim());
+            }
+
+            return AliDataFolderSelectionStore.Load()
+                ?? Path.Combine(GetLocalApplicationDataRoot(), LocalAliRootFolderName);
         }
     }
 
@@ -167,7 +171,7 @@ public sealed class AliServices
         Directory.CreateDirectory(DesktopSettingsRoot);
         Directory.CreateDirectory(DesktopUserDataRoot);
         Directory.CreateDirectory(Path.Combine(LocalAliRoot, "Backups"));
-        Directory.CreateDirectory(Path.Combine(LocalAliRoot, "Logs"));
+        Directory.CreateDirectory(Path.Combine(DesktopUserDataRoot, "Logs"));
 
         if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(LocalAliRootEnvironmentVariable)))
         {
@@ -184,7 +188,7 @@ public sealed class AliServices
         CopyMissingFiles(Path.Combine(legacyRoot, "BootstrapData"), DesktopSettingsRoot);
         CopyMissingFiles(Path.Combine(legacyRoot, "Profiles"), Path.Combine(DesktopUserDataRoot, "Profiles"));
         CopyMissingFiles(Path.Combine(legacyRoot, "Backups"), Path.Combine(LocalAliRoot, "Backups"));
-        CopyMissingFiles(Path.Combine(legacyRoot, "Logs"), Path.Combine(LocalAliRoot, "Logs"));
+        CopyMissingFiles(Path.Combine(legacyRoot, "Logs"), Path.Combine(DesktopUserDataRoot, "Logs"));
         CopyMissingFiles(LocalVectorLibrarySettings.LegacyDefaultRootDirectory(), Path.Combine(DesktopUserDataRoot, "RAG", "Library"));
         CopyMissingFile(
             Path.Combine(DesktopSettingsRoot, "Sources", "local_vector_library_index.json"),
@@ -225,17 +229,21 @@ public sealed class AliServices
             : null;
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
-        var permissions = new PermissionService();
+        var webSources = new TavilyFirecrawlSourceRetriever(
+            httpClient,
+            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+        var coordinator = new AliToolCoordinator(
+            runtime,
+            runtime,
+            localLibrary,
+            webSources,
+            memories,
+            reminders,
+            profile);
         var orchestrator = new ConversationOrchestrator(
             runtime,
-            permissions,
             correctionQueue,
-            new CompositeSourceRetriever(
-                localLibrary,
-                new TavilyFirecrawlSourceRetriever(
-                    httpClient,
-                    () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot))),
-            memoryStore: memories);
+            coordinator);
 
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();

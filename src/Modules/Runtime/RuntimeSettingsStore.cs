@@ -18,20 +18,24 @@ public static class RuntimeSettingsStore
     public static OpenAiCompatibleRuntimeOptions GetDefaultOptions() =>
         new(
             Enabled: false,
-            Endpoint: new Uri("http://127.0.0.1:11434/v1/"),
-            Model: string.Empty,
-            DisplayName: "Local OpenAI-compatible runtime",
-            Family: "local",
-            Size: "unknown",
-            Quantization: "Q4",
-            ContextTokens: 2048,
+            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Lemonade),
+            Model: "gpt-oss-20b-mxfp4-GGUF",
+            DisplayName: "GPT-OSS 20B - Lemonade",
+            Family: "GPT-OSS",
+            Size: "20B",
+            Quantization: "MXFP4",
+            ContextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
             OutputTokenLimit: 256,
             Temperature: 0.2,
             TopP: null,
             StreamingEnabled: true,
             SupportsVision: false,
             SupportsToolCalls: false,
-            AllowPrivateLanEndpoint: false);
+            AllowPrivateLanEndpoint: false)
+        {
+            Engine = LocalRuntimeEngines.Lemonade,
+            ReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort
+        };
 
     public static OpenAiCompatibleRuntimeOptions LoadOrDefault(string dataDirectory) =>
         LoadOpenAiCompatibleOptions(dataDirectory) ?? GetDefaultOptions();
@@ -44,7 +48,8 @@ public static class RuntimeSettingsStore
             try
             {
                 var json = File.ReadAllText(filePath);
-                return JsonSerializer.Deserialize<OpenAiCompatibleRuntimeOptions>(json, JsonOptions);
+                var options = JsonSerializer.Deserialize<OpenAiCompatibleRuntimeOptions>(json, JsonOptions);
+                return options is null ? null : OllamaRuntimeSafetyPolicy.Normalize(options);
             }
             catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -60,7 +65,7 @@ public static class RuntimeSettingsStore
             return null;
         }
 
-        return new OpenAiCompatibleRuntimeOptions(
+        return OllamaRuntimeSafetyPolicy.Normalize(new OpenAiCompatibleRuntimeOptions(
             Enabled: true,
             Endpoint: new Uri(endpoint),
             Model: model,
@@ -68,20 +73,25 @@ public static class RuntimeSettingsStore
             Family: Environment.GetEnvironmentVariable("ALI_OPENAI_FAMILY") ?? "local",
             Size: Environment.GetEnvironmentVariable("ALI_OPENAI_SIZE") ?? "unknown",
             Quantization: Environment.GetEnvironmentVariable("ALI_OPENAI_QUANTIZATION") ?? "Q4",
-            ContextTokens: ReadIntEnvironment("ALI_OPENAI_CONTEXT", 2048),
+            ContextTokens: ReadIntEnvironment("ALI_OPENAI_CONTEXT", OllamaRuntimeSafetyPolicy.DefaultContextTokens),
             OutputTokenLimit: ReadIntEnvironment("ALI_OPENAI_OUTPUT_LIMIT", 256),
             Temperature: ReadDoubleEnvironment("ALI_OPENAI_TEMPERATURE", 0.2),
             TopP: ReadNullableDoubleEnvironment("ALI_OPENAI_TOP_P"),
             StreamingEnabled: ReadBoolEnvironment("ALI_OPENAI_STREAMING", true),
             SupportsVision: ReadBoolEnvironment("ALI_OPENAI_SUPPORTS_VISION", false),
             SupportsToolCalls: ReadBoolEnvironment("ALI_OPENAI_SUPPORTS_TOOL_CALLS", false),
-            AllowPrivateLanEndpoint: ReadBoolEnvironment("ALI_ALLOW_PRIVATE_LAN_RUNTIME", false));
+            AllowPrivateLanEndpoint: ReadBoolEnvironment("ALI_ALLOW_PRIVATE_LAN_RUNTIME", false))
+        {
+            Engine = Environment.GetEnvironmentVariable("ALI_RUNTIME_ENGINE") ?? string.Empty
+        });
     }
 
     public static void Save(string dataDirectory, OpenAiCompatibleRuntimeOptions options)
     {
         Directory.CreateDirectory(dataDirectory);
-        File.WriteAllText(GetSettingsPath(dataDirectory), JsonSerializer.Serialize(options, JsonOptions));
+        File.WriteAllText(
+            GetSettingsPath(dataDirectory),
+            JsonSerializer.Serialize(OllamaRuntimeSafetyPolicy.Normalize(options), JsonOptions));
     }
 
     public static void WriteDefaultIfMissing(string dataDirectory)
@@ -106,20 +116,24 @@ public static class RuntimeSettingsStore
 
         var options = new OpenAiCompatibleRuntimeOptions(
             Enabled: true,
-            Endpoint: new Uri("http://127.0.0.1:11434/v1/"),
-            Model: "ali-deepseek-coder-v2:16b-low",
-            DisplayName: "Ali DeepSeek Coder V2 16B - technical",
-            Family: "DeepSeek Coder",
-            Size: "16B",
-            Quantization: "Q4 low-load",
-            ContextTokens: 4096,
-            OutputTokenLimit: 256,
-            Temperature: 0.2,
+            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Lemonade),
+            Model: "gpt-oss-20b-mxfp4-GGUF",
+            DisplayName: "GPT-OSS 20B - Lemonade",
+            Family: "GPT-OSS",
+            Size: "20B",
+            Quantization: "MXFP4",
+            ContextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
+            OutputTokenLimit: 1024,
+            Temperature: 1,
             TopP: null,
             StreamingEnabled: true,
             SupportsVision: false,
             SupportsToolCalls: false,
-            AllowPrivateLanEndpoint: false);
+            AllowPrivateLanEndpoint: false)
+        {
+            Engine = LocalRuntimeEngines.Lemonade,
+            ReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort
+        };
 
         File.WriteAllText(filePath, JsonSerializer.Serialize(options, JsonOptions));
     }

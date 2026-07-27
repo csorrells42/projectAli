@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Ali.Modules.Conversation;
+using Ali.Modules.Coordinator;
 using Ali.Modules.Evidence;
 using Ali.Modules.Feedback;
 using Ali.Modules.Memory;
@@ -23,6 +24,10 @@ using Ali.Modules.Internet;
 using Ali.Modules.Permissions;
 using Ali.Modules.RAG;
 using Ali.Modules.Storage;
+using Ali.Modules.Interaction;
+using Ali.Modules.Identity;
+using AvatarBuilder.Modules.Pipeline;
+using AvatarBuilder.Modules.Webcam.Common;
 using Ali.UI;
 using Ali;
 using MediaBrushes = System.Windows.Media.Brushes;
@@ -31,9 +36,6 @@ namespace Ali.UI.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
-    private const double SpectrumRenderWidth = 720d;
-    private const double SpectrumRenderHeight = 130d;
-    private const double SpectrumRenderInset = 12d;
     private const string RuntimeTopPModelDefault = "Model default";
     private const int StreamingTextFlushCharacters = 32;
     private const int StreamingTextDisplaySliceCharacters = 72;
@@ -47,11 +49,17 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan StreamingTextFlushInterval = TimeSpan.FromMilliseconds(45);
     private static readonly TimeSpan StreamingTextPaceDelay = TimeSpan.FromMilliseconds(12);
+    private static readonly TimeSpan VoicePlaybackEchoCooldown = TimeSpan.FromMilliseconds(1500);
     private static readonly JsonSerializerOptions MaintenanceReceiptJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
     private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
     private readonly AliServices _services;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
+    private AliInteractionRuntime? _interactionRuntime;
+    private readonly DispatcherTimer _interactionTimer = new() { Interval = TimeSpan.FromMilliseconds(75) };
+    private CancellationTokenSource? _visionModeLoad;
+    private Task _visionModeLoadTask = Task.CompletedTask;
+    private bool _visionInitializationStarted;
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _modelStatusTimer = new() { Interval = TimeSpan.FromSeconds(30) };
@@ -80,13 +88,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private SettingsWindow? _settingsWindow;
     private MaintenanceDashboardWindow? _maintenanceDashboardWindow;
     private LocalLibraryWindow? _localLibraryWindow;
-    private bool _voiceMonitorRequested;
-    private bool _suppressInputMonitorRestart;
     private VoiceCaptureDiagnostics? _lastCaptureDiagnostics;
-    private double[] _lastSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
-    private double[] _renderedSpectrumMagnitudes = new double[SpectrumAnalyzer.BarCount];
-    private double _spectrumVisualCeiling = 0.25d;
-    private double _lastSpectrumPeakLevel;
     private string _composerText = string.Empty;
     private bool _isCommandExplorerOpen;
     private CommandExplorerNodeViewModel? _selectedCommandExplorerNode;
@@ -94,8 +96,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isRecording;
     private bool _isTranscribing;
     private bool _isSpeaking;
+    private DateTimeOffset _suppressVoiceIngressUntil = DateTimeOffset.MinValue;
     private string _statusText = "Ready. Local runtime is not configured yet.";
     private string _runtimeDisplay;
+    private string _selectedRuntimeEngine = LocalRuntimeEngines.Lemonade;
     private string _runtimeEndpointText = string.Empty;
     private string _runtimeModelText = string.Empty;
     private string _runtimeContextText = "2048";
@@ -104,10 +108,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeTopPText = RuntimeTopPModelDefault;
     private string _runtimeQuantizationText = "Installed package default";
     private string _selectedRuntimeModelChoice = string.Empty;
+    private string _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort;
     private string _runtimeSelectionStatusText = "Runtime model list has not been refreshed yet.";
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
     private bool _runtimeVisionEnabled;
+    private bool _loadingRuntimeOptions;
     private bool _canActivateRuntime;
     private bool _canRevertToLastKnownGood;
     private string _runtimeHealthResult = "No runtime health check has been run.";
@@ -124,7 +130,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _internetFirecrawlUsageText = "Firecrawl usage not checked yet.";
     private string _internetBraveSearchUsageText = "Brave Search usage not checked yet.";
     private string _internetSerperUsageText = "Serper usage not checked yet.";
-    private string _attachmentStatus = "Screenshots are temporary by default.";
+    private string _attachmentStatus = "AI can be wrong.  Always check answers against reliable sources.";
     private string _voiceStatus = "Voice idle.";
     private string _sttStatus = "STT status loading.";
     private string _ttsStatus = "TTS status loading.";
@@ -138,9 +144,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _voiceInputMeterText = "Input meter starting.";
     private string _voiceDiagnosticsText = "No voice capture yet.";
     private string _lastSttDebugText = "No STT debug invocation yet.";
-    private PointCollection _spectrumLivePoints = CreateFlatSpectrumPoints();
-    private string _spectrumPeakText = "Peak 0%";
-    private double _spectrumDisplayGain = 6d;
     private string _whisperExecutableText = string.Empty;
     private string _whisperModelText = string.Empty;
     private string _whisperArgumentsText = string.Empty;
@@ -165,6 +168,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isAssigningPushToTalkKey;
     private bool _pushToTalkKeyDown;
     private bool _currentVoiceInputShouldAutoSend;
+    private bool _attentiveChatEnabled;
+    private string _attentionStatus = "Attentive chat is off.";
     private VoiceTurnMetadata? _lastVoiceMetadata;
     private CorrectionReviewItemViewModel? _selectedCorrectionReviewItem;
     private string _correctionReviewStatusText = "Correction queue not loaded yet.";
@@ -172,10 +177,25 @@ public sealed class MainWindowViewModel : ObservableObject
     private ReminderEntryViewModel? _selectedReminderEntry;
     private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
     private string _maintenanceStatusText = "Backups include conversations, memories, reminders, settings, sources, local indexes, voice settings, runtime settings, and generated documents. Temporary session audio/images are skipped.";
+    private CameraDevice? _selectedVisionCamera;
+    private CameraVideoMode? _selectedVisionCameraMode;
+    private FrameworkElement? _visionViewport;
+    private bool _isCameraBarExpanded;
+    private bool _visionCameraOn;
+    private bool _trackingOverlayEnabled = true;
+    private bool _faceMeshOverlayEnabled;
+    private bool _visualAttentionEnabled = true;
+    private bool _interactionPollBusy;
+    private string _visionStatus = "Camera off.";
+    private string _pendingAssistantName = string.Empty;
+    private string _assistantRenameStatus = "Changing the name preserves this assistant profile and takes effect after restart.";
+    private bool _isAgentActivityExpanded;
+    private string _agentActivitySummary = "Ready for the next request.";
 
     public MainWindowViewModel(AliServices services)
     {
         _services = services;
+        _pendingAssistantName = AssistantName;
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);
         ResourceMeters.Add(GpuMeter);
@@ -183,12 +203,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SendCommand = CreateAsyncCommand(SendAsync, () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
+        ClearAgentActivityCommand = CreateCommand(_ => ClearAgentActivity());
         NewChatCommand = CreateCommand(_ => StartNewChat());
         EraseHistoryCommand = CreateCommand(_ => EraseHistory());
         EraseConversationCommand = CreateCommand(EraseConversation);
         RenameConversationCommand = CreateCommand(RenameConversation);
         CommitConversationRenameCommand = CreateCommand(CommitConversationRename);
         FlagIncorrectCommand = CreateCommand(FlagIncorrect);
+        SaveAssistantNameCommand = CreateCommand(_ => SaveAssistantName());
         SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
         SaveInternetBackendSettingsCommand = CreateCommand(_ => SaveInternetBackendSettings());
         TestTavilyInternetBackendCommand = CreateAsyncCommand(() => TestInternetProviderAsync(InternetSearchProvider.Tavily), () => !IsBusy);
@@ -200,8 +222,8 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshRuntimeModelsCommand = CreateAsyncCommand(RefreshRuntimeModelsAsync, () => !IsBusy);
         RecommendRuntimeSettingsCommand = CreateCommand(_ => ShowRuntimeOptimizationReport());
         ActivateRuntimeCommand = CreateCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
-        RevertToStubCommand = CreateCommand(_ => RevertToStub(), _ => !IsBusy);
-        RevertToLastKnownGoodCommand = CreateCommand(_ => RevertToLastKnownGood(), _ => CanRevertToLastKnownGood && !IsBusy);
+        RevertToStubCommand = CreateAsyncCommand(RevertToStubAsync, () => !IsBusy);
+        RevertToLastKnownGoodCommand = CreateAsyncCommand(RevertToLastKnownGoodAsync, () => CanRevertToLastKnownGood && !IsBusy);
         PasteImageCommand = CreateAsyncCommand(AddClipboardImageAsync);
         RemoveAttachmentCommand = CreateCommand(RemoveAttachment);
         BeginAssignPushToTalkKeyCommand = CreateCommand(_ => BeginAssignPushToTalkKey());
@@ -212,6 +234,13 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenMaintenanceDashboardCommand = CreateCommand(_ => OpenMaintenanceDashboard());
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
+        RefreshVisionCamerasCommand = CreateAsyncCommand(RefreshVisionCamerasAsync);
+        ToggleVisionCameraCommand = CreateAsyncCommand(ToggleVisionCameraAsync);
+        ToggleVisualAttentionCommand = CreateCommand(_ => VisualAttentionEnabled = !VisualAttentionEnabled);
+        SelectParakeetSpeechToTextCommand = CreateCommand(_ => SelectInteractionSpeechToText(AliSpeechToTextEngine.Parakeet));
+        SelectWhisperSpeechToTextCommand = CreateCommand(_ => SelectInteractionSpeechToText(AliSpeechToTextEngine.Whisper));
+        NoOptionalOverlaysCommand = CreateCommand(_ => SetOptionalOverlays(false, false));
+        AllOptionalOverlaysCommand = CreateCommand(_ => SetOptionalOverlays(true, true));
         RunSelectedCommandExplorerCommand = CreateCommand(parameter => _ = RunCommandExplorerNodeSafelyAsync(parameter), parameter => CanRunCommandExplorerNode(parameter));
         PlayVoiceSampleCommand = CreateAsyncCommand(PlayVoiceSampleAsync, () => !IsSpeaking);
         RefreshCorrectionsCommand = CreateAsyncCommand(RefreshCorrectionsAsync);
@@ -254,6 +283,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _retainDebugAudio = _voiceSettings.RetainDebugAudio;
         _assistantReadsRepliesOutLoud = _voiceSettings.AssistantReadsRepliesOutLoud;
         _autoSendVoiceTranscripts = _voiceSettings.AutoSendVoiceTranscripts;
+        _attentiveChatEnabled = _voiceSettings.AttentiveChatEnabled;
         _speechRate = NormalizeSpeechRate(_voiceSettings.SpeechRate);
         _pushToTalkKeyText = NormalizePushToTalkKey(_voiceSettings.PushToTalkKey);
         ReplaceChoices(TextToSpeechEngineChoices, TextToSpeechEngines.All);
@@ -267,9 +297,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _selectedVoiceInputPreset = VoiceInputPreset.Normalize(_voiceSettings.SelectedInputPreset);
         _selectedVoiceInputChannelMode = InputChannelModeCatalog.ToLabel(
             InputChannelModeCatalog.FromStorageValue(_voiceSettings.SelectedInputChannelMode));
-        _inputLevelMonitor.LevelAvailable += InputLevelAvailable;
-        _inputLevelMonitor.SpectrumAvailable += SpectrumAvailable;
-
         _loadingVoiceSettings = true;
         LoadVoiceDevices();
         _loadingVoiceSettings = false;
@@ -295,6 +322,31 @@ public sealed class MainWindowViewModel : ObservableObject
         RefreshConversationHistory();
         RefreshMemoryReminders();
         StatusText = "New chat ready. Saved chats are available in the sidebar.";
+        try
+        {
+            _interactionRuntime = new AliInteractionRuntime(AssistantName, _services.UserDataRoot);
+        }
+        catch (Exception ex)
+        {
+            VoiceStatus = $"Interaction modules unavailable: {ex.Message}";
+        }
+
+        if (_interactionRuntime is not null)
+        {
+            _interactionTimer.Tick += InteractionTimerTick;
+            _interactionTimer.Start();
+            try
+            {
+                _interactionRuntime.StartSpeech(CurrentInputDeviceName());
+                _interactionRuntime.SetVisualAttentionEnabled(VisualAttentionEnabled);
+                _interactionRuntime.UpdatePushToTalk(AutoSendVoiceTranscripts, pressed: false);
+                VoiceStatus = $"Speech ingress ready: {_interactionRuntime.SpeechProviderName}.";
+            }
+            catch (Exception ex)
+            {
+                VoiceStatus = $"Speech ingress unavailable: {ex.Message}";
+            }
+        }
     }
 
     private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
@@ -320,6 +372,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<ChatMessageViewModel> Messages { get; } = new();
 
+    public ObservableCollection<AgentActivityItemViewModel> AgentActivities { get; } = new();
+
     public ObservableCollection<ImageAttachmentViewModel> Attachments { get; } = new();
 
     public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
@@ -333,6 +387,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<MemoryEntryViewModel> MemoryEntries { get; } = new();
 
     public ObservableCollection<ReminderEntryViewModel> ReminderEntries { get; } = new();
+
+    public ObservableCollection<CameraDevice> VisionCameras { get; } = new();
+
+    public ObservableCollection<CameraVideoMode> VisionCameraModes { get; } = new();
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
@@ -444,6 +502,18 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string AssistantName => _services.AssistantProfile.AssistantName;
 
+    public string PendingAssistantName
+    {
+        get => _pendingAssistantName;
+        set => SetProperty(ref _pendingAssistantName, value);
+    }
+
+    public string AssistantRenameStatus
+    {
+        get => _assistantRenameStatus;
+        private set => SetProperty(ref _assistantRenameStatus, value);
+    }
+
     public string AssistantWindowTitle => AssistantName;
 
     public string AssistantSettingsWindowTitle => $"{AssistantName} Settings";
@@ -466,6 +536,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand StopCommand { get; }
 
+    public ICommand ClearAgentActivityCommand { get; }
+
     public ICommand NewChatCommand { get; }
 
     public ICommand EraseHistoryCommand { get; }
@@ -477,6 +549,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand CommitConversationRenameCommand { get; }
 
     public ICommand FlagIncorrectCommand { get; }
+
+    public ICommand SaveAssistantNameCommand { get; }
 
     public ICommand SaveRuntimeSettingsCommand { get; }
 
@@ -523,6 +597,20 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand OpenLocalLibraryCommand { get; }
 
     public ICommand ToggleCommandExplorerCommand { get; }
+
+    public ICommand RefreshVisionCamerasCommand { get; }
+
+    public ICommand ToggleVisionCameraCommand { get; }
+
+    public ICommand ToggleVisualAttentionCommand { get; }
+
+    public ICommand SelectParakeetSpeechToTextCommand { get; }
+
+    public ICommand SelectWhisperSpeechToTextCommand { get; }
+
+    public ICommand NoOptionalOverlaysCommand { get; }
+
+    public ICommand AllOptionalOverlaysCommand { get; }
 
     public ICommand RunSelectedCommandExplorerCommand { get; }
 
@@ -670,22 +758,55 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public string SpeechRateLabel => $"{SpeechRate:0.00}x";
 
+    public string AttentiveChatToolTip =>
+        $"{AssistantName} processes the webcam locally and begins listening only after you deliberately look toward the camera.";
+
     public string RuntimeDisplay
     {
         get => _runtimeDisplay;
         private set => SetProperty(ref _runtimeDisplay, value);
     }
 
+    public IReadOnlyList<string> RuntimeEngineChoices => LocalRuntimeEngines.Choices;
+
+    public string SelectedRuntimeEngine
+    {
+        get => _selectedRuntimeEngine;
+        set
+        {
+            if (SetProperty(ref _selectedRuntimeEngine, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+                if (!_loadingRuntimeOptions)
+                {
+                    ApplyRuntimeEngineSelection(value);
+                }
+            }
+        }
+    }
+
     public string RuntimeEndpointText
     {
         get => _runtimeEndpointText;
-        set => SetProperty(ref _runtimeEndpointText, value);
+        set
+        {
+            if (SetProperty(ref _runtimeEndpointText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public string RuntimeModelText
     {
         get => _runtimeModelText;
-        set => SetProperty(ref _runtimeModelText, value);
+        set
+        {
+            if (SetProperty(ref _runtimeModelText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public string SelectedRuntimeModelChoice
@@ -709,25 +830,49 @@ public sealed class MainWindowViewModel : ObservableObject
     public string RuntimeContextText
     {
         get => _runtimeContextText;
-        set => SetProperty(ref _runtimeContextText, value);
+        set
+        {
+            if (SetProperty(ref _runtimeContextText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public string RuntimeOutputLimitText
     {
         get => _runtimeOutputLimitText;
-        set => SetProperty(ref _runtimeOutputLimitText, value);
+        set
+        {
+            if (SetProperty(ref _runtimeOutputLimitText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public string RuntimeTemperatureText
     {
         get => _runtimeTemperatureText;
-        set => SetProperty(ref _runtimeTemperatureText, value);
+        set
+        {
+            if (SetProperty(ref _runtimeTemperatureText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public string RuntimeTopPText
     {
         get => _runtimeTopPText;
-        set => SetProperty(ref _runtimeTopPText, value);
+        set
+        {
+            if (SetProperty(ref _runtimeTopPText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public string RuntimeSelectionStatusText
@@ -745,13 +890,116 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool RuntimeStreamingEnabled
     {
         get => _runtimeStreamingEnabled;
-        set => SetProperty(ref _runtimeStreamingEnabled, value);
+        set
+        {
+            if (SetProperty(ref _runtimeStreamingEnabled, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
     }
 
     public bool RuntimeVisionEnabled
     {
         get => _runtimeVisionEnabled;
-        set => SetProperty(ref _runtimeVisionEnabled, value);
+        set
+        {
+            if (SetProperty(ref _runtimeVisionEnabled, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
+    }
+
+    public bool IsReasoningLow
+    {
+        get => _selectedReasoningEffort == "low";
+        set
+        {
+            if (value)
+            {
+                SelectReasoningEffort("low");
+            }
+        }
+    }
+
+    public bool IsReasoningMedium
+    {
+        get => _selectedReasoningEffort == "medium";
+        set
+        {
+            if (value)
+            {
+                SelectReasoningEffort("medium");
+            }
+        }
+    }
+
+    public bool IsReasoningHigh
+    {
+        get => _selectedReasoningEffort == "high";
+        set
+        {
+            if (value)
+            {
+                SelectReasoningEffort("high");
+            }
+        }
+    }
+
+    public string RuntimeRequestContractText
+    {
+        get
+        {
+            if (!Uri.TryCreate(RuntimeEndpointText.Trim(), UriKind.Absolute, out var endpoint))
+            {
+                return "Enter a valid endpoint to preview the effective request contract.";
+            }
+
+            var engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint);
+            if (engine != LocalRuntimeEngines.Ollama)
+            {
+                var releaseEndpoint = engine == LocalRuntimeEngines.LlamaCpp
+                    ? "/models/unload"
+                    : engine == LocalRuntimeEngines.Lemonade
+                        ? "/api/v1/unload"
+                        : "not available";
+                var model = RuntimeModelText.Trim();
+                var reasoningContract = OllamaRuntimeSafetyPolicy.IsGptOssModel(model)
+                    ? $"chat_template_kwargs.reasoning_effort: {_selectedReasoningEffort}"
+                    : model.Contains("qwen", StringComparison.OrdinalIgnoreCase)
+                      || model.Contains("qwq", StringComparison.OrdinalIgnoreCase)
+                        ? "chat_template_kwargs.enable_thinking: false"
+                        : "provider-managed";
+                return $"Engine: {engine} | Transport: OpenAI-compatible\n"
+                    + $"Model: {model} | reasoning: {reasoningContract}\n"
+                    + $"Switch barrier: {releaseEndpoint}; release must verify before another engine is checked.\n"
+                    + "Context and GPU placement are controlled by the selected engine.";
+            }
+
+            var requestedContext = int.TryParse(RuntimeContextText.Trim(), out var parsedContext)
+                ? parsedContext
+                : OllamaRuntimeSafetyPolicy.DefaultContextTokens;
+            var effectiveContext = OllamaRuntimeSafetyPolicy.ClampContextTokens(requestedContext);
+            var contextText = requestedContext == effectiveContext
+                ? effectiveContext.ToString("N0", CultureInfo.InvariantCulture)
+                : $"{effectiveContext:N0} (requested {requestedContext:N0}; safety cap applied)";
+            var outputText = int.TryParse(RuntimeOutputLimitText.Trim(), out var output)
+                ? output.ToString("N0", CultureInfo.InvariantCulture)
+                : "invalid";
+            var topPText = RuntimeTopPText.Trim().Equals(RuntimeTopPModelDefault, StringComparison.OrdinalIgnoreCase)
+                ? "model default (omitted)"
+                : RuntimeTopPText.Trim();
+
+            return $"Engine: {LocalRuntimeEngines.Ollama} | Transport: native Ollama /api/chat\n"
+                + $"Model: {RuntimeModelText.Trim()}\n"
+                + $"num_ctx: {contextText} | hard cap: {OllamaRuntimeSafetyPolicy.MaximumContextTokens:N0}\n"
+                + $"num_predict: {outputText} | stream: {RuntimeStreamingEnabled.ToString().ToLowerInvariant()}\n"
+                + $"temperature: {RuntimeTemperatureText.Trim()} | top_p: {topPText}\n"
+                + $"think: {(OllamaRuntimeSafetyPolicy.IsGptOssModel(RuntimeModelText) ? _selectedReasoningEffort : "false")} | keep_alive: {OllamaRuntimeSafetyPolicy.KeepAlive}\n"
+                + $"vision: {RuntimeVisionEnabled.ToString().ToLowerInvariant()} | model switch: unload old model first\n"
+                + "Unspecified Ollama options use the model defaults. Logs contain request metadata, not conversation text.";
+        }
     }
 
     public bool CanActivateRuntime
@@ -896,8 +1144,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public double VoiceInputLevelPercent
     {
         get => _voiceInputLevelPercent;
-        private set => SetProperty(ref _voiceInputLevelPercent, value);
+        private set
+        {
+            if (SetProperty(ref _voiceInputLevelPercent, value))
+            {
+                OnPropertyChanged(nameof(VoiceInputLevelText));
+            }
+        }
     }
+
+    public string VoiceInputLevelText => $"{VoiceInputLevelPercent:0}%";
 
     public string VoiceInputMeterText
     {
@@ -989,8 +1245,219 @@ public sealed class MainWindowViewModel : ObservableObject
                 VoiceStatus = value
                     ? $"Push to Talk enabled. Hold {PushToTalkKeyLabel} to speak."
                     : "Push to Talk disabled.";
+                _interactionRuntime?.UpdatePushToTalk(value, _pushToTalkKeyDown);
                 RaiseCommandStates();
             }
+        }
+    }
+
+    public bool AttentiveChatEnabled
+    {
+        get => _attentiveChatEnabled;
+        set
+        {
+            if (!SetProperty(ref _attentiveChatEnabled, value))
+            {
+                return;
+            }
+
+            SaveVoiceSettings(attentiveChatEnabled: value);
+            AttentionStatus = value
+                ? "Unified attention is active."
+                : "Unified attention remains active through the security module.";
+        }
+    }
+
+    public string AttentionStatus
+    {
+        get => _attentionStatus;
+        private set => SetProperty(ref _attentionStatus, value);
+    }
+
+    public CameraDevice? SelectedVisionCamera
+    {
+        get => _selectedVisionCamera;
+        set
+        {
+            if (SetProperty(ref _selectedVisionCamera, value))
+            {
+                _visionModeLoadTask = LoadVisionCameraModesAsync(value);
+            }
+        }
+    }
+
+    public CameraVideoMode? SelectedVisionCameraMode
+    {
+        get => _selectedVisionCameraMode;
+        set => SetProperty(ref _selectedVisionCameraMode, value);
+    }
+
+    public FrameworkElement? VisionViewport
+    {
+        get => _visionViewport;
+        private set => SetProperty(ref _visionViewport, value);
+    }
+
+    public bool IsCameraBarExpanded
+    {
+        get => _isCameraBarExpanded;
+        set => SetProperty(ref _isCameraBarExpanded, value);
+    }
+
+    public bool VisionCameraOn
+    {
+        get => _visionCameraOn;
+        private set
+        {
+            if (SetProperty(ref _visionCameraOn, value))
+            {
+                OnPropertyChanged(nameof(VisionCameraButtonText));
+            }
+        }
+    }
+
+    public string VisionCameraButtonText => VisionCameraOn ? "Camera Off" : "Camera On";
+
+    public bool VisualAttentionEnabled
+    {
+        get => _visualAttentionEnabled;
+        set
+        {
+            if (!SetProperty(ref _visualAttentionEnabled, value))
+            {
+                return;
+            }
+
+            _interactionRuntime?.SetVisualAttentionEnabled(value);
+            OnPropertyChanged(nameof(VisualAttentionButtonText));
+            OnPropertyChanged(nameof(VisualAttentionButtonToolTip));
+            AttentionStatus = value
+                ? "Visual attention enabled."
+                : "Visual attention disabled; wake word and push to talk remain available.";
+        }
+    }
+
+    public string VisualAttentionButtonText => VisualAttentionEnabled
+        ? "Disable visual attention"
+        : "Enable visual attention";
+
+    public string VisualAttentionButtonToolTip => VisualAttentionEnabled
+        ? "Stops visual-only attention from sending speech to Ali. Wake word and push to talk continue to work."
+        : "Allows stable visual attention to admit speech again.";
+
+    public string VisionStatus
+    {
+        get => _visionStatus;
+        private set => SetProperty(ref _visionStatus, value);
+    }
+
+    public bool TrackingOverlayEnabled
+    {
+        get => _trackingOverlayEnabled;
+        set
+        {
+            if (SetProperty(ref _trackingOverlayEnabled, value))
+            {
+                _interactionRuntime?.SetOverlays(value, FaceMeshOverlayEnabled);
+            }
+        }
+    }
+
+    public bool FaceMeshOverlayEnabled
+    {
+        get => _faceMeshOverlayEnabled;
+        set
+        {
+            if (SetProperty(ref _faceMeshOverlayEnabled, value))
+            {
+                _interactionRuntime?.SetOverlays(TrackingOverlayEnabled, value);
+            }
+        }
+    }
+
+    public bool ParakeetSpeechToTextSelected =>
+        _interactionRuntime?.SpeechProviderName.Contains("Parakeet", StringComparison.OrdinalIgnoreCase) != false;
+
+    public bool WhisperSpeechToTextSelected => !ParakeetSpeechToTextSelected;
+
+    public string ConfiguredSourcesText =>
+        "Local vector library, Tavily, Firecrawl, Brave Search, and Serper. Provider availability follows the Internet settings below.";
+
+    public string ConfiguredTopicsText =>
+        "Current events, news, weather, general web research, approved local documents, conversation memory, and reminders.";
+
+    public FrameworkElement? DetachVisionViewport()
+    {
+        var viewport = VisionViewport;
+        VisionViewport = null;
+        return viewport;
+    }
+
+    public AliIdentityReviewSession? CreateIdentityReviewSession()
+    {
+        if (_interactionRuntime is not { } runtime)
+        {
+            return null;
+        }
+
+        var viewport = DetachVisionViewport();
+        try
+        {
+            return runtime.CreateIdentityReviewSession(viewport);
+        }
+        catch
+        {
+            if (viewport is not null)
+            {
+                RestoreVisionViewport(viewport);
+            }
+            throw;
+        }
+    }
+
+    public void RestoreIdentityReviewViewport(AliIdentityReviewSession session)
+    {
+        if (session.LiveViewport is not null)
+        {
+            RestoreVisionViewport(session.LiveViewport);
+        }
+    }
+
+    public IFramePipelineTimingReportSource? FramePipelineTiming =>
+        _interactionRuntime?.FramePipelineTiming;
+
+    public void RestoreVisionViewport(FrameworkElement viewport)
+    {
+        if (VisionCameraOn && _interactionRuntime?.ViewportHost == viewport)
+        {
+            VisionViewport = viewport;
+        }
+    }
+
+    public async Task InitializeVisionAsync()
+    {
+        if (_visionInitializationStarted)
+        {
+            return;
+        }
+
+        _visionInitializationStarted = true;
+        try
+        {
+            await RefreshVisionCamerasAsync().ConfigureAwait(true);
+            await _visionModeLoadTask.ConfigureAwait(true);
+            if (SelectedVisionCamera is not null
+                && SelectedVisionCameraMode is { } mode
+                && IsExact4K30(mode))
+            {
+                await ToggleVisionCameraAsync().ConfigureAwait(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            VisionViewport = null;
+            VisionCameraOn = false;
+            VisionStatus = $"Camera startup failed safely: {ex.Message}";
         }
     }
 
@@ -1044,30 +1511,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool ManualTranscriptReviewEnabled => true;
 
     public double ManualTranscriptReviewOpacity => 1d;
-
-    public PointCollection SpectrumLivePoints
-    {
-        get => _spectrumLivePoints;
-        private set => SetProperty(ref _spectrumLivePoints, value);
-    }
-
-    public string SpectrumPeakText
-    {
-        get => _spectrumPeakText;
-        private set => SetProperty(ref _spectrumPeakText, value);
-    }
-
-    public double SpectrumDisplayGain
-    {
-        get => _spectrumDisplayGain;
-        set
-        {
-            if (SetProperty(ref _spectrumDisplayGain, Math.Clamp(value, 1d, 24d)))
-            {
-                RefreshSpectrumPoints();
-            }
-        }
-    }
 
     public string WhisperExecutableText
     {
@@ -1221,6 +1664,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isSpeaking, value))
             {
+                if (!value)
+                {
+                    _suppressVoiceIngressUntil = DateTimeOffset.UtcNow + VoicePlaybackEchoCooldown;
+                }
+
                 OnPropertyChanged(nameof(SendButtonText));
                 OnPropertyChanged(nameof(SendButtonToolTip));
                 OnPropertyChanged(nameof(SendButtonBackground));
@@ -1361,6 +1809,17 @@ public sealed class MainWindowViewModel : ObservableObject
     public async Task ShutdownLocalRuntimeAsync()
     {
         RequestShutdownCancellation();
+        _interactionTimer.Stop();
+        _visionModeLoad?.Cancel();
+        _visionModeLoad?.Dispose();
+        _visionModeLoad = null;
+        VisionViewport = null;
+        var interactionRuntime = _interactionRuntime;
+        _interactionRuntime = null;
+        if (interactionRuntime is not null)
+        {
+            await Task.Run(interactionRuntime.Dispose).ConfigureAwait(true);
+        }
         _modelStatusTimer.Stop();
         SetModelConnectionStatus("command sent, waiting on model to shut down", MediaBrushes.Gold);
         StatusText = "Shutting down local model...";
@@ -1369,9 +1828,8 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await _services.RuntimeController.ShutdownAsync(shutdown.Token).ConfigureAwait(true);
+            await _services.RuntimeController.RevertToFallbackAsync(shutdown.Token).ConfigureAwait(true);
             StopOllamaProcessesStartedByAli();
-            _services.RuntimeController.RevertToFallback();
             UpdateRuntimeStatus();
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
             StatusText = "Local model shut down.";
@@ -1385,7 +1843,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task EnsureLocalOllamaStartedAsync(OpenAiCompatibleRuntimeOptions options)
     {
-        if (!IsLocalOllamaEndpoint(options.Endpoint))
+        if (LocalRuntimeEngines.Normalize(options.Engine, options.Endpoint) != LocalRuntimeEngines.Ollama
+            || !IsLocalOllamaEndpoint(options.Endpoint))
         {
             return;
         }
@@ -1660,6 +2119,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         IsBusy = true;
         StatusText = "Streaming local response...";
+        ClearAgentActivity();
+        IsAgentActivityExpanded = false;
         EnsureActiveConversationHistoryItem();
         ApplyFirstMessageTitleIfNeeded(text);
 
@@ -1667,7 +2128,6 @@ public sealed class MainWindowViewModel : ObservableObject
         var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
         var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
         var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
-        var localFoundationStatus = ApplyLocalMemoryAndReminderRequests(text, userMessageId);
         var userMessage = new ChatMessageViewModel(
             userMessageId,
             ChatRole.User,
@@ -1697,6 +2157,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var completed = false;
         var reachedOutputLimit = false;
         var pendingVisibleText = new StringBuilder();
+        var answerStarted = false;
         var lastVisibleTextFlush = DateTimeOffset.UtcNow;
 
         async Task FlushVisibleTextAsync(bool force, bool pace)
@@ -1737,6 +2198,39 @@ public sealed class MainWindowViewModel : ObservableObject
                 _activeResponse.Token);
             await foreach (var chunk in responseStream)
             {
+                if (chunk.IsActivity)
+                {
+                    AddAgentActivity(chunk);
+                    if (chunk.ApprovalPrompt is { } approvalPrompt)
+                    {
+                        var choice = AgentToolApprovalWindow.Show(
+                            System.Windows.Application.Current?.MainWindow,
+                            approvalPrompt);
+                        if (!_services.Orchestrator.ResolveToolApproval(new AgentToolApprovalDecision(
+                                approvalPrompt.RequestId,
+                                choice)))
+                        {
+                            AddAgentActivity(new AssistantStreamChunk(
+                                chunk.ConversationId,
+                                chunk.UserMessageId,
+                                chunk.AssistantMessageId,
+                                "Approval response expired",
+                                EvidenceStatus.Unknown,
+                                IsActivity: true,
+                                ActivityKind: AgentActivityKind.Warning,
+                                ActivityDetail: "The agent run was no longer waiting for this permission decision."));
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (!answerStarted)
+                {
+                    answerStarted = true;
+                    assistantMessage.Text = string.Empty;
+                }
+
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
                 reachedOutputLimit |= chunk.ReachedOutputLimit;
                 QueueStreamingSpeech(streamingSpeech, chunk.Text);
@@ -1776,6 +2270,14 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             assistantMessage.Text += "\n\nStopped by user.";
+            AddAgentActivity(new AssistantStreamChunk(
+                _conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Stopped by user",
+                EvidenceStatus.Unknown,
+                IsActivity: true,
+                ActivityKind: AgentActivityKind.Warning));
             CancelStreamingSpeech(streamingSpeech);
             StatusText = "Response stopped.";
         }
@@ -1783,6 +2285,15 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            AddAgentActivity(new AssistantStreamChunk(
+                _conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Model communication failed",
+                EvidenceStatus.Unknown,
+                IsActivity: true,
+                ActivityKind: AgentActivityKind.Error,
+                ActivityDetail: ex.Message));
             CancelStreamingSpeech(streamingSpeech);
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
             StatusText = $"Local model communication failed: {ex.Message}";
@@ -1800,11 +2311,25 @@ public sealed class MainWindowViewModel : ObservableObject
             ClearTemporaryAttachments();
             SaveActiveConversation();
             UpdateRuntimeStatus();
-            if (!string.IsNullOrWhiteSpace(localFoundationStatus))
-            {
-                StatusText = $"{StatusText} {localFoundationStatus}";
-            }
+            RefreshMemoryReminders();
         }
+    }
+
+    private void AddAgentActivity(AssistantStreamChunk chunk)
+    {
+        AgentActivities.Add(new AgentActivityItemViewModel(chunk));
+        while (AgentActivities.Count > 200)
+        {
+            AgentActivities.RemoveAt(0);
+        }
+
+        AgentActivitySummary = chunk.Text;
+    }
+
+    private void ClearAgentActivity()
+    {
+        AgentActivities.Clear();
+        AgentActivitySummary = "Ready for the next request.";
     }
 
     private void Stop()
@@ -1898,6 +2423,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
+        ClearAgentActivity();
         _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
         _activeConversationHistoryItem = null;
         SelectHistoryItemWithoutLoading(null);
@@ -1906,7 +2432,7 @@ public sealed class MainWindowViewModel : ObservableObject
         LastTranscript = string.Empty;
         StatusText = statusText;
         VoiceStatus = "Voice idle.";
-        AttachmentStatus = "Screenshots are temporary by default.";
+        AttachmentStatus = "AI can be wrong.  Always check answers against reliable sources.";
     }
 
     private void RefreshConversationHistory()
@@ -1977,6 +2503,7 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
+        ClearAgentActivity();
         var session = ConversationSessionFactory.Reopen(conversation);
         foreach (var message in session.Messages)
         {
@@ -1990,7 +2517,7 @@ public sealed class MainWindowViewModel : ObservableObject
         EditableTranscript = string.Empty;
         LastTranscript = string.Empty;
         VoiceStatus = "Voice idle.";
-        AttachmentStatus = "Screenshots are temporary by default.";
+        AttachmentStatus = "AI can be wrong.  Always check answers against reliable sources.";
         StatusText = $"Loaded saved chat: {conversation.Title}";
     }
 
@@ -2004,72 +2531,6 @@ public sealed class MainWindowViewModel : ObservableObject
         var conversation = BuildStoredConversation(_activeConversationHistoryItem);
         _services.Conversations.Save(conversation);
         RefreshConversationHistory();
-    }
-
-    private string ApplyLocalMemoryAndReminderRequests(string text, string userMessageId)
-    {
-        var statuses = new List<string>();
-        var memoryDecision = MemoryRequestParser.Evaluate(text);
-        if (memoryDecision.Kind == MemoryRequestKind.Save)
-        {
-            if (memoryDecision.Sensitivity == MemorySensitivity.PotentiallySensitive)
-            {
-                statuses.Add(memoryDecision.Message);
-            }
-            else if (!string.IsNullOrWhiteSpace(memoryDecision.Text))
-            {
-                var now = DateTimeOffset.UtcNow;
-                _services.Memories.Save(new MemoryEntry(
-                    $"mem_{Guid.NewGuid():N}",
-                    memoryDecision.Text,
-                    "general",
-                    now,
-                    now,
-                    MemorySource.ExplicitUserRequest,
-                    memoryDecision.Sensitivity,
-                    Active: true,
-                    _conversationId,
-                    userMessageId,
-                    "Saved from explicit chat request."));
-                statuses.Add(memoryDecision.Message);
-            }
-        }
-        else if (memoryDecision.Kind == MemoryRequestKind.Forget && !string.IsNullOrWhiteSpace(memoryDecision.Text))
-        {
-            var removed = _services.Memories.DeleteMatching(memoryDecision.Text);
-            statuses.Add($"Removed {removed} matching local memory item(s).");
-        }
-        else if (memoryDecision.Kind == MemoryRequestKind.Ambiguous)
-        {
-            statuses.Add(memoryDecision.Message);
-        }
-
-        var reminderDecision = ReminderRequestParser.Evaluate(text, DateTimeOffset.Now);
-        if (reminderDecision.Accepted && reminderDecision.Title is not null && reminderDecision.DueAt is not null)
-        {
-            var now = DateTimeOffset.UtcNow;
-            _services.Reminders.Save(new ReminderEntry(
-                $"rem_{Guid.NewGuid():N}",
-                reminderDecision.Title,
-                reminderDecision.Title,
-                reminderDecision.DueAt.Value,
-                now,
-                ReminderStatus.Scheduled,
-                ConversationId: _conversationId,
-                MessageId: userMessageId));
-            statuses.Add(reminderDecision.Message);
-        }
-        else if (!string.IsNullOrWhiteSpace(reminderDecision.Message))
-        {
-            statuses.Add(reminderDecision.Message);
-        }
-
-        if (statuses.Count > 0)
-        {
-            RefreshMemoryReminders();
-        }
-
-        return string.Join(" ", statuses);
     }
 
     private void RefreshMemoryReminders()
@@ -3306,25 +3767,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task StartPushToTalkAsync()
     {
-        if (!AutoSendVoiceTranscripts || _pushToTalkKeyDown || IsRecording || IsTranscribing || IsBusy)
+        if (!AutoSendVoiceTranscripts || _pushToTalkKeyDown || IsBusy)
         {
             return;
         }
 
         _pushToTalkKeyDown = true;
         OnPropertyChanged(nameof(PushToTalkKeyButtonText));
-        _currentVoiceInputShouldAutoSend = true;
-        try
-        {
-            await StartVoiceRecordingAsync().ConfigureAwait(true);
-        }
-        catch
-        {
-            _pushToTalkKeyDown = false;
-            OnPropertyChanged(nameof(PushToTalkKeyButtonText));
-            _currentVoiceInputShouldAutoSend = false;
-            throw;
-        }
+        _interactionRuntime?.UpdatePushToTalk(enabled: true, pressed: true);
+        AttentionStatus = "Attention: Yes (Push to Talk)";
+        VoiceStatus = $"Listening while {PushToTalkKeyLabel} is held.";
+        await Task.CompletedTask;
     }
 
     public async Task StopPushToTalkAsync()
@@ -3336,10 +3789,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _pushToTalkKeyDown = false;
         OnPropertyChanged(nameof(PushToTalkKeyButtonText));
-        if (IsRecording || IsTranscribing)
-        {
-            await StopVoiceRecordingOrTranscriptionAsync().ConfigureAwait(true);
-        }
+        _interactionRuntime?.UpdatePushToTalk(AutoSendVoiceTranscripts, pressed: false);
+        VoiceStatus = "Push to Talk released; secured utterance is being processed.";
+        await Task.CompletedTask;
     }
 
     private void LoadRuntimeSettings()
@@ -3560,6 +4012,47 @@ public sealed class MainWindowViewModel : ObservableObject
             _ => InternetSearchProvider.Tavily
         };
 
+    private void SaveAssistantName()
+    {
+        try
+        {
+            var normalizedName = AssistantProfile.NormalizeAssistantName(PendingAssistantName);
+            if (normalizedName.Length > 40)
+            {
+                AssistantRenameStatus = "Assistant name must be 40 characters or fewer.";
+                return;
+            }
+
+            if (normalizedName.Equals(AssistantName, StringComparison.Ordinal))
+            {
+                AssistantRenameStatus = $"The assistant is already named {AssistantName}.";
+                return;
+            }
+
+            AssistantProfileStore.Save(
+                _services.DataRoot,
+                _services.AssistantProfile with { AssistantName = normalizedName });
+            PendingAssistantName = normalizedName;
+            AssistantRenameStatus = $"Saved {normalizedName}. Restart the app to update the wake word, prompts, and window titles.";
+        }
+        catch (Exception ex)
+        {
+            AssistantRenameStatus = $"Assistant name was not saved: {ex.Message}";
+        }
+    }
+
+    public bool IsAgentActivityExpanded
+    {
+        get => _isAgentActivityExpanded;
+        set => SetProperty(ref _isAgentActivityExpanded, value);
+    }
+
+    public string AgentActivitySummary
+    {
+        get => _agentActivitySummary;
+        private set => SetProperty(ref _agentActivitySummary, value);
+    }
+
     private void SaveRuntimeSettings()
     {
         try
@@ -3723,26 +4216,56 @@ public sealed class MainWindowViewModel : ObservableObject
         StatusText = "Verified runtime activated.";
     }
 
-    private void RevertToStub()
+    private async Task RevertToStubAsync()
     {
-        _services.RuntimeController.RevertToFallback();
-        CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
-        UpdateRuntimeStatus();
-        SetModelConnectionStatus("model offline", MediaBrushes.Red);
-        StatusText = "Reverted to deterministic stub.";
+        IsBusy = true;
+        StatusText = "Unloading the active runtime before reverting to the deterministic stub...";
+        using var operation = BeginUiOperation(TimeSpan.FromSeconds(45));
+        try
+        {
+            await _services.RuntimeController.RevertToFallbackAsync(operation.Token).ConfigureAwait(true);
+            CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
+            UpdateRuntimeStatus();
+            SetModelConnectionStatus("model offline", MediaBrushes.Red);
+            StatusText = "Active runtime unloaded and reverted to deterministic stub.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Runtime revert stopped because release could not be verified: {ex.Message}";
+        }
+        finally
+        {
+            CompleteUiOperation(operation);
+            IsBusy = false;
+        }
     }
 
-    private void RevertToLastKnownGood()
+    private async Task RevertToLastKnownGoodAsync()
     {
-        if (!_services.RuntimeController.RevertToLastKnownGood())
+        IsBusy = true;
+        StatusText = "Unloading the active runtime before restoring the last-known-good runtime...";
+        using var operation = BeginUiOperation(TimeSpan.FromSeconds(45));
+        try
         {
-            StatusText = "No last-known-good runtime is available yet.";
-            return;
-        }
+            if (!await _services.RuntimeController.RevertToLastKnownGoodAsync(operation.Token).ConfigureAwait(true))
+            {
+                StatusText = "No last-known-good runtime is available yet.";
+                return;
+            }
 
-        UpdateRuntimeStatus();
-        SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
-        StatusText = "Reverted to last-known-good runtime.";
+            UpdateRuntimeStatus();
+            SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
+            StatusText = "Previous runtime released; last-known-good runtime restored.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Last-known-good restore stopped because release could not be verified: {ex.Message}";
+        }
+        finally
+        {
+            CompleteUiOperation(operation);
+            IsBusy = false;
+        }
     }
 
     private async void FlagIncorrect(object? parameter)
@@ -3936,6 +4459,13 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Context size must be at least 512 tokens.");
         }
 
+        if (LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint) == LocalRuntimeEngines.Ollama
+            && contextTokens > OllamaRuntimeSafetyPolicy.MaximumContextTokens)
+        {
+            throw new InvalidOperationException(
+                $"Ollama context cannot exceed the {OllamaRuntimeSafetyPolicy.MaximumContextTokens:N0}-token safety cap.");
+        }
+
         if (!int.TryParse(RuntimeOutputLimitText.Trim(), out var outputLimit) || outputLimit < 1)
         {
             throw new InvalidOperationException("Max output tokens must be at least 1.");
@@ -3971,7 +4501,7 @@ public sealed class MainWindowViewModel : ObservableObject
         var selectedModel = CurrentRuntimeModelChoice();
         var quantization = PreferConfigured(RuntimeQuantizationText, selectedModel?.DefaultQuantization ?? "Installed package default");
 
-        return new OpenAiCompatibleRuntimeOptions(
+        return OllamaRuntimeSafetyPolicy.Normalize(new OpenAiCompatibleRuntimeOptions(
             Enabled: !string.IsNullOrWhiteSpace(model),
             Endpoint: endpoint,
             Model: model,
@@ -3986,7 +4516,11 @@ public sealed class MainWindowViewModel : ObservableObject
             StreamingEnabled: RuntimeStreamingEnabled,
             SupportsVision: RuntimeVisionEnabled,
             SupportsToolCalls: false,
-            AllowPrivateLanEndpoint: false);
+            AllowPrivateLanEndpoint: false)
+        {
+            Engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint),
+            ReasoningEffort = _selectedReasoningEffort
+        });
     }
 
     public async Task AddClipboardImageAsync()
@@ -4051,7 +4585,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Attachments.Remove(attachment);
         DeleteAttachmentIfTemporary(attachment);
         AttachmentStatus = Attachments.Count == 0
-            ? "Screenshots are temporary by default."
+            ? "AI can be wrong.  Always check answers against reliable sources."
             : $"{Attachments.Count} image attachment(s). Temporary by default.";
     }
 
@@ -4067,7 +4601,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         AttachmentStatus = Attachments.Count == 0
-            ? "Screenshots are temporary by default."
+            ? "AI can be wrong.  Always check answers against reliable sources."
             : $"{Attachments.Count} retained image attachment(s).";
     }
 
@@ -4231,9 +4765,9 @@ public sealed class MainWindowViewModel : ObservableObject
                 audioInput,
                 _activeVoiceInput?.Token ?? CancellationToken.None).ConfigureAwait(true);
             UpdateLastSttDebugText();
-            var normalizedTranscript = SpeechTranscriptGuard.NormalizeAssistantName(transcript.Text);
+            var normalizedTranscript = SpeechTranscriptGuard.NormalizeAssistantName(transcript.Text, AssistantName);
 
-            var transcriptGuard = SpeechTranscriptGuard.Evaluate(normalizedTranscript);
+            var transcriptGuard = SpeechTranscriptGuard.Evaluate(normalizedTranscript, assistantName: AssistantName);
             if (!transcriptGuard.Accepted)
             {
                 _lastVoiceMetadata = CreateVoiceMetadata(
@@ -4301,13 +4835,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task SendTranscriptAsync()
     {
-        var transcript = SpeechTranscriptGuard.NormalizeAssistantName(EditableTranscript).Trim();
+        var transcript = SpeechTranscriptGuard.NormalizeAssistantName(EditableTranscript, AssistantName).Trim();
         if (string.IsNullOrWhiteSpace(transcript) || IsBusy)
         {
             return;
         }
 
-        var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript);
+        var transcriptGuard = SpeechTranscriptGuard.Evaluate(transcript, assistantName: AssistantName);
         if (!transcriptGuard.Accepted)
         {
             _lastVoiceMetadata = CreateVoiceMetadata(
@@ -4508,10 +5042,12 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             TtsStatus = "Speech stopped.";
+            VoiceStatus = "Speech stopped.";
         }
         catch (Exception ex)
         {
             TtsStatus = $"Speech failed: {ex.Message}";
+            VoiceStatus = $"Speech failed: {ex.Message}";
         }
         finally
         {
@@ -4636,16 +5172,13 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            _voiceMonitorRequested = true;
             RefreshVoiceSettingsChoices();
-            StartInputLevelMonitor();
             await RefreshCorrectionsAsync().ConfigureAwait(true);
             RefreshMemoryReminders();
             await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            _voiceMonitorRequested = false;
             StopInputLevelMonitor();
             HandleCommandException(ex);
         }
@@ -4673,7 +5206,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _settingsWindow.Closed += (_, _) =>
         {
             _settingsWindow = null;
-            _voiceMonitorRequested = false;
             StopInputLevelMonitor();
             VoiceInputLevelPercent = 0;
             VoiceInputMeterText = "Input meter paused.";
@@ -4750,7 +5282,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void RefreshVoiceSettingsChoices()
     {
-        _suppressInputMonitorRestart = true;
         _loadingVoiceSettings = true;
         try
         {
@@ -4776,7 +5307,6 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             _loadingVoiceSettings = false;
-            _suppressInputMonitorRestart = false;
         }
 
         RefreshTextToSpeechVoiceChoices();
@@ -5274,8 +5804,44 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private void SelectReasoningEffort(string effort)
+    {
+        var normalized = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(effort);
+        _selectedReasoningEffort = normalized;
+        NotifyReasoningEffortChanged();
+        _services.RuntimeController.SetReasoningEffort(normalized);
+
+        try
+        {
+            _services.SaveRuntimeSettings(BuildRuntimeOptionsFromUi());
+            StatusText = $"Reasoning effort set to {normalized}. The next GPT-OSS request will use it.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Reasoning effort changed for this session, but could not be saved: {ex.Message}";
+        }
+    }
+
+    private void NotifyReasoningEffortChanged()
+    {
+        OnPropertyChanged(nameof(IsReasoningLow));
+        OnPropertyChanged(nameof(IsReasoningMedium));
+        OnPropertyChanged(nameof(IsReasoningHigh));
+        OnPropertyChanged(nameof(RuntimeRequestContractText));
+    }
+
     private void ApplyRuntimeOptions(OpenAiCompatibleRuntimeOptions options)
     {
+        _loadingRuntimeOptions = true;
+        try
+        {
+            SelectedRuntimeEngine = LocalRuntimeEngines.Normalize(options.Engine, options.Endpoint);
+        }
+        finally
+        {
+            _loadingRuntimeOptions = false;
+        }
+
         var selectedModel = RuntimeModelChoice.FromOptions(options);
         LoadRuntimeModelChoices(RuntimeModelChoiceCatalog.KnownChoices().Append(selectedModel), options.Model);
 
@@ -5289,6 +5855,9 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeTopPText = topPText;
         RuntimeStreamingEnabled = options.StreamingEnabled;
         RuntimeVisionEnabled = options.SupportsVision;
+        _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(options.ReasoningEffort);
+        NotifyReasoningEffortChanged();
+        _services.RuntimeController.SetReasoningEffort(_selectedReasoningEffort);
 
         var selectedLabel = FindRuntimeModelLabel(options.Model);
         if (selectedLabel is null)
@@ -5309,6 +5878,15 @@ public sealed class MainWindowViewModel : ObservableObject
             preferredContext: options.ContextTokens.ToString(CultureInfo.InvariantCulture),
             preferredOutputLimit: options.OutputTokenLimit.ToString(CultureInfo.InvariantCulture),
             resetToSmallest: false);
+    }
+
+    private void ApplyRuntimeEngineSelection(string engine)
+    {
+        var normalized = LocalRuntimeEngines.Normalize(engine, LocalRuntimeEngines.DefaultEndpoint(engine));
+        RuntimeEndpointText = LocalRuntimeEngines.DefaultEndpoint(normalized).ToString();
+        CanActivateRuntime = false;
+        RuntimeSelectionStatusText = $"{normalized} selected. Refresh its installed model list, then Check and Activate.";
+        StatusText = $"Runtime engine selected: {normalized}. The current engine remains active until the replacement passes Check.";
     }
 
     private RuntimeModelChoice? CurrentRuntimeModelChoice()
@@ -5366,9 +5944,25 @@ public sealed class MainWindowViewModel : ObservableObject
         ReplaceChoices(RuntimeContextChoices, choice.ContextTokens.Select(value => value.ToString(CultureInfo.InvariantCulture)));
         ReplaceChoices(RuntimeOutputLimitChoices, choice.OutputTokenLimits.Select(value => value.ToString(CultureInfo.InvariantCulture)));
 
+        var isGptOss = OllamaRuntimeSafetyPolicy.IsGptOssModel(choice.Model)
+            || OllamaRuntimeSafetyPolicy.IsGptOssModel(choice.Family);
+        var defaultContext = isGptOss
+            ? OllamaRuntimeSafetyPolicy.DefaultContextTokens.ToString(CultureInfo.InvariantCulture)
+            : choice.ContextTokens.FirstOrDefault().ToString(CultureInfo.InvariantCulture);
+        var defaultOutputLimit = isGptOss
+            ? "1024"
+            : choice.OutputTokenLimits.FirstOrDefault().ToString(CultureInfo.InvariantCulture);
+
         RuntimeQuantizationText = PickChoice(RuntimeQuantizationChoices, preferredQuantization, choice.DefaultQuantization, resetToSmallest);
-        RuntimeContextText = PickChoice(RuntimeContextChoices, preferredContext, choice.ContextTokens.FirstOrDefault().ToString(CultureInfo.InvariantCulture), resetToSmallest);
-        RuntimeOutputLimitText = PickChoice(RuntimeOutputLimitChoices, preferredOutputLimit, choice.OutputTokenLimits.FirstOrDefault().ToString(CultureInfo.InvariantCulture), resetToSmallest);
+        RuntimeContextText = PickChoice(RuntimeContextChoices, preferredContext, defaultContext, resetToSmallest && !isGptOss);
+        RuntimeOutputLimitText = PickChoice(RuntimeOutputLimitChoices, preferredOutputLimit, defaultOutputLimit, resetToSmallest && !isGptOss);
+        if (resetToSmallest && isGptOss)
+        {
+            EnsureChoice(RuntimeTemperatureChoices, "1");
+            RuntimeTemperatureText = "1";
+            RuntimeTopPText = RuntimeTopPModelDefault;
+        }
+
         RuntimeSelectionStatusText = $"{choice.Source}. Vision: {(choice.SupportsVision ? "yes" : "no")}. Streaming: {(choice.StreamingEnabled ? "yes" : "unknown until health check")}.";
     }
 
@@ -5645,12 +6239,12 @@ public sealed class MainWindowViewModel : ObservableObject
             activate.RaiseCanExecuteChanged();
         }
 
-        if (RevertToStubCommand is RelayCommand revertStub)
+        if (RevertToStubCommand is AsyncRelayCommand revertStub)
         {
             revertStub.RaiseCanExecuteChanged();
         }
 
-        if (RevertToLastKnownGoodCommand is RelayCommand revertLastKnownGood)
+        if (RevertToLastKnownGoodCommand is AsyncRelayCommand revertLastKnownGood)
         {
             revertLastKnownGood.RaiseCanExecuteChanged();
         }
@@ -5799,6 +6393,222 @@ public sealed class MainWindowViewModel : ObservableObject
         return $"{profile.DisplayName} | {profile.Quantization} | {profile.ContextTokens:N0} ctx";
     }
 
+    private async Task RefreshVisionCamerasAsync()
+    {
+        var runtime = _interactionRuntime;
+        if (runtime is null)
+        {
+            return;
+        }
+        VisionStatus = "Looking for cameras...";
+        try
+        {
+            var cameras = await Task.Run(runtime.GetCameras).ConfigureAwait(true);
+            if (cameras.Count == 0)
+            {
+                // Windows can briefly report no capture devices while the media
+                // stack is settling during application startup. Retry once;
+                // this is device discovery only and never enters the frame path.
+                await Task.Delay(750).ConfigureAwait(true);
+                cameras = await Task.Run(runtime.GetCameras).ConfigureAwait(true);
+            }
+            var previousName = SelectedVisionCamera?.Name;
+            VisionCameras.Clear();
+            foreach (var camera in cameras)
+            {
+                VisionCameras.Add(camera);
+            }
+            SelectedVisionCamera = VisionCameras.FirstOrDefault(camera =>
+                    string.Equals(camera.Name, previousName, StringComparison.OrdinalIgnoreCase))
+                ?? VisionCameras.FirstOrDefault();
+            VisionStatus = SelectedVisionCamera is null
+                ? "No camera devices found."
+                : $"Selected {SelectedVisionCamera.Name}.";
+        }
+        catch (Exception ex)
+        {
+            VisionStatus = $"Camera discovery failed safely: {ex.Message}";
+        }
+    }
+
+    private async Task LoadVisionCameraModesAsync(CameraDevice? camera)
+    {
+        _visionModeLoad?.Cancel();
+        _visionModeLoad?.Dispose();
+        VisionCameraModes.Clear();
+        VisionCameraModes.Add(CameraVideoMode.Auto);
+        SelectedVisionCameraMode = CameraVideoMode.Auto;
+        if (camera is null || _interactionRuntime is null)
+        {
+            return;
+        }
+        var load = new CancellationTokenSource();
+        _visionModeLoad = load;
+        try
+        {
+            var modes = await _interactionRuntime
+                .GetModesAsync(camera, load.Token)
+                .ConfigureAwait(true);
+            if (load.IsCancellationRequested)
+            {
+                return;
+            }
+            VisionCameraModes.Clear();
+            foreach (var mode in modes)
+            {
+                VisionCameraModes.Add(mode);
+            }
+            SelectedVisionCameraMode = VisionCameraModes
+                .Where(mode => !mode.IsAuto)
+                .OrderByDescending(IsExact4K30)
+                .ThenByDescending(mode => mode.Width == 1920 && mode.Height == 1080)
+                .ThenByDescending(mode => mode.FramesPerSecond ?? 0)
+                .FirstOrDefault()
+                ?? VisionCameraModes.FirstOrDefault()
+                ?? CameraVideoMode.Auto;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            VisionStatus = $"Camera modes unavailable: {ex.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_visionModeLoad, load))
+            {
+                _visionModeLoad = null;
+            }
+            load.Dispose();
+        }
+    }
+
+    private static bool IsExact4K30(CameraVideoMode mode) =>
+        mode.Width == 3840
+        && mode.Height == 2160
+        && mode.FramesPerSecond is double framesPerSecond
+        && Math.Abs(framesPerSecond - 30d) < 0.5d;
+
+    private async Task ToggleVisionCameraAsync()
+    {
+        var runtime = _interactionRuntime;
+        if (runtime is null)
+        {
+            VisionStatus = "Interaction modules are not available.";
+            return;
+        }
+        if (VisionCameraOn)
+        {
+            VisionViewport = null;
+            VisionCameraOn = false;
+            VisionStatus = "Camera stopping...";
+            await Task.Run(runtime.TurnCameraOff).ConfigureAwait(true);
+            VisionStatus = "Camera off.";
+            return;
+        }
+        if (SelectedVisionCamera is null)
+        {
+            VisionStatus = "Choose a camera first.";
+            return;
+        }
+        var mode = SelectedVisionCameraMode ?? CameraVideoMode.Auto;
+        VisionStatus = $"Starting {SelectedVisionCamera.Name} ({mode.Label})...";
+        try
+        {
+            VisionViewport = runtime.TurnCameraOn(SelectedVisionCamera, mode);
+            runtime.SetOverlays(TrackingOverlayEnabled, FaceMeshOverlayEnabled);
+            VisionCameraOn = true;
+            VisionStatus = "DX12 D3D11 bridge texture NV12";
+        }
+        catch (Exception ex)
+        {
+            VisionViewport = null;
+            VisionCameraOn = false;
+            VisionStatus = $"Camera failed safely: {ex.Message}";
+        }
+    }
+
+    private async void InteractionTimerTick(object? sender, EventArgs e)
+    {
+        var runtime = _interactionRuntime;
+        if (runtime is null)
+        {
+            return;
+        }
+        var level = Math.Clamp(runtime.MicrophoneInputLevel, 0d, 1d);
+        if (_settingsWindow?.IsVisible == true)
+        {
+            VoiceInputLevelPercent = level * 100d;
+            VoiceInputMeterText = $"Shared microphone level: {level:P0}.";
+            VoiceDiagnosticsText = runtime.SpeechStatus;
+        }
+        AttentionStatus = runtime.HasAttention
+            ? $"Attention: Yes ({runtime.AttentionSource})"
+            : "Attention: No";
+        if (_interactionPollBusy || IsBusy)
+        {
+            return;
+        }
+        if (IsSpeaking || DateTimeOffset.UtcNow < _suppressVoiceIngressUntil)
+        {
+            runtime.TryTakeAcceptedSpeech(out _);
+            return;
+        }
+        if (!runtime.TryTakeAcceptedSpeech(out var accepted)
+            || accepted is null)
+        {
+            return;
+        }
+        _interactionPollBusy = true;
+        try
+        {
+            LastTranscript = accepted.ExactText;
+            EditableTranscript = accepted.ExactText;
+            VoiceStatus = $"{accepted.Provider} accepted speech via {accepted.AttentionSource}.";
+            var metadata = new VoiceTurnMetadata(
+                VoiceInputOrigin.Voice,
+                accepted.ExactText,
+                accepted.Provider,
+                "Unified security pipeline",
+                _services.TextToSpeech.ProviderName,
+                _services.TextToSpeech.VoiceId,
+                RawAudioRetained: false,
+                InputDeviceNumber: CurrentInputDeviceNumber(),
+                InputDeviceName: CurrentInputDeviceName(),
+                PersonIdentityId: accepted.PersonIdentityId,
+                ParticipantDisplayName: accepted.ParticipantDisplayName,
+                VisualIdentityConfidence: accepted.VisualIdentityConfidence,
+                VoiceIdentityConfidence: accepted.VoiceIdentityConfidence,
+                AttentionSource: accepted.AttentionSource);
+            await SendTextAsync(accepted.ExactText, VoiceInputOrigin.Voice, metadata)
+                .ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            VoiceStatus = $"Accepted speech could not be sent: {ex.Message}";
+        }
+        finally
+        {
+            _interactionPollBusy = false;
+        }
+    }
+
+    private void SelectInteractionSpeechToText(AliSpeechToTextEngine engine)
+    {
+        _interactionRuntime?.SelectSpeechToText(engine);
+        OnPropertyChanged(nameof(ParakeetSpeechToTextSelected));
+        OnPropertyChanged(nameof(WhisperSpeechToTextSelected));
+        VoiceStatus = $"Speech to text selected: {_interactionRuntime?.SpeechProviderName ?? engine.ToString()}.";
+    }
+
+    private void SetOptionalOverlays(bool tracking, bool faceMesh)
+    {
+        TrackingOverlayEnabled = tracking;
+        FaceMeshOverlayEnabled = faceMesh;
+        _interactionRuntime?.SetOverlays(tracking, faceMesh);
+    }
+
     private void LoadVoiceDevices()
     {
         VoiceInputDevices.Clear();
@@ -5874,7 +6684,14 @@ public sealed class MainWindowViewModel : ObservableObject
             recorder.InputDeviceNumber = deviceNumber;
             RefreshVoiceInputChannelModes();
             SaveVoiceSettings(selectedInputDeviceNumber: deviceNumber, selectedInputDeviceName: CurrentInputDeviceName());
-            StartInputLevelMonitor();
+            try
+            {
+                _interactionRuntime?.SelectMicrophoneByName(CurrentInputDeviceName());
+            }
+            catch (Exception ex)
+            {
+                VoiceStatus = $"Microphone selection failed safely: {ex.Message}";
+            }
         }
     }
 
@@ -5964,70 +6781,10 @@ public sealed class MainWindowViewModel : ObservableObject
         VoiceDiagnosticsText = $"{snapshot.DeviceName} | {snapshot.SampleRate} Hz | {snapshot.Channels} ch | {snapshot.State}";
     }
 
-    private void SpectrumAvailable(object? sender, SpectrumFrame frame)
-    {
-        var dispatcher = System.Windows.Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ApplySpectrumFrame(frame);
-            return;
-        }
-
-        _ = dispatcher.BeginInvoke(() => ApplySpectrumFrame(frame));
-    }
-
-    private void ApplySpectrumFrame(SpectrumFrame frame)
-    {
-        if (frame.Magnitudes.Length == 0)
-        {
-            return;
-        }
-
-        _lastSpectrumMagnitudes = frame.Magnitudes.ToArray();
-        EnsureSpectrumRenderBuffers(frame.Magnitudes.Length);
-        var frameCeiling = Math.Max(0.08d, frame.Magnitudes.Select(ShapeSpectrumMagnitude).DefaultIfEmpty(0.08d).Max());
-        _spectrumVisualCeiling = frameCeiling > _spectrumVisualCeiling
-            ? Ease(_spectrumVisualCeiling, frameCeiling, 0.10d)
-            : Ease(_spectrumVisualCeiling, frameCeiling, 0.025d);
-
-        for (var index = 0; index < frame.Magnitudes.Length; index++)
-        {
-            var visualMagnitude = NormalizeSpectrumForDisplay(ShapeSpectrumMagnitude(frame.Magnitudes[index]));
-            _renderedSpectrumMagnitudes[index] = Ease(_renderedSpectrumMagnitudes[index], visualMagnitude, 0.14d);
-        }
-
-        _lastSpectrumPeakLevel = frame.PeakLevel;
-        SpectrumPeakText = $"Peak {frame.PeakLevel:P0}";
-        RefreshSpectrumPoints();
-    }
-
-    private void RefreshSpectrumPoints()
-    {
-        SpectrumLivePoints = SmoothSpectrumPoints(CreateSpectrumPoints(_renderedSpectrumMagnitudes));
-        SpectrumPeakText = $"Peak {_lastSpectrumPeakLevel:P0}";
-    }
-
     private void StartInputLevelMonitor()
     {
-        if (!_voiceMonitorRequested || _suppressInputMonitorRestart)
-        {
-            return;
-        }
-
-        if (IsRecording || !TryReadDeviceNumber(SelectedVoiceInputDevice, out var deviceNumber))
-        {
-            return;
-        }
-
-        try
-        {
-            _inputLevelMonitor.Start(deviceNumber, CurrentInputDeviceName());
-        }
-        catch (Exception ex)
-        {
-            VoiceInputLevelPercent = 0;
-            VoiceInputMeterText = $"Input meter unavailable: {ex.Message}";
-        }
+        // The shared MicrophoneModule owns input acquisition. The settings
+        // meter is refreshed from its current level by InteractionTimerTick.
     }
 
     private void StopInputLevelMonitor() => _inputLevelMonitor.Stop();
@@ -6037,7 +6794,6 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
         {
             recorder.LevelAvailable += InputLevelAvailable;
-            recorder.SpectrumAvailable += SpectrumAvailable;
         }
     }
 
@@ -6046,7 +6802,6 @@ public sealed class MainWindowViewModel : ObservableObject
         if (_services.VoiceRecorder is NAudioVoiceRecorder recorder)
         {
             recorder.LevelAvailable -= InputLevelAvailable;
-            recorder.SpectrumAvailable -= SpectrumAvailable;
         }
     }
 
@@ -6096,6 +6851,7 @@ public sealed class MainWindowViewModel : ObservableObject
         bool? retainDebugAudio = null,
         bool? assistantReadsRepliesOutLoud = null,
         bool? autoSendVoiceTranscripts = null,
+        bool? attentiveChatEnabled = null,
         double? speechRate = null,
         string? pushToTalkKey = null)
     {
@@ -6121,6 +6877,7 @@ public sealed class MainWindowViewModel : ObservableObject
             RetainDebugAudio = retainDebugAudio ?? _voiceSettings.RetainDebugAudio,
             AssistantReadsRepliesOutLoud = assistantReadsRepliesOutLoud ?? _voiceSettings.AssistantReadsRepliesOutLoud,
             AutoSendVoiceTranscripts = autoSendVoiceTranscripts ?? _voiceSettings.AutoSendVoiceTranscripts,
+            AttentiveChatEnabled = attentiveChatEnabled ?? _voiceSettings.AttentiveChatEnabled,
             SpeechRate = NormalizeSpeechRate(speechRate ?? _voiceSettings.SpeechRate),
             PushToTalkKey = NormalizePushToTalkKey(pushToTalkKey ?? _voiceSettings.PushToTalkKey)
         };
@@ -6235,96 +6992,6 @@ public sealed class MainWindowViewModel : ObservableObject
             level?.Peak,
             level?.Rms,
             level?.State.ToString());
-    }
-
-    private static PointCollection CreateFlatSpectrumPoints() =>
-        CreateSpectrumPoints(new double[SpectrumAnalyzer.BarCount]);
-
-    private static PointCollection CreateSpectrumPoints(IReadOnlyList<double> magnitudes)
-    {
-        var points = new PointCollection();
-        if (magnitudes.Count == 0)
-        {
-            return points;
-        }
-
-        var denominator = Math.Max(1, magnitudes.Count - 1);
-        for (var index = 0; index < magnitudes.Count; index++)
-        {
-            var x = index * (SpectrumRenderWidth / denominator);
-            var level = Math.Clamp(magnitudes[index], 0d, 1d);
-            var graphBottom = Math.Max(SpectrumRenderInset + 1d, SpectrumRenderHeight - SpectrumRenderInset);
-            var usableHeight = graphBottom - SpectrumRenderInset;
-            var y = graphBottom - (usableHeight * level);
-            points.Add(new System.Windows.Point(x, y));
-        }
-
-        return points;
-    }
-
-    private void EnsureSpectrumRenderBuffers(int length)
-    {
-        if (_renderedSpectrumMagnitudes.Length == length)
-        {
-            return;
-        }
-
-        _renderedSpectrumMagnitudes = new double[length];
-    }
-
-    private static double ShapeSpectrumMagnitude(double magnitude)
-    {
-        var lifted = Math.Max(0d, magnitude - 0.01d);
-        return Math.Clamp(Math.Pow(lifted, 0.9d), 0d, 1d);
-    }
-
-    private double NormalizeSpectrumForDisplay(double magnitude) =>
-        Math.Clamp(
-            magnitude / Math.Max(0.08d, _spectrumVisualCeiling) * 0.78d * SpectrumDisplayGain / 6d,
-            0d,
-            0.92d);
-
-    private static double Ease(double current, double target, double amount) =>
-        current + ((target - current) * amount);
-
-    private static PointCollection SmoothSpectrumPoints(PointCollection source)
-    {
-        if (source.Count < 4)
-        {
-            return source;
-        }
-
-        var smoothed = new PointCollection(source.Count * 2);
-        smoothed.Add(source[0]);
-
-        for (var index = 1; index < source.Count - 2; index++)
-        {
-            var p0 = source[index - 1];
-            var p1 = source[index];
-            var p2 = source[index + 1];
-            var p3 = source[index + 2];
-
-            smoothed.Add(p1);
-            smoothed.Add(CatmullRom(p0, p1, p2, p3, 0.5d));
-        }
-
-        smoothed.Add(source[^2]);
-        smoothed.Add(source[^1]);
-        return smoothed;
-    }
-
-    private static System.Windows.Point CatmullRom(
-        System.Windows.Point p0,
-        System.Windows.Point p1,
-        System.Windows.Point p2,
-        System.Windows.Point p3,
-        double t)
-    {
-        var t2 = t * t;
-        var t3 = t2 * t;
-        var x = 0.5d * ((2d * p1.X) + ((-p0.X + p2.X) * t) + ((2d * p0.X - 5d * p1.X + 4d * p2.X - p3.X) * t2) + ((-p0.X + 3d * p1.X - 3d * p2.X + p3.X) * t3));
-        var y = 0.5d * ((2d * p1.Y) + ((-p0.Y + p2.Y) * t) + ((2d * p0.Y - 5d * p1.Y + 4d * p2.Y - p3.Y) * t2) + ((-p0.Y + 3d * p1.Y - 3d * p2.Y + p3.Y) * t3));
-        return new System.Windows.Point(x, y);
     }
 
     private static string PreferConfigured(string? configured, string? fallback) =>

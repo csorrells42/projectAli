@@ -17,3 +17,5 @@ lib/voice/kitten/
 lib/voice/whisper/CACHEDIR.TAG
 lib/voice/whisper/.locks/
 lib/voice/whisper/models--Systran--faster-whisper-*/
+lib/vision/mediapipe-runtime/python/
+lib/vision/mediapipe-runtime/python-packages/
