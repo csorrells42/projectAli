@@ -19,7 +19,6 @@ namespace Ali.Modules.Coordinator;
 public sealed class AliToolCoordinator
 {
     private const int MaximumVisibleSources = 5;
-    private readonly ILocalModelRuntime _runtime;
     private readonly AliAgentHarnessRunner _harness;
     private readonly AsyncLocal<CoordinatorTurnContext?> _turn = new();
 
@@ -32,7 +31,6 @@ public sealed class AliToolCoordinator
         IReminderStore reminders,
         AssistantProfile assistantProfile)
     {
-        _runtime = runtime;
         var catalog = new AliToolCatalog(
             localLibrary,
             webSources,
@@ -68,35 +66,6 @@ public sealed class AliToolCoordinator
         ArgumentException.ThrowIfNullOrWhiteSpace(assistantMessageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userText);
 
-        if (attachments.Count > 0)
-        {
-            yield return Activity(
-                conversationId,
-                userMessageId,
-                assistantMessageId,
-                AgentActivityKind.Status,
-                "Inspecting the attached image locally");
-            var request = new ChatRequest(conversationId, userMessageId, userText, history)
-            {
-                Attachments = attachments
-            };
-            await foreach (var token in _runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
-            {
-                if (!token.IsThinking)
-                {
-                    yield return new AssistantStreamChunk(
-                        conversationId,
-                        userMessageId,
-                        assistantMessageId,
-                        token.Text,
-                        token.EvidenceStatus,
-                        token.FinishReason);
-                }
-            }
-
-            yield break;
-        }
-
         var channel = Channel.CreateUnbounded<AssistantStreamChunk>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -109,6 +78,7 @@ public sealed class AliToolCoordinator
             assistantMessageId,
             userText,
             history,
+            attachments,
             channel.Writer,
             cancellationToken);
 
@@ -126,6 +96,7 @@ public sealed class AliToolCoordinator
         string assistantMessageId,
         string userText,
         IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
         ChannelWriter<AssistantStreamChunk> writer,
         CancellationToken cancellationToken)
     {
@@ -142,6 +113,7 @@ public sealed class AliToolCoordinator
                 turn,
                 userText,
                 history,
+                attachments,
                 chunk => writer.TryWrite(chunk),
                 cancellationToken).ConfigureAwait(false);
             PublishSourceAppendix(turn, result.FinishReason, writer);
@@ -214,20 +186,4 @@ public sealed class AliToolCoordinator
             finishReason));
     }
 
-    private static AssistantStreamChunk Activity(
-        string conversationId,
-        string userMessageId,
-        string assistantMessageId,
-        AgentActivityKind kind,
-        string text,
-        string? detail = null) =>
-        new(
-            conversationId,
-            userMessageId,
-            assistantMessageId,
-            text,
-            EvidenceStatus.Unknown,
-            IsActivity: true,
-            ActivityKind: kind,
-            ActivityDetail: detail);
 }

@@ -96,7 +96,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         var suppressPersona = options?.AdditionalProperties is { } properties
             && properties.TryGetValue("ali.internalRouting", out var internalRouting)
             && internalRouting is true;
-        var serializedMessages = BuildExtensionsAiMessages(messages, suppressPersona);
+        var serializedMessages = BuildExtensionsAiMessages(messages, suppressPersona, useNativeOllama);
         var tools = BuildExtensionsAiTools(options).ToArray();
         var maxTokens = options?.MaxOutputTokens ?? _options.OutputTokenLimit;
         object payload = useNativeOllama
@@ -149,7 +149,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
 
     private object[] BuildExtensionsAiMessages(
         IReadOnlyList<MeaiChatMessage> messages,
-        bool suppressPersona)
+        bool suppressPersona,
+        bool useNativeOllama)
     {
         var serialized = new List<object>();
         if (!suppressPersona)
@@ -197,10 +198,60 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 continue;
             }
 
+            var imageData = message.Contents
+                .OfType<DataContent>()
+                .Where(content => content.HasTopLevelMediaType("image"))
+                .ToArray();
+            var imageUris = message.Contents
+                .OfType<UriContent>()
+                .Where(content => content.HasTopLevelMediaType("image"))
+                .ToArray();
+            if (imageData.Length == 0 && imageUris.Length == 0)
+            {
+                serialized.Add(new
+                {
+                    role = message.Role.ToString().ToLowerInvariant(),
+                    content = (object)(message.Text ?? string.Empty)
+                });
+                continue;
+            }
+
+            if (useNativeOllama)
+            {
+                if (imageUris.Length > 0)
+                {
+                    throw new NotSupportedException("Ollama image messages require in-memory image data, not remote image URIs.");
+                }
+
+                serialized.Add(new
+                {
+                    role = message.Role.ToString().ToLowerInvariant(),
+                    content = message.Text ?? string.Empty,
+                    images = imageData.Select(content => content.Base64Data).ToArray()
+                });
+                continue;
+            }
+
+            var parts = new List<object>();
+            if (!string.IsNullOrWhiteSpace(message.Text))
+            {
+                parts.Add(new { type = "text", text = message.Text });
+            }
+
+            parts.AddRange(imageData.Select(content => (object)new
+            {
+                type = "image_url",
+                image_url = new { url = content.Uri }
+            }));
+            parts.AddRange(imageUris.Select(content => (object)new
+            {
+                type = "image_url",
+                image_url = new { url = content.Uri }
+            }));
             serialized.Add(new
             {
                 role = message.Role.ToString().ToLowerInvariant(),
-                content = (object)(message.Text ?? string.Empty)
+                content = (object)parts
             });
         }
 

@@ -64,9 +64,18 @@ internal sealed class AliAgentHarnessRunner
         CoordinatorTurnContext turn,
         string userText,
         IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
         Action<AssistantStreamChunk> publish,
         CancellationToken cancellationToken)
     {
+        if (attachments.Count > 0)
+        {
+            turn.Report(
+                AgentActivityKind.Status,
+                "Inspecting attachments through the agent",
+                $"Loaded {attachments.Count} attachment(s) without bypassing tools or approvals.");
+        }
+
         turn.Report(
             AgentActivityKind.Status,
             "Agent Framework started",
@@ -79,7 +88,12 @@ internal sealed class AliAgentHarnessRunner
                 ? "No relevant saved memory matched this request."
                 : $"Loaded {memoryContext.Memories.Count} relevant saved memory item(s).");
         var state = await GetOrCreateConversationStateAsync(turn.ConversationId, cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<MeaiChatMessage> input = BuildInitialInput(state, history, userText, memoryContext);
+        IReadOnlyList<MeaiChatMessage> input = BuildInitialInput(
+            state,
+            history,
+            userText,
+            memoryContext,
+            attachments);
         string? finishReason = null;
         var wroteAnswer = false;
 
@@ -170,22 +184,56 @@ internal sealed class AliAgentHarnessRunner
         ConversationAgentState state,
         IReadOnlyList<RuntimeChatMessage> history,
         string userText,
-        CoordinatorMemoryResult memoryContext)
+        CoordinatorMemoryResult memoryContext,
+        IReadOnlyList<ChatAttachment> attachments)
     {
+        var userMessage = BuildUserMessage(userText, attachments);
         if (state.Seeded)
         {
             return
             [
                 BuildMemoryContextMessage(memoryContext),
-                new MeaiChatMessage(MeaiChatRole.User, userText)
+                userMessage
             ];
         }
 
         state.Seeded = true;
         var messages = history.Select(ToExtensionsAiMessage).ToList();
         messages.Add(BuildMemoryContextMessage(memoryContext));
-        messages.Add(new MeaiChatMessage(MeaiChatRole.User, userText));
+        messages.Add(userMessage);
         return messages;
+    }
+
+    private static MeaiChatMessage BuildUserMessage(
+        string userText,
+        IReadOnlyList<ChatAttachment> attachments)
+    {
+        if (attachments.Count == 0)
+        {
+            return new MeaiChatMessage(MeaiChatRole.User, userText);
+        }
+
+        var contents = new List<AIContent>
+        {
+            new TextContent(userText)
+        };
+        foreach (var attachment in attachments.Where(item => item.Kind == AttachmentKind.Image))
+        {
+            try
+            {
+                contents.Add(new DataContent(
+                    Convert.FromBase64String(attachment.Base64Data),
+                    string.IsNullOrWhiteSpace(attachment.ContentType) ? "image/png" : attachment.ContentType));
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    $"The attached image '{attachment.FileName}' did not contain valid image data.",
+                    ex);
+            }
+        }
+
+        return new MeaiChatMessage(MeaiChatRole.User, contents);
     }
 
     private static MeaiChatMessage BuildMemoryContextMessage(CoordinatorMemoryResult context)

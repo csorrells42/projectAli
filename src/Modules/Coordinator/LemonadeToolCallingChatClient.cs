@@ -118,9 +118,19 @@ internal sealed class LemonadeToolCallingChatClient(
         foreach (var message in sourceMessages.Where(message => message.Role != AIChatRole.System))
         {
             var text = message.Text;
-            if (!string.IsNullOrWhiteSpace(text))
+            var dataContents = message.Contents
+                .Where(content => content is DataContent or UriContent)
+                .ToList();
+            if (!string.IsNullOrWhiteSpace(text) || dataContents.Count > 0)
             {
-                result.Add(new AIChatMessage(message.Role, text));
+                var contents = new List<AIContent>();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    contents.Add(new TextContent(text));
+                }
+
+                contents.AddRange(dataContents);
+                result.Add(new AIChatMessage(message.Role, contents));
             }
 
             foreach (var call in message.Contents.OfType<FunctionCallContent>())
