@@ -28,7 +28,9 @@ public static class LocalVoiceResourceLocator
     {
         var voiceRoot = FindVoiceRoot(appBaseDirectory, searchRoot);
         var candidate = voiceRoot is null ? null : Path.Combine(voiceRoot, "python-venv", "Scripts", "python.exe");
-        return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
+        return File.Exists(candidate)
+            ? Path.GetFullPath(candidate)
+            : FindBundledPythonExecutable(appBaseDirectory);
     }
 
     public static string? FindPiperVoiceDirectory(string appBaseDirectory, string? searchRoot = null)

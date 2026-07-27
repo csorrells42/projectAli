@@ -2,12 +2,23 @@
 
 Ali is a local-first WPF assistant built in C#.
 
+Original Project Ali source is available under the [MIT License](LICENSE).
+Bundled dependencies and model assets retain their upstream licenses; see
+[Third-Party Notices](THIRD-PARTY-NOTICES.md) and `runtime-assets.json`.
+
 ## Build
 
 ```powershell
 dotnet restore .\Ali.sln --configfile .\NuGet.Config --ignore-failed-sources
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\RestoreRuntimeAssets.ps1
 dotnet build .\Ali.sln --no-restore
 ```
+
+The restore script provisions the ignored canonical staging tree at
+`artifacts\runtime-assets\win-x64`. It accepts `-VerifyOnly` for full checksum
+validation, `-VerifyOnly -Fast` for the Build-time existence/size check, and
+`-OfflineCache <folder>` to restore without network access from a previously
+populated `downloads` and `wheels` cache.
 
 ## Run
 
@@ -19,11 +30,14 @@ dotnet run --project .\src\Ali.csproj --no-build
 
 ```powershell
 dotnet publish .\src\Ali.csproj -c Release -r win-x64 --self-contained true -o .\bin\Release\Ali
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\TestPublishedBundle.ps1 -PublishRoot .\bin\Release\Ali
 ```
 
 Copy the published folder to the target computer and launch `Ali.exe`.
-The publish now fails instead of producing a camera-broken folder when the local
-MediaPipe runtime asset is missing from `lib\vision\mediapipe-runtime`.
+Build fails when a required staged asset is absent. Publish performs the full
+model checksum pass before producing a copy-folder bundle, so a camera-, voice-,
+speech-, or FFmpeg-broken folder cannot be produced accidentally. Non-English
+.NET satellite-resource folders are removed from the finished English bundle.
 
 ## Runtime Data
 
@@ -33,7 +47,10 @@ Ali keeps user-facing runtime data under:
 %LOCALAPPDATA%\AliFiles
 ```
 
-Local voice resources may exist under `lib\voice` during development or beside an installed app. Large package/runtime assets are intentionally ignored by Git.
+Large package/runtime assets are intentionally ignored by Git. Their exact
+versions, licenses, immutable sources, destinations, sizes, and model checksums
+are tracked in `runtime-assets.json`; no machine-bound virtual environment is
+copied into a build.
 
 ## Current Shape
 

@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 1,
+  "platform": "win-x64",
+  "stageRoot": "artifacts/runtime-assets/win-x64",
+  "restoreCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\RestoreRuntimeAssets.ps1",
+  "policies": {
+    "ffmpeg": "required-bundled-lgpl-shared",
+    "sileroVad": "optional; faster-whisper may use its packaged copy, while Ali voice activity retains its RMS fallback",
+    "languages": [ "en" ],
+    "python": "One pinned CPython embeddable runtime; package trees are installed from pinned wheel-only lock files. Virtual environments are never copied."
+  },
+  "assets": [
+    {
+      "id": "python-embed",
+      "version": "3.12.10",
+      "license": "PSF-2.0",
+      "licenseUrl": "https://docs.python.org/3/license.html",
+      "url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+      "fileName": "python-3.12.10-embed-amd64.zip",
+      "size": 11133606,
+      "sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+      "kind": "zip",
+      "mappings": [ { "from": ".", "to": "runtime/python" } ]
+    },
+    {
+      "id": "pip-bootstrap-wheel",
+      "version": "26.1.2",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/pypa/pip/blob/26.1.2/LICENSE.txt",
+      "url": "https://files.pythonhosted.org/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl",
+      "fileName": "pip-26.1.2-py3-none-any.whl",
+      "size": 1813144,
+      "sha256": "382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab",
+      "kind": "pipWheel"
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2-int8",
+      "version": "0.6b-v2-int8",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+      "fileName": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+      "size": 482468385,
+      "sha256": "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad",
+      "kind": "tar.bz2",
+      "mappings": [
+        {
+          "from": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+          "to": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+        }
+      ]
+    },
+    {
+      "id": "sherpa-kws-zh-en-3m",
+      "version": "2025-12-20",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+      "fileName": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+      "size": 32885699,
+      "sha256": "68447f4fbc67e70eee3a93961f36e81e98f47aef73ce7e7ca00885c6cd3616a6",
+      "kind": "tar.bz2",
+      "mappings": [
+        {
+          "from": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
+          "to": "dependencies/audio/keyword-spotting/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"
+        }
+      ]
+    },
+    {
+      "id": "campplus-speaker-voxceleb-16k",
+      "version": "2024-01-17",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/modelscope/3D-Speaker/blob/main/LICENSE",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+      "fileName": "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+      "size": 29596978,
+      "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
+      "kind": "file",
+      "destination": "dependencies/audio/speaker-identification/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+    },
+    {
+      "id": "faster-whisper-small-en-config",
+      "version": "d1d751a5f8271d482d14ca55d9e2deeebbae577f",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/Systran/faster-whisper-small.en/blob/d1d751a5f8271d482d14ca55d9e2deeebbae577f/LICENSE",
+      "url": "https://huggingface.co/Systran/faster-whisper-small.en/resolve/d1d751a5f8271d482d14ca55d9e2deeebbae577f/config.json?download=true",
+      "fileName": "faster-whisper-small.en-config.json",
+      "size": 2657,
+      "sha256": "666a9605530ac1f61fa8177f3702b4dacec9966749e42610839fcc32661d5fae",
+      "kind": "file",
+      "destination": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/config.json"
+    },
+    {
+      "id": "faster-whisper-small-en-model",
+      "version": "d1d751a5f8271d482d14ca55d9e2deeebbae577f",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/Systran/faster-whisper-small.en/blob/d1d751a5f8271d482d14ca55d9e2deeebbae577f/LICENSE",
+      "url": "https://huggingface.co/Systran/faster-whisper-small.en/resolve/d1d751a5f8271d482d14ca55d9e2deeebbae577f/model.bin?download=true",
+      "fileName": "faster-whisper-small.en-model.bin",
+      "size": 483545366,
+      "sha256": "62b2a45b05ee59acb4a5341b33ee35e041395d378d418a18acfe4c9e768ee37a",
+      "kind": "file",
+      "destination": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/model.bin"
+    },
+    {
+      "id": "faster-whisper-small-en-tokenizer",
+      "version": "d1d751a5f8271d482d14ca55d9e2deeebbae577f",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/Systran/faster-whisper-small.en/blob/d1d751a5f8271d482d14ca55d9e2deeebbae577f/LICENSE",
+      "url": "https://huggingface.co/Systran/faster-whisper-small.en/resolve/d1d751a5f8271d482d14ca55d9e2deeebbae577f/tokenizer.json?download=true",
+      "fileName": "faster-whisper-small.en-tokenizer.json",
+      "size": 2128466,
+      "sha256": "929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df",
+      "kind": "file",
+      "destination": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/tokenizer.json"
+    },
+    {
+      "id": "faster-whisper-small-en-vocabulary",
+      "version": "d1d751a5f8271d482d14ca55d9e2deeebbae577f",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/Systran/faster-whisper-small.en/blob/d1d751a5f8271d482d14ca55d9e2deeebbae577f/LICENSE",
+      "url": "https://huggingface.co/Systran/faster-whisper-small.en/resolve/d1d751a5f8271d482d14ca55d9e2deeebbae577f/vocabulary.txt?download=true",
+      "fileName": "faster-whisper-small.en-vocabulary.txt",
+      "size": 422309,
+      "sha256": "ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf",
+      "kind": "file",
+      "destination": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/vocabulary.txt"
+    },
+    {
+      "id": "kitten-tts-nano-model",
+      "version": "7d99aae46867223af52d5ea16d076d8839ce1a2e",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/KittenML/kitten-tts-nano-0.1/blob/7d99aae46867223af52d5ea16d076d8839ce1a2e/LICENSE",
+      "url": "https://huggingface.co/KittenML/kitten-tts-nano-0.1/resolve/7d99aae46867223af52d5ea16d076d8839ce1a2e/kitten_tts_nano_v0_1.onnx?download=true",
+      "fileName": "kitten_tts_nano_v0_1.onnx",
+      "size": 23847845,
+      "sha256": "8818e8f06eb34bc9d17ba3987a9b513c5759e2f5f119b1242cfbb503d12bdc0a",
+      "kind": "file",
+      "destination": "lib/voice/kitten/kitten_tts_nano_v0_1.onnx"
+    },
+    {
+      "id": "kitten-tts-nano-voices",
+      "version": "7d99aae46867223af52d5ea16d076d8839ce1a2e",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/KittenML/kitten-tts-nano-0.1/blob/7d99aae46867223af52d5ea16d076d8839ce1a2e/LICENSE",
+      "url": "https://huggingface.co/KittenML/kitten-tts-nano-0.1/resolve/7d99aae46867223af52d5ea16d076d8839ce1a2e/voices.npz?download=true",
+      "fileName": "kitten-tts-nano-voices.npz",
+      "size": 10294,
+      "sha256": "d1f3b3ce46c5fa79fa0019824bf572fea74f6a84c88b079cfecd700118d00b62",
+      "kind": "file",
+      "destination": "lib/voice/kitten/voices.npz"
+    },
+    {
+      "id": "piper-hfc-female-medium-model",
+      "version": "0d907f158acc877ddeebcbf827659ee13bea8bcd",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/rhasspy/piper-voices/blob/0d907f158acc877ddeebcbf827659ee13bea8bcd/LICENSE",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/0d907f158acc877ddeebcbf827659ee13bea8bcd/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx?download=true",
+      "fileName": "en_US-hfc_female-medium.onnx",
+      "size": 63201294,
+      "sha256": "914c473788fc1fa8b63ace1cdcdb44588f4ae523d3ab37df1536616835a140b7",
+      "kind": "file",
+      "destination": "lib/voice/piper/en_US-hfc_female-medium.onnx"
+    },
+    {
+      "id": "piper-hfc-female-medium-config",
+      "version": "0d907f158acc877ddeebcbf827659ee13bea8bcd",
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/rhasspy/piper-voices/blob/0d907f158acc877ddeebcbf827659ee13bea8bcd/LICENSE",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/0d907f158acc877ddeebcbf827659ee13bea8bcd/en/en_US/hfc_female/medium/en_US-hfc_female-medium.onnx.json?download=true",
+      "fileName": "en_US-hfc_female-medium.onnx.json",
+      "size": 5033,
+      "sha256": "03f1fa0622b80463283592d97aca9f6e89aec345a5c56b7257723e0093c58b6c",
+      "kind": "file",
+      "destination": "lib/voice/piper/en_US-hfc_female-medium.onnx.json"
+    },
+    {
+      "id": "piper-tts-source",
+      "version": "1.6.0",
+      "license": "GPL-3.0-or-later",
+      "licenseUrl": "https://github.com/OHF-Voice/piper1-gpl/blob/v1.6.0/COPYING",
+      "url": "https://files.pythonhosted.org/packages/3e/7d/2e97b591465abf75525e658df61cff4bcb34367d69b39b2ef19b1d533908/piper_tts-1.6.0.tar.gz",
+      "fileName": "piper_tts-1.6.0.tar.gz",
+      "size": 24250315,
+      "sha256": "876952ba7e206957951943f24f0649415fc8c1c513bc8b7e58f2813bd01adb0a",
+      "kind": "file",
+      "destination": "third-party-source/piper_tts-1.6.0.tar.gz"
+    },
+    {
+      "id": "ffmpeg-win64-lgpl-shared",
+      "version": "n8.1.2-31-g8c9502e9b0",
+      "license": "LGPL-2.1-or-later",
+      "licenseUrl": "https://ffmpeg.org/legal.html",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-27-14-00/ffmpeg-n8.1.2-31-g8c9502e9b0-win64-lgpl-shared-8.1.zip",
+      "fileName": "ffmpeg-n8.1.2-31-g8c9502e9b0-win64-lgpl-shared-8.1.zip",
+      "size": 70510962,
+      "sha256": "0c434d097268f8ee61c96eab3faf048ead646f4ff38ee21027012d23f84e5c19",
+      "kind": "zip",
+      "mappings": [
+        { "from": "ffmpeg-n8.1.2-31-g8c9502e9b0-win64-lgpl-shared-8.1/bin", "to": "dependencies/ffmpeg/win-x64" },
+        { "from": "ffmpeg-n8.1.2-31-g8c9502e9b0-win64-lgpl-shared-8.1/LICENSE.txt", "to": "dependencies/ffmpeg/LICENSE.txt" }
+      ]
+    }
+  ],
+  "packageGroups": [
+    { "id": "mediapipe", "requirements": "tools/runtime-assets/requirements-mediapipe.txt", "destination": "runtime/python-packages" },
+    { "id": "voice", "requirements": "tools/runtime-assets/requirements-voice.txt", "destination": "runtime/tts-packages" },
+    { "id": "whisper", "requirements": "tools/runtime-assets/requirements-whisper.txt", "destination": "runtime/whisper-packages" }
+  ],
+  "repositoryFiles": [
+    { "source": "LICENSE", "destination": "LICENSE" },
+    { "source": "THIRD-PARTY-NOTICES.md", "destination": "THIRD-PARTY-NOTICES.md" },
+    { "source": "src/Modules/Voice/Tools/local_kitten_tts.py", "destination": "lib/voice/local_kitten_tts.py" },
+    { "source": "src/Modules/Voice/Tools/local_whisper_stt.py", "destination": "lib/voice/local_whisper_stt.py" },
+    { "source": "external/modules/ParakeetSpeechToTextModule/faster_whisper_worker.py", "destination": "dependencies/audio/whisper/faster_whisper_worker.py", "optional": true }
+  ],
+  "packageMarkers": [
+    "runtime/python-packages/mediapipe/__init__.py",
+    "runtime/tts-packages/kittentts/__init__.py",
+    "runtime/tts-packages/piper/__init__.py",
+    "runtime/whisper-packages/faster_whisper/__init__.py"
+  ],
+  "requiredFiles": [
+    { "path": "runtime/python/python.exe", "size": 104952, "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a" },
+    { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/decoder.int8.onnx", "size": 7257753, "sha256": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e" },
+    { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx", "size": 652184296, "sha256": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab" },
+    { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/joiner.int8.onnx", "size": 1739080, "sha256": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2" },
+    { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/tokens.txt", "size": 9384, "sha256": "ec182b70dd42113aff6c5372c75cac58c952443eb22322f57bbd7f53977d497d" },
+    { "path": "dependencies/audio/keyword-spotting/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-8-left-64.onnx", "size": 759829, "sha256": "63a22dd60f40fff082ac3e09afa507f6787da36df76ded2fbe145fa233e22c21" },
+    { "path": "dependencies/audio/keyword-spotting/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-8-left-64.int8.onnx", "size": 4600657, "sha256": "2ca84d6bfe73e1ea3c9c49f600f7cad1c9ddd423c53c906b8bfe802444dd78d5" },
+    { "path": "dependencies/audio/keyword-spotting/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx", "size": 86629, "sha256": "190d4067b4cc20b72a42a1916e69d92052000fb7051a427ebb1bc72a69207dc1" },
+    { "path": "dependencies/audio/keyword-spotting/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/en.phone", "size": 3330061, "sha256": "f7000ec3a90544c0c7c16090d8951779c2b322e14dad5006290f498567d439ea" },
+    { "path": "dependencies/audio/keyword-spotting/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt", "size": 1928, "sha256": "2d3f32311f9b692b964da3c90e830258d3e78e013cb0c992dbfb15cd5a1a71b0" },
+    { "path": "dependencies/audio/speaker-identification/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx", "size": 29596978, "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b" },
+    { "path": "lib/voice/kitten/kitten_tts_nano_v0_1.onnx", "size": 23847845, "sha256": "8818e8f06eb34bc9d17ba3987a9b513c5759e2f5f119b1242cfbb503d12bdc0a" },
+    { "path": "lib/voice/kitten/voices.npz", "size": 10294, "sha256": "d1f3b3ce46c5fa79fa0019824bf572fea74f6a84c88b079cfecd700118d00b62" },
+    { "path": "lib/voice/piper/en_US-hfc_female-medium.onnx", "size": 63201294, "sha256": "914c473788fc1fa8b63ace1cdcdb44588f4ae523d3ab37df1536616835a140b7" },
+    { "path": "lib/voice/piper/en_US-hfc_female-medium.onnx.json", "size": 5033, "sha256": "03f1fa0622b80463283592d97aca9f6e89aec345a5c56b7257723e0093c58b6c" },
+    { "path": "third-party-source/piper_tts-1.6.0.tar.gz", "size": 24250315, "sha256": "876952ba7e206957951943f24f0649415fc8c1c513bc8b7e58f2813bd01adb0a" },
+    { "path": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/config.json", "size": 2657, "sha256": "666a9605530ac1f61fa8177f3702b4dacec9966749e42610839fcc32661d5fae" },
+    { "path": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/model.bin", "size": 483545366, "sha256": "62b2a45b05ee59acb4a5341b33ee35e041395d378d418a18acfe4c9e768ee37a" },
+    { "path": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/tokenizer.json", "size": 2128466, "sha256": "929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df" },
+    { "path": "lib/voice/whisper/models--Systran--faster-whisper-small.en/snapshots/d1d751a5f8271d482d14ca55d9e2deeebbae577f/vocabulary.txt", "size": 422309, "sha256": "ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf" },
+    { "path": "dependencies/ffmpeg/win-x64/ffmpeg.exe", "size": 542208, "sha256": "8d983b54f6e8e6e13481c81fdefa1e1d1670ce8396fbd7df67cfa5efd1b76174" },
+    { "path": "dependencies/ffmpeg/win-x64/avcodec-62.dll", "size": 70875136, "sha256": "840c71a812427a1dcabd71990d4dcfbe042b2137457d022cf06557a6f311a5b2" },
+    { "path": "dependencies/ffmpeg/win-x64/avdevice-62.dll", "size": 3699712, "sha256": "141a9d13269ea5bb7f6db61357967fd7662e30fc8621a3c88bec86555b1872bc" },
+    { "path": "dependencies/ffmpeg/win-x64/avfilter-11.dll", "size": 29816320, "sha256": "8c8b0de891861aa138394e89350b7568b75f033fc78497331ed08888805c79b3" },
+    { "path": "dependencies/ffmpeg/win-x64/avformat-62.dll", "size": 22070784, "sha256": "233960e25ae220ff3480d798af3fd9443ee58c41852f60905d39da5e8d880baa" },
+    { "path": "dependencies/ffmpeg/win-x64/avutil-60.dll", "size": 2937856, "sha256": "96b458a2f911b5c82b4e040bb790b9e4463569758e99d7cad70ba7f40cc78f63" },
+    { "path": "dependencies/ffmpeg/win-x64/swresample-6.dll", "size": 723968, "sha256": "9f73b88c36753f8a79eb8e7db53b8f68ce07034620fb509ef605ad05e25fecc3" },
+    { "path": "dependencies/ffmpeg/win-x64/swscale-9.dll", "size": 12570624, "sha256": "5ca733581268c3ef7a365b155bfafabe4cd205426db78eda91881efaf60781c5" }
+  ]
+}

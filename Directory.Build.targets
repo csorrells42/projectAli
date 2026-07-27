@@ -1,0 +1,36 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Ali'">
+    <AliRuntimeAssetStage>$(MSBuildThisFileDirectory)artifacts\runtime-assets\win-x64</AliRuntimeAssetStage>
+    <AliRuntimeRestoreCommand>powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)tools\RestoreRuntimeAssets.ps1&quot;</AliRuntimeRestoreCommand>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Ali' And Exists('$(AliRuntimeAssetStage)')">
+    <Content Include="$(AliRuntimeAssetStage)\**\*"
+             Link="%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="ValidateAliRuntimeAssetsForBuild"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(MSBuildProjectName)' == 'Ali'">
+    <Exec Command="$(AliRuntimeRestoreCommand) -VerifyOnly -Fast"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" />
+  </Target>
+
+  <Target Name="ValidateAliRuntimeAssetsForPublish"
+          BeforeTargets="ComputeFilesToPublish"
+          Condition="'$(MSBuildProjectName)' == 'Ali'">
+    <Exec Command="$(AliRuntimeRestoreCommand) -VerifyOnly"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" />
+  </Target>
+
+  <Target Name="RemoveAliNonEnglishSatelliteResources"
+          AfterTargets="Publish"
+          Condition="'$(MSBuildProjectName)' == 'Ali'">
+    <ItemGroup>
+      <_AliNonEnglishSatelliteDirectory Include="$(PublishDir)cs;$(PublishDir)de;$(PublishDir)es;$(PublishDir)fr;$(PublishDir)it;$(PublishDir)ja;$(PublishDir)ko;$(PublishDir)pl;$(PublishDir)pt-BR;$(PublishDir)ru;$(PublishDir)tr" />
+    </ItemGroup>
+    <RemoveDir Directories="@(_AliNonEnglishSatelliteDirectory)" />
+  </Target>
+</Project>
