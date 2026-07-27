@@ -130,7 +130,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _internetFirecrawlUsageText = "Firecrawl usage not checked yet.";
     private string _internetBraveSearchUsageText = "Brave Search usage not checked yet.";
     private string _internetSerperUsageText = "Serper usage not checked yet.";
-    private string _attachmentStatus = "Screenshots are temporary by default.";
+    private string _attachmentStatus = "AI can be wrong.  Always check answers against reliable sources.";
     private string _voiceStatus = "Voice idle.";
     private string _sttStatus = "STT status loading.";
     private string _ttsStatus = "TTS status loading.";
@@ -2425,7 +2425,7 @@ public sealed class MainWindowViewModel : ObservableObject
         LastTranscript = string.Empty;
         StatusText = statusText;
         VoiceStatus = "Voice idle.";
-        AttachmentStatus = "Screenshots are temporary by default.";
+        AttachmentStatus = "AI can be wrong.  Always check answers against reliable sources.";
     }
 
     private void RefreshConversationHistory()
@@ -2510,7 +2510,7 @@ public sealed class MainWindowViewModel : ObservableObject
         EditableTranscript = string.Empty;
         LastTranscript = string.Empty;
         VoiceStatus = "Voice idle.";
-        AttachmentStatus = "Screenshots are temporary by default.";
+        AttachmentStatus = "AI can be wrong.  Always check answers against reliable sources.";
         StatusText = $"Loaded saved chat: {conversation.Title}";
     }
 
@@ -4578,7 +4578,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Attachments.Remove(attachment);
         DeleteAttachmentIfTemporary(attachment);
         AttachmentStatus = Attachments.Count == 0
-            ? "Screenshots are temporary by default."
+            ? "AI can be wrong.  Always check answers against reliable sources."
             : $"{Attachments.Count} image attachment(s). Temporary by default.";
     }
 
@@ -4594,7 +4594,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         AttachmentStatus = Attachments.Count == 0
-            ? "Screenshots are temporary by default."
+            ? "AI can be wrong.  Always check answers against reliable sources."
             : $"{Attachments.Count} retained image attachment(s).";
     }
 
