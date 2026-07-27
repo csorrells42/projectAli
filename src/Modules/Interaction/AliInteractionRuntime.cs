@@ -66,6 +66,7 @@ public sealed class AliInteractionRuntime : IDisposable
         var bundledPackageRoots = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "runtime", "whisper-packages"),
+            Path.Combine(AppContext.BaseDirectory, "runtime", "tts-packages"),
             packages
         };
         var pythonPathEntries = (Environment.GetEnvironmentVariable("PYTHONPATH") ?? "")

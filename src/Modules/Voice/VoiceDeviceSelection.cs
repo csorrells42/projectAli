@@ -71,7 +71,8 @@ public static class VoiceDeviceSelection
 
         if (settings.SelectedOutputDeviceNumber is int savedNumber)
         {
-            var savedByName = string.IsNullOrWhiteSpace(settings.SelectedOutputDeviceName)
+            var hasSavedName = !string.IsNullOrWhiteSpace(settings.SelectedOutputDeviceName);
+            var savedByName = !hasSavedName
                 ? null
                 : devices.FirstOrDefault(device =>
                     string.Equals(device.Name, settings.SelectedOutputDeviceName, StringComparison.Ordinal));
@@ -85,6 +86,17 @@ public static class VoiceDeviceSelection
                     savedByName.Name,
                     true,
                     warning);
+            }
+
+            if (hasSavedName)
+            {
+                var defaultOutput = devices.FirstOrDefault(device => device.DeviceNumber == -1)
+                    ?? devices[0];
+                return new VoiceDeviceSelectionResult(
+                    defaultOutput.DeviceNumber,
+                    defaultOutput.Name,
+                    false,
+                    $"Saved speaker {savedNumber}: {settings.SelectedOutputDeviceName} is missing. Ali selected {defaultOutput.Name} for now.");
             }
 
             var saved = devices.FirstOrDefault(device => device.DeviceNumber == savedNumber);

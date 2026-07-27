@@ -53,8 +53,7 @@ public static class LocalVoiceResourceLocator
             return voicePython;
         }
 
-        var bundledPython = Path.Combine(appBaseDirectory, "runtime", "python", "python.exe");
-        return File.Exists(bundledPython) ? Path.GetFullPath(bundledPython) : null;
+        return FindBundledPythonExecutable(appBaseDirectory);
     }
 
     public static string? FindWhisperModelRoot(string appBaseDirectory, string? searchRoot = null)
@@ -80,7 +79,8 @@ public static class LocalVoiceResourceLocator
 
     public static string? FindKittenPythonExecutable(string appBaseDirectory, string? searchRoot = null)
     {
-        return FindPythonExecutable(appBaseDirectory, searchRoot);
+        return FindPythonExecutable(appBaseDirectory, searchRoot)
+            ?? FindBundledPythonExecutable(appBaseDirectory);
     }
 
     public static string? FindKittenModelRoot(string appBaseDirectory, string? searchRoot = null)
@@ -387,6 +387,12 @@ public static class LocalVoiceResourceLocator
 
     private static bool LocalPathExists(string? path) =>
         !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path));
+
+    private static string? FindBundledPythonExecutable(string appBaseDirectory)
+    {
+        var candidate = Path.Combine(appBaseDirectory, "runtime", "python", "python.exe");
+        return File.Exists(candidate) ? Path.GetFullPath(candidate) : null;
+    }
 
     private static bool ShouldSkipDirectory(string? name) =>
         name is null
