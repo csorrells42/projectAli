@@ -228,6 +228,15 @@ internal sealed class LemonadeToolCallingChatClient(
         var raw = response.Text?.Trim() ?? string.Empty;
         if (!TryParseDecision(raw, out var decision))
         {
+            if (TryExtractIncompleteFinalAnswer(raw, out var recoveredAnswer))
+            {
+                turn?.Report(
+                    AgentActivityKind.Warning,
+                    "Recovered a partial final answer",
+                    "The model reached its output limit before closing the internal response envelope. Ali removed the envelope and preserved the readable answer.");
+                return CopyMetadata(response, new TextContent(recoveredAnswer));
+            }
+
             turn?.Report(
                 AgentActivityKind.Warning,
                 "The model returned an ordinary answer",
@@ -310,6 +319,142 @@ internal sealed class LemonadeToolCallingChatClient(
         {
             return false;
         }
+    }
+
+    private static bool TryExtractIncompleteFinalAnswer(string text, out string answer)
+    {
+        answer = string.Empty;
+        var candidate = text.TrimStart();
+        if (!candidate.StartsWith('{')
+            || !TryReadJsonStringProperty(candidate, "action", out var encodedAction, out var actionClosed)
+            || !actionClosed
+            || !TryDecodeJsonString(encodedAction, out var action)
+            || !string.Equals(action, "final", StringComparison.OrdinalIgnoreCase)
+            || !TryReadJsonStringProperty(candidate, "answer", out var encodedAnswer, out var answerClosed)
+            || !TryDecodeJsonString(encodedAnswer, out answer)
+            || string.IsNullOrWhiteSpace(answer))
+        {
+            answer = string.Empty;
+            return false;
+        }
+
+        answer = answer.Trim();
+        if (!answerClosed)
+        {
+            answer += "\n\nResponse stopped at the model output limit.";
+        }
+
+        return true;
+    }
+
+    private static bool TryReadJsonStringProperty(
+        string text,
+        string propertyName,
+        out string encodedValue,
+        out bool closed)
+    {
+        encodedValue = string.Empty;
+        closed = false;
+        var propertyToken = $"\"{propertyName}\"";
+        var propertyStart = text.IndexOf(propertyToken, StringComparison.Ordinal);
+        if (propertyStart < 0)
+        {
+            return false;
+        }
+
+        var index = propertyStart + propertyToken.Length;
+        while (index < text.Length && char.IsWhiteSpace(text[index]))
+        {
+            index++;
+        }
+
+        if (index >= text.Length || text[index] != ':')
+        {
+            return false;
+        }
+
+        index++;
+        while (index < text.Length && char.IsWhiteSpace(text[index]))
+        {
+            index++;
+        }
+
+        if (index >= text.Length || text[index] != '"')
+        {
+            return false;
+        }
+
+        var valueStart = ++index;
+        var escaped = false;
+        for (; index < text.Length; index++)
+        {
+            var current = text[index];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (current == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (current == '"')
+            {
+                encodedValue = text[valueStart..index];
+                closed = true;
+                return true;
+            }
+        }
+
+        encodedValue = text[valueStart..];
+        return true;
+    }
+
+    private static bool TryDecodeJsonString(string encodedValue, out string decodedValue)
+    {
+        decodedValue = string.Empty;
+        var safeValue = TrimIncompleteJsonEscape(encodedValue);
+        try
+        {
+            decodedValue = JsonSerializer.Deserialize<string>($"\"{safeValue}\"") ?? string.Empty;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string TrimIncompleteJsonEscape(string value)
+    {
+        var lastSlash = value.LastIndexOf('\\');
+        if (lastSlash < 0)
+        {
+            return value;
+        }
+
+        var precedingSlashes = 0;
+        for (var index = lastSlash - 1; index >= 0 && value[index] == '\\'; index--)
+        {
+            precedingSlashes++;
+        }
+
+        if (precedingSlashes % 2 != 0)
+        {
+            return value;
+        }
+
+        var escapeLength = value.Length - lastSlash;
+        if (escapeLength == 1
+            || (escapeLength < 6 && escapeLength > 1 && value[lastSlash + 1] == 'u'))
+        {
+            return value[..lastSlash];
+        }
+
+        return value;
     }
 
     private static Dictionary<string, object?> ParseArguments(JsonElement root)

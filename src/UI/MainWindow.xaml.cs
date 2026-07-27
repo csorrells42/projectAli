@@ -11,6 +11,8 @@ namespace Ali.UI;
 
 public partial class MainWindow : Window
 {
+    private static readonly TimeSpan StartupCloseWait = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan ShutdownCloseWait = TimeSpan.FromMilliseconds(1500);
     private bool _allowClose;
     private bool _closing;
     private Task? _startupTask;
@@ -58,19 +60,45 @@ public partial class MainWindow : Window
 
         e.Cancel = true;
         _closing = true;
-        if (DataContext is MainWindowViewModel viewModel)
+        Hide();
+        try
         {
-            viewModel.RequestShutdownCancellation();
-            if (_startupTask is { IsCompleted: false })
+            if (DataContext is MainWindowViewModel viewModel)
             {
-                await _startupTask.ConfigureAwait(true);
+                viewModel.RequestShutdownCancellation();
+                if (_startupTask is { IsCompleted: false } startupTask)
+                {
+                    var startupCompletion = await Task.WhenAny(
+                        startupTask,
+                        Task.Delay(StartupCloseWait)).ConfigureAwait(true);
+                    if (ReferenceEquals(startupCompletion, startupTask))
+                    {
+                        await startupTask.ConfigureAwait(true);
+                    }
+                }
+
+                if (_startupTask is not { IsCompleted: false })
+                {
+                    var shutdownTask = viewModel.ShutdownLocalRuntimeAsync();
+                    var shutdownCompletion = await Task.WhenAny(
+                        shutdownTask,
+                        Task.Delay(ShutdownCloseWait)).ConfigureAwait(true);
+                    if (ReferenceEquals(shutdownCompletion, shutdownTask))
+                    {
+                        await shutdownTask.ConfigureAwait(true);
+                    }
+                }
             }
-
-            await viewModel.ShutdownLocalRuntimeAsync().ConfigureAwait(true);
         }
-
-        _allowClose = true;
-        Close();
+        catch
+        {
+            // Closing must remain reliable even when camera or runtime cleanup faults.
+        }
+        finally
+        {
+            _allowClose = true;
+            Close();
+        }
     }
 
     private async void ComposerTextBox_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
