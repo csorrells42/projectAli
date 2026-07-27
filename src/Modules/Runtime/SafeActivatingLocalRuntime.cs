@@ -4,7 +4,7 @@ using Ali.Modules.Runtime;
 
 namespace Ali.Modules.Runtime;
 
-public sealed class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime
+public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient
 {
     private readonly ILocalModelRuntime _fallbackRuntime;
     private ILocalModelRuntime? _candidateRuntime;

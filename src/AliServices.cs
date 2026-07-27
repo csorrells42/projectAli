@@ -7,6 +7,7 @@ using Ali.Modules.Internet;
 using Ali.Modules.RAG;
 using Ali.Modules.Voice;
 using Ali.Modules.Storage;
+using Ali.Modules.Coordinator;
 
 namespace Ali;
 
@@ -230,16 +231,27 @@ public sealed class AliServices
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
         var permissions = new PermissionService();
+        var webSources = new TavilyFirecrawlSourceRetriever(
+            httpClient,
+            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+        var coordinator = new AliToolCoordinator(
+            runtime,
+            runtime,
+            localLibrary,
+            webSources,
+            memories,
+            reminders,
+            permissions,
+            profile);
         var orchestrator = new ConversationOrchestrator(
             runtime,
             permissions,
             correctionQueue,
             new CompositeSourceRetriever(
                 localLibrary,
-                new TavilyFirecrawlSourceRetriever(
-                    httpClient,
-                    () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot))),
-            memoryStore: memories);
+                webSources),
+            memoryStore: memories,
+            coordinator: coordinator);
 
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();

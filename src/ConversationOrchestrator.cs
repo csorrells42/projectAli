@@ -10,6 +10,7 @@ using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Ali.Modules.Internet;
 using Ali.Modules.Time;
+using Ali.Modules.Coordinator;
 
 namespace Ali;
 
@@ -33,7 +34,8 @@ public sealed class ConversationOrchestrator(
     CorrectionQueueService correctionQueue,
     ISourceRetriever? sourceRetriever = null,
     ISourceQueryPlanner? sourceQueryPlanner = null,
-    IMemoryStore? memoryStore = null)
+    IMemoryStore? memoryStore = null,
+    AliToolCoordinator? coordinator = null)
 {
     private const int MaxPromptMemories = 20;
     private static readonly char[] MemoryRelevanceTokenSeparators =
@@ -103,6 +105,8 @@ public sealed class ConversationOrchestrator(
 
     public IMemoryStore? Memories { get; } = memoryStore;
 
+    public AliToolCoordinator? Coordinator { get; } = coordinator;
+
     public async IAsyncEnumerable<AssistantStreamChunk> StreamAnswerAsync(
         string conversationId,
         string userMessageId,
@@ -116,6 +120,24 @@ public sealed class ConversationOrchestrator(
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(assistantMessageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userText);
+
+        if (Coordinator is not null)
+        {
+            await foreach (var chunk in Coordinator.StreamAnswerAsync(
+                               conversationId,
+                               userMessageId,
+                               assistantMessageId,
+                               userText,
+                               history,
+                               attachments,
+                               cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+
+            yield break;
+        }
 
         yield return new AssistantStreamChunk(
             conversationId,

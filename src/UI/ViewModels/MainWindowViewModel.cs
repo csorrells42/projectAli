@@ -48,6 +48,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan StreamingTextFlushInterval = TimeSpan.FromMilliseconds(45);
     private static readonly TimeSpan StreamingTextPaceDelay = TimeSpan.FromMilliseconds(12);
+    private static readonly TimeSpan VoicePlaybackEchoCooldown = TimeSpan.FromMilliseconds(1500);
     private static readonly JsonSerializerOptions MaintenanceReceiptJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
     private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
@@ -94,6 +95,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isRecording;
     private bool _isTranscribing;
     private bool _isSpeaking;
+    private DateTimeOffset _suppressVoiceIngressUntil = DateTimeOffset.MinValue;
     private string _statusText = "Ready. Local runtime is not configured yet.";
     private string _runtimeDisplay;
     private string _selectedRuntimeEngine = LocalRuntimeEngines.Lemonade;
@@ -1647,6 +1649,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             if (SetProperty(ref _isSpeaking, value))
             {
+                if (!value)
+                {
+                    _suppressVoiceIngressUntil = DateTimeOffset.UtcNow + VoicePlaybackEchoCooldown;
+                }
+
                 OnPropertyChanged(nameof(SendButtonText));
                 OnPropertyChanged(nameof(SendButtonToolTip));
                 OnPropertyChanged(nameof(SendButtonBackground));
@@ -2104,7 +2111,6 @@ public sealed class MainWindowViewModel : ObservableObject
         var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
         var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
         var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
-        var localFoundationStatus = ApplyLocalMemoryAndReminderRequests(text, userMessageId);
         var userMessage = new ChatMessageViewModel(
             userMessageId,
             ChatRole.User,
@@ -2270,10 +2276,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ClearTemporaryAttachments();
             SaveActiveConversation();
             UpdateRuntimeStatus();
-            if (!string.IsNullOrWhiteSpace(localFoundationStatus))
-            {
-                StatusText = $"{StatusText} {localFoundationStatus}";
-            }
+            RefreshMemoryReminders();
         }
     }
 
@@ -6543,8 +6546,16 @@ public sealed class MainWindowViewModel : ObservableObject
         AttentionStatus = runtime.HasAttention
             ? $"Attention: Yes ({runtime.AttentionSource})"
             : "Attention: No";
-        if (_interactionPollBusy || IsBusy
-            || !runtime.TryTakeAcceptedSpeech(out var accepted)
+        if (_interactionPollBusy || IsBusy)
+        {
+            return;
+        }
+        if (IsSpeaking || DateTimeOffset.UtcNow < _suppressVoiceIngressUntil)
+        {
+            runtime.TryTakeAcceptedSpeech(out _);
+            return;
+        }
+        if (!runtime.TryTakeAcceptedSpeech(out var accepted)
             || accepted is null)
         {
             return;

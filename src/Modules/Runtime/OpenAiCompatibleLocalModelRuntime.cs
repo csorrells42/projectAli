@@ -13,7 +13,7 @@ using Ali;
 
 namespace Ali.Modules.Runtime;
 
-public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime
+public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient
 {
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
