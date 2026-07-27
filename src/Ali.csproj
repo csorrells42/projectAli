@@ -10,6 +10,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <MediaPipeRuntimeAssetRoot>$(MSBuildProjectDirectory)\..\lib\vision\mediapipe-runtime</MediaPipeRuntimeAssetRoot>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="depricated\**\*.cs" />
@@ -56,5 +57,19 @@
   <ItemGroup>
     <Content Include="Modules\Voice\Tools\local_kitten_tts.py" Link="lib\voice\local_kitten_tts.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Modules\Voice\Tools\local_whisper_stt.py" Link="lib\voice\local_whisper_stt.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MediaPipeRuntimeAssetRoot)\python\**\*"
+             Link="runtime\python\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Condition="Exists('$(MediaPipeRuntimeAssetRoot)\python\python.exe')" />
+    <Content Include="$(MediaPipeRuntimeAssetRoot)\python-packages\**\*"
+             Link="runtime\python-packages\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Condition="Exists('$(MediaPipeRuntimeAssetRoot)\python-packages\mediapipe\__init__.py')" />
   </ItemGroup>
+  <Target Name="ValidatePortableMediaPipeRuntime" BeforeTargets="Publish">
+    <Error Condition="!Exists('$(MediaPipeRuntimeAssetRoot)\python\python.exe') Or !Exists('$(MediaPipeRuntimeAssetRoot)\python-packages\mediapipe\__init__.py')"
+           Text="Ali portable publish requires the local MediaPipe runtime under lib\vision\mediapipe-runtime. Restore that asset before publishing so the camera cannot ship broken." />
+  </Target>
 </Project>

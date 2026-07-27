@@ -22,6 +22,8 @@ dotnet publish .\src\Ali.csproj -c Release -r win-x64 --self-contained true -o .
 ```
 
 Copy the published folder to the target computer and launch `Ali.exe`.
+The publish now fails instead of producing a camera-broken folder when the local
+MediaPipe runtime asset is missing from `lib\vision\mediapipe-runtime`.
 
 ## Runtime Data
 
