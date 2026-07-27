@@ -146,9 +146,13 @@ public sealed class AliServices
         get
         {
             var configuredRoot = Environment.GetEnvironmentVariable(LocalAliRootEnvironmentVariable);
-            return string.IsNullOrWhiteSpace(configuredRoot)
-                ? Path.Combine(GetLocalApplicationDataRoot(), LocalAliRootFolderName)
-                : Path.GetFullPath(configuredRoot.Trim());
+            if (!string.IsNullOrWhiteSpace(configuredRoot))
+            {
+                return Path.GetFullPath(configuredRoot.Trim());
+            }
+
+            return AliDataFolderSelectionStore.Load()
+                ?? Path.Combine(GetLocalApplicationDataRoot(), LocalAliRootFolderName);
         }
     }
 

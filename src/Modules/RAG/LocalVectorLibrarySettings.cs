@@ -5,13 +5,17 @@ namespace Ali.Modules.RAG;
 
 public sealed record LocalVectorLibrarySettings
 {
+    public const string DefaultEmbeddingEndpoint = "http://127.0.0.1:13305/api/v1/embeddings";
+
+    public const string DefaultEmbeddingModel = "nomic-embed-text-v1-GGUF";
+
     public bool Enabled { get; init; } = true;
 
     public string RootDirectory { get; init; } = DefaultRootDirectory();
 
-    public string EmbeddingEndpoint { get; init; } = "http://127.0.0.1:11434/api/embed";
+    public string EmbeddingEndpoint { get; init; } = DefaultEmbeddingEndpoint;
 
-    public string EmbeddingModel { get; init; } = "nomic-embed-text";
+    public string EmbeddingModel { get; init; } = DefaultEmbeddingModel;
 
     public int ScanIntervalMinutes { get; init; } = 10;
 

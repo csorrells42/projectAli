@@ -189,12 +189,92 @@
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         </Style>
-        <Style TargetType="MenuItem">
-            <Setter Property="Background" Value="{StaticResource PanelAltBrush}" />
+        <Style TargetType="Menu">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-            <Setter Property="Padding" Value="10,6" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style TargetType="MenuItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Grid SnapsToDevicePixels="True">
+                            <Border x:Name="MenuItemBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="Transparent"
+                                    BorderThickness="1"
+                                    Padding="10,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0"
+                                                      ContentSource="Header"
+                                                      RecognizesAccessKey="True"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Center" />
+                                    <TextBlock x:Name="CheckIndicator"
+                                               Grid.Column="1"
+                                               Text="&#xE73E;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               Foreground="#8EE6B5"
+                                               Visibility="Collapsed"
+                                               Margin="14,0,0,0"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock x:Name="SubmenuIndicator"
+                                               Grid.Column="2"
+                                               Text="&#xE76C;"
+                                               FontFamily="Segoe MDL2 Assets"
+                                               Foreground="#B9D7EF"
+                                               Visibility="Collapsed"
+                                               Margin="14,0,0,0"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   Placement="Right"
+                                   PopupAnimation="Fade"
+                                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                                <Border Background="{StaticResource PanelAltBrush}"
+                                        BorderBrush="#4C7598"
+                                        BorderThickness="1"
+                                        MinWidth="190"
+                                        Padding="2">
+                                    <StackPanel IsItemsHost="True"
+                                                KeyboardNavigation.DirectionalNavigation="Cycle" />
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="#243F58" />
+                                <Setter TargetName="MenuItemBorder" Property="BorderBrush" Value="#4C7598" />
+                            </Trigger>
+                            <Trigger Property="IsSubmenuOpen" Value="True">
+                                <Setter TargetName="MenuItemBorder" Property="Background" Value="#183149" />
+                                <Setter TargetName="MenuItemBorder" Property="BorderBrush" Value="#4C7598" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="CheckIndicator" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="TopLevelHeader">
+                                <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom" />
+                            </Trigger>
+                            <Trigger Property="Role" Value="SubmenuHeader">
+                                <Setter TargetName="SubmenuIndicator" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="Separator">
             <Setter Property="Height" Value="1" />
@@ -237,8 +317,8 @@
               Background="{StaticResource PanelBrush}"
               Foreground="{StaticResource TextBrush}">
             <MenuItem Header="_File">
-                <MenuItem Header="_Identity Review..." IsEnabled="False" ToolTip="Identity review is supplied by the shared IdentityModule and will open here after its portable review surface is connected." />
-                <MenuItem Header="_User Data Folder" IsEnabled="False" ToolTip="All durable assistant state is stored beneath the UserData folder." />
+                <MenuItem Header="_Identity Review..." Click="OpenIdentityReviewMenuItem_OnClick" />
+                <MenuItem Header="_Choose Data Folder..." Click="OpenDataFolderMenuItem_OnClick" />
                 <MenuItem Header="_Identity Engine">
                     <MenuItem Header="_CPU" IsCheckable="True" IsChecked="True" />
                     <MenuItem Header="_DirectML GPU" IsCheckable="True" IsEnabled="False" ToolTip="GPU identity remains held back until its recognition path passes validation." />
@@ -254,7 +334,9 @@
                               Command="{Binding SelectWhisperSpeechToTextCommand}" />
                 </MenuItem>
                 <Separator />
-                <MenuItem Header="Frame Pipeline _Timing..." IsEnabled="False" ToolTip="The shared module timing surface will be attached after the live integration pass." />
+                <MenuItem Header="Frame Pipeline _Timing..."
+                          ToolTip="Opens a table that requests each module's current waited and worked times once per second."
+                          Click="OpenPipelineTimingMenuItem_OnClick" />
                 <Separator />
                 <MenuItem Header="E_xit" Click="CloseMenuItem_OnClick" />
             </MenuItem>
@@ -612,6 +694,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
@@ -636,7 +719,37 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Border Grid.Row="1"
+                <StackPanel Grid.Row="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            Margin="0,0,8,6"
+                            ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
+                    <TextBlock Text="Effort"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="0,0,12,0" />
+                    <RadioButton Content="Low"
+                                 GroupName="ReasoningEffort"
+                                 IsChecked="{Binding IsReasoningLow}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,14,0" />
+                    <RadioButton Content="Medium"
+                                 GroupName="ReasoningEffort"
+                                 IsChecked="{Binding IsReasoningMedium}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,14,0" />
+                    <RadioButton Content="High"
+                                 GroupName="ReasoningEffort"
+                                 IsChecked="{Binding IsReasoningHigh}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 VerticalAlignment="Center" />
+                </StackPanel>
+
+                <Border Grid.Row="2"
                         Background="#242426"
                         BorderBrush="#38383D"
                         BorderThickness="1"
@@ -679,31 +792,16 @@
                                 Style="{StaticResource ComposerButton}"
                                 VerticalAlignment="Bottom"
                                 MinWidth="116" />
-                        <StackPanel Grid.Column="2"
-                                    MinWidth="92"
-                                    Margin="4,0,0,0"
-                                    ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
-                            <TextBlock Text="Effort"
-                                       Foreground="{StaticResource MutedTextBrush}"
-                                       FontSize="11"
-                                       FontWeight="SemiBold"
-                                       Margin="8,0,0,3" />
-                            <RadioButton Content="Low"
-                                         GroupName="ReasoningEffort"
-                                         IsChecked="{Binding IsReasoningLow}"
-                                         Foreground="{StaticResource TextBrush}"
-                                         Margin="8,0,0,2" />
-                            <RadioButton Content="Medium"
-                                         GroupName="ReasoningEffort"
-                                         IsChecked="{Binding IsReasoningMedium}"
-                                         Foreground="{StaticResource TextBrush}"
-                                         Margin="8,0,0,2" />
-                            <RadioButton Content="High"
-                                         GroupName="ReasoningEffort"
-                                         IsChecked="{Binding IsReasoningHigh}"
-                                         Foreground="{StaticResource TextBrush}"
-                                         Margin="8,0,0,6" />
-                            <Button AutomationProperties.AutomationId="MainChatSendButton"
+                        <Grid Grid.Column="2"
+                              MinWidth="286"
+                              Margin="4,0,0,0"
+                              VerticalAlignment="Bottom">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    AutomationProperties.AutomationId="MainChatSendButton"
                                     Content="{Binding SendButtonText}"
                                     Command="{Binding SendCommand}"
                                     ToolTip="{Binding SendButtonToolTip}"
@@ -711,11 +809,18 @@
                                     Background="{Binding SendButtonBackground}"
                                     BorderBrush="{Binding SendButtonBorderBrush}"
                                     MinWidth="92" />
-                        </StackPanel>
+                            <Button Grid.Column="1"
+                                    AutomationProperties.AutomationId="VisualAttentionToggleButton"
+                                    Content="{Binding VisualAttentionButtonText}"
+                                    Command="{Binding ToggleVisualAttentionCommand}"
+                                    ToolTip="{Binding VisualAttentionButtonToolTip}"
+                                    Style="{StaticResource ComposerButton}"
+                                    MinWidth="178" />
+                        </Grid>
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="2" Margin="6,8,6,0">
+                <Grid Grid.Row="3" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />

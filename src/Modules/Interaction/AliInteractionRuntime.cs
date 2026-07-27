@@ -1,5 +1,10 @@
+using AvatarBuilder.Modules.Audio.Microphone;
+using AvatarBuilder.Modules.Audio.SpeakerRecognition;
 using AvatarBuilder.Modules.Audio.SpeechToText;
 using AvatarBuilder.Modules.Pipeline;
+using AvatarBuilder.Modules.Security;
+using AvatarBuilder.Modules.Vision.Identity;
+using AvatarBuilder.Modules.Vision.IdentityEnrollment;
 using AvatarBuilder.Modules.Webcam.Common;
 using AvatarBuilder.Modules.Webcam.MediaFoundation;
 
@@ -14,6 +19,13 @@ public sealed record AliAcceptedSpeech(
     double VisualIdentityConfidence,
     double VoiceIdentityConfidence);
 
+public sealed record AliIdentityReviewSession(
+    IPersonIdentityReviewService Service,
+    System.Windows.FrameworkElement? LiveViewport,
+    IdentityEnrollmentGuidanceModule? Guidance,
+    ISpeakerEnrollmentService SpeakerEnrollment,
+    IMicrophoneInputService MicrophoneInput);
+
 /// <summary>
 /// Application composition facade. It owns lifecycle and selection only; all
 /// capture, analysis, security, transcription, overlay, and viewport work is
@@ -24,6 +36,7 @@ public sealed class AliInteractionRuntime : IDisposable
     private readonly AliSpeechIngressPipeline _speech;
     private readonly SnapshotCursor<TranscriptionOutput> _transcript = new();
     private AliVisionPipeline? _vision;
+    private int _visualAttentionEnabled = 1;
     private bool _disposed;
 
     public AliInteractionRuntime(string assistantName, string aliDataRoot)
@@ -61,20 +74,26 @@ public sealed class AliInteractionRuntime : IDisposable
     public string DataFolder { get; }
     public System.Windows.FrameworkElement? ViewportHost => _vision?.ViewportHost;
     public bool CameraIsOn => _vision is not null;
-    public bool HasVisualAttention => _vision?.HasStableAttention == true;
-    public bool HasAttention => _speech.HasAttention;
-    public string AttentionSource => _speech.AttentionSource.ToString();
+    public bool VisualAttentionEnabled => Volatile.Read(ref _visualAttentionEnabled) != 0;
+    public bool HasVisualAttention => VisualAttentionEnabled && _vision?.HasStableAttention == true;
+    public bool HasAttention => _speech.HasAttention
+        && (VisualAttentionEnabled || _speech.AttentionSource != AttentionGrantSource.Visual);
+    public string AttentionSource => !VisualAttentionEnabled
+        && _speech.AttentionSource == AttentionGrantSource.Visual
+            ? AttentionGrantSource.None.ToString()
+            : _speech.AttentionSource.ToString();
     public string CameraStatus => _vision?.CameraStatus ?? "Camera off";
     public string SpeechStatus => _speech.Status;
     public string SpeechProviderName => _speech.ProviderName;
     public bool SpeechIsConfigured => _speech.IsConfigured;
     public double MicrophoneInputLevel => _speech.Microphone.GetInputLevel();
+    public IFramePipelineTimingReportSource? FramePipelineTiming => _vision;
 
     public void StartSpeech(string? selectedMicrophoneName)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _speech.Start();
         _speech.SelectMicrophoneByName(selectedMicrophoneName);
+        _speech.Start();
     }
 
     public IReadOnlyList<CameraDevice> GetCameras() =>
@@ -130,6 +149,23 @@ public sealed class AliInteractionRuntime : IDisposable
     public void SetOverlays(bool tracking, bool faceMesh) =>
         _vision?.SetOptionalOverlays(tracking, faceMesh);
 
+    public void SetVisualAttentionEnabled(bool enabled) =>
+        Volatile.Write(ref _visualAttentionEnabled, enabled ? 1 : 0);
+
+    public AliIdentityReviewSession CreateIdentityReviewSession(
+        System.Windows.FrameworkElement? liveViewport)
+    {
+        IPersonIdentityReviewService service = _vision?.IdentityReviewService
+            ?? new StoredPersonIdentityReviewService(DataFolder);
+        var guidance = _vision?.CreateIdentityEnrollmentGuidance();
+        return new AliIdentityReviewSession(
+            service,
+            liveViewport,
+            guidance,
+            _speech.SpeakerEnrollmentService,
+            _speech.Microphone);
+    }
+
     public bool TryTakeAcceptedSpeech(out AliAcceptedSpeech? accepted)
     {
         accepted = null;
@@ -146,6 +182,11 @@ public sealed class AliInteractionRuntime : IDisposable
                 return false;
             }
             var decision = output.Interaction.Decision;
+            if (!VisualAttentionEnabled
+                && decision.AttentionSource == AttentionGrantSource.Visual)
+            {
+                return false;
+            }
             accepted = new AliAcceptedSpeech(
                 output.ExactTextForAli,
                 output.Transcription.Provider,

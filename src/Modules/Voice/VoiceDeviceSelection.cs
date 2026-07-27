@@ -22,6 +22,22 @@ public static class VoiceDeviceSelection
 
         if (settings.SelectedInputDeviceNumber is int savedNumber)
         {
+            var savedByName = string.IsNullOrWhiteSpace(settings.SelectedInputDeviceName)
+                ? null
+                : devices.FirstOrDefault(device =>
+                    string.Equals(device.Name, settings.SelectedInputDeviceName, StringComparison.Ordinal));
+            if (savedByName is not null)
+            {
+                var warning = savedByName.DeviceNumber == savedNumber
+                    ? null
+                    : $"Saved microphone moved from number {savedNumber} to {savedByName.DeviceNumber}; Ali restored it by name.";
+                return new VoiceDeviceSelectionResult(
+                    savedByName.DeviceNumber,
+                    savedByName.Name,
+                    true,
+                    warning);
+            }
+
             var saved = devices.FirstOrDefault(device => device.DeviceNumber == savedNumber);
             if (saved is not null)
             {
@@ -55,6 +71,22 @@ public static class VoiceDeviceSelection
 
         if (settings.SelectedOutputDeviceNumber is int savedNumber)
         {
+            var savedByName = string.IsNullOrWhiteSpace(settings.SelectedOutputDeviceName)
+                ? null
+                : devices.FirstOrDefault(device =>
+                    string.Equals(device.Name, settings.SelectedOutputDeviceName, StringComparison.Ordinal));
+            if (savedByName is not null)
+            {
+                var warning = savedByName.DeviceNumber == savedNumber
+                    ? null
+                    : $"Saved speaker moved from number {savedNumber} to {savedByName.DeviceNumber}; Ali restored it by name.";
+                return new VoiceDeviceSelectionResult(
+                    savedByName.DeviceNumber,
+                    savedByName.Name,
+                    true,
+                    warning);
+            }
+
             var saved = devices.FirstOrDefault(device => device.DeviceNumber == savedNumber);
             if (saved is not null)
             {

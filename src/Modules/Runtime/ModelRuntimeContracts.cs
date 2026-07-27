@@ -78,7 +78,7 @@ public interface ILocalModelRuntime
 
 public interface IModelSwitchAwareRuntime
 {
-    string ModelId { get; }
+    string RuntimeIdentity { get; }
 
     Task UnloadForModelSwitchAsync(CancellationToken cancellationToken);
 }

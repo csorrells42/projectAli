@@ -649,6 +649,18 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
+        if (root.TryGetProperty("data", out var data)
+            && data.ValueKind is JsonValueKind.Array)
+        {
+            var first = data.EnumerateArray().FirstOrDefault();
+            if (first.ValueKind is JsonValueKind.Object
+                && first.TryGetProperty("embedding", out var openAiEmbedding)
+                && openAiEmbedding.ValueKind is JsonValueKind.Array)
+            {
+                return ReadFloatArray(openAiEmbedding);
+            }
+        }
+
         if (root.TryGetProperty("embeddings", out var embeddings)
             && embeddings.ValueKind is JsonValueKind.Array)
         {

@@ -17,6 +17,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
 {
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
+    private const int MaximumLowReasoningHealthProbeTokens = 256;
     private const int QwenVisibleOutputTokenFloor = 512;
     private const int QwenVisibleOutputRetryTokenLimit = 1024;
     private const int MaxAutomaticLengthContinuations = 0;
@@ -30,6 +31,8 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
     private const string OutputLimitReachedNotice =
         "Response reached the configured output limit before the model finished. Ask me to continue or increase the Runtime output limit.";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan UnloadVerificationInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan UnloadVerificationTimeout = TimeSpan.FromSeconds(30);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -42,6 +45,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
     private readonly AssistantProfile _assistantProfile;
     private readonly EndpointValidationResult _endpointValidation;
     private string _reasoningEffort;
+    private int? _lastHealthProbeCompletionTokens;
     private int _requestInFlight;
 
     public OpenAiCompatibleLocalModelRuntime(
@@ -59,7 +63,8 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
 
     public ModelProfile ActiveProfile { get; private set; }
 
-    public string ModelId => _options.Model;
+    public string RuntimeIdentity =>
+        $"{LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint)}|{_options.Endpoint}|{_options.Model}";
 
     public string ReasoningEffort => Volatile.Read(ref _reasoningEffort);
 
@@ -224,7 +229,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
                         line["data:".Length..],
                         includeReasoning: isHealthCheck)
                     : new OpenAiStreamEvent(null, null, IsDone: false);
-            if (!string.IsNullOrEmpty(streamEvent.Thinking))
+            if (isHealthCheck && !string.IsNullOrEmpty(streamEvent.Thinking))
             {
                 yield return new ModelToken(
                     streamEvent.Thinking,
@@ -320,6 +325,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
                 return FailureHealth(started, modelsResult.Summary, streamingSupported);
             }
 
+            _lastHealthProbeCompletionTokens = null;
             var nonStreamingText = await SendNonStreamingProbeWithRetryAsync(
                 BuildProbeRequest("Return exactly OK. Do not explain. Do not include thinking text."),
                 cancellationToken).ConfigureAwait(false);
@@ -331,6 +337,12 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
                     started,
                     $"Tiny non-streaming prompt did not return exactly OK after thinking-text cleanup. Raw: {TrimForUser(nonStreamingText)}",
                     streamingSupported);
+            }
+
+            var reasoningControlFailure = ValidateReasoningControlHealthProbe();
+            if (reasoningControlFailure is not null)
+            {
+                return FailureHealth(started, reasoningControlFailure, streamingSupported);
             }
 
             if (_options.StreamingEnabled)
@@ -360,9 +372,15 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
             }
 
             ActiveProfile = _options.ToModelProfile(isLastKnownGood: true);
+            var reasoningVerification = IsGptOssRuntime()
+                ? $" GPT-OSS reasoning effort '{ReasoningEffort}' was sent explicitly"
+                  + (_lastHealthProbeCompletionTokens.HasValue
+                      ? $"; the tiny probe used {_lastHealthProbeCompletionTokens.Value:N0} completion tokens."
+                      : ".")
+                : string.Empty;
             return new RuntimeHealthCheck(
                 Succeeded: true,
-                Summary: $"Verified local OpenAI-compatible runtime with model '{_options.Model}'.",
+                Summary: $"Verified local runtime with model '{_options.Model}'.{reasoningVerification}",
                 CheckedAt: DateTimeOffset.UtcNow,
                 Elapsed: DateTimeOffset.UtcNow - started,
                 Endpoint: _options.Endpoint.ToString(),
@@ -379,45 +397,192 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
         }
     }
 
-    public Task ShutdownAsync(CancellationToken cancellationToken)
+    public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
-        WriteHealthLog($"runtime shutdown model={_options.Model} action=leave-resident keep_alive={OllamaRuntimeSafetyPolicy.KeepAlive}");
-        return Task.CompletedTask;
+        WriteHealthLog($"runtime shutdown runtime={RuntimeIdentity} action=unload-and-verify");
+        await UnloadForModelSwitchAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task UnloadForModelSwitchAsync(CancellationToken cancellationToken)
     {
-        if (!IsNativeOllamaEndpoint() || string.IsNullOrWhiteSpace(_options.Model))
+        if (string.IsNullOrWhiteSpace(_options.Model))
         {
             return;
         }
 
-        var uri = BuildOllamaApiUri("generate");
-        var payload = JsonSerializer.Serialize(
-            new
-            {
-                model = _options.Model,
-                keep_alive = 0,
-                stream = false
-            },
-            JsonOptions);
+        var engine = LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint);
+        switch (engine)
+        {
+            case LocalRuntimeEngines.Ollama:
+                await UnloadOllamaAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            case LocalRuntimeEngines.LlamaCpp:
+                await UnloadLlamaCppAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            case LocalRuntimeEngines.Lemonade:
+                await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Ali cannot verify model release for runtime engine '{engine}'. Select Ollama, llama.cpp, or Lemonade before switching engines.");
+        }
+    }
+
+    private async Task UnloadOllamaAsync(CancellationToken cancellationToken)
+    {
+        var unloadUri = BuildOllamaApiUri("generate");
+        await PostJsonAndRequireSuccessAsync(
+            unloadUri,
+            new { model = _options.Model, keep_alive = 0, stream = false },
+            cancellationToken).ConfigureAwait(false);
+
+        await WaitForModelReleaseAsync(
+            BuildOllamaApiUri("ps"),
+            body => !OllamaListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UnloadLlamaCppAsync(CancellationToken cancellationToken)
+    {
+        var unloadUri = BuildServerRootUri("models/unload");
+        await PostJsonAndRequireSuccessAsync(
+            unloadUri,
+            new { model = _options.Model },
+            cancellationToken).ConfigureAwait(false);
+
+        await WaitForModelReleaseAsync(
+            BuildServerRootUri("models"),
+            body => !LlamaCppListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task UnloadLemonadeAsync(CancellationToken cancellationToken)
+    {
+        var unloadUri = BuildServerRootUri("api/v1/unload");
+        await PostJsonAndRequireSuccessAsync(
+            unloadUri,
+            new { model_name = _options.Model },
+            cancellationToken).ConfigureAwait(false);
+
+        await WaitForModelReleaseAsync(
+            BuildServerRootUri("api/v1/health"),
+            body => !LemonadeListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task PostJsonAndRequireSuccessAsync(Uri uri, object payload, CancellationToken cancellationToken)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Post, uri)
         {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json")
         };
 
-        WriteHealthLog($"model-switch unload request model={_options.Model} endpoint={uri}");
+        WriteHealthLog($"model-switch unload request runtime={RuntimeIdentity} endpoint={uri}");
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             WriteHealthLog(
-                $"model-switch unload failed model={_options.Model} status={(int)response.StatusCode} error={TrimForUser(error)}");
-            response.EnsureSuccessStatusCode();
+                $"model-switch unload failed runtime={RuntimeIdentity} status={(int)response.StatusCode} error={TrimForUser(error)}");
+            throw new HttpRequestException(
+                $"Runtime unload failed with HTTP {(int)response.StatusCode}. {TrimForUser(error)}");
         }
 
-        WriteHealthLog($"model-switch unload complete model={_options.Model} status={(int)response.StatusCode}");
+        WriteHealthLog($"model-switch unload accepted runtime={RuntimeIdentity} status={(int)response.StatusCode}");
     }
+
+    private async Task WaitForModelReleaseAsync(
+        Uri statusUri,
+        Func<string, bool> released,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + UnloadVerificationTimeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, statusUri);
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var releaseVerified = false;
+            if (response.IsSuccessStatusCode)
+            {
+                try
+                {
+                    releaseVerified = released(body);
+                }
+                catch (JsonException ex)
+                {
+                    WriteHealthLog(
+                        $"model-switch release probe returned invalid JSON runtime={RuntimeIdentity} endpoint={statusUri} error={ex.Message}");
+                }
+            }
+
+            if (releaseVerified)
+            {
+                WriteHealthLog($"model-switch release verified runtime={RuntimeIdentity} endpoint={statusUri}");
+                return;
+            }
+
+            await Task.Delay(UnloadVerificationInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new TimeoutException(
+            $"Runtime '{RuntimeIdentity}' accepted unload but did not verify model release within {UnloadVerificationTimeout.TotalSeconds:N0} seconds.");
+    }
+
+    private static bool OllamaListsModelAsLoaded(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.TryGetProperty("models", out var models)
+            && models.ValueKind == JsonValueKind.Array
+            && models.EnumerateArray().Any(item =>
+                MatchesModelProperty(item, "model", model) || MatchesModelProperty(item, "name", model));
+    }
+
+    private static bool LlamaCppListsModelAsLoaded(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("data", out var models) || models.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in models.EnumerateArray())
+        {
+            if (!MatchesModelProperty(item, "id", model))
+            {
+                continue;
+            }
+
+            if (!item.TryGetProperty("status", out var status)
+                || !status.TryGetProperty("value", out var value)
+                || value.ValueKind != JsonValueKind.String)
+            {
+                return true;
+            }
+
+            var statusValue = value.GetString();
+            return !string.Equals(statusValue, "unloaded", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(statusValue, "sleeping", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool LemonadeListsModelAsLoaded(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.TryGetProperty("all_models_loaded", out var models)
+            && models.ValueKind == JsonValueKind.Array
+            && models.EnumerateArray().Any(item =>
+                item.ValueKind == JsonValueKind.String
+                    ? string.Equals(item.GetString(), model, StringComparison.OrdinalIgnoreCase)
+                    : MatchesModelProperty(item, "model_name", model));
+    }
+
+    private static bool MatchesModelProperty(JsonElement element, string propertyName, string model) =>
+        element.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && string.Equals(value.GetString(), model, StringComparison.OrdinalIgnoreCase);
 
     private async Task<ModelsCheckResult> CheckModelsEndpointAsync(CancellationToken cancellationToken)
     {
@@ -515,6 +680,11 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
             throw new HttpRequestException($"Chat completion failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
         }
 
+        if (isHealthCheck)
+        {
+            _lastHealthProbeCompletionTokens = ExtractCompletionTokens(body, useNativeOllama);
+        }
+
         var result = useNativeOllama
             ? ExtractNativeOllamaMessageResult(body)
             : OpenAiStreamParser.ExtractMessageResult(body, includeReasoning: isHealthCheck);
@@ -525,6 +695,45 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
         }
 
         return content;
+    }
+
+    private string? ValidateReasoningControlHealthProbe()
+    {
+        if (!IsGptOssRuntime() || !string.Equals(ReasoningEffort, "low", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!_lastHealthProbeCompletionTokens.HasValue)
+        {
+            return "The runtime did not report completion-token usage for the low-effort startup probe, so Ali cannot verify that its GPT-OSS reasoning setting was honored.";
+        }
+
+        if (_lastHealthProbeCompletionTokens.Value > MaximumLowReasoningHealthProbeTokens)
+        {
+            return $"The tiny low-effort startup probe used {_lastHealthProbeCompletionTokens.Value:N0} completion tokens. The runtime may be ignoring GPT-OSS reasoning controls; activation is blocked above {MaximumLowReasoningHealthProbeTokens:N0} tokens.";
+        }
+
+        return null;
+    }
+
+    private static int? ExtractCompletionTokens(string json, bool nativeOllama)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (nativeOllama)
+        {
+            return root.TryGetProperty("eval_count", out var evalCount)
+                && evalCount.TryGetInt32(out var nativeTokens)
+                    ? nativeTokens
+                    : null;
+        }
+
+        return root.TryGetProperty("usage", out var usage)
+            && usage.TryGetProperty("completion_tokens", out var completionTokens)
+            && completionTokens.TryGetInt32(out var openAiTokens)
+                ? openAiTokens
+                : null;
     }
 
     private async Task<string> SendNonStreamingProbeWithRetryAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -622,14 +831,52 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
         return builder.Uri;
     }
 
+    private Uri BuildServerRootUri(string relativePath)
+    {
+        var builder = new UriBuilder(_options.Endpoint)
+        {
+            Path = $"/{relativePath.TrimStart('/')}",
+            Query = string.Empty
+        };
+
+        return builder.Uri;
+    }
+
     private bool IsNativeOllamaEndpoint() =>
-        OllamaRuntimeSafetyPolicy.IsNativeOllamaEndpoint(_options.Endpoint);
+        LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.Ollama;
 
     private object ResolveNativeThinkingValue() =>
-        OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Model)
-        || OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Family)
+        IsGptOssRuntime()
             ? ReasoningEffort
             : false;
+
+    private object? ResolveOpenAiChatTemplateKwargs()
+    {
+        if (IsGptOssRuntime())
+        {
+            return new Dictionary<string, object>
+            {
+                ["reasoning_effort"] = ReasoningEffort
+            };
+        }
+
+        if (ShouldDisableThinking())
+        {
+            return new Dictionary<string, object>
+            {
+                ["enable_thinking"] = false
+            };
+        }
+
+        return null;
+    }
+
+    private string ResolveOpenAiThinkingDescription() =>
+        IsGptOssRuntime()
+            ? $"chat_template_kwargs.reasoning_effort={ReasoningEffort}"
+            : ShouldDisableThinking()
+                ? "chat_template_kwargs.enable_thinking=false"
+                : "provider-managed";
 
     private string ResolveNativeThinkingDescription() =>
         ResolveNativeThinkingValue() is string effort ? effort : "false";
@@ -716,7 +963,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
             : "provider-managed";
         WriteHealthLog(
             $"request POST {uri} model={_options.Model} stream={stream} "
-            + $"think={(nativeOllama ? ResolveNativeThinkingDescription() : "provider-managed")} keep_alive={(nativeOllama ? OllamaRuntimeSafetyPolicy.KeepAlive : "provider-managed")} "
+            + $"think={(nativeOllama ? ResolveNativeThinkingDescription() : ResolveOpenAiThinkingDescription())} keep_alive={(nativeOllama ? OllamaRuntimeSafetyPolicy.KeepAlive : "provider-managed")} "
             + $"num_ctx={context} num_predict={ResolveMaxTokens(request, requestedMaxTokens)} messages={messageCount} "
             + $"estimated_prompt_tokens={estimatedPromptTokens} health={isHealthCheck}");
     }
@@ -736,6 +983,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
         if (useNativeOllama)
         {
             ValidateNativeOllamaPayload(payload);
+        }
+        else
+        {
+            ValidateOpenAiCompatiblePayload(payload);
         }
 
         return payload;
@@ -759,6 +1010,7 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
             max_tokens = ResolveMaxTokens(request, maxTokens),
             temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
             top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP,
+            chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(),
             think = ShouldDisableThinking() ? false : (bool?)null
         };
     }
@@ -862,6 +1114,43 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
         }
     }
 
+    private void ValidateOpenAiCompatiblePayload(string payload)
+    {
+        if (!IsGptOssRuntime() && !ShouldDisableThinking())
+        {
+            return;
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("chat_template_kwargs", out var templateArguments)
+            || templateArguments.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException(
+                "Refusing to send an OpenAI-compatible reasoning-model request without explicit chat-template controls.");
+        }
+
+        if (IsGptOssRuntime())
+        {
+            if (!templateArguments.TryGetProperty("reasoning_effort", out var reasoningEffort)
+                || reasoningEffort.ValueKind != JsonValueKind.String
+                || !string.Equals(reasoningEffort.GetString(), ReasoningEffort, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to send a GPT-OSS request without reasoning effort {ReasoningEffort}.");
+            }
+
+            return;
+        }
+
+        if (!templateArguments.TryGetProperty("enable_thinking", out var enableThinking)
+            || enableThinking.ValueKind != JsonValueKind.False)
+        {
+            throw new InvalidOperationException(
+                "Refusing to send a Qwen reasoning-model request without thinking disabled.");
+        }
+    }
+
     private int ResolveMaxTokens(ChatRequest request, int? requestedMaxTokens)
     {
         if (requestedMaxTokens.HasValue)
@@ -942,6 +1231,10 @@ public sealed class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IMod
 
     private bool ShouldDisableThinking() =>
         IsQwenThinkingRuntime(_options.Model) || IsQwenThinkingRuntime(_options.Family);
+
+    private bool IsGptOssRuntime() =>
+        OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Model)
+        || OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Family);
 
     private static bool IsQwenThinkingRuntime(string? value) =>
         !string.IsNullOrWhiteSpace(value)

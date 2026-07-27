@@ -8,56 +8,14 @@ internal static class RuntimeModelChoiceCatalog
     public static IReadOnlyList<RuntimeModelChoice> KnownChoices() =>
     [
         RuntimeModelChoice.FromModelId(
-            "gpt-oss:20b",
-            "Recommended reasoning model",
-            displayName: "GPT-OSS 20B - reasoning assistant",
+            "gpt-oss-20b-mxfp4-GGUF",
+            "Installed Lemonade reasoning model",
+            displayName: "GPT-OSS 20B - Lemonade",
             family: "GPT-OSS",
-            size: "20.9B",
+            size: "20B",
             quantization: "MXFP4",
             contextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
-            outputTokenLimit: 1024),
-        RuntimeModelChoice.FromModelId(
-            "ali-deepseek-coder-v2:16b-low",
-            "Recommended technical Ali model",
-            displayName: "Ali DeepSeek Coder V2 16B - technical",
-            family: "DeepSeek Coder",
-            size: "16B",
-            quantization: "Q4 low-load",
-            contextTokens: 4096,
-            outputTokenLimit: 256),
-        RuntimeModelChoice.FromModelId(
-            "deepseek-coder-v2:16b",
-            "Known technical model",
-            displayName: "DeepSeek Coder V2 16B",
-            family: "DeepSeek Coder",
-            size: "16B",
-            quantization: "Ollama package default",
-            contextTokens: 4096,
-            outputTokenLimit: 256),
-        RuntimeModelChoice.FromModelId(
-            "gemma4:12b",
-            "Optional general-purpose model",
-            displayName: "Gemma 4 12B - general assistant",
-            family: "Gemma",
-            size: "12B",
-            quantization: "Ollama package default",
-            contextTokens: 4096,
-            outputTokenLimit: 256),
-        RuntimeModelChoice.FromModelId(
-            "gemma4:26b",
-            "Recommended general-purpose model",
-            displayName: "Gemma 4 26B - general assistant",
-            family: "Gemma",
-            size: "26B",
-            quantization: "Ollama package default",
-            contextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
-            outputTokenLimit: 512),
-        RuntimeModelChoice.FromModelId("qwen3:1.7b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:4b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:8b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:14b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3:32b", "Known Qwen option"),
-        RuntimeModelChoice.FromModelId("qwen3-vl:8b", "Known vision option")
+            outputTokenLimit: 1024)
     ];
 
     public static IReadOnlyList<RuntimeModelChoice> ParseRuntimeModelChoices(string json)
@@ -130,6 +88,16 @@ internal sealed record RuntimeModelChoice(
     {
         var model = ReadStringProperty(item, "id", "name", "model");
         if (string.IsNullOrWhiteSpace(model))
+        {
+            return null;
+        }
+
+        if (TryGetProperty(item, "labels", out var labels)
+            && labels.ValueKind is JsonValueKind.Array
+            && labels.EnumerateArray().Any(label =>
+                label.ValueKind is JsonValueKind.String
+                && label.GetString() is { } value
+                && value is "embeddings" or "embedding" or "reranking" or "transcription" or "tts" or "image"))
         {
             return null;
         }

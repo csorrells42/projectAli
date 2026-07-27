@@ -3,6 +3,7 @@ using AvatarBuilder.Modules.Contracts;
 using AvatarBuilder.Modules.Pipeline;
 using AvatarBuilder.Modules.Vision.Attention;
 using AvatarBuilder.Modules.Vision.Identity;
+using AvatarBuilder.Modules.Vision.IdentityEnrollment;
 using AvatarBuilder.Modules.Vision.MediaPipe;
 using AvatarBuilder.Modules.Vision.Overlays;
 using AvatarBuilder.Modules.Vision.TargetSelection;
@@ -16,7 +17,9 @@ namespace Ali.Modules.Interaction;
 /// Ali's composition root for the tested vision DLLs. It selects and starts
 /// black-box modules; each module retains sole ownership of its operation.
 /// </summary>
-public sealed class AliVisionPipeline : IDisposable
+public sealed class AliVisionPipeline :
+    IFramePipelineTimingReportSource,
+    IDisposable
 {
     private readonly CameraModule _camera;
     private readonly MediaPipeModule _mediaPipe;
@@ -110,9 +113,28 @@ public sealed class AliVisionPipeline : IDisposable
     public System.Windows.FrameworkElement ViewportHost => _viewport.Host;
     public IModuleOutputSource<TargetSelectionOutput> TargetSelection => _targetSelection;
     public IModuleOutputSource<AttentionOutput> Attention => _attention;
+    public IPersonIdentityReviewService IdentityReviewService => _identity;
     public bool HasStableAttention => _attention.LatestStableAttention;
     public string CameraStatus => _camera.Status;
     public string IdentityStatus => _identity.IdentityStatus;
+
+    public IdentityEnrollmentGuidanceModule CreateIdentityEnrollmentGuidance()
+    {
+        var guidance = new IdentityEnrollmentGuidanceModule(_mediaPipe, _identity);
+        guidance.Start();
+        return guidance;
+    }
+
+    public IReadOnlyList<FramePipelineTimingRow> GetTimingReport() =>
+    [
+        new("Camera", _camera.GetIdleTime(), _camera.GetWorkingTime()),
+        new("MediaPipe", _mediaPipe.GetIdleTime(), _mediaPipe.GetWorkingTime()),
+        new("Identity", _identity.GetIdleTime(), _identity.GetWorkingTime()),
+        new("Attention", _attention.GetIdleTime(), _attention.GetWorkingTime()),
+        new("Target selection", _targetSelection.GetIdleTime(), _targetSelection.GetWorkingTime()),
+        new("Overlay", _overlay.GetIdleTime(), _overlay.GetWorkingTime()),
+        new("Viewport", _viewport.GetIdleTime(), _viewport.GetWorkingTime())
+    ];
 
     public void SetTrackingOverlay(bool enabled) =>
         _overlaySelection.Set(PreviewOverlayLayers.Tracking, enabled);

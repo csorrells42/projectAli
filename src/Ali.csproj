@@ -38,6 +38,7 @@
     <ProjectReference Include="..\..\..\CameraModule\CameraModule.csproj" />
     <ProjectReference Include="..\..\..\MediaPipeModule\MediaPipeModule.csproj" />
     <ProjectReference Include="..\..\..\IdentityModule\IdentityModule.csproj" />
+    <ProjectReference Include="..\..\..\IdentityEnrollmentGuidanceModule\IdentityEnrollmentGuidanceModule.csproj" />
     <ProjectReference Include="..\..\..\AttentionModule\AttentionModule.csproj" />
     <ProjectReference Include="..\..\..\MicrophoneModule\MicrophoneModule.csproj" />
     <ProjectReference Include="..\..\..\VoiceActivityModule\VoiceActivityModule.csproj" />

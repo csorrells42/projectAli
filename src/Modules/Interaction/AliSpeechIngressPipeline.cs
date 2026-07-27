@@ -58,6 +58,7 @@ public sealed class AliSpeechIngressPipeline : IDisposable
     }
 
     public IModuleOutputSource<SpeakerRecognitionOutput> Speaker => _speaker;
+    public ISpeakerEnrollmentService SpeakerEnrollmentService => _speaker;
     public IMicrophoneInputService Microphone => _microphone;
     public string ProviderName => _speechToText?.ProviderName ??
         (_engine == AliSpeechToTextEngine.Parakeet
