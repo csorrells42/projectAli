@@ -10,7 +10,6 @@ public sealed class ChatMessageViewModel : ObservableObject
     private string _text;
     private EvidenceStatus _evidenceStatus;
     private bool _isFlaggedForCorrection;
-    private bool _isAgentActivityHost;
 
     public ChatMessageViewModel(
         string id,
@@ -88,12 +87,6 @@ public sealed class ChatMessageViewModel : ObservableObject
     {
         get => _isFlaggedForCorrection;
         set => SetProperty(ref _isFlaggedForCorrection, value);
-    }
-
-    public bool IsAgentActivityHost
-    {
-        get => _isAgentActivityHost;
-        set => SetProperty(ref _isAgentActivityHost, value);
     }
 
     public void MarkCorrection(string correctionId)

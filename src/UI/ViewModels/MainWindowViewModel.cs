@@ -67,7 +67,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly HashSet<string> _shownDueReminderIds = new(StringComparer.OrdinalIgnoreCase);
     private string _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
-    private ChatMessageViewModel? _agentActivityHostMessage;
     private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
     private string _conversationSearchText = string.Empty;
     private bool _loadingConversationHistorySelection;
@@ -2141,7 +2140,6 @@ public sealed class MainWindowViewModel : ObservableObject
             sourceVoiceMetadata: voiceMetadata,
             sourceUserMessageId: userMessageId,
             sourceQuestion: text);
-        SetAgentActivityHost(assistantMessage);
 
         var history = Messages.Select(message => message.ToCoreMessage()).ToList();
         Messages.Add(userMessage);
@@ -2327,20 +2325,6 @@ public sealed class MainWindowViewModel : ObservableObject
         AgentActivitySummary = "Ready for the next request.";
     }
 
-    private void SetAgentActivityHost(ChatMessageViewModel? message)
-    {
-        if (_agentActivityHostMessage is not null)
-        {
-            _agentActivityHostMessage.IsAgentActivityHost = false;
-        }
-
-        _agentActivityHostMessage = message;
-        if (_agentActivityHostMessage is not null)
-        {
-            _agentActivityHostMessage.IsAgentActivityHost = true;
-        }
-    }
-
     private void Stop()
     {
         CancelActiveUiOperation();
@@ -2432,7 +2416,6 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
-        SetAgentActivityHost(null);
         ClearAgentActivity();
         _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
         _activeConversationHistoryItem = null;
@@ -2513,7 +2496,6 @@ public sealed class MainWindowViewModel : ObservableObject
         ClearTemporaryAttachments();
         Attachments.Clear();
         Messages.Clear();
-        SetAgentActivityHost(null);
         ClearAgentActivity();
         var session = ConversationSessionFactory.Reopen(conversation);
         foreach (var message in session.Messages)

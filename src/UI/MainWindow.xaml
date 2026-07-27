@@ -658,90 +658,6 @@
                             <StackPanel Margin="0,0,0,18"
                                         MaxWidth="760"
                                         HorizontalAlignment="{Binding MessageAlignment}">
-                                <Expander AutomationProperties.AutomationId="AliActivityPanel"
-                                          IsExpanded="{Binding DataContext.IsAgentActivityExpanded, Mode=TwoWay, RelativeSource={RelativeSource AncestorType=Window}}"
-                                          Visibility="{Binding IsAgentActivityHost, Converter={StaticResource BoolToVisibilityConverter}}"
-                                          Foreground="{StaticResource TextBrush}"
-                                          Background="#151517"
-                                          BorderBrush="{StaticResource BorderBrushDark}"
-                                          BorderThickness="1"
-                                          MaxHeight="230"
-                                          Margin="0,0,0,10">
-                                    <Expander.Header>
-                                        <Grid Margin="8,6" MinWidth="520">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="&#xE8C3;"
-                                                       FontFamily="Segoe MDL2 Assets"
-                                                       Foreground="#C5B3FF"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,8,0" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="Ali"
-                                                       Foreground="{StaticResource TextBrush}"
-                                                       FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,10,0" />
-                                            <TextBlock Grid.Column="2"
-                                                       Text="{Binding DataContext.AgentActivitySummary, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                       Foreground="#E2E8F0"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       VerticalAlignment="Center" />
-                                        </Grid>
-                                    </Expander.Header>
-                                    <Grid Margin="10,0,10,8">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="*" />
-                                        </Grid.RowDefinitions>
-                                        <Button Content="Clear"
-                                                Command="{Binding DataContext.ClearAgentActivityCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                HorizontalAlignment="Right"
-                                                MinHeight="24"
-                                                Height="24"
-                                                Padding="8,0"
-                                                Margin="0,0,0,4" />
-                                        <ScrollViewer Grid.Row="1" MaxHeight="170" VerticalScrollBarVisibility="Auto">
-                                            <ItemsControl ItemsSource="{Binding DataContext.AgentActivities, RelativeSource={RelativeSource AncestorType=Window}}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate DataType="{x:Type vm:AgentActivityItemViewModel}">
-                                                        <Grid Margin="0,3">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="22" />
-                                                                <ColumnDefinition Width="Auto" />
-                                                                <ColumnDefinition Width="*" />
-                                                                <ColumnDefinition Width="Auto" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Text="{Binding Icon}"
-                                                                       FontFamily="Segoe MDL2 Assets"
-                                                                       Foreground="{Binding Accent}"
-                                                                       VerticalAlignment="Top" />
-                                                            <TextBlock Grid.Column="1"
-                                                                       Text="{Binding Title}"
-                                                                       Foreground="{Binding Accent}"
-                                                                       FontWeight="SemiBold"
-                                                                       Margin="0,0,10,0"
-                                                                       VerticalAlignment="Top" />
-                                                            <TextBlock Grid.Column="2"
-                                                                       Text="{Binding Detail}"
-                                                                       Foreground="{StaticResource MutedTextBrush}"
-                                                                       TextWrapping="Wrap"
-                                                                       VerticalAlignment="Top" />
-                                                            <TextBlock Grid.Column="3"
-                                                                       Text="{Binding TimingText}"
-                                                                       Foreground="{StaticResource SubtleTextBrush}"
-                                                                       Margin="12,0,0,0"
-                                                                       VerticalAlignment="Top" />
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </ScrollViewer>
-                                    </Grid>
-                                </Expander>
                                 <controls:MarkdownMessageView Markdown="{Binding Text}"
                                                               MessageTextAlignment="{Binding MessageTextAlignment}"
                                                               AutomationProperties.AutomationId="MainChatMessageText"
@@ -774,6 +690,7 @@
 
             <Grid Grid.Row="3" HorizontalAlignment="Stretch" VerticalAlignment="Bottom">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -832,7 +749,92 @@
                                  VerticalAlignment="Center" />
                 </StackPanel>
 
-                <Border Grid.Row="2"
+                <Expander Grid.Row="2"
+                          AutomationProperties.AutomationId="AliActivityPanel"
+                          IsExpanded="{Binding IsAgentActivityExpanded, Mode=TwoWay}"
+                          Foreground="{StaticResource TextBrush}"
+                          Background="#151517"
+                          BorderBrush="{StaticResource BorderBrushDark}"
+                          BorderThickness="1"
+                          MaxHeight="230"
+                          Margin="0,0,0,8">
+                    <Expander.Header>
+                        <Grid Margin="8,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="&#xE8C3;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       Foreground="#C5B3FF"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0" />
+                            <TextBlock Grid.Column="1"
+                                       Text="Ali"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding AgentActivitySummary}"
+                                       Foreground="#E2E8F0"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Expander.Header>
+                    <Grid Margin="10,0,10,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Button Content="Clear"
+                                Command="{Binding ClearAgentActivityCommand}"
+                                HorizontalAlignment="Right"
+                                MinHeight="24"
+                                Height="24"
+                                Padding="8,0"
+                                Margin="0,0,0,4" />
+                        <ScrollViewer Grid.Row="1" MaxHeight="170" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding AgentActivities}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:AgentActivityItemViewModel}">
+                                        <Grid Margin="0,3">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="22" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Icon}"
+                                                       FontFamily="Segoe MDL2 Assets"
+                                                       Foreground="{Binding Accent}"
+                                                       VerticalAlignment="Top" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Title}"
+                                                       Foreground="{Binding Accent}"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,0,10,0"
+                                                       VerticalAlignment="Top" />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding Detail}"
+                                                       Foreground="{StaticResource MutedTextBrush}"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Top" />
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding TimingText}"
+                                                       Foreground="{StaticResource SubtleTextBrush}"
+                                                       Margin="12,0,0,0"
+                                                       VerticalAlignment="Top" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Expander>
+
+                <Border Grid.Row="3"
                         Background="#242426"
                         BorderBrush="#38383D"
                         BorderThickness="1"
@@ -903,7 +905,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="3" Margin="6,8,6,0">
+                <Grid Grid.Row="4" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
