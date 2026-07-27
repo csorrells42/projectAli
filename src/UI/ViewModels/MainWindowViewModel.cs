@@ -180,6 +180,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private CameraDevice? _selectedVisionCamera;
     private CameraVideoMode? _selectedVisionCameraMode;
     private FrameworkElement? _visionViewport;
+    private bool _isCameraBarExpanded;
     private bool _visionCameraOn;
     private bool _trackingOverlayEnabled = true;
     private bool _faceMeshOverlayEnabled;
@@ -1295,6 +1296,12 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _visionViewport;
         private set => SetProperty(ref _visionViewport, value);
+    }
+
+    public bool IsCameraBarExpanded
+    {
+        get => _isCameraBarExpanded;
+        set => SetProperty(ref _isCameraBarExpanded, value);
     }
 
     public bool VisionCameraOn

@@ -361,13 +361,23 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushDark}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="8"
+                        Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0"
                         Background="#05070A"
                         BorderBrush="{StaticResource BorderBrushDark}"
                         BorderThickness="1"
@@ -397,24 +407,39 @@
                             </TextBlock>
                         </Grid>
                     </controls:AspectRatioDecorator>
-                </Border>
+                        </Border>
 
-                <Button Grid.Row="1"
+                        <Button Grid.Row="1"
                         Content="Expand Webcam"
                         Click="ExpandWebcam_OnClick"
                         IsEnabled="{Binding VisionCameraOn}"
                         HorizontalAlignment="Stretch"
-                        Margin="0,0,0,10"
+                        Margin="0"
                         ToolTip="Available while the camera is on. Moves the existing viewport into a resizable window." />
+                    </Grid>
+                </Border>
 
-                <StackPanel Grid.Row="2">
+                <Border Grid.Row="1"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushDark}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
                     <TextBlock Text="Recents"
                                Foreground="{StaticResource MutedTextBrush}"
                                FontWeight="SemiBold"
                                Margin="0,4,0,6" />
                 </StackPanel>
 
-                <ListBox Grid.Row="3"
+                <ListBox Grid.Row="1"
                          ItemsSource="{Binding ConversationHistory}"
                          SelectedItem="{Binding SelectedConversationHistoryItem, Mode=TwoWay}"
                          Background="Transparent"
@@ -494,7 +519,7 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
 
-                <StackPanel Grid.Row="4">
+                <StackPanel Grid.Row="2">
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -523,6 +548,8 @@
                             Background="#2A1517"
                             ToolTip="Erase saved local conversations and recent chat entries after confirmation." />
                 </StackPanel>
+                    </Grid>
+                </Border>
             </Grid>
         </Border>
 
@@ -534,12 +561,13 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0"
+            <Border Grid.Row="1"
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrushDark}"
                     BorderThickness="1"
                     Padding="10"
-                    Margin="0,0,0,8">
+                    Margin="0,0,0,10"
+                    Visibility="{Binding IsCameraBarExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -560,9 +588,9 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
+            <Border Grid.Row="0"
                     Height="44"
-                    Margin="0,0,0,10"
+                    Margin="0,0,0,8"
                     Padding="14,0"
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrushDark}"
@@ -570,6 +598,7 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -636,13 +665,64 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <Button Grid.Column="3"
+                    <ToggleButton Grid.Column="3"
+                                  AutomationProperties.AutomationId="MainChatCameraBarToggleButton"
+                                  AutomationProperties.Name="Camera controls"
+                                  IsChecked="{Binding IsCameraBarExpanded, Mode=TwoWay}"
+                                  Height="34"
+                                  Margin="0"
+                                  Cursor="Hand"
+                                  ToolTip="Show or hide camera controls.">
+                        <ToggleButton.Template>
+                            <ControlTemplate TargetType="ToggleButton">
+                                <Border x:Name="CameraToggleChrome"
+                                        Height="34"
+                                        Padding="12,0"
+                                        Background="#2A2A2E"
+                                        BorderBrush="#46464D"
+                                        BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Camera"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <Path x:Name="CameraToggleChevron"
+                                              Data="M 0 0 L 4 4 L 8 0 Z"
+                                              Fill="{StaticResource MutedTextBrush}"
+                                              Width="8"
+                                              Height="4"
+                                              Margin="8,0,0,0"
+                                              RenderTransformOrigin="0.5,0.5"
+                                              Stretch="Fill"
+                                              VerticalAlignment="Center">
+                                            <Path.RenderTransform>
+                                                <RotateTransform Angle="0" />
+                                            </Path.RenderTransform>
+                                        </Path>
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="CameraToggleChrome" Property="BorderBrush" Value="#5A5A63" />
+                                    </Trigger>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter TargetName="CameraToggleChrome" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                        <Setter TargetName="CameraToggleChevron" Property="RenderTransform">
+                                            <Setter.Value>
+                                                <RotateTransform Angle="180" />
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </ToggleButton.Template>
+                    </ToggleButton>
+                    <Button Grid.Column="4"
                             Content="Settings"
                             AutomationProperties.AutomationId="MainChatSettingsButton"
                             Command="{Binding OpenSettingsCommand}"
                             Height="34"
                             MinHeight="34"
-                            Margin="0"
+                            Margin="8,0,0,0"
                             Padding="12,0"
                             VerticalAlignment="Center" />
                 </Grid>
