@@ -13,6 +13,12 @@ namespace Ali.Modules.Coordinator;
 /// </summary>
 internal sealed class AliToolCatalog
 {
+    internal const string TypoInterpretationInstruction =
+        "The user's wording may contain spelling mistakes, keyboard slips, or speech-transcription errors. "
+        + "Infer the intended words from the whole sentence before answering, planning, or choosing tools. "
+        + "Preserve the user's original message, but use the inferred wording in tool arguments and searches. "
+        + "If two plausible interpretations would materially change the answer, ask one short clarifying question instead of guessing.";
+
     public AliToolCatalog(
         ISourceRetriever localLibrary,
         ISourceRetriever webSources,
@@ -80,11 +86,12 @@ internal sealed class AliToolCatalog
 
     public AliMemoryTools MemoryTools { get; }
 
-    private static string BuildInstructions(string assistantName) =>
+    internal static string BuildInstructions(string assistantName) =>
         string.Join(
             Environment.NewLine,
             $"You are {assistantName}, a local personal assistant.",
             "Interpret the user's complete request yourself. No application router classifies English before you receive it.",
+            TypoInterpretationInstruction,
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "Relevant local memory is retrieved before every turn. If it directly answers a personal question, use it immediately; otherwise call search_memory before guessing, reflecting, or searching the internet.",
             "For current events or facts that may have changed, use search_current_web promptly and answer from its evidence.",

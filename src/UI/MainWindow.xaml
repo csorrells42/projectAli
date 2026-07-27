@@ -940,6 +940,8 @@
                         <TextBox x:Name="ComposerTextBox"
                                  AutomationProperties.AutomationId="MainChatComposerTextBox"
                                  Grid.Column="0"
+                                 Language="en-US"
+                                 SpellCheck.IsEnabled="True"
                                  MinHeight="44"
                                  MaxHeight="150"
                                  VerticalScrollBarVisibility="Auto"
@@ -951,6 +953,7 @@
                                  Padding="8,10"
                                  FontSize="15"
                                  VerticalContentAlignment="Center"
+                                 ToolTip="Spelling is checked as you type. Right-click an underlined word for suggestions."
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
