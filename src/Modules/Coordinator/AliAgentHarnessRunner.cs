@@ -22,9 +22,7 @@ internal sealed class AliAgentHarnessRunner
     private readonly IReadOnlyList<AITool> _tools;
     private readonly AliMemoryTools _memoryTools;
     private readonly AIAgent _agent;
-    private readonly ConcurrentDictionary<string, ConversationAgentState> _conversationStates = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
-    private readonly SemaphoreSlim _sessionGate = new(1, 1);
 
     public AliAgentHarnessRunner(
         IChatClient chatClient,
@@ -91,9 +89,11 @@ internal sealed class AliAgentHarnessRunner
             memoryContext.Memories.Count == 0
                 ? "No relevant saved memory matched this request."
                 : $"Loaded {memoryContext.Memories.Count} relevant saved memory item(s).");
-        var state = await GetOrCreateConversationStateAsync(turn.ConversationId, cancellationToken).ConfigureAwait(false);
+        // The UI conversation history is the canonical state. A fresh Harness session per
+        // visible turn prevents an unfinished high-effort tool loop from leaking into the
+        // user's next message while preserving one session across this turn's tool calls.
+        var session = await _agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<MeaiChatMessage> input = BuildInitialInput(
-            state,
             history,
             userText,
             memoryContext,
@@ -106,7 +106,7 @@ internal sealed class AliAgentHarnessRunner
             ToolApprovalRequestContent? approvalRequest = null;
             await foreach (var update in _agent.RunStreamingAsync(
                                input,
-                               state.Session,
+                               session,
                                options: null,
                                cancellationToken).ConfigureAwait(false))
             {
@@ -156,52 +156,13 @@ internal sealed class AliAgentHarnessRunner
         return new AgentHarnessRunResult(wroteAnswer, finishReason);
     }
 
-    private async Task<ConversationAgentState> GetOrCreateConversationStateAsync(
-        string conversationId,
-        CancellationToken cancellationToken)
-    {
-        if (_conversationStates.TryGetValue(conversationId, out var existing))
-        {
-            return existing;
-        }
-
-        await _sessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_conversationStates.TryGetValue(conversationId, out existing))
-            {
-                return existing;
-            }
-
-            var session = await _agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
-            var created = new ConversationAgentState(session);
-            _conversationStates[conversationId] = created;
-            return created;
-        }
-        finally
-        {
-            _sessionGate.Release();
-        }
-    }
-
-    private static IReadOnlyList<MeaiChatMessage> BuildInitialInput(
-        ConversationAgentState state,
+    internal static IReadOnlyList<MeaiChatMessage> BuildInitialInput(
         IReadOnlyList<RuntimeChatMessage> history,
         string userText,
         CoordinatorMemoryResult memoryContext,
         IReadOnlyList<ChatAttachment> attachments)
     {
         var userMessage = BuildUserMessage(userText, attachments);
-        if (state.Seeded)
-        {
-            return
-            [
-                BuildMemoryContextMessage(memoryContext),
-                userMessage
-            ];
-        }
-
-        state.Seeded = true;
         var messages = history.Select(ToExtensionsAiMessage).ToList();
         messages.Add(BuildMemoryContextMessage(memoryContext));
         messages.Add(userMessage);
@@ -331,12 +292,6 @@ internal sealed class AliAgentHarnessRunner
     }
 
     private static string Humanize(string toolName) => toolName.Replace('_', ' ').Trim();
-
-    private sealed class ConversationAgentState(AgentSession session)
-    {
-        public AgentSession Session { get; } = session;
-        public bool Seeded { get; set; }
-    }
 
     private sealed record PendingApproval(TaskCompletionSource<AgentToolApprovalChoice> Completion);
 }

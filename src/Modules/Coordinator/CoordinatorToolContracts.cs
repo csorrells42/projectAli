@@ -19,7 +19,8 @@ public sealed record CoordinatorMemoryWriteResult(
 public sealed record CoordinatorSourceResult(
     string Status,
     IReadOnlyList<CoordinatorSourceItem> Sources,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    bool CanRetry = false);
 
 public sealed record CoordinatorSourceItem(
     string Name,
@@ -72,6 +73,8 @@ internal sealed class CoordinatorTurnContext(
     public string OriginalUserText { get; } = originalUserText;
 
     public bool UsedEvidenceTool { get; set; }
+
+    public int WebSearchAttempts { get; set; }
 
     public List<CoordinatorSourceItem> WebSources { get; } = [];
 

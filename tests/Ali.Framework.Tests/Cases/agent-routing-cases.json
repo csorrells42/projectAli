@@ -12,6 +12,12 @@
     "mustNotUse": ["research_web"]
   },
   {
+    "name": "current-sports-prediction",
+    "prompt": "Give me your prediction of Alabama's performance in this year's college football playoff.",
+    "expectedTool": "search_current_web",
+    "mustNotUse": ["research_web"]
+  },
+  {
     "name": "nested-comparative-research",
     "prompt": "Compare three current home battery systems, their warranties, recent recalls, installed cost, and which fits a 12 kWh daily load.",
     "expectedTool": "research_web",

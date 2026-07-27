@@ -13,5 +13,8 @@ public sealed class AliToolCatalogTests
         Assert.Contains("Infer the intended words from the whole sentence", instructions, StringComparison.Ordinal);
         Assert.Contains("Preserve the user's original message", instructions, StringComparison.Ordinal);
         Assert.Contains("ask one short clarifying question instead of guessing", instructions, StringComparison.Ordinal);
+        Assert.Contains("predictions, forecasts, opinions", instructions, StringComparison.Ordinal);
+        Assert.Contains("Never give a generic refusal", instructions, StringComparison.Ordinal);
+        Assert.Contains("CanRetry is false", instructions, StringComparison.Ordinal);
     }
 }

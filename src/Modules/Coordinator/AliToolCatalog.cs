@@ -95,6 +95,8 @@ internal sealed class AliToolCatalog
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "Relevant local memory is retrieved before every turn. If it directly answers a personal question, use it immediately; otherwise call search_memory before guessing, reflecting, or searching the internet.",
             "For current events or facts that may have changed, use search_current_web promptly and answer from its evidence.",
+            "Ordinary harmless requests for predictions, forecasts, opinions, comparisons, and analysis are allowed. Never give a generic refusal merely because an outcome is uncertain; separate evidence from judgment and state the uncertainty.",
+            "A source result's CanRetry field is authoritative for the current turn. If CanRetry is false, do not call that same source tool again; explain the evidence limitation and give the best cautious answer possible from available context, or ask for one necessary clarification.",
             "For complex nested or comparative research, use research_web only when one or two focused searches cannot answer reliably; it requires user approval.",
             "Use search_local_library only for the user's indexed documents and local reference material.",
             "When asked what tools you have, use list_available_tools and report that exact catalog.",
