@@ -1,0 +1,68 @@
+<Window x:Class="AvatarBuilder.Modules.Viewports.Diagnostics.PipelineTimingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Frame Pipeline Timing"
+        Width="720"
+        Height="420"
+        MinWidth="620"
+        MinHeight="300"
+        WindowStartupLocation="CenterOwner"
+        Background="#071018"
+        Foreground="#E8F4FF">
+  <Grid Margin="14">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <TextBlock Text="Frame Pipeline Timing"
+               FontSize="20"
+               FontWeight="SemiBold" />
+    <TextBlock Grid.Row="1"
+               Margin="0,4,0,12"
+               Foreground="#AFC7D8"
+               Text="While this window is open, it requests each module's current Time Waited and Time Worked once per second." />
+
+    <DataGrid Grid.Row="2"
+              ItemsSource="{Binding Rows}"
+              AutoGenerateColumns="False"
+              IsReadOnly="True"
+              CanUserAddRows="False"
+              CanUserDeleteRows="False"
+              CanUserReorderColumns="False"
+              HeadersVisibility="Column"
+              GridLinesVisibility="Horizontal"
+              Background="#0B1721"
+              Foreground="#E8F4FF"
+              BorderBrush="#284354"
+              HorizontalGridLinesBrush="#203847"
+              RowBackground="#0B1721"
+              AlternatingRowBackground="#0E1D29">
+      <DataGrid.Resources>
+        <Style TargetType="DataGridColumnHeader">
+          <Setter Property="Background" Value="#142A39" />
+          <Setter Property="Foreground" Value="#E8F4FF" />
+          <Setter Property="FontWeight" Value="SemiBold" />
+          <Setter Property="Padding" Value="8,6" />
+        </Style>
+        <Style TargetType="DataGridCell">
+          <Setter Property="BorderThickness" Value="0" />
+          <Setter Property="Padding" Value="8,5" />
+          <Setter Property="Foreground" Value="#E8F4FF" />
+        </Style>
+      </DataGrid.Resources>
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Module"
+                            Binding="{Binding Module}"
+                            Width="*" />
+        <DataGridTextColumn Header="Time Waited (ms)"
+                            Binding="{Binding TimeWaitedMilliseconds}"
+                            Width="180" />
+        <DataGridTextColumn Header="Time Worked (ms)"
+                            Binding="{Binding TimeWorkedMilliseconds}"
+                            Width="180" />
+      </DataGrid.Columns>
+    </DataGrid>
+  </Grid>
+</Window>

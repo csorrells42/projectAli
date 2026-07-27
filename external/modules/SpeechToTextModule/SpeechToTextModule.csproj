@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SpeechToTextModule</AssemblyName>
+    <RootNamespace>AvatarBuilder.Modules.Audio.SpeechToText</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\MicrophoneModule\MicrophoneModule.csproj" />
+    <ProjectReference Include="..\VoiceActivityModule\VoiceActivityModule.csproj" />
+    <ProjectReference Include="..\SpeakerRecognitionModule\SpeakerRecognitionModule.csproj" />
+    <ProjectReference Include="..\WakeWordModule\WakeWordModule.csproj" />
+    <ProjectReference Include="..\AliSecurityModule\AliSecurityModule.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Tools\faster_whisper_worker.py">
+      <Link>dependencies\audio\whisper\faster_whisper_worker.py</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

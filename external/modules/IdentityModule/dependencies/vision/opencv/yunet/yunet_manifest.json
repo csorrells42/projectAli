@@ -1,0 +1,17 @@
+{
+  "backend": "OpenCV YuNet FaceDetectorYN",
+  "modelFile": "face_detection_yunet_2023mar.onnx",
+  "expectedOutputs": [
+    "face_box",
+    "right_eye_point",
+    "left_eye_point",
+    "nose_tip_point",
+    "right_mouth_corner_point",
+    "left_mouth_corner_point",
+    "confidence_score"
+  ],
+  "status": "model_file_not_bundled_yet",
+  "license": "MIT for OpenCV Zoo face_detection_yunet model directory",
+  "source": "https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet",
+  "notes": "Place the portable OpenCV Zoo face_detection_yunet_2023mar.onnx model beside this manifest. The app will use YuNet for model-backed face localization before Haar fallback."
+}

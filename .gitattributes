@@ -1,1 +1,3 @@
 *.pdf binary
+*.sln text eol=crlf
+external/modules/** text=auto

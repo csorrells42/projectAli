@@ -1,0 +1,19 @@
+{
+  "backend": "MediaPipe Face Landmarker task bundle",
+  "modelFile": "face_landmarker.task",
+  "modelUrl": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
+  "sha256": "64184E229B263107BC2B804C6625DB1341FF2BB731874B0BCC2FE6544E0BC9FF",
+  "expectedLandmarks": 478,
+  "outputs": [
+    "dense_3d_face_mesh",
+    "eye_landmarks",
+    "mouth_and_jaw_landmarks",
+    "blendshape_scores",
+    "facial_transformation_matrix"
+  ],
+  "status": "model_file_not_bundled_yet",
+  "inferenceImplementationStatus": "runtime_not_bundled_yet",
+  "runtime": "MediaPipe Tasks Face Landmarker desktop/native bridge",
+  "runtimeFiles": [],
+  "notes": "Place the portable face_landmarker.task model beside this manifest. The app will prefer this dense backend only after both the model and a local inference runtime are bundled; until then OpenCV LBF and aperture fallback remain active."
+}

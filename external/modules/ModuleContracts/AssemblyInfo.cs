@@ -1,0 +1,17 @@
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("CameraModule")]
+[assembly: InternalsVisibleTo("MediaPipeModule")]
+[assembly: InternalsVisibleTo("IdentityModule")]
+[assembly: InternalsVisibleTo("AttentionModule")]
+[assembly: InternalsVisibleTo("MicrophoneModule")]
+[assembly: InternalsVisibleTo("VoiceActivityModule")]
+[assembly: InternalsVisibleTo("SpeakerRecognitionModule")]
+[assembly: InternalsVisibleTo("WakeWordModule")]
+[assembly: InternalsVisibleTo("AliSecurityModule")]
+[assembly: InternalsVisibleTo("SpeechToTextModule")]
+[assembly: InternalsVisibleTo("TargetSelectionModule")]
+[assembly: InternalsVisibleTo("ViewportModule")]
+[assembly: InternalsVisibleTo("OverlayModule")]
+[assembly: InternalsVisibleTo("AvatarBuilder")]
+[assembly: InternalsVisibleTo("AvatarModule")]

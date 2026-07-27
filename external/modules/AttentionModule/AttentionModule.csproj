@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>AttentionModule</AssemblyName>
+    <RootNamespace>AvatarBuilder.Modules.Vision.Attention</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\CameraModule\CameraModule.csproj" />
+    <ProjectReference Include="..\MediaPipeModule\MediaPipeModule.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>OverlayModule</AssemblyName>
+    <RootNamespace>AvatarBuilder.Modules.Vision.Overlays</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\CameraModule\CameraModule.csproj" />
+    <ProjectReference Include="..\MediaPipeModule\MediaPipeModule.csproj" />
+    <ProjectReference Include="..\TargetSelectionModule\TargetSelectionModule.csproj" />
+    <ProjectReference Include="..\AttentionModule\AttentionModule.csproj" />
+    <ProjectReference Include="..\ViewportModule\ViewportModule.csproj" />
+  </ItemGroup>
+</Project>

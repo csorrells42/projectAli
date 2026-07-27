@@ -14,10 +14,6 @@
   <ItemGroup>
     <Compile Include="..\..\..\src\Modules\AliModuleCatalog.cs"
              Link="Modules\AliModuleCatalog.cs" />
-    <Compile Include="..\..\..\src\Modules\Attention\AttentionGate.cs"
-             Link="Modules\Attention\AttentionGate.cs" />
-    <Compile Include="..\..\..\src\Modules\Attention\VoiceTurnDetector.cs"
-             Link="Modules\Attention\VoiceTurnDetector.cs" />
   </ItemGroup>
 
 </Project>

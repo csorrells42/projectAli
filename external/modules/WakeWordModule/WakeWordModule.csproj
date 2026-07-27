@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>WakeWordModule</AssemblyName>
+    <RootNamespace>AvatarBuilder.Modules.Audio.WakeWord</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
+    <ProjectReference Include="..\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\MicrophoneModule\MicrophoneModule.csproj" />
+    <ProjectReference Include="..\VoiceActivityModule\VoiceActivityModule.csproj" />
+  </ItemGroup>
+	<ItemGroup Condition="Exists('models\sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20')">
+		<Content Include="models\sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20\**\*">
+			<Link>dependencies\audio\keyword-spotting\sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20\%(RecursiveDir)%(Filename)%(Extension)</Link>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+	</ItemGroup>
+</Project>

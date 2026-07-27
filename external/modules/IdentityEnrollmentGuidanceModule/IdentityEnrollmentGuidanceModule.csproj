@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>IdentityEnrollmentGuidanceModule</AssemblyName>
+    <RootNamespace>AvatarBuilder.Modules.Vision.IdentityEnrollment</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\MediaPipeModule\MediaPipeModule.csproj" />
+    <ProjectReference Include="..\IdentityModule\IdentityModule.csproj" />
+  </ItemGroup>
+</Project>

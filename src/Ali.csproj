@@ -37,23 +37,23 @@
     <PackageReference Include="Vortice.Direct3D12" Version="3.8.3" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\ModuleContracts\ModuleContracts.csproj" />
-    <ProjectReference Include="..\..\..\CameraModule\CameraModule.csproj" />
-    <ProjectReference Include="..\..\..\MediaPipeModule\MediaPipeModule.csproj" />
-    <ProjectReference Include="..\..\..\IdentityModule\IdentityModule.csproj" />
-    <ProjectReference Include="..\..\..\IdentityEnrollmentGuidanceModule\IdentityEnrollmentGuidanceModule.csproj" />
-    <ProjectReference Include="..\..\..\AttentionModule\AttentionModule.csproj" />
-    <ProjectReference Include="..\..\..\MicrophoneModule\MicrophoneModule.csproj" />
-    <ProjectReference Include="..\..\..\VoiceActivityModule\VoiceActivityModule.csproj" />
-    <ProjectReference Include="..\..\..\SpeakerRecognitionModule\SpeakerRecognitionModule.csproj" />
-    <ProjectReference Include="..\..\..\WakeWordModule\WakeWordModule.csproj" />
-    <ProjectReference Include="..\..\..\AliSecurityModule\AliSecurityModule.csproj" />
-    <ProjectReference Include="..\..\..\SpeechToTextModule\SpeechToTextModule.csproj" />
-    <ProjectReference Include="..\..\..\ParakeetSpeechToTextModule\ParakeetSpeechToTextModule.csproj" />
-    <ProjectReference Include="..\..\..\InteractionConfidenceModule\InteractionConfidenceModule.csproj" />
-    <ProjectReference Include="..\..\..\TargetSelectionModule\TargetSelectionModule.csproj" />
-    <ProjectReference Include="..\..\..\ViewportModule\ViewportModule.csproj" />
-    <ProjectReference Include="..\..\..\OverlayModule\OverlayModule.csproj" />
+    <ProjectReference Include="..\external\modules\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\external\modules\CameraModule\CameraModule.csproj" />
+    <ProjectReference Include="..\external\modules\MediaPipeModule\MediaPipeModule.csproj" />
+    <ProjectReference Include="..\external\modules\IdentityModule\IdentityModule.csproj" />
+    <ProjectReference Include="..\external\modules\IdentityEnrollmentGuidanceModule\IdentityEnrollmentGuidanceModule.csproj" />
+    <ProjectReference Include="..\external\modules\AttentionModule\AttentionModule.csproj" />
+    <ProjectReference Include="..\external\modules\MicrophoneModule\MicrophoneModule.csproj" />
+    <ProjectReference Include="..\external\modules\VoiceActivityModule\VoiceActivityModule.csproj" />
+    <ProjectReference Include="..\external\modules\SpeakerRecognitionModule\SpeakerRecognitionModule.csproj" />
+    <ProjectReference Include="..\external\modules\WakeWordModule\WakeWordModule.csproj" />
+    <ProjectReference Include="..\external\modules\AliSecurityModule\AliSecurityModule.csproj" />
+    <ProjectReference Include="..\external\modules\SpeechToTextModule\SpeechToTextModule.csproj" />
+    <ProjectReference Include="..\external\modules\ParakeetSpeechToTextModule\ParakeetSpeechToTextModule.csproj" />
+    <ProjectReference Include="..\external\modules\InteractionConfidenceModule\InteractionConfidenceModule.csproj" />
+    <ProjectReference Include="..\external\modules\TargetSelectionModule\TargetSelectionModule.csproj" />
+    <ProjectReference Include="..\external\modules\ViewportModule\ViewportModule.csproj" />
+    <ProjectReference Include="..\external\modules\OverlayModule\OverlayModule.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Modules\Voice\Tools\local_kitten_tts.py" Link="lib\voice\local_kitten_tts.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

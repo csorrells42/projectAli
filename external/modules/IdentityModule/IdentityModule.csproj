@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NuGetAudit>false</NuGetAudit>
+    <AssemblyName>IdentityModule</AssemblyName>
+    <RootNamespace>AvatarBuilder.Modules.Vision.Identity</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="dependencies\vision\opencv\sface\**\*;dependencies\vision\opencv\yunet\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260602" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260602" />
+    <PackageReference Include="Vortice.Direct3D12" Version="3.8.3" />
+    <ProjectReference Include="..\ModuleContracts\ModuleContracts.csproj" />
+    <ProjectReference Include="..\CameraModule\CameraModule.csproj" />
+  </ItemGroup>
+
+</Project>
