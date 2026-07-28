@@ -8,6 +8,12 @@ using Microsoft.Agents.AI;
 
 namespace Ali.Modules.WorkstationFiles;
 
+public sealed record WorkstationFileMoveResult(
+    bool Success,
+    string SourcePath,
+    string DestinationPath,
+    string Message);
+
 public sealed class AliWorkstationFileAccess
 {
     private static readonly HashSet<string> ReadOnlyToolNames =
@@ -38,6 +44,50 @@ public sealed class AliWorkstationFileAccess
     public IReadOnlyList<AliWorkstationFileMount> Mounts => _rawStore.Mounts;
 
     public string RecoverableTrashPath => _rawStore.TrashRoot;
+
+    internal AliResolvedWorkstationPath ResolvePhysicalFilePath(string path) =>
+        _rawStore.ResolvePhysicalFilePath(path);
+
+    public async Task<WorkstationFileMoveResult> MoveAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _rawStore.MoveFileAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false);
+            await Audit.AppendAsync(
+                    "move",
+                    $"{sourcePath} -> {destinationPath}",
+                    succeeded: true,
+                    "completed",
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return new WorkstationFileMoveResult(
+                true,
+                sourcePath,
+                destinationPath,
+                "The file was moved successfully.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            try
+            {
+                await Audit.AppendAsync(
+                        "move",
+                        $"{sourcePath} -> {destinationPath}",
+                        succeeded: false,
+                        ex.GetType().Name,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+
+            return new WorkstationFileMoveResult(false, sourcePath, destinationPath, ex.Message);
+        }
+    }
 
     public string Instructions =>
         "Use only relative paths beginning with one of these approved roots: "

@@ -27,6 +27,7 @@ public static class AliCapabilityCatalog
     public const string FileSearchName = "file_access_grep";
     public const string FileReplaceName = "file_access_replace";
     public const string FileReplaceLinesName = "file_access_replace_lines";
+    public const string FileMoveName = "file_access_move";
     public const string WorkMemoryWriteName = "file_memory_write";
     public const string WorkMemoryReadName = "file_memory_read";
     public const string WorkMemoryDeleteName = "file_memory_delete";
@@ -34,6 +35,8 @@ public static class AliCapabilityCatalog
     public const string WorkMemorySearchName = "file_memory_grep";
     public const string WorkMemoryReplaceName = "file_memory_replace";
     public const string WorkMemoryReplaceLinesName = "file_memory_replace_lines";
+    public const string DotNetBuildName = "dotnet_build_project";
+    public const string DotNetRunName = "dotnet_run_project";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -58,13 +61,16 @@ public static class AliCapabilityCatalog
         new(FileSearchName, "Search text inside files under Ali's approved workstation roots.", "Microsoft Agent Framework file access"),
         new(FileReplaceName, "Edit matching text in an existing file after approval.", "Microsoft Agent Framework file access"),
         new(FileReplaceLinesName, "Edit specific lines in an existing file after approval.", "Microsoft Agent Framework file access"),
+        new(FileMoveName, "Rename or move an existing file between approved workstation folders after approval.", "Ali workstation file tools"),
         new(WorkMemoryWriteName, "Write a private working note or draft for the active user and conversation, optionally with a discovery description.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReadName, "Read a private working note from the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryDeleteName, "Move a private working note into Ali's recoverable work-memory trash.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryListName, "List private working notes and their descriptions for the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemorySearchName, "Search private working notes for the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceName, "Replace matching text in a private working note.", "Microsoft Agent Framework file memory"),
-        new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory")
+        new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory"),
+        new(DotNetBuildName, "Restore and compile an approved C# .csproj with the local .NET SDK after user approval.", "Ali .NET coding tools"),
+        new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Ali .NET coding tools")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>

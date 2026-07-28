@@ -16,11 +16,14 @@ public sealed class AgentToolPermissionStoreTests
         Assert.True(AliToolPermissionPolicy.RequiresApproval("research_web"));
         Assert.False(AliToolPermissionPolicy.RequiresApproval("search_current_web"));
         Assert.False(AliToolPermissionPolicy.RequiresApproval("search_local_library"));
-        Assert.Equal(11, AliToolPermissionPolicy.ProtectedTools.Count);
+        Assert.Equal(14, AliToolPermissionPolicy.ProtectedTools.Count);
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileWriteName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileDeleteName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReplaceName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReplaceLinesName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileMoveName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetBuildName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetRunName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReadName));
         Assert.All(
             AliToolPermissionPolicy.ProtectedTools,

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Ali.Modules.AgentWorkMemory;
+using Ali.Modules.Coding;
 using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
@@ -52,6 +53,9 @@ public sealed class AliToolCoordinator
         _userMemories = userMemories;
         _activeUsers = activeUsers;
         _memorySettings = memorySettings;
+        var dotNetTools = new AliDotNetCodingTools(
+            fileAccess,
+            Path.Combine(Path.GetDirectoryName(fileAccess.Audit.Path)!, "dotnet-actions.jsonl"));
         var catalog = new AliToolCatalog(
             localLibrary,
             webSources,
@@ -61,6 +65,8 @@ public sealed class AliToolCoordinator
             assistantProfile,
             mcpClients,
             toolPermissions,
+            fileAccess,
+            dotNetTools,
             () => _turn.Value,
             userMemories,
             activeUsers,

@@ -123,6 +123,39 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task ClosedFinalEnvelopeWithLengthFinishReason_StillContinues()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"final","answer":"Desktop tree through Desktops.exe"}"""))
+            {
+                FinishReason = ChatFinishReason.Length
+            },
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"final","answer":"and the remaining files through the end of the tree."}"""))
+            {
+                FinishReason = ChatFinishReason.Stop
+            });
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Charlie",
+            () => null);
+        var tool = AIFunctionFactory.Create(() => "ok", "file_access_ls", "List files.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Fully expand the tree.")],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("Desktops.exe", response.Text, StringComparison.Ordinal);
+        Assert.Contains("end of the tree", response.Text, StringComparison.Ordinal);
+        Assert.Equal(2, inner.CallCount);
+    }
+
+    [Fact]
     public async Task TruncatedToolCall_ContinuesAndRunsAsOneCompleteToolRequest()
     {
         using var inner = new RecordingChatClient(

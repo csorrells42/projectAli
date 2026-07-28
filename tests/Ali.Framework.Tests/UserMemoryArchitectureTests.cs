@@ -1,7 +1,11 @@
+using System.Runtime.CompilerServices;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Identity;
+using Ali.Modules.Permissions;
 using Ali.Modules.UserMemory;
 using AvatarBuilder.Modules.Vision.Identity;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 
 namespace Ali.Framework.Tests;
 
@@ -92,6 +96,69 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
+    public async Task ApprovedNativeMemoryTool_ResumesSavesAndCanBeRecalled()
+    {
+        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var service = new PersistingMemoryService();
+        var memoryTools = new AliMemoryTools(
+            service,
+            new FakeActiveSession(user),
+            () => new UserMemorySettings(),
+            static () => null);
+        var policy = new AliToolPermissionPolicy(static () => null);
+        var rememberFunction = policy.Apply(AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)memoryTools.RememberAsync,
+            AliCapabilityCatalog.RememberCurrentUserName,
+            "Save an explicitly requested memory."));
+        using var client = new ScriptedChatClient(
+        [
+            ToolCall(AliCapabilityCatalog.RememberCurrentUserName, new Dictionary<string, object?>
+            {
+                ["fact"] = "My shop foreman is Bill",
+                ["category"] = "people"
+            }),
+            FinalAnswer("saved")
+        ]);
+        var agent = client.AsHarnessAgent(new HarnessAgentOptions
+        {
+            MaximumIterationsPerRequest = 4,
+            DisableWebSearch = true,
+            DisableFileMemory = true,
+            DisableAgentSkillsProvider = true,
+            DisableTodoProvider = true,
+            DisableAgentModeProvider = true,
+            ChatOptions = new ChatOptions
+            {
+                Tools = [rememberFunction],
+                ToolMode = ChatToolMode.Auto
+            }
+        });
+        var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
+
+        var first = await agent.RunAsync(
+            "Remember that my shop foreman is Bill.",
+            session,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var request = Assert.Single(first.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ToolApprovalRequestContent>());
+        Assert.Null(service.StoredFact);
+
+        var second = await agent.RunAsync(
+            new ChatMessage(ChatRole.User,
+            [
+                request.CreateResponse(true, "Approved once by the user.")
+            ]),
+            session,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("saved", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("My shop foreman is Bill", service.StoredFact);
+        var recalled = await memoryTools.SearchAsync("Who is my shop foreman?", TestContext.Current.CancellationToken);
+        Assert.Contains(recalled.Memories, memory => memory.Text == "My shop foreman is Bill");
+    }
+
+    [Fact]
     public void McpMemoryPoliciesAreDisabledByDefaultAndClassifiedAsPrivate()
     {
         var policies = Ali.Modules.Mcp.McpServerToolCatalog.CreateDefaultPolicies();
@@ -177,6 +244,90 @@ public sealed class UserMemoryArchitectureTests
         {
             SeenUsers.Add(user);
             return Task.FromResult(new MemoryOperationResult(true, "ok", []));
+        }
+    }
+
+    private sealed class PersistingMemoryService : IUserMemoryService
+    {
+        public string? StoredFact { get; private set; }
+
+        public Task<IReadOnlyList<UserMemory>> RecallAsync(
+            ActiveUser user,
+            string query,
+            int maximumResults,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<UserMemory> values = StoredFact is null
+                ? []
+                : [new("memory-1", StoredFact, "people", DateTimeOffset.UtcNow, null, 1, true, "explicit_user_request")];
+            return Task.FromResult(values);
+        }
+
+        public Task<MemoryOperationResult> RememberAsync(
+            ActiveUser user,
+            string conversation,
+            string source,
+            CancellationToken cancellationToken)
+        {
+            StoredFact = conversation;
+            return Task.FromResult(new MemoryOperationResult(
+                true,
+                "Memory saved locally.",
+                [new UserMemory("memory-1", conversation, "people", DateTimeOffset.UtcNow, null, 1, true, source)]));
+        }
+
+        public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string correction, CancellationToken cancellationToken) =>
+            Task.FromResult(new MemoryOperationResult(false, "unused", []));
+
+        public Task<MemoryOperationResult> ForgetAsync(ActiveUser user, string request, CancellationToken cancellationToken) =>
+            Task.FromResult(new MemoryOperationResult(false, "unused", []));
+
+        public Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken) =>
+            RecallAsync(user, string.Empty, 10, cancellationToken);
+
+        public Task<MemoryOperationResult> DeleteAsync(ActiveUser user, string memoryId, CancellationToken cancellationToken) =>
+            Task.FromResult(new MemoryOperationResult(false, "unused", []));
+
+        public Task<UserMemoryStatus> TestAsync(ActiveUser user, CancellationToken cancellationToken) =>
+            Task.FromResult(new UserMemoryStatus(true, true, true, "Ready", "ok"));
+    }
+
+    private static ChatResponse ToolCall(string name, IDictionary<string, object?> arguments)
+    {
+        var message = new ChatMessage(ChatRole.Assistant, string.Empty);
+        message.Contents.Add(new FunctionCallContent($"call-{Guid.NewGuid():N}", name, arguments));
+        return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
+    }
+
+    private static ChatResponse FinalAnswer(string text) =>
+        new(new ChatMessage(ChatRole.Assistant, text)) { FinishReason = ChatFinishReason.Stop };
+
+    private sealed class ScriptedChatClient(IEnumerable<ChatResponse> responses) : IChatClient
+    {
+        private readonly Queue<ChatResponse> _responses = new(responses);
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(_responses.Count > 0 ? _responses.Dequeue() : FinalAnswer("script exhausted"));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
         }
     }
 }

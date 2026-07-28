@@ -6,6 +6,12 @@ namespace Ali.Modules.WorkstationFiles;
 
 public sealed record AliWorkstationFileMount(string Name, string RootPath);
 
+internal sealed record AliResolvedWorkstationPath(
+    string MountName,
+    string MountRoot,
+    string RelativePath,
+    string PhysicalPath);
+
 /// <summary>
 /// Presents several explicitly approved Windows folders as one virtual Agent Framework
 /// file store. Every path begins with a mount name; absolute paths, traversal, and
@@ -52,6 +58,16 @@ public sealed class AliWorkstationFileStore : AgentFileStore
 
     public string TrashRoot => _trashRoot;
 
+    internal AliResolvedWorkstationPath ResolvePhysicalFilePath(string path)
+    {
+        var resolved = ResolveFile(path);
+        return new AliResolvedWorkstationPath(
+            resolved.Mount.Name,
+            resolved.Mount.RootPath,
+            resolved.RelativePath,
+            resolved.Mount.ResolvePhysicalPath(resolved.RelativePath));
+    }
+
     public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default)
     {
         var resolved = ResolveFile(path);
@@ -62,6 +78,31 @@ public sealed class AliWorkstationFileStore : AgentFileStore
     {
         var resolved = ResolveFile(path);
         return resolved.Mount.Store.ReadAsync(resolved.RelativePath, cancellationToken);
+    }
+
+    internal Task MoveFileAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = ResolveFile(sourcePath);
+        var destination = ResolveDestinationFile(destinationPath, source.Mount);
+        var sourcePhysicalPath = source.Mount.ResolvePhysicalPath(source.RelativePath);
+        var destinationPhysicalPath = destination.Mount.ResolvePhysicalPath(destination.RelativePath);
+        if (!File.Exists(sourcePhysicalPath))
+        {
+            throw new FileNotFoundException("The source file does not exist.", sourcePhysicalPath);
+        }
+
+        if (File.Exists(destinationPhysicalPath))
+        {
+            throw new IOException("The destination file already exists. Ali will not overwrite it during a rename.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPhysicalPath)!);
+        File.Move(sourcePhysicalPath, destinationPhysicalPath, overwrite: false);
+        return Task.CompletedTask;
     }
 
     public override async Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
@@ -150,13 +191,54 @@ public sealed class AliWorkstationFileStore : AgentFileStore
 
     private ResolvedPath ResolveFile(string path)
     {
-        var resolved = Resolve(path, allowMountRoot: false);
+        var resolved = ResolveExistingBareFileOrPath(path);
         if (string.IsNullOrWhiteSpace(resolved.RelativePath))
         {
             throw new ArgumentException("A file path must include a name beneath an approved mount.", nameof(path));
         }
 
         return resolved;
+    }
+
+    private ResolvedPath ResolveExistingBareFileOrPath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var trimmed = path.Trim();
+        if (Path.IsPathFullyQualified(trimmed)
+            || trimmed.Contains('/')
+            || trimmed.Contains('\\')
+            || _mounts.ContainsKey(trimmed))
+        {
+            return Resolve(trimmed, allowMountRoot: false);
+        }
+
+        var matches = _mounts.Values
+            .Select(mount => new ResolvedPath(mount, trimmed))
+            .Where(candidate => File.Exists(candidate.Mount.ResolvePhysicalPath(candidate.RelativePath)))
+            .ToArray();
+        return matches.Length switch
+        {
+            1 => matches[0],
+            > 1 => throw new ArgumentException(
+                $"The bare file name '{trimmed}' exists in more than one approved root ({string.Join(", ", matches.Select(match => match.Mount.Name))}). Use a virtual root to disambiguate it.",
+                nameof(path)),
+            _ => Resolve(trimmed, allowMountRoot: false)
+        };
+    }
+
+    private ResolvedPath ResolveDestinationFile(string path, MountedStore sourceMount)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var trimmed = path.Trim();
+        if (!Path.IsPathFullyQualified(trimmed)
+            && !trimmed.Contains('/')
+            && !trimmed.Contains('\\')
+            && !_mounts.ContainsKey(trimmed))
+        {
+            return new ResolvedPath(sourceMount, trimmed);
+        }
+
+        return Resolve(trimmed, allowMountRoot: false);
     }
 
     private ResolvedPath ResolveDirectory(string path) => Resolve(path, allowMountRoot: true);

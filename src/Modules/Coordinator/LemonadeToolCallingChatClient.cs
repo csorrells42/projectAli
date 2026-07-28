@@ -79,7 +79,7 @@ internal sealed class LemonadeToolCallingChatClient(
         CancellationToken cancellationToken)
     {
         if (TryReadFinalAnswer(response.Text, out var accumulatedAnswer, out var wasTruncated)
-            && wasTruncated)
+            && (wasTruncated || IsLengthFinish(response)))
         {
             return await CompleteTruncatedFinalAsync(
                 response,
@@ -294,6 +294,7 @@ internal sealed class LemonadeToolCallingChatClient(
             Environment.NewLine,
             "You are the decision engine inside a tool-calling agent harness.",
             "Interpret the complete conversation and choose exactly one next action.",
+            "The newest user message is authoritative. Do not resume or retry an earlier failed action unless the newest message explicitly requests a retry or completing that action is still necessary to satisfy the newest request.",
             "Return exactly one JSON object and no Markdown or commentary.",
             "To call a tool: {\"action\":\"call\",\"tool\":\"exact_tool_name\",\"arguments\":{},\"summary\":\"short user-visible reason\"}",
             "To answer: {\"action\":\"final\",\"answer\":\"complete conversational answer\"}",
@@ -365,9 +366,12 @@ internal sealed class LemonadeToolCallingChatClient(
             return false;
         }
 
-        return string.Equals(response.FinishReason?.ToString(), "length", StringComparison.OrdinalIgnoreCase)
+        return IsLengthFinish(response)
             || !text.TrimEnd().EndsWith('}');
     }
+
+    private static bool IsLengthFinish(ChatResponse response) =>
+        string.Equals(response.FinishReason?.ToString(), "length", StringComparison.OrdinalIgnoreCase);
 
     private static string NormalizeDecisionContinuation(string? text)
     {

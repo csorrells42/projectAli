@@ -1,3 +1,4 @@
+using Ali.Modules.Coding;
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
@@ -5,6 +6,7 @@ using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 using Ali.Modules.UserMemory;
+using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -30,6 +32,8 @@ internal sealed class AliToolCatalog
         AssistantProfile assistantProfile,
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess,
+        AliDotNetCodingTools dotNetTools,
         Func<CoordinatorTurnContext?> turnAccessor,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
@@ -101,7 +105,19 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string>)identityTimeTools.GetCurrentLocalTime,
                 AliCapabilityCatalog.GetCurrentLocalTimeName,
-                "Return the authoritative local computer date, time, and time zone. Use for relative dates, deadlines, schedules, and reminders when an exact clock value matters."))
+                "Return the authoritative local computer date, time, and time zone. Use for relative dates, deadlines, schedules, and reminders when an exact clock value matters.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string?, CancellationToken, Task<DotNetBuildResult>>)dotNetTools.BuildAsync,
+                AliCapabilityCatalog.DotNetBuildName,
+                "Restore and compile one C# project using the installed .NET SDK. projectPath must be an approved virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj. configuration is Debug or Release. This executes project build targets and always requires user approval. Inspect the returned compiler output and correct errors before claiming success.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string?, CancellationToken, Task<DotNetRunResult>>)dotNetTools.RunAsync,
+                AliCapabilityCatalog.DotNetRunName,
+                "Launch the already-built artifact for one approved C# project. projectPath must be an approved virtual .csproj path and configuration must match the successful build. This starts local code and always requires user approval. Call only when the user explicitly asks to run or open the application.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string, CancellationToken, Task<WorkstationFileMoveResult>>)fileAccess.MoveAsync,
+                AliCapabilityCatalog.FileMoveName,
+                "Rename or move one existing file without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source name can be resolved automatically. The destination is never overwritten. This changes an existing file and always requires user approval."))
         ];
 
         Instructions = BuildInstructions(profile.AssistantName);
@@ -120,6 +136,7 @@ internal sealed class AliToolCatalog
             Environment.NewLine,
             $"You are {assistantName}, a local personal assistant.",
             "Interpret the user's complete request yourself. No application router classifies English before you receive it.",
+            "Treat the newest user message as authoritative. Never carry forward or retry an earlier failed action unless the user explicitly asks to retry it or it remains necessary for the newest request.",
             TypoInterpretationInstruction,
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "Relevant per-user Mem0 memory is retrieved before every turn. When the retrieved set is nonempty and directly answers the user's question, answer from it immediately. Do not convert a recalled fact into a todo item, note-taking task, reminder, or web search. Call search_memory only when the initial recalled set does not answer the personal question.",
@@ -132,6 +149,8 @@ internal sealed class AliToolCatalog
             "Use file_memory descriptions to make substantial working notes discoverable. Store durable personal facts only through the explicit memory tools, and place requested deliverables in file_access Exports or another approved user folder.",
             "Use the Agent Framework file_access tools for direct file requests. Translate named locations into virtual paths yourself: desktop -> Desktop/<file>, documents -> Documents/<file>, downloads -> Downloads/<file>, and exports -> Exports/<file>. Never ask the user for an absolute path. If a path call fails, correct it using an approved virtual root and retry.",
             "Create new requested text artifacts with overwrite=false and default to Exports when the user did not name a location. Never claim a file was created, edited, or deleted without a successful file tool result.",
+            "When the user asks to rename or move a file, use file_access_move. Do not imitate a rename by creating a second file and deleting the first. After any failed file operation, inspect the error and do not claim the requested change occurred.",
+            "For C# applications, create a complete .csproj and source files inside one approved folder. When the user asks to compile, test, build, or run the app, call dotnet_build_project, inspect its compiler output, fix errors with file tools, and rebuild until successful. Call dotnet_run_project only after a successful build and only when the user explicitly asks to launch the app. These tools never provide a general shell.",
             "When the user requests your current tool inventory or disputes the completeness or count of an earlier inventory, call list_available_tools immediately without asking permission. For a full inventory, preserve every returned tool and its Source. You may use any requested table, list, explanation, grouping, or filtering, but never relabel native tools as MCP, invent tools, blame omissions on trimming, or offer to fetch the catalog later.",
             "Break compound requests into steps, call one tool at a time, inspect every result, and continue until the whole request is answered. Keep internal task tracking out of ordinary conversational answers; use private file memory only when a genuinely multi-step task needs durable working state.",
             "Correctness is more important than avoiding a necessary tool call. Do not invent current facts when live evidence is unavailable.",

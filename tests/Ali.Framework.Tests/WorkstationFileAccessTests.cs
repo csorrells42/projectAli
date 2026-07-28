@@ -358,6 +358,64 @@ public sealed class WorkstationFileAccessTests
     }
 
     [Fact]
+    public async Task UniqueBareExistingFile_CanBeFoundAndDeletedWithoutInventingAPath()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            await access.Store.WriteAsync("Workspace/touch.txt", "old", TestContext.Current.CancellationToken);
+
+            Assert.Equal("old", await access.Store.ReadAsync("touch.txt", TestContext.Current.CancellationToken));
+            Assert.True(await access.Store.DeleteAsync("touch.txt", TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(Path.Combine(root, "workspace", "touch.txt")));
+        });
+    }
+
+    [Fact]
+    public async Task BareExistingFile_FailsClearlyWhenMoreThanOneRootMatches()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            await access.Store.WriteAsync("Workspace/touch.txt", "workspace", TestContext.Current.CancellationToken);
+            await access.Store.WriteAsync("Exports/touch.txt", "exports", TestContext.Current.CancellationToken);
+
+            var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+                access.Store.ReadAsync("touch.txt", TestContext.Current.CancellationToken));
+            Assert.Contains("more than one approved root", error.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task MoveTool_RenamesWithoutRecreatingAndNeverOverwritesDestination()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            await access.Store.WriteAsync("Workspace/touch.txt", "preserved", TestContext.Current.CancellationToken);
+
+            var moved = await access.MoveAsync(
+                "touch.txt",
+                "touch.cs",
+                TestContext.Current.CancellationToken);
+
+            Assert.True(moved.Success, moved.Message);
+            Assert.False(File.Exists(Path.Combine(root, "workspace", "touch.txt")));
+            Assert.Equal("preserved", await File.ReadAllTextAsync(
+                Path.Combine(root, "workspace", "touch.cs"),
+                TestContext.Current.CancellationToken));
+
+            await access.Store.WriteAsync("Workspace/other.txt", "other", TestContext.Current.CancellationToken);
+            var collision = await access.MoveAsync(
+                "Workspace/other.txt",
+                "Workspace/touch.cs",
+                TestContext.Current.CancellationToken);
+            Assert.False(collision.Success);
+            Assert.Equal("preserved", await File.ReadAllTextAsync(
+                Path.Combine(root, "workspace", "touch.cs"),
+                TestContext.Current.CancellationToken));
+            Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileMoveName));
+        });
+    }
+
+    [Fact]
     public async Task AuditLog_RecordsMetadataButNeverFileContent()
     {
         await WithAccessAsync(async (root, access, permissions) =>

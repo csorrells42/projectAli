@@ -23,7 +23,10 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.FileWriteName, "Creates or overwrites a workstation file", "New files allowed; overwrite asks"),
         new(AliCapabilityCatalog.FileDeleteName, "Moves a workstation file to recoverable trash"),
         new(AliCapabilityCatalog.FileReplaceName, "Edits matching text in an existing file"),
-        new(AliCapabilityCatalog.FileReplaceLinesName, "Edits specific lines in an existing file")
+        new(AliCapabilityCatalog.FileReplaceLinesName, "Edits specific lines in an existing file"),
+        new(AliCapabilityCatalog.FileMoveName, "Renames or moves an existing workstation file"),
+        new(AliCapabilityCatalog.DotNetBuildName, "Executes the local .NET SDK and project build targets"),
+        new(AliCapabilityCatalog.DotNetRunName, "Launches a compiled local application")
     ];
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =
