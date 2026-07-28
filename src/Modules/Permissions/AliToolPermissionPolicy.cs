@@ -17,9 +17,12 @@ internal sealed class AliToolPermissionPolicy(Func<CoordinatorTurnContext?> turn
     ];
 
     public AIFunction Apply(AIFunction function)
+        => Apply(function, ApprovalRequiredTools.Contains(function.Name));
+
+    public AIFunction Apply(AIFunction function, bool requiresApproval)
     {
         var observable = new ActivityReportingAIFunction(function, turnAccessor);
-        return ApprovalRequiredTools.Contains(function.Name)
+        return requiresApproval
             ? new ApprovalRequiredAIFunction(observable)
             : observable;
     }

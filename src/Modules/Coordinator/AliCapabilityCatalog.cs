@@ -1,4 +1,5 @@
 using System.Text;
+using Ali.Modules.Mcp;
 
 namespace Ali.Modules.Coordinator;
 
@@ -28,9 +29,36 @@ public static class AliCapabilityCatalog
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>
+        ListAvailableTools(additionalTools: []);
+
+    public static CoordinatorCapabilityResult ListAvailableTools(McpClientManager mcpClients)
+    {
+        ArgumentNullException.ThrowIfNull(mcpClients);
+        var settings = mcpClients.LoadSettings();
+        var additionalTools = settings.Enabled
+            ? settings.Servers
+                .Where(server => server.Enabled)
+                .SelectMany(server => server.Tools
+                    .Where(tool => tool.Enabled)
+                    .Select(tool => new CoordinatorCapability(
+                        McpClientManager.BuildModelToolName(server, tool.Name),
+                        string.IsNullOrWhiteSpace(tool.Description)
+                            ? $"Run {tool.Name} through the {server.Name} MCP integration."
+                            : $"{tool.Description} (MCP server: {server.Name})")))
+                .ToList()
+            : [];
+        return ListAvailableTools(additionalTools);
+    }
+
+    private static CoordinatorCapabilityResult ListAvailableTools(
+        IReadOnlyList<CoordinatorCapability> additionalTools)
+    {
+        var allTools = Tools.Concat(additionalTools).ToList();
+        return
         new(
-            $"Ali has {Tools.Count} registered model-callable tools. This list is authoritative for the current session.",
-            Tools);
+            $"Ali has {allTools.Count} configured model-callable tools. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
+            allTools);
+    }
 
     public static string BuildPromptManifest()
     {
@@ -44,8 +72,10 @@ public static class AliCapabilityCatalog
                 .AppendLine(tool.Description);
         }
 
-        manifest.Append("Voice playback is an application output setting, not a model-callable tool. "
-            + "You do not currently have direct calendar, email, arbitrary file-system, shell, camera, or generic browser-control tools.");
+        manifest.Append("Additional tools whose names begin with mcp_ are external MCP integrations explicitly enabled by the user. "
+            + "Use list_available_tools for their configured catalog and obey approval requests. "
+            + "Voice playback is an application output setting, not a model-callable tool. "
+            + "Never claim calendar, email, arbitrary file-system, shell, camera, or generic browser-control access unless an enabled tool with that exact capability appears in the current turn.");
         return manifest.ToString();
     }
 }

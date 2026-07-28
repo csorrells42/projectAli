@@ -1,6 +1,7 @@
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
+using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 using Microsoft.Extensions.AI;
@@ -26,6 +27,7 @@ internal sealed class AliToolCatalog
         IMemoryStore memories,
         IReminderStore reminders,
         AssistantProfile assistantProfile,
+        McpClientManager mcpClients,
         Func<CoordinatorTurnContext?> turnAccessor)
     {
         var profile = assistantProfile.Normalize();
@@ -38,7 +40,7 @@ internal sealed class AliToolCatalog
         Tools =
         [
             Protect(AIFunctionFactory.Create(
-                (Func<CoordinatorCapabilityResult>)AliCapabilityCatalog.ListAvailableTools,
+                (Func<CoordinatorCapabilityResult>)(() => AliCapabilityCatalog.ListAvailableTools(mcpClients)),
                 AliCapabilityCatalog.ListAvailableToolsName,
                 "Return the exact authoritative list of model-callable tools registered for Ali right now. Use this when the user asks what tools, abilities, or integrations Ali can use. Never infer additional generic tools.")),
             Protect(AIFunctionFactory.Create(

@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Ali.Modules.Evidence;
 using Ali.Modules.Identity;
+using Ali.Modules.Mcp;
+using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -22,6 +24,12 @@ internal sealed class AliAgentHarnessRunner
     private readonly IReadOnlyList<AITool> _tools;
     private readonly AliMemoryTools _memoryTools;
     private readonly AIAgent _agent;
+    private readonly IChatClient _compatibilityClient;
+    private readonly ILocalModelRuntime _runtime;
+    private readonly AssistantProfile _assistantProfile;
+    private readonly string _instructions;
+    private readonly McpClientManager _mcpClients;
+    private readonly Func<CoordinatorTurnContext?> _turnAccessor;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
 
     public AliAgentHarnessRunner(
@@ -29,15 +37,26 @@ internal sealed class AliAgentHarnessRunner
         ILocalModelRuntime runtime,
         AssistantProfile assistantProfile,
         AliToolCatalog catalog,
+        McpClientManager mcpClients,
         Func<CoordinatorTurnContext?> turnAccessor)
     {
         _tools = catalog.Tools;
         _memoryTools = catalog.MemoryTools;
-        var compatibilityClient = new LemonadeToolCallingChatClient(chatClient, runtime, turnAccessor);
-        var profile = runtime.ActiveProfile;
-        _agent = compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
+        _runtime = runtime;
+        _assistantProfile = assistantProfile.Normalize();
+        _instructions = catalog.Instructions;
+        _mcpClients = mcpClients;
+        _turnAccessor = turnAccessor;
+        _compatibilityClient = new LemonadeToolCallingChatClient(chatClient, runtime, turnAccessor);
+        _agent = CreateAgent(_tools);
+    }
+
+    private AIAgent CreateAgent(IReadOnlyList<AITool> tools)
+    {
+        var profile = _runtime.ActiveProfile;
+        return _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
         {
-            Name = assistantProfile.Normalize().AssistantName,
+            Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, and clock tools.",
             MaximumIterationsPerRequest = MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
@@ -49,8 +68,8 @@ internal sealed class AliAgentHarnessRunner
             DisableAgentSkillsProvider = true,
             ChatOptions = new ChatOptions
             {
-                Instructions = catalog.Instructions,
-                Tools = _tools.ToList(),
+                Instructions = _instructions,
+                Tools = tools.ToList(),
                 ToolMode = ChatToolMode.Auto,
                 AllowMultipleToolCalls = false,
                 MaxOutputTokens = profile.OutputTokenLimit
@@ -70,6 +89,33 @@ internal sealed class AliAgentHarnessRunner
         Action<AssistantStreamChunk> publish,
         CancellationToken cancellationToken)
     {
+        await using var mcpSession = await _mcpClients
+            .CreateEnabledToolSessionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var warning in mcpSession.Warnings)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                $"Skipped MCP server {warning.ServerName}",
+                warning.Message);
+        }
+
+        IReadOnlyList<AITool> activeTools = _tools;
+        var activeAgent = _agent;
+        if (mcpSession.Tools.Count > 0)
+        {
+            var permissionPolicy = new AliToolPermissionPolicy(_turnAccessor);
+            activeTools = _tools
+                .Concat(mcpSession.Tools.Select(tool =>
+                    (AITool)permissionPolicy.Apply(tool.Function, tool.RequiresApproval)))
+                .ToList();
+            activeAgent = CreateAgent(activeTools);
+            turn.Report(
+                AgentActivityKind.Status,
+                "Loaded enabled MCP integrations",
+                $"Added {mcpSession.Tools.Count} approved external tool(s) for this turn.");
+        }
+
         if (attachments.Count > 0)
         {
             turn.Report(
@@ -92,7 +138,7 @@ internal sealed class AliAgentHarnessRunner
         // The UI conversation history is the canonical state. A fresh Harness session per
         // visible turn prevents an unfinished high-effort tool loop from leaking into the
         // user's next message while preserving one session across this turn's tool calls.
-        var session = await _agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+        var session = await activeAgent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<MeaiChatMessage> input = BuildInitialInput(
             history,
             userText,
@@ -104,7 +150,7 @@ internal sealed class AliAgentHarnessRunner
         while (true)
         {
             ToolApprovalRequestContent? approvalRequest = null;
-            await foreach (var update in _agent.RunStreamingAsync(
+            await foreach (var update in activeAgent.RunStreamingAsync(
                                input,
                                session,
                                options: null,
@@ -149,7 +195,11 @@ internal sealed class AliAgentHarnessRunner
                 break;
             }
 
-            var response = await RequestApprovalAsync(turn, approvalRequest, cancellationToken).ConfigureAwait(false);
+            var response = await RequestApprovalAsync(
+                turn,
+                approvalRequest,
+                activeTools,
+                cancellationToken).ConfigureAwait(false);
             input = [new MeaiChatMessage(MeaiChatRole.User, [response])];
         }
 
@@ -218,12 +268,13 @@ internal sealed class AliAgentHarnessRunner
     private async Task<AIContent> RequestApprovalAsync(
         CoordinatorTurnContext turn,
         ToolApprovalRequestContent request,
+        IReadOnlyList<AITool> activeTools,
         CancellationToken cancellationToken)
     {
         var functionCall = request.ToolCall as FunctionCallContent;
         var toolName = functionCall?.Name ?? request.ToolCall.GetType().Name;
         var arguments = functionCall is null ? "{}" : CompactArguments(functionCall.Arguments, 1200);
-        var description = _tools
+        var description = activeTools
             .OfType<AIFunctionDeclaration>()
             .FirstOrDefault(tool => string.Equals(tool.Name, toolName, StringComparison.Ordinal))?
             .Description ?? "Ali requested permission to run this tool.";

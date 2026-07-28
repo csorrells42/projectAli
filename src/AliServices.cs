@@ -7,6 +7,7 @@ using Ali.Modules.RAG;
 using Ali.Modules.Voice;
 using Ali.Modules.Storage;
 using Ali.Modules.Coordinator;
+using Ali.Modules.Mcp;
 
 namespace Ali;
 
@@ -34,7 +35,9 @@ public sealed class AliServices
         ISpeechPlayer speechPlayer,
         FileConversationStore conversations,
         FileMemoryStore memories,
-        FileReminderStore reminders)
+        FileReminderStore reminders,
+        McpClientManager mcpClients,
+        McpServerHost mcpServer)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -51,6 +54,8 @@ public sealed class AliServices
         Conversations = conversations;
         Memories = memories;
         Reminders = reminders;
+        McpClients = mcpClients;
+        McpServer = mcpServer;
     }
 
     public string DataRoot { get; }
@@ -75,6 +80,10 @@ public sealed class AliServices
 
     public string InternetBackendSettingsExamplePath => WebSourceBackendSettingsStore.GetExamplePath(DataRoot);
 
+    public string McpClientSettingsPath => McpClientSettingsStore.GetSettingsPath(DataRoot);
+
+    public string McpServerSettingsPath => McpServerSettingsStore.GetSettingsPath(DataRoot);
+
     public SafeActivatingLocalRuntime RuntimeController { get; }
 
     public ConversationOrchestrator Orchestrator { get; }
@@ -92,6 +101,10 @@ public sealed class AliServices
     public FileMemoryStore Memories { get; }
 
     public FileReminderStore Reminders { get; }
+
+    public McpClientManager McpClients { get; }
+
+    public McpServerHost McpServer { get; }
 
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
@@ -238,6 +251,16 @@ public sealed class AliServices
             () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
         var webResearch = new McpWebResearchClient(
             () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+        var mcpClients = new McpClientManager(dataRoot);
+        var mcpServer = new McpServerHost(
+            dataRoot,
+            new AliMcpServerToolFactory(
+                localLibrary,
+                webSources,
+                webResearch,
+                memories,
+                reminders,
+                profile));
         var coordinator = new AliToolCoordinator(
             runtime,
             runtime,
@@ -246,7 +269,8 @@ public sealed class AliServices
             webResearch,
             memories,
             reminders,
-            profile);
+            profile,
+            mcpClients);
         var orchestrator = new ConversationOrchestrator(
             runtime,
             correctionQueue,
@@ -273,7 +297,9 @@ public sealed class AliServices
             speechPlayer,
             conversations,
             memories,
-            reminders);
+            reminders,
+            mcpClients,
+            mcpServer);
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

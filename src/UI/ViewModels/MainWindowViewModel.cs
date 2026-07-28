@@ -195,6 +195,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(AliServices services)
     {
         _services = services;
+        McpSettings = new McpSettingsViewModel(_services.McpClients);
+        McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
         _pendingAssistantName = AssistantName;
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);
@@ -391,6 +393,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<CameraDevice> VisionCameras { get; } = new();
 
     public ObservableCollection<CameraVideoMode> VisionCameraModes { get; } = new();
+
+    public McpSettingsViewModel McpSettings { get; }
+
+    public McpServerSettingsViewModel McpServerSettings { get; }
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
@@ -1758,6 +1764,8 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _statusText, value);
     }
 
+    public Task InitializeMcpServerAsync() => McpServerSettings.StartIfEnabledAsync();
+
     public async Task StartLocalRuntimeAsync()
     {
         var options = _services.LoadRuntimeSettings();
@@ -1809,6 +1817,15 @@ public sealed class MainWindowViewModel : ObservableObject
     public async Task ShutdownLocalRuntimeAsync()
     {
         RequestShutdownCancellation();
+        try
+        {
+            await _services.McpServer.StopAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            // Model and camera shutdown must continue even if the optional MCP server faults.
+        }
+
         _interactionTimer.Stop();
         _visionModeLoad?.Cancel();
         _visionModeLoad?.Dispose();

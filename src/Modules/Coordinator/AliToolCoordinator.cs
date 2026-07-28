@@ -5,6 +5,7 @@ using Ali.Modules.Evidence;
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
+using Ali.Modules.Mcp;
 using Ali.Modules.Reminders;
 using Ali.Modules.Runtime;
 using Microsoft.Extensions.AI;
@@ -30,7 +31,8 @@ public sealed class AliToolCoordinator
         McpWebResearchClient webResearch,
         IMemoryStore memories,
         IReminderStore reminders,
-        AssistantProfile assistantProfile)
+        AssistantProfile assistantProfile,
+        McpClientManager mcpClients)
     {
         var catalog = new AliToolCatalog(
             localLibrary,
@@ -39,12 +41,14 @@ public sealed class AliToolCoordinator
             memories,
             reminders,
             assistantProfile,
+            mcpClients,
             () => _turn.Value);
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
             assistantProfile,
             catalog,
+            mcpClients,
             () => _turn.Value);
     }
 
