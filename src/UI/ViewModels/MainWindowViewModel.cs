@@ -218,6 +218,7 @@ public sealed class MainWindowViewModel : ObservableObject
         EraseConversationCommand = CreateCommand(EraseConversation);
         RenameConversationCommand = CreateCommand(RenameConversation);
         CommitConversationRenameCommand = CreateCommand(CommitConversationRename);
+        CopyMessageCommand = CreateCommand(CopyMessage);
         FlagIncorrectCommand = CreateCommand(FlagIncorrect);
         SaveAssistantNameCommand = CreateCommand(_ => SaveAssistantName());
         SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
@@ -566,6 +567,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RenameConversationCommand { get; }
 
     public ICommand CommitConversationRenameCommand { get; }
+
+    public ICommand CopyMessageCommand { get; }
 
     public ICommand FlagIncorrectCommand { get; }
 
@@ -4302,6 +4305,24 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             CompleteUiOperation(operation);
             IsBusy = false;
+        }
+    }
+
+    private void CopyMessage(object? parameter)
+    {
+        if (parameter is not ChatMessageViewModel message || string.IsNullOrWhiteSpace(message.Text))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(message.Text);
+            StatusText = "Message copied to the clipboard.";
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException)
+        {
+            StatusText = $"Could not copy the message: {ex.Message}";
         }
     }
 

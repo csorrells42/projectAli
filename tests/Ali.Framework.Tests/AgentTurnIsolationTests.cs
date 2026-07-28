@@ -29,6 +29,24 @@ public sealed class AgentTurnIsolationTests
     }
 
     [Fact]
+    public void InitialInput_PlacesRetrievedPerUserMemoryImmediatelyBeforeCurrentQuestion()
+    {
+        var memory = new CoordinatorMemoryResult(
+            "Found one memory",
+            [new CoordinatorMemoryItem("memory-1", "The current user works in Stuart, Florida.", "dates_places", DateTimeOffset.UtcNow)],
+            []);
+
+        var input = AliAgentHarnessRunner.BuildInitialInput([], "Where does the user work?", memory, []);
+
+        Assert.Equal(2, input.Count);
+        Assert.Equal(ChatRole.System, input[0].Role);
+        Assert.Contains("PER-USER MEM0 MEMORY", input[0].Text, StringComparison.Ordinal);
+        Assert.Contains("Stuart, Florida", input[0].Text, StringComparison.Ordinal);
+        Assert.Equal(ChatRole.User, input[1].Role);
+        Assert.Equal("Where does the user work?", input[1].Text);
+    }
+
+    [Fact]
     public async Task CurrentWebSearch_StopsAfterTwoEmptyAttemptsWithinOneTurn()
     {
         var retriever = new EmptySourceRetriever();

@@ -215,7 +215,7 @@ internal sealed class LemonadeToolCallingChatClient(
             "To answer: {\"action\":\"final\",\"answer\":\"complete conversational answer\"}",
             "Use only an exact tool name from the supplied catalog and valid arguments from its schema.",
             "For compound requests, call one tool at a time, inspect its result, and then choose the next action.",
-            "Relevant local memory is already retrieved before every turn. If that context directly answers a personal question, answer from it; otherwise call search_memory before claiming the information is unavailable.",
+            "Relevant per-user memory is already retrieved before every turn. If a nonempty memory context directly answers a personal question, answer from it immediately; never turn a recalled fact into a todo item, note-taking task, reminder, or web search. Otherwise call search_memory before claiming the information is unavailable.",
             "Use tools only when they improve correctness. Do not call a source tool for greetings or ordinary conversation.",
             "The read-only list_available_tools tool requires no permission. If the user requests the current tool inventory or disputes the completeness or count of an earlier inventory, call it now; never offer to call it later.",
             "Never include hidden reasoning or reasoning_content. The summary is a brief operational explanation, not private reasoning.",
