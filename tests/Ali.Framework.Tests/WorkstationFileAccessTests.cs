@@ -2,6 +2,7 @@ using Ali.Modules.Coordinator;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Permissions;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using System.Reflection;
 
 namespace Ali.Framework.Tests;
@@ -186,6 +187,118 @@ public sealed class WorkstationFileAccessTests
     }
 
     [Fact]
+    public async Task Harness_TrustedWorkstationExecutesNewFileWriteWithoutPrompting()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            using var client = new ScriptedChatClient(
+            [
+                ToolCall(FileAccessProvider.WriteToolName, new Dictionary<string, object?>
+                {
+                    ["fileName"] = "Workspace/touch.txt",
+                    ["content"] = "approval integration test",
+                    ["overwrite"] = false
+                }),
+                FinalAnswer("created")
+            ]);
+            var agent = client.AsHarnessAgent(new HarnessAgentOptions
+            {
+                MaximumIterationsPerRequest = 4,
+                DisableWebSearch = true,
+                DisableFileMemory = true,
+                DisableAgentSkillsProvider = true,
+                DisableTodoProvider = true,
+                DisableAgentModeProvider = true,
+                FileAccessStore = access.Store,
+                FileAccessProviderOptions = new FileAccessProviderOptions
+                {
+                    Instructions = access.Instructions,
+                    DisableReadOnlyToolApproval = false,
+                    DisableWriteToolApproval = false
+                },
+                ToolApprovalAgentOptions = new ToolApprovalAgentOptions
+                {
+                    AutoApprovalRules = [access.ShouldAutoApproveAsync]
+                }
+            });
+
+            var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
+            var response = await agent.RunAsync(
+                "Create Workspace/touch.txt as a new file.",
+                session,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain(response.Messages.SelectMany(message => message.Contents),
+                content => content is ToolApprovalRequestContent);
+            Assert.Equal("approval integration test",
+                await access.Store.ReadAsync("Workspace/touch.txt", TestContext.Current.CancellationToken));
+            Assert.Equal(2, client.CallCount);
+        });
+    }
+
+    [Fact]
+    public async Task Harness_ApprovedWriteResumesAndExecutesTheOriginalToolCall()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            permissions.SetProfile(AgentPermissionProfile.LockedDown);
+            using var client = new ScriptedChatClient(
+            [
+                ToolCall(FileAccessProvider.WriteToolName, new Dictionary<string, object?>
+                {
+                    ["fileName"] = "Workspace/touch.txt",
+                    ["content"] = "approved integration test",
+                    ["overwrite"] = false
+                }),
+                FinalAnswer("created")
+            ]);
+            var agent = client.AsHarnessAgent(new HarnessAgentOptions
+            {
+                MaximumIterationsPerRequest = 4,
+                DisableWebSearch = true,
+                DisableFileMemory = true,
+                DisableAgentSkillsProvider = true,
+                DisableTodoProvider = true,
+                DisableAgentModeProvider = true,
+                FileAccessStore = access.Store,
+                FileAccessProviderOptions = new FileAccessProviderOptions
+                {
+                    Instructions = access.Instructions,
+                    DisableReadOnlyToolApproval = false,
+                    DisableWriteToolApproval = false
+                },
+                ToolApprovalAgentOptions = new ToolApprovalAgentOptions
+                {
+                    AutoApprovalRules = [access.ShouldAutoApproveAsync]
+                }
+            });
+
+            var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
+            var first = await agent.RunAsync(
+                "Create Workspace/touch.txt.",
+                session,
+                cancellationToken: TestContext.Current.CancellationToken);
+            var request = Assert.Single(first.Messages
+                .SelectMany(message => message.Contents)
+                .OfType<ToolApprovalRequestContent>());
+
+            var approval = new ChatMessage(ChatRole.User,
+            [
+                request.CreateResponse(true, "Approved once by the user.")
+            ]);
+            var second = await agent.RunAsync(
+                approval,
+                session,
+                cancellationToken: TestContext.Current.CancellationToken);
+
+            Assert.Contains("created", second.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("approved integration test",
+                await access.Store.ReadAsync("Workspace/touch.txt", TestContext.Current.CancellationToken));
+            Assert.Equal(2, client.CallCount);
+        });
+    }
+
+    [Fact]
     public async Task WorkstationStore_RejectsAbsoluteTraversalAndUnknownRoots()
     {
         await WithAccessAsync(async (root, access, permissions) =>
@@ -196,6 +309,51 @@ public sealed class WorkstationFileAccessTests
                 access.Store.ReadAsync("Workspace/../outside.txt", TestContext.Current.CancellationToken));
             await Assert.ThrowsAsync<ArgumentException>(() =>
                 access.Store.ReadAsync("AppData/secret.txt", TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
+    public async Task WorkstationStore_AcceptsAbsolutePathsOnlyInsideApprovedMounts()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var approvedAbsolutePath = Path.Combine(root, "workspace", "absolute.txt");
+
+            Assert.True(await access.ShouldAutoApproveAsync(
+                AliCapabilityCatalog.FileWriteName,
+                new Dictionary<string, object?>
+                {
+                    ["fileName"] = approvedAbsolutePath,
+                    ["overwrite"] = false
+                },
+                TestContext.Current.CancellationToken));
+            await access.Store.WriteAsync(
+                approvedAbsolutePath,
+                "inside approved mount",
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                "inside approved mount",
+                await access.Store.ReadAsync("Workspace/absolute.txt", TestContext.Current.CancellationToken));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                access.Store.WriteAsync(
+                    Path.Combine(root, "outside.txt"),
+                    "outside approved mount",
+                    TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
+    public async Task InvalidBarePath_TellsAgentHowToRetryWithoutAskingForAbsolutePath()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+                access.Store.WriteAsync("touch.txt", "test", TestContext.Current.CancellationToken));
+
+            Assert.Contains("Desktop/touch.txt", error.Message, StringComparison.Ordinal);
+            Assert.Contains("do not ask the user for an absolute path", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Desktop/touch.txt", access.Instructions, StringComparison.Ordinal);
         });
     }
 
@@ -233,6 +391,52 @@ public sealed class WorkstationFileAccessTests
             ? typed
             : throw new InvalidOperationException(
                 $"{methodName} returned {result?.GetType().FullName ?? "null"}, not {typeof(T).FullName}.");
+    }
+
+    private static ChatResponse ToolCall(string name, IDictionary<string, object?> arguments)
+    {
+        var message = new ChatMessage(ChatRole.Assistant, string.Empty);
+        message.Contents.Add(new FunctionCallContent($"call-{Guid.NewGuid():N}", name, arguments));
+        return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
+    }
+
+    private static ChatResponse FinalAnswer(string text) =>
+        new(new ChatMessage(ChatRole.Assistant, text)) { FinishReason = ChatFinishReason.Stop };
+
+    private sealed class ScriptedChatClient(IEnumerable<ChatResponse> responses) : IChatClient
+    {
+        private readonly Queue<ChatResponse> _responses = new(responses);
+
+        public int CallCount { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(_responses.Count > 0
+                ? _responses.Dequeue()
+                : FinalAnswer("script exhausted"));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
     }
 
     private static async Task WithAccessAsync(

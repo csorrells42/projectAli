@@ -42,7 +42,11 @@ public sealed class AliWorkstationFileAccess
     public string Instructions =>
         "Use only relative paths beginning with one of these approved roots: "
         + string.Join(", ", Mounts.Select(mount => mount.Name))
-        + ". Never invent or use an absolute path. Read, list, and search files when useful. "
+        + ". Translate the user's named location directly: 'desktop' means Desktop/<file>, "
+        + "'documents' means Documents/<file>, 'downloads' means Downloads/<file>, and an export means Exports/<file>. "
+        + "For example, a request for touch.txt on the desktop must use Desktop/touch.txt. "
+        + "Never ask the user for an absolute path; if a path call fails, correct it with one of these virtual roots and retry. "
+        + "Read, list, and search files when useful. "
         + "For new artifacts, default to Exports unless the user names another approved root. "
         + "Write with overwrite=false when creating a new file. Existing-file overwrite, replace, line edits, and delete require approval. "
         + "A delete moves the file into Ali's recoverable trash rather than erasing it permanently.";

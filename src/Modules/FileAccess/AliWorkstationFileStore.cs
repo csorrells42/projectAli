@@ -164,6 +164,11 @@ public sealed class AliWorkstationFileStore : AgentFileStore
     private ResolvedPath Resolve(string path, bool allowMountRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (Path.IsPathFullyQualified(path))
+        {
+            return ResolveApprovedAbsolutePath(path, allowMountRoot);
+        }
+
         var normalized = path.Replace('\\', '/').Trim('/');
         var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (segments.Length == 0
@@ -175,7 +180,9 @@ public sealed class AliWorkstationFileStore : AgentFileStore
         if (!_mounts.TryGetValue(segments[0], out var mount))
         {
             throw new ArgumentException(
-                $"Unknown workstation mount '{segments[0]}'. Available roots: {string.Join(", ", _mounts.Keys)}.",
+                $"Unknown workstation mount '{segments[0]}'. Retry with a virtual path beginning with one of: "
+                + $"{string.Join(", ", _mounts.Keys)}. For example, use Desktop/touch.txt for a file on the desktop; "
+                + "do not ask the user for an absolute path.",
                 nameof(path));
         }
 
@@ -186,6 +193,49 @@ public sealed class AliWorkstationFileStore : AgentFileStore
         }
 
         return new ResolvedPath(mount, relativePath);
+    }
+
+    private ResolvedPath ResolveApprovedAbsolutePath(string path, bool allowMountRoot)
+    {
+        string candidate;
+        try
+        {
+            candidate = Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new ArgumentException("The file path was not valid.", nameof(path), ex);
+        }
+
+        foreach (var mount in _mounts.Values.OrderByDescending(item => item.RootPath.Length))
+        {
+            var root = Path.TrimEndingDirectorySeparator(mount.RootPath);
+            var beneathRoot = candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || candidate.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            if (!beneathRoot)
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(root, candidate).Replace('\\', '/');
+            if (relativePath == ".")
+            {
+                relativePath = string.Empty;
+            }
+
+            if (!allowMountRoot && relativePath.Length == 0)
+            {
+                throw new ArgumentException("A file name is required beneath the workstation mount.", nameof(path));
+            }
+
+            return new ResolvedPath(mount, relativePath);
+        }
+
+        throw new ArgumentException(
+            "Absolute paths are accepted only when they resolve inside an approved workstation folder. "
+            + $"Retry with a virtual path beginning with one of: {string.Join(", ", _mounts.Keys)}.",
+            nameof(path));
     }
 
     private static string NormalizeMountName(string name)
