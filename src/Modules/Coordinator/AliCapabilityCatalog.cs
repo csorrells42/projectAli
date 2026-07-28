@@ -19,6 +19,13 @@ public static class AliCapabilityCatalog
     public const string CreateReminderName = "create_reminder";
     public const string GetAssistantIdentityName = "get_assistant_identity";
     public const string GetCurrentLocalTimeName = "get_current_local_time";
+    public const string FileWriteName = "file_access_write";
+    public const string FileReadName = "file_access_read";
+    public const string FileDeleteName = "file_access_delete";
+    public const string FileListName = "file_access_ls";
+    public const string FileSearchName = "file_access_grep";
+    public const string FileReplaceName = "file_access_replace";
+    public const string FileReplaceLinesName = "file_access_replace_lines";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -35,7 +42,14 @@ public static class AliCapabilityCatalog
         new(SearchLocalLibraryName, "Search the user's indexed local RAG library and reference documents."),
         new(CreateReminderName, "Create a local reminder after an explicit user request."),
         new(GetAssistantIdentityName, "Return Ali's configured local assistant identity."),
-        new(GetCurrentLocalTimeName, "Return the authoritative local computer date, time, and time zone.")
+        new(GetCurrentLocalTimeName, "Return the authoritative local computer date, time, and time zone."),
+        new(FileWriteName, "Create a new text file or, after approval, overwrite an existing file in Ali's approved workstation folders."),
+        new(FileReadName, "Read a text file from Ali's approved workstation folders."),
+        new(FileDeleteName, "Move a file from an approved workstation folder into Ali's recoverable trash after approval."),
+        new(FileListName, "List files and folders under Ali's approved workstation roots."),
+        new(FileSearchName, "Search text inside files under Ali's approved workstation roots."),
+        new(FileReplaceName, "Edit matching text in an existing file after approval."),
+        new(FileReplaceLinesName, "Edit specific lines in an existing file after approval.")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>

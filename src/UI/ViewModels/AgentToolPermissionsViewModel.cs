@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using Ali.Modules.Permissions;
 using Ali.Modules.UserMemory;
+using Ali.Modules.WorkstationFiles;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace Ali.UI.ViewModels;
@@ -11,16 +12,19 @@ public sealed class AgentToolPermissionsViewModel : ObservableObject
 {
     private readonly AgentToolPermissionStore _store;
     private readonly IActiveUserSession _activeUsers;
+    private readonly AliWorkstationFileAccess _fileAccess;
     private AgentToolPermissionGrantViewModel? _selectedGrant;
     private AgentPermissionProfileChoiceViewModel? _selectedPermissionProfile;
     private string _statusText = "Saved Agent Framework permissions have not been reviewed yet.";
 
     public AgentToolPermissionsViewModel(
         AgentToolPermissionStore store,
-        IActiveUserSession activeUsers)
+        IActiveUserSession activeUsers,
+        AliWorkstationFileAccess fileAccess)
     {
         _store = store;
         _activeUsers = activeUsers;
+        _fileAccess = fileAccess;
         PermissionProfileChoices =
         [
             new(AgentPermissionProfile.TrustedWorkstation, "Trusted Workstation"),
@@ -80,6 +84,14 @@ public sealed class AgentToolPermissionsViewModel : ObservableObject
         : $"Permissions for {_activeUsers.Current.DisplayName} ({_activeUsers.Current.StableId})";
 
     public string SettingsPath => _store.SettingsPath;
+
+    public string ApprovedFileRootsText => string.Join(
+        "   •   ",
+        _fileAccess.Mounts.Select(mount => $"{mount.Name}: {mount.RootPath}"));
+
+    public string FileAuditPath => _fileAccess.Audit.Path;
+
+    public string RecoverableTrashPath => _fileAccess.RecoverableTrashPath;
 
     public string StatusText
     {
@@ -288,7 +300,7 @@ public sealed class AgentToolPermissionPolicyViewModel
     public string? ToolGrantId => _toolGrant?.Id;
 
     public string CurrentBehavior => _matchingGrants.Count == 0
-        ? "Ask before use"
+        ? _policy.DefaultBehavior
         : IsAlwaysAllowed
             ? "Allowed for this user until revoked"
             : $"Ask unless one of {_matchingGrants.Count} exact saved call(s) matches";

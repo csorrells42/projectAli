@@ -1,6 +1,9 @@
+#pragma warning disable MAAI001 // Agent Framework file-access provider is intentionally enabled by Ali's workstation-file module.
+
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Ali.Modules.Evidence;
+using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
 using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
@@ -31,6 +34,7 @@ internal sealed class AliAgentHarnessRunner
     private readonly string _instructions;
     private readonly McpClientManager _mcpClients;
     private readonly AgentToolPermissionStore _toolPermissions;
+    private readonly AliWorkstationFileAccess _fileAccess;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
@@ -42,6 +46,7 @@ internal sealed class AliAgentHarnessRunner
         AliToolCatalog catalog,
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess,
         IActiveUserSession? activeUsers,
         Func<CoordinatorTurnContext?> turnAccessor)
     {
@@ -52,6 +57,7 @@ internal sealed class AliAgentHarnessRunner
         _instructions = catalog.Instructions;
         _mcpClients = mcpClients;
         _toolPermissions = toolPermissions;
+        _fileAccess = fileAccess;
         _activeUsers = activeUsers;
         _turnAccessor = turnAccessor;
         _compatibilityClient = new LemonadeToolCallingChatClient(chatClient, runtime, turnAccessor);
@@ -64,7 +70,7 @@ internal sealed class AliAgentHarnessRunner
         return _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
-            Description = "Local personal assistant with memory, current web, local library, reminders, identity, and clock tools.",
+            Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, and approved workstation file tools.",
             MaximumIterationsPerRequest = MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
             MaxContextWindowTokens = profile.ContextTokens,
@@ -73,6 +79,18 @@ internal sealed class AliAgentHarnessRunner
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableAgentSkillsProvider = true,
+            FileAccessStore = _fileAccess.Store,
+            FileAccessProviderOptions = new FileAccessProviderOptions
+            {
+                Instructions = _fileAccess.Instructions,
+                DisableWriteTools = false,
+                DisableReadOnlyToolApproval = false,
+                DisableWriteToolApproval = false
+            },
+            ToolApprovalAgentOptions = new ToolApprovalAgentOptions
+            {
+                AutoApprovalRules = [_fileAccess.ShouldAutoApproveAsync]
+            },
             ChatOptions = new ChatOptions
             {
                 Instructions = _instructions,
@@ -111,7 +129,7 @@ internal sealed class AliAgentHarnessRunner
         var activeAgent = _agent;
         if (mcpSession.Tools.Count > 0)
         {
-            var permissionPolicy = new AliToolPermissionPolicy(_turnAccessor);
+            var permissionPolicy = new AliToolPermissionPolicy(_turnAccessor, () => _toolPermissions.CurrentProfile);
             activeTools = _tools
                 .Concat(mcpSession.Tools.Select(tool =>
                     (AITool)permissionPolicy.Apply(tool.Function, tool.RequiresApproval)))

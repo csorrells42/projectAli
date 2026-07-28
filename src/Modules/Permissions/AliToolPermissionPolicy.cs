@@ -19,7 +19,11 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.ForgetCurrentUserMemoryName, "Deletes personal long-term memory"),
         new(AliCapabilityCatalog.ListCurrentUserMemoriesName, "Reads private personal memory"),
         new(AliCapabilityCatalog.CreateReminderName, "Creates a persistent reminder"),
-        new(AliCapabilityCatalog.ResearchWebName, "Starts metered deep web research")
+        new(AliCapabilityCatalog.ResearchWebName, "Starts metered deep web research"),
+        new(AliCapabilityCatalog.FileWriteName, "Creates or overwrites a workstation file", "New files allowed; overwrite asks"),
+        new(AliCapabilityCatalog.FileDeleteName, "Moves a workstation file to recoverable trash"),
+        new(AliCapabilityCatalog.FileReplaceName, "Edits matching text in an existing file"),
+        new(AliCapabilityCatalog.FileReplaceLinesName, "Edits specific lines in an existing file")
     ];
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =
@@ -27,7 +31,10 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.SearchMemoryName, "Reads shared local memory"),
         new(AliCapabilityCatalog.RecallUserMemoryName, "Reads private personal memory"),
         new(AliCapabilityCatalog.SearchCurrentWebName, "Transmits a query to configured web sources"),
-        new(AliCapabilityCatalog.SearchLocalLibraryName, "Reads indexed local documents")
+        new(AliCapabilityCatalog.SearchLocalLibraryName, "Reads indexed local documents"),
+        new(AliCapabilityCatalog.FileReadName, "Reads a workstation file"),
+        new(AliCapabilityCatalog.FileListName, "Lists approved workstation folders"),
+        new(AliCapabilityCatalog.FileSearchName, "Searches text in approved workstation folders")
     ];
 
     internal static IReadOnlyList<AgentToolPermissionDefinition> ProtectedTools => TrustedWorkstationTools;
@@ -69,4 +76,7 @@ internal sealed class AliToolPermissionPolicy(
     }
 }
 
-public sealed record AgentToolPermissionDefinition(string ToolName, string Reason);
+public sealed record AgentToolPermissionDefinition(
+    string ToolName,
+    string Reason,
+    string DefaultBehavior = "Ask before use");

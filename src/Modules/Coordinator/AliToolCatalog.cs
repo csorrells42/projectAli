@@ -128,6 +128,8 @@ internal sealed class AliToolCatalog
             "A source result's CanRetry field is authoritative for the current turn. If CanRetry is false, do not call that same source tool again; explain the evidence limitation and give the best cautious answer possible from available context, or ask for one necessary clarification.",
             "For complex nested or comparative research, use research_web only when one or two focused searches cannot answer reliably; it requires user approval.",
             "Use search_local_library only for the user's indexed documents and local reference material.",
+            "Use the Agent Framework file_access tools for direct file requests. Paths must begin with an approved virtual root such as Workspace, Desktop, Documents, Downloads, or Exports; never send an absolute path.",
+            "Create new requested text artifacts with overwrite=false and default to Exports when the user did not name a location. Never claim a file was created, edited, or deleted without a successful file tool result.",
             "When asked what tools you have, use list_available_tools and report that exact catalog.",
             "Break compound requests into steps. For multi-step work, maintain a concise todo plan, call one tool at a time, inspect every result, and continue until the whole request is answered.",
             "Correctness is more important than avoiding a necessary tool call. Do not invent current facts when live evidence is unavailable.",

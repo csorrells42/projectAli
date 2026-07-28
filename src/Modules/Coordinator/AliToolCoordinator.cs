@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Ali.Modules.Evidence;
+using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
@@ -39,6 +40,7 @@ public sealed class AliToolCoordinator
         AssistantProfile assistantProfile,
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null)
@@ -66,6 +68,7 @@ public sealed class AliToolCoordinator
             catalog,
             mcpClients,
             toolPermissions,
+            fileAccess,
             activeUsers,
             () => _turn.Value);
     }

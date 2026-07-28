@@ -199,7 +199,10 @@ public sealed class MainWindowViewModel : ObservableObject
         McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
         LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
         UserMemorySettings = new UserMemorySettingsViewModel(_services);
-        AgentToolPermissions = new AgentToolPermissionsViewModel(_services.ToolPermissions, _services.ActiveUsers);
+        AgentToolPermissions = new AgentToolPermissionsViewModel(
+            _services.ToolPermissions,
+            _services.ActiveUsers,
+            _services.FileAccess);
         _pendingAssistantName = AssistantName;
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);

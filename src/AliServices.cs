@@ -9,6 +9,7 @@ using Ali.Modules.Storage;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
+using Ali.Modules.WorkstationFiles;
 using Ali.Modules.UserMemory;
 
 namespace Ali;
@@ -43,7 +44,8 @@ public sealed class AliServices
         QdrantServiceManager qdrant,
         IActiveUserSession activeUsers,
         Mem0UserMemoryService userMemories,
-        AgentToolPermissionStore toolPermissions)
+        AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -66,6 +68,7 @@ public sealed class AliServices
         ActiveUsers = activeUsers;
         UserMemories = userMemories;
         ToolPermissions = toolPermissions;
+        FileAccess = fileAccess;
     }
 
     public string DataRoot { get; }
@@ -125,6 +128,8 @@ public sealed class AliServices
     public Mem0UserMemoryService UserMemories { get; }
 
     public AgentToolPermissionStore ToolPermissions { get; }
+
+    public AliWorkstationFileAccess FileAccess { get; }
 
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
@@ -275,6 +280,11 @@ public sealed class AliServices
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
+        var fileAccess = AliWorkstationFileAccess.CreateDefault(
+            userDataRoot,
+            profileDataRoot,
+            toolPermissions,
+            activeUsers);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
@@ -311,6 +321,7 @@ public sealed class AliServices
             profile,
             mcpClients,
             toolPermissions,
+            fileAccess,
             userMemories,
             activeUsers,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
@@ -346,7 +357,8 @@ public sealed class AliServices
             qdrant,
             activeUsers,
             userMemories,
-            toolPermissions);
+            toolPermissions,
+            fileAccess);
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

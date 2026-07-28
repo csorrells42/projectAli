@@ -1857,6 +1857,24 @@
                                        Foreground="#F6C85F"
                                        TextWrapping="Wrap"
                                        Margin="0,8,0,0" />
+                            <TextBlock Text="Approved workstation roots"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontWeight="SemiBold"
+                                       Margin="0,9,0,0" />
+                            <TextBlock Text="{Binding ApprovedFileRootsText}"
+                                       Foreground="{StaticResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       Margin="0,3,0,0" />
+                            <TextBlock Foreground="{StaticResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       Margin="0,3,0,0">
+                                <Run Text="File action audit: " />
+                                <Run Text="{Binding FileAuditPath}" />
+                                <Run Text="   •   Recoverable trash: " />
+                                <Run Text="{Binding RecoverableTrashPath}" />
+                            </TextBlock>
                         </StackPanel>
                     </Border>
 
