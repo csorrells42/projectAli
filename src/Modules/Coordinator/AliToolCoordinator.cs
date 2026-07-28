@@ -54,8 +54,10 @@ public sealed class AliToolCoordinator
         _activeUsers = activeUsers;
         _memorySettings = memorySettings;
         var dotNetAuditPath = Path.Combine(Path.GetDirectoryName(fileAccess.Audit.Path)!, "dotnet-actions.jsonl");
-        var dotNetProjectScaffolder = new AliDotNetProjectScaffolder(fileAccess, dotNetAuditPath);
-        var dotNetTools = new AliDotNetCodingTools(fileAccess, dotNetAuditPath);
+        var codingProjectTracker = new AliCodingProjectTracker();
+        var codingProjectResolver = new AliCodingProjectResolver(fileAccess);
+        var dotNetProjectScaffolder = new AliDotNetProjectScaffolder(fileAccess, codingProjectTracker, dotNetAuditPath);
+        var dotNetTools = new AliRoslynCodingTools(codingProjectResolver, codingProjectTracker, dotNetAuditPath);
         var catalog = new AliToolCatalog(
             localLibrary,
             webSources,

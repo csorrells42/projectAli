@@ -5,8 +5,118 @@ using Ali.Modules.WorkstationFiles;
 
 namespace Ali.Framework.Tests;
 
+[Collection(ProcessEnvironmentIntegrationCollection.Name)]
 public sealed class DotNetCodingToolsTests
 {
+    [Fact]
+    public async Task UntouchedScaffold_IsRejectedUntilRequestedSourceIsWritten()
+    {
+        await WithProjectToolsAsync(async (root, access, scaffolder, tools, auditPath) =>
+        {
+            var created = await scaffolder.CreateAsync(
+                "Workspace/RequestedApp/RequestedApp.csproj",
+                "console",
+                TestContext.Current.CancellationToken);
+            Assert.True(created.Success, created.Output);
+
+            var untouchedBuild = await tools.BuildAsync(
+                "Workspace/RequestedApp/RequestedApp.csproj",
+                "Debug",
+                TestContext.Current.CancellationToken);
+            Assert.False(untouchedBuild.Success);
+            Assert.Null(untouchedBuild.ExitCode);
+            Assert.Contains("untouched SDK template", untouchedBuild.Summary, StringComparison.OrdinalIgnoreCase);
+
+            var untouchedRun = await tools.RunAsync(
+                "Workspace/RequestedApp/RequestedApp.csproj",
+                "Debug",
+                TestContext.Current.CancellationToken);
+            Assert.False(untouchedRun.Success);
+            Assert.Contains("untouched SDK template", untouchedRun.Summary, StringComparison.OrdinalIgnoreCase);
+
+            await access.Store.WriteAsync(
+                "Workspace/RequestedApp/Program.cs",
+                """
+                File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "implemented.txt"), "yes");
+                """,
+                TestContext.Current.CancellationToken);
+            var implementedBuild = await tools.BuildAsync(
+                "Workspace/RequestedApp/RequestedApp.csproj",
+                "Debug",
+                TestContext.Current.CancellationToken);
+            Assert.True(implementedBuild.Success, implementedBuild.Output);
+        });
+    }
+
+    [Fact]
+    public async Task RoslynIntelligence_AnalyzesFormatsFindsSymbolsAndProvidesCompletions()
+    {
+        await WithCodingToolsAsync(async (root, access, tools, auditPath) =>
+        {
+            await access.Store.WriteAsync(
+                "Workspace/Intelligence/Intelligence.csproj",
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <OutputType>Library</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                  </PropertyGroup>
+                </Project>
+                """,
+                TestContext.Current.CancellationToken);
+            const string source = "namespace Intelligence; public sealed class Calculator{public int Add(int left,int right){return left+right;} public void Print(){Console.WriteLine(Add(1,2));}}";
+            await access.Store.WriteAsync(
+                "Workspace/Intelligence/Program.cs",
+                source,
+                TestContext.Current.CancellationToken);
+
+            var build = await tools.BuildAsync(
+                "Workspace/Intelligence/Intelligence.csproj",
+                "Debug",
+                TestContext.Current.CancellationToken);
+            Assert.True(build.Success, build.Output);
+
+            var analysis = await tools.AnalyzeAsync(
+                "Workspace/Intelligence/Intelligence.csproj",
+                TestContext.Current.CancellationToken);
+            Assert.True(analysis.Success, string.Join(Environment.NewLine, analysis.Diagnostics.Select(item => item.Message)));
+            Assert.True(analysis.DocumentCount >= 1);
+            Assert.DoesNotContain(analysis.Diagnostics, diagnostic => diagnostic.Severity == "Error");
+
+            var symbols = await tools.FindSymbolAsync(
+                "Workspace/Intelligence/Intelligence.csproj",
+                "Calculator",
+                TestContext.Current.CancellationToken);
+            Assert.True(symbols.Success);
+            Assert.Contains(symbols.Matches, match => match.Symbol == "Calculator" && match.Kind == "NamedType");
+
+            var completionPosition = source.IndexOf("Console.", StringComparison.Ordinal) + "Console.".Length;
+            var completions = await tools.GetCompletionsAsync(
+                "Workspace/Intelligence/Intelligence.csproj",
+                "Workspace/Intelligence/Program.cs",
+                1,
+                completionPosition + 1,
+                TestContext.Current.CancellationToken);
+            Assert.True(completions.Success);
+            Assert.Contains("WriteLine", completions.Completions);
+
+            var formatted = await tools.FormatAsync(
+                "Workspace/Intelligence/Intelligence.csproj",
+                TestContext.Current.CancellationToken);
+            Assert.True(formatted.Success, formatted.Summary);
+            Assert.Contains("Program.cs", formatted.ChangedFiles);
+            var formattedSource = await access.Store.ReadAsync(
+                "Workspace/Intelligence/Program.cs",
+                TestContext.Current.CancellationToken);
+            Assert.NotEqual(source, formattedSource);
+            Assert.Contains("Calculator {", formattedSource, StringComparison.Ordinal);
+            var audit = await File.ReadAllTextAsync(auditPath, TestContext.Current.CancellationToken);
+            Assert.Contains("\"engine\":\"Roslyn/MSBuild\"", audit, StringComparison.Ordinal);
+            Assert.Contains("\"operation\":\"format\"", audit, StringComparison.Ordinal);
+        });
+    }
+
     [Fact]
     public async Task CreateBuildAndRun_CreatesARealWpfTicTacToeApplication()
     {
@@ -325,14 +435,19 @@ public sealed class DotNetCodingToolsTests
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetBuildName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetRunName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetCreateProjectName));
+            Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFormatProjectName));
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetBuildName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetRunName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetCreateProjectName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynAnalyzeProjectName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFormatProjectName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFindSymbolName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynGetCompletionsName);
         });
     }
 
     private static async Task WithCodingToolsAsync(
-        Func<string, AliWorkstationFileAccess, AliDotNetCodingTools, string, Task> action)
+        Func<string, AliWorkstationFileAccess, AliRoslynCodingTools, string, Task> action)
     {
         var root = Path.Combine(Path.GetTempPath(), "AliDotNetCodingTests", Guid.NewGuid().ToString("N"));
         try
@@ -345,7 +460,8 @@ public sealed class DotNetCodingToolsTests
             var audit = new AgentFileActionAuditStore(root, activeUsers: null);
             var access = new AliWorkstationFileAccess(store, audit, permissions);
             var codingAuditPath = Path.Combine(root, "dotnet-actions.jsonl");
-            var tools = new AliDotNetCodingTools(access, codingAuditPath);
+            var tracker = new AliCodingProjectTracker();
+            var tools = new AliRoslynCodingTools(new AliCodingProjectResolver(access), tracker, codingAuditPath);
             await action(root, access, tools, codingAuditPath);
         }
         finally
@@ -358,7 +474,7 @@ public sealed class DotNetCodingToolsTests
     }
 
     private static async Task WithProjectToolsAsync(
-        Func<string, AliWorkstationFileAccess, AliDotNetProjectScaffolder, AliDotNetCodingTools, string, Task> action)
+        Func<string, AliWorkstationFileAccess, AliDotNetProjectScaffolder, AliRoslynCodingTools, string, Task> action)
     {
         var root = Path.Combine(Path.GetTempPath(), "AliDotNetProjectTests", Guid.NewGuid().ToString("N"));
         try
@@ -371,8 +487,9 @@ public sealed class DotNetCodingToolsTests
             var audit = new AgentFileActionAuditStore(root, activeUsers: null);
             var access = new AliWorkstationFileAccess(store, audit, permissions);
             var codingAuditPath = Path.Combine(root, "dotnet-actions.jsonl");
-            var scaffolder = new AliDotNetProjectScaffolder(access, codingAuditPath);
-            var tools = new AliDotNetCodingTools(access, codingAuditPath);
+            var tracker = new AliCodingProjectTracker();
+            var scaffolder = new AliDotNetProjectScaffolder(access, tracker, codingAuditPath);
+            var tools = new AliRoslynCodingTools(new AliCodingProjectResolver(access), tracker, codingAuditPath);
             await action(root, access, scaffolder, tools, codingAuditPath);
         }
         finally

@@ -36,6 +36,10 @@ public static class AliCapabilityCatalog
     public const string WorkMemoryReplaceName = "file_memory_replace";
     public const string WorkMemoryReplaceLinesName = "file_memory_replace_lines";
     public const string DotNetCreateProjectName = "dotnet_create_project";
+    public const string RoslynAnalyzeProjectName = "roslyn_analyze_project";
+    public const string RoslynFormatProjectName = "roslyn_format_project";
+    public const string RoslynFindSymbolName = "roslyn_find_symbol";
+    public const string RoslynGetCompletionsName = "roslyn_get_completions";
     public const string DotNetBuildName = "dotnet_build_project";
     public const string DotNetRunName = "dotnet_run_project";
 
@@ -71,8 +75,12 @@ public static class AliCapabilityCatalog
         new(WorkMemoryReplaceName, "Replace matching text in a private working note.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory"),
         new(DotNetCreateProjectName, "Create a new WPF or console C# project in an empty approved folder after user approval.", "Ali .NET coding tools"),
-        new(DotNetBuildName, "Restore and compile an approved C# .csproj with the local .NET SDK after user approval.", "Ali .NET coding tools"),
-        new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Ali .NET coding tools")
+        new(RoslynAnalyzeProjectName, "Load a C# project with Roslyn and return semantic compiler diagnostics.", "Microsoft Roslyn coding intelligence"),
+        new(RoslynFormatProjectName, "Format every C# document in an approved project with Roslyn after user approval.", "Microsoft Roslyn coding intelligence"),
+        new(RoslynFindSymbolName, "Find C# type and member declarations semantically with Roslyn.", "Microsoft Roslyn coding intelligence"),
+        new(RoslynGetCompletionsName, "Return Roslyn IntelliSense completion candidates at a C# source location.", "Microsoft Roslyn coding intelligence"),
+        new(DotNetBuildName, "Restore and compile an approved C# .csproj through Microsoft's MSBuild API after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
+        new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Microsoft Roslyn/MSBuild coding tools")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>

@@ -17,6 +17,28 @@ foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md
     }
 }
 
+foreach ($roslynFile in @(
+    'Microsoft.Build.Locator.dll',
+    'Microsoft.CodeAnalysis.CSharp.dll',
+    'Microsoft.CodeAnalysis.CSharp.Features.dll',
+    'Microsoft.CodeAnalysis.CSharp.Workspaces.dll',
+    'Microsoft.CodeAnalysis.Workspaces.MSBuild.dll',
+    'BuildHost-netcore\Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll'
+)) {
+    $path = Join-Path $root $roslynFile
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Published Ali bundle is missing Roslyn coding intelligence: $path"
+    }
+}
+
+$redistributedMsBuild = @(
+    Get-ChildItem -LiteralPath $root -Filter 'Microsoft.Build*.dll' -File -Recurse |
+        Where-Object { $_.Name -ne 'Microsoft.Build.Locator.dll' }
+)
+if ($redistributedMsBuild.Count -gt 0) {
+    throw "Published Ali bundle must resolve MSBuild from the installed SDK, not redistribute it: $($redistributedMsBuild.FullName -join ', ')"
+}
+
 $nonEnglishSatelliteDirectories = @(
     @('cs', 'de', 'es', 'fr', 'it', 'ja', 'ko', 'pl', 'pt-BR', 'ru', 'tr', 'zh-Hans', 'zh-Hant') |
         Where-Object { Test-Path -LiteralPath (Join-Path $root $_) -PathType Container }

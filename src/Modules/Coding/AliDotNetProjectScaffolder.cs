@@ -24,12 +24,17 @@ internal sealed class AliDotNetProjectScaffolder
     private static readonly JsonSerializerOptions AuditJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly SemaphoreSlim ScaffoldLock = new(1, 1);
     private readonly AliWorkstationFileAccess _fileAccess;
+    private readonly AliCodingProjectTracker _projectTracker;
     private readonly string _auditPath;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
 
-    public AliDotNetProjectScaffolder(AliWorkstationFileAccess fileAccess, string auditPath)
+    public AliDotNetProjectScaffolder(
+        AliWorkstationFileAccess fileAccess,
+        AliCodingProjectTracker projectTracker,
+        string auditPath)
     {
         _fileAccess = fileAccess ?? throw new ArgumentNullException(nameof(fileAccess));
+        _projectTracker = projectTracker ?? throw new ArgumentNullException(nameof(projectTracker));
         ArgumentException.ThrowIfNullOrWhiteSpace(auditPath);
         _auditPath = Path.GetFullPath(auditPath);
     }
@@ -72,6 +77,10 @@ internal sealed class AliDotNetProjectScaffolder
 
         started.Stop();
         var success = execution.ExitCode == 0 && File.Exists(project.PhysicalPath);
+        if (success)
+        {
+            _projectTracker.RecordScaffold(project.PhysicalPath);
+        }
         await WriteAuditAsync(
                 projectPath,
                 normalizedTemplate,
