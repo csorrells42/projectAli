@@ -1,8 +1,10 @@
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
+using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
+using Ali.Modules.UserMemory;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -26,19 +28,26 @@ internal sealed class AliToolCatalog
         IMemoryStore memories,
         IReminderStore reminders,
         AssistantProfile assistantProfile,
-        Func<CoordinatorTurnContext?> turnAccessor)
+        McpClientManager mcpClients,
+        AgentToolPermissionStore toolPermissions,
+        Func<CoordinatorTurnContext?> turnAccessor,
+        IUserMemoryService? userMemories = null,
+        IActiveUserSession? activeUsers = null,
+        Func<UserMemorySettings>? memorySettings = null)
     {
         var profile = assistantProfile.Normalize();
-        MemoryTools = new AliMemoryTools(memories, turnAccessor);
+        MemoryTools = userMemories is not null && activeUsers is not null && memorySettings is not null
+            ? new AliMemoryTools(userMemories, activeUsers, memorySettings, turnAccessor)
+            : new AliMemoryTools(memories, turnAccessor);
         var sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, turnAccessor);
         var reminderTools = new AliReminderTools(reminders, turnAccessor);
         var identityTimeTools = new AliIdentityTimeTools(profile);
-        var permissionPolicy = new AliToolPermissionPolicy(turnAccessor);
+        var permissionPolicy = new AliToolPermissionPolicy(turnAccessor, () => toolPermissions.CurrentProfile);
 
         Tools =
         [
             Protect(AIFunctionFactory.Create(
-                (Func<CoordinatorCapabilityResult>)AliCapabilityCatalog.ListAvailableTools,
+                (Func<CoordinatorCapabilityResult>)(() => AliCapabilityCatalog.ListAvailableTools(mcpClients)),
                 AliCapabilityCatalog.ListAvailableToolsName,
                 "Return the exact authoritative list of model-callable tools registered for Ali right now. Use this when the user asks what tools, abilities, or integrations Ali can use. Never infer additional generic tools.")),
             Protect(AIFunctionFactory.Create(
@@ -49,6 +58,26 @@ internal sealed class AliToolCatalog
                 (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.RememberAsync,
                 AliCapabilityCatalog.RememberFactName,
                 "Save a fact in Ali's local memory only when the user explicitly asks Ali to remember or save it. Never call this merely because information seems useful.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.SearchAsync,
+                AliCapabilityCatalog.RecallUserMemoryName,
+                "Recall relevant durable memories for the active identity profile. The active stable user ID is resolved internally and cannot be supplied by the model.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.RememberAsync,
+                AliCapabilityCatalog.RememberCurrentUserName,
+                "Save a durable fact only when the user explicitly teaches or asks Ali to remember it. Ownership is always the active identity profile.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.CorrectAsync,
+                AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+                "Correct a durable memory for the active identity profile. This changes private local data and requires approval.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.ForgetAsync,
+                AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+                "Forget memories matching the current user's explicit request. This is destructive and requires approval.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.ListCurrentAsync,
+                AliCapabilityCatalog.ListCurrentUserMemoriesName,
+                "List only the active identity profile's memories. This reads private data and requires approval.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string?, CancellationToken, Task<CoordinatorSourceResult>>)sourceTools.SearchCurrentWebAsync,
                 AliCapabilityCatalog.SearchCurrentWebName,
@@ -99,6 +128,8 @@ internal sealed class AliToolCatalog
             "A source result's CanRetry field is authoritative for the current turn. If CanRetry is false, do not call that same source tool again; explain the evidence limitation and give the best cautious answer possible from available context, or ask for one necessary clarification.",
             "For complex nested or comparative research, use research_web only when one or two focused searches cannot answer reliably; it requires user approval.",
             "Use search_local_library only for the user's indexed documents and local reference material.",
+            "Use the Agent Framework file_access tools for direct file requests. Paths must begin with an approved virtual root such as Workspace, Desktop, Documents, Downloads, or Exports; never send an absolute path.",
+            "Create new requested text artifacts with overwrite=false and default to Exports when the user did not name a location. Never claim a file was created, edited, or deleted without a successful file tool result.",
             "When asked what tools you have, use list_available_tools and report that exact catalog.",
             "Break compound requests into steps. For multi-step work, maintain a concise todo plan, call one tool at a time, inspect every result, and continue until the whole request is answered.",
             "Correctness is more important than avoiding a necessary tool call. Do not invent current facts when live evidence is unavailable.",

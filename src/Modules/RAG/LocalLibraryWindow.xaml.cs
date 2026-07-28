@@ -174,43 +174,16 @@ public partial class LocalLibraryWindow : Window
         }
     }
 
-    private void RefreshIndexSummary()
+    private async void RefreshIndexSummary()
     {
-        if (!File.Exists(_services.LocalVectorLibraryIndexPath))
-        {
-            IndexSummaryText.Text = "No index yet";
-            return;
-        }
-
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(_services.LocalVectorLibraryIndexPath));
-            var root = document.RootElement;
-            var documents = root.TryGetProperty("documents", out var documentsElement)
-                            && documentsElement.ValueKind is JsonValueKind.Array
-                ? documentsElement.GetArrayLength()
-                : 0;
-            var chunks = documentsElement.ValueKind is JsonValueKind.Array
-                ? documentsElement.EnumerateArray().Sum(CountChunks)
-                : 0;
-            var lastScan = root.TryGetProperty("lastScanUtc", out var lastScanElement)
-                           && lastScanElement.ValueKind is JsonValueKind.String
-                ? lastScanElement.GetString()
-                : "unknown";
-            IndexSummaryText.Text = $"{documents} document(s), {chunks} chunk(s), last scan {lastScan}";
+            var status = await _services.CreateLocalVectorLibraryRetriever().GetStatusAsync().ConfigureAwait(true);
+            IndexSummaryText.Text = status.Message;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or Grpc.Core.RpcException)
         {
-            IndexSummaryText.Text = $"Index unreadable: {ex.Message}";
+            IndexSummaryText.Text = $"Qdrant status unavailable: {ex.Message}";
         }
-    }
-
-    private static int CountChunks(JsonElement document)
-    {
-        return document.TryGetProperty("chunks", out var chunks)
-               && chunks.ValueKind is JsonValueKind.Array
-            ? chunks.GetArrayLength()
-            : 0;
     }
 }
-

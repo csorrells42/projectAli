@@ -19,6 +19,16 @@ Notable runtime boundaries:
 - Faster Whisper model assets are MIT.
 - The bundled FFmpeg build is the LGPL shared variant and retains its upstream
   license file.
+- The bundled Qdrant 1.18.2 Windows service and Qdrant.Client 1.18.1 are
+  licensed under Apache-2.0.
+- Mem0 2.0.12 and the Qdrant Python client are licensed under Apache-2.0.
+  Their pinned Python dependency tree is restored from
+  `tools/runtime-assets/requirements-mem0.txt`; every dependency retains its
+  own upstream license.
+- TreeSitter.DotNet 1.3.0 and its packaged language grammars retain their
+  upstream MIT and grammar-specific licenses.
+- The bundled ripgrep 15.2.0 Windows executable is offered under MIT or the
+  Unlicense; both upstream license files are included beside `rg.exe`.
 - Python, MediaPipe, ONNX Runtime, Sherpa ONNX, native libraries, NuGet
   packages, Python wheels, and other dependencies retain their respective
   upstream licenses.

@@ -2,11 +2,15 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Ali.Modules.Evidence;
+using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
+using Ali.Modules.Mcp;
+using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 using Ali.Modules.Runtime;
+using Ali.Modules.UserMemory;
 using Microsoft.Extensions.AI;
 using RuntimeChatMessage = Ali.Modules.Runtime.ChatMessage;
 
@@ -21,6 +25,9 @@ public sealed class AliToolCoordinator
     private const int MaximumVisibleSources = 5;
     private readonly AliAgentHarnessRunner _harness;
     private readonly AsyncLocal<CoordinatorTurnContext?> _turn = new();
+    private readonly IUserMemoryService? _userMemories;
+    private readonly IActiveUserSession? _activeUsers;
+    private readonly Func<UserMemorySettings>? _memorySettings;
 
     public AliToolCoordinator(
         ILocalModelRuntime runtime,
@@ -30,8 +37,17 @@ public sealed class AliToolCoordinator
         McpWebResearchClient webResearch,
         IMemoryStore memories,
         IReminderStore reminders,
-        AssistantProfile assistantProfile)
+        AssistantProfile assistantProfile,
+        McpClientManager mcpClients,
+        AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess,
+        IUserMemoryService? userMemories = null,
+        IActiveUserSession? activeUsers = null,
+        Func<UserMemorySettings>? memorySettings = null)
     {
+        _userMemories = userMemories;
+        _activeUsers = activeUsers;
+        _memorySettings = memorySettings;
         var catalog = new AliToolCatalog(
             localLibrary,
             webSources,
@@ -39,12 +55,21 @@ public sealed class AliToolCoordinator
             memories,
             reminders,
             assistantProfile,
-            () => _turn.Value);
+            mcpClients,
+            toolPermissions,
+            () => _turn.Value,
+            userMemories,
+            activeUsers,
+            memorySettings);
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
             assistantProfile,
             catalog,
+            mcpClients,
+            toolPermissions,
+            fileAccess,
+            activeUsers,
             () => _turn.Value);
     }
 
@@ -111,12 +136,20 @@ public sealed class AliToolCoordinator
         _turn.Value = turn;
         try
         {
+            var learnedAnswer = new StringBuilder();
             var result = await _harness.RunAsync(
                 turn,
                 userText,
                 history,
                 attachments,
-                chunk => writer.TryWrite(chunk),
+                chunk =>
+                {
+                    if (!chunk.IsActivity && !chunk.IsReasoning && !string.IsNullOrWhiteSpace(chunk.Text))
+                    {
+                        learnedAnswer.Append(chunk.Text);
+                    }
+                    writer.TryWrite(chunk);
+                },
                 cancellationToken).ConfigureAwait(false);
             PublishSourceAppendix(turn, result.FinishReason, writer);
             if (!result.WroteAnswer)
@@ -129,6 +162,8 @@ public sealed class AliToolCoordinator
                     EvidenceStatus.Unverified,
                     result.FinishReason));
             }
+
+            QueueBackgroundLearning(turn, userText, learnedAnswer.ToString());
 
             turn.Report(AgentActivityKind.Complete, "Response complete", "Ali finished the agent run.");
             writer.TryComplete();
@@ -146,6 +181,40 @@ public sealed class AliToolCoordinator
         {
             _turn.Value = null;
         }
+    }
+
+    private void QueueBackgroundLearning(CoordinatorTurnContext turn, string userText, string answer)
+    {
+        if (_userMemories is null || _activeUsers is null || _memorySettings is null)
+        {
+            return;
+        }
+        var settings = _memorySettings().Normalize();
+        if (!settings.Enabled || !settings.AutomaticBackgroundLearning || string.IsNullOrWhiteSpace(answer))
+        {
+            return;
+        }
+        if (_activeUsers.RequiresSelection)
+        {
+            turn.Report(AgentActivityKind.Warning, "Background memory review skipped", "Select the active user profile before Ali stores personal memory.");
+            return;
+        }
+
+        var user = _activeUsers.Current;
+        var conversation = $"User: {userText.Trim()}\nAssistant: {answer.Trim()}";
+        turn.Report(AgentActivityKind.Status, "Background memory review queued", "The visible answer is complete; durable-memory extraction will run at low effort.");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                await _userMemories.RememberAsync(user, conversation, "conversation", timeout.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Background learning is deliberately fail-safe and must never disturb a completed answer.
+            }
+        });
     }
 
     private static void PublishSourceAppendix(

@@ -41,7 +41,8 @@ public partial class MainWindow : Window
         {
             _startupTask = viewModel.StartLocalRuntimeAsync();
             var visionStartup = viewModel.InitializeVisionAsync();
-            await Task.WhenAll(_startupTask, visionStartup).ConfigureAwait(true);
+            var mcpServerStartup = viewModel.InitializeMcpServerAsync();
+            await Task.WhenAll(_startupTask, visionStartup, mcpServerStartup).ConfigureAwait(true);
         }
     }
 

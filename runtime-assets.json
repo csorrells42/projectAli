@@ -201,25 +201,60 @@
         { "from": "ffmpeg-n8.1.2-31-g8c9502e9b0-win64-lgpl-shared-8.1/bin", "to": "dependencies/ffmpeg/win-x64" },
         { "from": "ffmpeg-n8.1.2-31-g8c9502e9b0-win64-lgpl-shared-8.1/LICENSE.txt", "to": "dependencies/ffmpeg/LICENSE.txt" }
       ]
+    },
+    {
+      "id": "qdrant-windows",
+      "version": "1.18.2",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/qdrant/qdrant/blob/v1.18.2/LICENSE",
+      "url": "https://github.com/qdrant/qdrant/releases/download/v1.18.2/qdrant-x86_64-pc-windows-msvc.zip",
+      "fileName": "qdrant-x86_64-pc-windows-msvc-1.18.2.zip",
+      "size": 28772797,
+      "sha256": "b2b262cba6f78cf4fa794ae78d73a8f70a221c93c76c75ac8fd6fe95d809b142",
+      "kind": "zip",
+      "mappings": [
+        { "from": "qdrant.exe", "to": "dependencies/qdrant/qdrant.exe" }
+      ]
+    },
+    {
+      "id": "ripgrep-windows",
+      "version": "15.2.0",
+      "license": "MIT OR Unlicense",
+      "licenseUrl": "https://github.com/BurntSushi/ripgrep/blob/15.2.0/LICENSE-MIT",
+      "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
+      "fileName": "ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
+      "size": 1789611,
+      "sha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+      "kind": "zip",
+      "mappings": [
+        { "from": "ripgrep-15.2.0-x86_64-pc-windows-msvc/rg.exe", "to": "dependencies/ripgrep/rg.exe" },
+        { "from": "ripgrep-15.2.0-x86_64-pc-windows-msvc/COPYING", "to": "dependencies/ripgrep/COPYING" },
+        { "from": "ripgrep-15.2.0-x86_64-pc-windows-msvc/LICENSE-MIT", "to": "dependencies/ripgrep/LICENSE-MIT" }
+      ]
     }
   ],
   "packageGroups": [
     { "id": "mediapipe", "requirements": "tools/runtime-assets/requirements-mediapipe.txt", "destination": "runtime/python-packages" },
     { "id": "voice", "requirements": "tools/runtime-assets/requirements-voice.txt", "destination": "runtime/tts-packages" },
-    { "id": "whisper", "requirements": "tools/runtime-assets/requirements-whisper.txt", "destination": "runtime/whisper-packages" }
+    { "id": "whisper", "requirements": "tools/runtime-assets/requirements-whisper.txt", "destination": "runtime/whisper-packages" },
+    { "id": "mem0", "requirements": "tools/runtime-assets/requirements-mem0.txt", "destination": "runtime/mem0-packages" }
   ],
   "repositoryFiles": [
     { "source": "LICENSE", "destination": "LICENSE" },
     { "source": "THIRD-PARTY-NOTICES.md", "destination": "THIRD-PARTY-NOTICES.md" },
     { "source": "src/Modules/Voice/Tools/local_kitten_tts.py", "destination": "lib/voice/local_kitten_tts.py" },
     { "source": "src/Modules/Voice/Tools/local_whisper_stt.py", "destination": "lib/voice/local_whisper_stt.py" },
+    { "source": "src/Modules/UserMemory/Tools/mem0_service.py", "destination": "lib/memory/mem0_service.py" },
+    { "source": "src/Modules/UserMemory/Tools/lemonade_llm.py", "destination": "lib/memory/lemonade_llm.py" },
+    { "source": "src/Modules/UserMemory/Tools/local_qdrant.py", "destination": "lib/memory/local_qdrant.py" },
     { "source": "external/modules/ParakeetSpeechToTextModule/faster_whisper_worker.py", "destination": "dependencies/audio/whisper/faster_whisper_worker.py", "optional": true }
   ],
   "packageMarkers": [
     "runtime/python-packages/mediapipe/__init__.py",
     "runtime/tts-packages/kittentts/__init__.py",
     "runtime/tts-packages/piper/__init__.py",
-    "runtime/whisper-packages/faster_whisper/__init__.py"
+    "runtime/whisper-packages/faster_whisper/__init__.py",
+    "runtime/mem0-packages/mem0/__init__.py"
   ],
   "requiredFiles": [
     { "path": "runtime/python/python.exe", "size": 104952, "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a" },
@@ -249,6 +284,8 @@
     { "path": "dependencies/ffmpeg/win-x64/avformat-62.dll", "size": 22070784, "sha256": "233960e25ae220ff3480d798af3fd9443ee58c41852f60905d39da5e8d880baa" },
     { "path": "dependencies/ffmpeg/win-x64/avutil-60.dll", "size": 2937856, "sha256": "96b458a2f911b5c82b4e040bb790b9e4463569758e99d7cad70ba7f40cc78f63" },
     { "path": "dependencies/ffmpeg/win-x64/swresample-6.dll", "size": 723968, "sha256": "9f73b88c36753f8a79eb8e7db53b8f68ce07034620fb509ef605ad05e25fecc3" },
-    { "path": "dependencies/ffmpeg/win-x64/swscale-9.dll", "size": 12570624, "sha256": "5ca733581268c3ef7a365b155bfafabe4cd205426db78eda91881efaf60781c5" }
+    { "path": "dependencies/ffmpeg/win-x64/swscale-9.dll", "size": 12570624, "sha256": "5ca733581268c3ef7a365b155bfafabe4cd205426db78eda91881efaf60781c5" },
+    { "path": "dependencies/qdrant/qdrant.exe", "size": 85080576, "sha256": "b029d8b1c54ee14b164c93cc60f722ff87dae9f6379f779cd378f5e33b17474e" },
+    { "path": "dependencies/ripgrep/rg.exe", "size": 4218880, "sha256": "14231169855ec5205cf5a1b6f1db358ff4aed4247c86b69ce8aae647c77f6680" }
   ]
 }

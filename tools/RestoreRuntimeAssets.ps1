@@ -217,6 +217,7 @@ try {
         '..\python-packages',
         '..\tts-packages',
         '..\whisper-packages',
+        '..\mem0-packages',
         'import site'
     ) | Set-Content -LiteralPath $pthFile -Encoding Ascii
 

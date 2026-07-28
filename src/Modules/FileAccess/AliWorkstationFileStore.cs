@@ -1,0 +1,237 @@
+using Microsoft.Agents.AI;
+
+#pragma warning disable MAAI001 // Agent Framework file-store API is intentionally adopted behind this module boundary.
+
+namespace Ali.Modules.WorkstationFiles;
+
+public sealed record AliWorkstationFileMount(string Name, string RootPath);
+
+/// <summary>
+/// Presents several explicitly approved Windows folders as one virtual Agent Framework
+/// file store. Every path begins with a mount name; absolute paths, traversal, and
+/// reparse-point escapes are rejected by this layer and the framework store beneath it.
+/// </summary>
+public sealed class AliWorkstationFileStore : AgentFileStore
+{
+    private readonly IReadOnlyDictionary<string, MountedStore> _mounts;
+    private readonly string _trashRoot;
+
+    public AliWorkstationFileStore(
+        IEnumerable<AliWorkstationFileMount> mounts,
+        string trashRoot)
+    {
+        ArgumentNullException.ThrowIfNull(mounts);
+        ArgumentException.ThrowIfNullOrWhiteSpace(trashRoot);
+        _trashRoot = Path.GetFullPath(trashRoot);
+        Directory.CreateDirectory(_trashRoot);
+
+        var configured = new Dictionary<string, MountedStore>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mount in mounts)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(mount.Name);
+            ArgumentException.ThrowIfNullOrWhiteSpace(mount.RootPath);
+            var name = NormalizeMountName(mount.Name);
+            if (!configured.TryAdd(name, new MountedStore(name, mount.RootPath)))
+            {
+                throw new ArgumentException($"Duplicate workstation file mount '{name}'.", nameof(mounts));
+            }
+        }
+
+        if (configured.Count == 0)
+        {
+            throw new ArgumentException("At least one workstation file mount is required.", nameof(mounts));
+        }
+
+        _mounts = configured;
+    }
+
+    public IReadOnlyList<AliWorkstationFileMount> Mounts => _mounts.Values
+        .Select(mount => new AliWorkstationFileMount(mount.Name, mount.RootPath))
+        .OrderBy(mount => mount.Name, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    public string TrashRoot => _trashRoot;
+
+    public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default)
+    {
+        var resolved = ResolveFile(path);
+        return resolved.Mount.Store.WriteAsync(resolved.RelativePath, content, cancellationToken);
+    }
+
+    public override Task<string?> ReadAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var resolved = ResolveFile(path);
+        return resolved.Mount.Store.ReadAsync(resolved.RelativePath, cancellationToken);
+    }
+
+    public override async Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var resolved = ResolveFile(path);
+        if (!await resolved.Mount.Store.FileExistsAsync(resolved.RelativePath, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = resolved.Mount.ResolvePhysicalPath(resolved.RelativePath);
+        var trashDirectory = Path.Combine(
+            _trashRoot,
+            DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff"),
+            resolved.Mount.Name);
+        var destination = Path.Combine(
+            trashDirectory,
+            resolved.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Move(source, destination);
+        return true;
+    }
+
+    public override async Task<IReadOnlyList<FileStoreEntry>> ListChildrenAsync(
+        string directory,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return _mounts.Values
+                .OrderBy(mount => mount.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(mount => new FileStoreEntry(mount.Name, FileStoreEntry.Directory))
+                .ToArray();
+        }
+
+        var resolved = ResolveDirectory(directory);
+        return await resolved.Mount.Store
+            .ListChildrenAsync(resolved.RelativePath, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public override Task<bool> FileExistsAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var resolved = ResolveFile(path);
+        return resolved.Mount.Store.FileExistsAsync(resolved.RelativePath, cancellationToken);
+    }
+
+    public override async Task<IReadOnlyList<FileSearchResult>> SearchAsync(
+        string directory,
+        string regexPattern,
+        string? globPattern,
+        bool recursive,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            var resolved = ResolveDirectory(directory);
+            return await resolved.Mount.Store
+                .SearchAsync(resolved.RelativePath, regexPattern, globPattern, recursive, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var all = new List<FileSearchResult>();
+        foreach (var mount in _mounts.Values.OrderBy(mount => mount.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var results = await mount.Store
+                .SearchAsync(string.Empty, regexPattern, globPattern, recursive, cancellationToken)
+                .ConfigureAwait(false);
+            all.AddRange(results.Select(result => new FileSearchResult
+            {
+                FileName = $"{mount.Name}/{result.FileName}",
+                Snippet = result.Snippet,
+                MatchingLines = result.MatchingLines
+            }));
+        }
+
+        return all;
+    }
+
+    public override Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var resolved = ResolveDirectory(path);
+        return resolved.Mount.Store.CreateDirectoryAsync(resolved.RelativePath, cancellationToken);
+    }
+
+    private ResolvedPath ResolveFile(string path)
+    {
+        var resolved = Resolve(path, allowMountRoot: false);
+        if (string.IsNullOrWhiteSpace(resolved.RelativePath))
+        {
+            throw new ArgumentException("A file path must include a name beneath an approved mount.", nameof(path));
+        }
+
+        return resolved;
+    }
+
+    private ResolvedPath ResolveDirectory(string path) => Resolve(path, allowMountRoot: true);
+
+    private ResolvedPath Resolve(string path, bool allowMountRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var normalized = path.Replace('\\', '/').Trim('/');
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0
+            || segments.Any(segment => segment is "." or ".." || segment.Contains(':', StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("File paths must stay beneath an approved workstation mount.", nameof(path));
+        }
+
+        if (!_mounts.TryGetValue(segments[0], out var mount))
+        {
+            throw new ArgumentException(
+                $"Unknown workstation mount '{segments[0]}'. Available roots: {string.Join(", ", _mounts.Keys)}.",
+                nameof(path));
+        }
+
+        var relativePath = string.Join('/', segments.Skip(1));
+        if (!allowMountRoot && relativePath.Length == 0)
+        {
+            throw new ArgumentException("A file name is required beneath the workstation mount.", nameof(path));
+        }
+
+        return new ResolvedPath(mount, relativePath);
+    }
+
+    private static string NormalizeMountName(string name)
+    {
+        var normalized = name.Trim().Replace(' ', '-');
+        if (normalized is "." or ".."
+            || normalized.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || normalized.Contains(':', StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"Invalid workstation file mount name '{name}'.", nameof(name));
+        }
+
+        return normalized;
+    }
+
+    private sealed class MountedStore
+    {
+        public MountedStore(string name, string rootPath)
+        {
+            Name = name;
+            RootPath = Path.GetFullPath(rootPath);
+            Directory.CreateDirectory(RootPath);
+            Store = new FileSystemAgentFileStore(RootPath);
+        }
+
+        public string Name { get; }
+
+        public string RootPath { get; }
+
+        public FileSystemAgentFileStore Store { get; }
+
+        public string ResolvePhysicalPath(string relativePath)
+        {
+            var root = Path.EndsInDirectorySeparator(RootPath)
+                ? RootPath
+                : RootPath + Path.DirectorySeparatorChar;
+            var candidate = Path.GetFullPath(
+                Path.Combine(RootPath, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("The resolved file path escaped its approved mount.", nameof(relativePath));
+            }
+
+            return candidate;
+        }
+    }
+
+    private sealed record ResolvedPath(MountedStore Mount, string RelativePath);
+}

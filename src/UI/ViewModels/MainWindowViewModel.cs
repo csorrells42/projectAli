@@ -184,7 +184,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _visionCameraOn;
     private bool _trackingOverlayEnabled = true;
     private bool _faceMeshOverlayEnabled;
-    private bool _visualAttentionEnabled = true;
+    private bool _visualAttentionEnabled;
     private bool _interactionPollBusy;
     private string _visionStatus = "Camera off.";
     private string _pendingAssistantName = string.Empty;
@@ -195,6 +195,14 @@ public sealed class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(AliServices services)
     {
         _services = services;
+        McpSettings = new McpSettingsViewModel(_services.McpClients);
+        McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
+        LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
+        UserMemorySettings = new UserMemorySettingsViewModel(_services);
+        AgentToolPermissions = new AgentToolPermissionsViewModel(
+            _services.ToolPermissions,
+            _services.ActiveUsers,
+            _services.FileAccess);
         _pendingAssistantName = AssistantName;
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);
@@ -337,8 +345,8 @@ public sealed class MainWindowViewModel : ObservableObject
             _interactionTimer.Start();
             try
             {
-                _interactionRuntime.StartSpeech(CurrentInputDeviceName());
                 _interactionRuntime.SetVisualAttentionEnabled(VisualAttentionEnabled);
+                _interactionRuntime.StartSpeech(CurrentInputDeviceName());
                 _interactionRuntime.UpdatePushToTalk(AutoSendVoiceTranscripts, pressed: false);
                 VoiceStatus = $"Speech ingress ready: {_interactionRuntime.SpeechProviderName}.";
             }
@@ -391,6 +399,16 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<CameraDevice> VisionCameras { get; } = new();
 
     public ObservableCollection<CameraVideoMode> VisionCameraModes { get; } = new();
+
+    public McpSettingsViewModel McpSettings { get; }
+
+    public McpServerSettingsViewModel McpServerSettings { get; }
+
+    public LocalKnowledgeSettingsViewModel LocalKnowledgeSettings { get; }
+
+    public UserMemorySettingsViewModel UserMemorySettings { get; }
+
+    public AgentToolPermissionsViewModel AgentToolPermissions { get; }
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {
@@ -1331,6 +1349,8 @@ public sealed class MainWindowViewModel : ObservableObject
             _interactionRuntime?.SetVisualAttentionEnabled(value);
             OnPropertyChanged(nameof(VisualAttentionButtonText));
             OnPropertyChanged(nameof(VisualAttentionButtonToolTip));
+            OnPropertyChanged(nameof(VisualAttentionButtonBackground));
+            OnPropertyChanged(nameof(VisualAttentionButtonBorderBrush));
             AttentionStatus = value
                 ? "Visual attention enabled."
                 : "Visual attention disabled; wake word and push to talk remain available.";
@@ -1338,8 +1358,16 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public string VisualAttentionButtonText => VisualAttentionEnabled
-        ? "Disable visual attention"
-        : "Enable visual attention";
+        ? "Visual Attention Enabled"
+        : "Visual Attention Disabled";
+
+    public System.Windows.Media.Brush VisualAttentionButtonBackground => VisualAttentionEnabled
+        ? MediaBrushes.DarkGreen
+        : MediaBrushes.DarkRed;
+
+    public System.Windows.Media.Brush VisualAttentionButtonBorderBrush => VisualAttentionEnabled
+        ? MediaBrushes.LimeGreen
+        : MediaBrushes.IndianRed;
 
     public string VisualAttentionButtonToolTip => VisualAttentionEnabled
         ? "Stops visual-only attention from sending speech to Ali. Wake word and push to talk continue to work."
@@ -1446,12 +1474,9 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await RefreshVisionCamerasAsync().ConfigureAwait(true);
             await _visionModeLoadTask.ConfigureAwait(true);
-            if (SelectedVisionCamera is not null
-                && SelectedVisionCameraMode is { } mode
-                && IsExact4K30(mode))
-            {
-                await ToggleVisionCameraAsync().ConfigureAwait(true);
-            }
+            VisionStatus = SelectedVisionCamera is null
+                ? "Camera off; no camera devices found."
+                : $"Camera ready and off: {SelectedVisionCamera.Name}.";
         }
         catch (Exception ex)
         {
@@ -1758,6 +1783,8 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _statusText, value);
     }
 
+    public Task InitializeMcpServerAsync() => McpServerSettings.StartIfEnabledAsync();
+
     public async Task StartLocalRuntimeAsync()
     {
         var options = _services.LoadRuntimeSettings();
@@ -1809,6 +1836,15 @@ public sealed class MainWindowViewModel : ObservableObject
     public async Task ShutdownLocalRuntimeAsync()
     {
         RequestShutdownCancellation();
+        try
+        {
+            await _services.McpServer.StopAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            // Model and camera shutdown must continue even if the optional MCP server faults.
+        }
+
         _interactionTimer.Stop();
         _visionModeLoad?.Cancel();
         _visionModeLoad?.Dispose();
@@ -5173,6 +5209,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             RefreshVoiceSettingsChoices();
+            AgentToolPermissions.Reload();
             await RefreshCorrectionsAsync().ConfigureAwait(true);
             RefreshMemoryReminders();
             await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);

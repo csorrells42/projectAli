@@ -577,6 +577,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="Camera" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
                     <ComboBox Grid.Column="1" ItemsSource="{Binding VisionCameras}" SelectedItem="{Binding SelectedVisionCamera}" />
@@ -585,6 +586,17 @@
                     <Button Grid.Column="4" Content="{Binding VisionCameraButtonText}" Command="{Binding ToggleVisionCameraCommand}" Margin="14,0,0,0" />
                     <Button Grid.Column="5" Content="Refresh" Command="{Binding RefreshVisionCamerasCommand}" Margin="8,0,0,0" />
                     <TextBlock Grid.Column="6" Text="{Binding VisionStatus}" VerticalAlignment="Center" Margin="14,0,0,0" Foreground="#B9D7EF" TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="7"
+                            AutomationProperties.AutomationId="VisualAttentionToggleButton"
+                            Content="{Binding VisualAttentionButtonText}"
+                            Command="{Binding ToggleVisualAttentionCommand}"
+                            ToolTip="{Binding VisualAttentionButtonToolTip}"
+                            Background="{Binding VisualAttentionButtonBackground}"
+                            BorderBrush="{Binding VisualAttentionButtonBorderBrush}"
+                            Foreground="White"
+                            FontWeight="SemiBold"
+                            MinWidth="190"
+                            Margin="14,0,0,0" />
                 </Grid>
             </Border>
 
@@ -970,14 +982,10 @@
                                 VerticalAlignment="Bottom"
                                 MinWidth="116" />
                         <Grid Grid.Column="2"
-                              MinWidth="286"
+                              MinWidth="92"
                               Margin="4,0,0,0"
                               VerticalAlignment="Bottom">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0"
+                            <Button
                                     AutomationProperties.AutomationId="MainChatSendButton"
                                     Content="{Binding SendButtonText}"
                                     Command="{Binding SendCommand}"
@@ -986,13 +994,6 @@
                                     Background="{Binding SendButtonBackground}"
                                     BorderBrush="{Binding SendButtonBorderBrush}"
                                     MinWidth="92" />
-                            <Button Grid.Column="1"
-                                    AutomationProperties.AutomationId="VisualAttentionToggleButton"
-                                    Content="{Binding VisualAttentionButtonText}"
-                                    Command="{Binding ToggleVisualAttentionCommand}"
-                                    ToolTip="{Binding VisualAttentionButtonToolTip}"
-                                    Style="{StaticResource ComposerButton}"
-                                    MinWidth="178" />
                         </Grid>
                     </Grid>
                 </Border>

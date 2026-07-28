@@ -1,8 +1,14 @@
+#pragma warning disable MAAI001 // Agent Framework file-access provider is intentionally enabled by Ali's workstation-file module.
+
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Ali.Modules.Evidence;
+using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
+using Ali.Modules.Mcp;
+using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
+using Ali.Modules.UserMemory;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -22,6 +28,15 @@ internal sealed class AliAgentHarnessRunner
     private readonly IReadOnlyList<AITool> _tools;
     private readonly AliMemoryTools _memoryTools;
     private readonly AIAgent _agent;
+    private readonly IChatClient _compatibilityClient;
+    private readonly ILocalModelRuntime _runtime;
+    private readonly AssistantProfile _assistantProfile;
+    private readonly string _instructions;
+    private readonly McpClientManager _mcpClients;
+    private readonly AgentToolPermissionStore _toolPermissions;
+    private readonly AliWorkstationFileAccess _fileAccess;
+    private readonly IActiveUserSession? _activeUsers;
+    private readonly Func<CoordinatorTurnContext?> _turnAccessor;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
 
     public AliAgentHarnessRunner(
@@ -29,16 +44,33 @@ internal sealed class AliAgentHarnessRunner
         ILocalModelRuntime runtime,
         AssistantProfile assistantProfile,
         AliToolCatalog catalog,
+        McpClientManager mcpClients,
+        AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess,
+        IActiveUserSession? activeUsers,
         Func<CoordinatorTurnContext?> turnAccessor)
     {
         _tools = catalog.Tools;
         _memoryTools = catalog.MemoryTools;
-        var compatibilityClient = new LemonadeToolCallingChatClient(chatClient, runtime, turnAccessor);
-        var profile = runtime.ActiveProfile;
-        _agent = compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
+        _runtime = runtime;
+        _assistantProfile = assistantProfile.Normalize();
+        _instructions = catalog.Instructions;
+        _mcpClients = mcpClients;
+        _toolPermissions = toolPermissions;
+        _fileAccess = fileAccess;
+        _activeUsers = activeUsers;
+        _turnAccessor = turnAccessor;
+        _compatibilityClient = new LemonadeToolCallingChatClient(chatClient, runtime, turnAccessor);
+        _agent = CreateAgent(_tools);
+    }
+
+    private AIAgent CreateAgent(IReadOnlyList<AITool> tools)
+    {
+        var profile = _runtime.ActiveProfile;
+        return _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
         {
-            Name = assistantProfile.Normalize().AssistantName,
-            Description = "Local personal assistant with memory, current web, local library, reminders, identity, and clock tools.",
+            Name = _assistantProfile.AssistantName,
+            Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, and approved workstation file tools.",
             MaximumIterationsPerRequest = MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
             MaxContextWindowTokens = profile.ContextTokens,
@@ -47,10 +79,22 @@ internal sealed class AliAgentHarnessRunner
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableAgentSkillsProvider = true,
+            FileAccessStore = _fileAccess.Store,
+            FileAccessProviderOptions = new FileAccessProviderOptions
+            {
+                Instructions = _fileAccess.Instructions,
+                DisableWriteTools = false,
+                DisableReadOnlyToolApproval = false,
+                DisableWriteToolApproval = false
+            },
+            ToolApprovalAgentOptions = new ToolApprovalAgentOptions
+            {
+                AutoApprovalRules = [_fileAccess.ShouldAutoApproveAsync]
+            },
             ChatOptions = new ChatOptions
             {
-                Instructions = catalog.Instructions,
-                Tools = _tools.ToList(),
+                Instructions = _instructions,
+                Tools = tools.ToList(),
                 ToolMode = ChatToolMode.Auto,
                 AllowMultipleToolCalls = false,
                 MaxOutputTokens = profile.OutputTokenLimit
@@ -70,6 +114,33 @@ internal sealed class AliAgentHarnessRunner
         Action<AssistantStreamChunk> publish,
         CancellationToken cancellationToken)
     {
+        await using var mcpSession = await _mcpClients
+            .CreateEnabledToolSessionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var warning in mcpSession.Warnings)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                $"Skipped MCP server {warning.ServerName}",
+                warning.Message);
+        }
+
+        IReadOnlyList<AITool> activeTools = _tools;
+        var activeAgent = _agent;
+        if (mcpSession.Tools.Count > 0)
+        {
+            var permissionPolicy = new AliToolPermissionPolicy(_turnAccessor, () => _toolPermissions.CurrentProfile);
+            activeTools = _tools
+                .Concat(mcpSession.Tools.Select(tool =>
+                    (AITool)permissionPolicy.Apply(tool.Function, tool.RequiresApproval)))
+                .ToList();
+            activeAgent = CreateAgent(activeTools);
+            turn.Report(
+                AgentActivityKind.Status,
+                "Loaded enabled MCP integrations",
+                $"Added {mcpSession.Tools.Count} approved external tool(s) for this turn.");
+        }
+
         if (attachments.Count > 0)
         {
             turn.Report(
@@ -89,10 +160,14 @@ internal sealed class AliAgentHarnessRunner
             memoryContext.Memories.Count == 0
                 ? "No relevant saved memory matched this request."
                 : $"Loaded {memoryContext.Memories.Count} relevant saved memory item(s).");
+        foreach (var warning in memoryContext.Warnings)
+        {
+            turn.Report(AgentActivityKind.Warning, "Memory recall failed safely", warning);
+        }
         // The UI conversation history is the canonical state. A fresh Harness session per
         // visible turn prevents an unfinished high-effort tool loop from leaking into the
         // user's next message while preserving one session across this turn's tool calls.
-        var session = await _agent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+        var session = await activeAgent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<MeaiChatMessage> input = BuildInitialInput(
             history,
             userText,
@@ -104,7 +179,7 @@ internal sealed class AliAgentHarnessRunner
         while (true)
         {
             ToolApprovalRequestContent? approvalRequest = null;
-            await foreach (var update in _agent.RunStreamingAsync(
+            await foreach (var update in activeAgent.RunStreamingAsync(
                                input,
                                session,
                                options: null,
@@ -149,7 +224,11 @@ internal sealed class AliAgentHarnessRunner
                 break;
             }
 
-            var response = await RequestApprovalAsync(turn, approvalRequest, cancellationToken).ConfigureAwait(false);
+            var response = await RequestApprovalAsync(
+                turn,
+                approvalRequest,
+                activeTools,
+                cancellationToken).ConfigureAwait(false);
             input = [new MeaiChatMessage(MeaiChatRole.User, [response])];
         }
 
@@ -218,15 +297,33 @@ internal sealed class AliAgentHarnessRunner
     private async Task<AIContent> RequestApprovalAsync(
         CoordinatorTurnContext turn,
         ToolApprovalRequestContent request,
+        IReadOnlyList<AITool> activeTools,
         CancellationToken cancellationToken)
     {
         var functionCall = request.ToolCall as FunctionCallContent;
         var toolName = functionCall?.Name ?? request.ToolCall.GetType().Name;
         var arguments = functionCall is null ? "{}" : CompactArguments(functionCall.Arguments, 1200);
-        var description = _tools
+        var description = activeTools
             .OfType<AIFunctionDeclaration>()
             .FirstOrDefault(tool => string.Equals(tool.Name, toolName, StringComparison.Ordinal))?
             .Description ?? "Ali requested permission to run this tool.";
+
+        if (functionCall is not null
+            && TryGetActiveUser(out var activeUser)
+            && _toolPermissions.TryMatch(activeUser, toolName, functionCall.Arguments, out var savedGrant)
+            && savedGrant is not null)
+        {
+            turn.Report(
+                AgentActivityKind.Status,
+                $"Used saved permission for {Humanize(toolName)}",
+                savedGrant.Scope == AgentToolPermissionScope.Tool
+                    ? $"{activeUser.DisplayName} previously allowed this tool."
+                    : $"{activeUser.DisplayName} previously allowed these exact arguments.");
+            return savedGrant.Scope == AgentToolPermissionScope.Tool
+                ? request.CreateAlwaysApproveToolResponse("Approved by the current user's saved tool rule.")
+                : request.CreateAlwaysApproveToolWithArgumentsResponse("Approved by the current user's saved exact-arguments rule.");
+        }
+
         var prompt = new AgentToolApprovalPrompt(request.RequestId, toolName, arguments, description);
         var completion = new TaskCompletionSource<AgentToolApprovalChoice>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_pendingApprovals.TryAdd(request.RequestId, new PendingApproval(completion)))
@@ -254,6 +351,12 @@ internal sealed class AliAgentHarnessRunner
             choice == AgentToolApprovalChoice.Deny ? AgentActivityKind.Warning : AgentActivityKind.Status,
             choice == AgentToolApprovalChoice.Deny ? "Permission denied" : "Permission granted",
             choice.ToString());
+
+        if (choice is AgentToolApprovalChoice.AlwaysAllowArguments or AgentToolApprovalChoice.AlwaysAllowTool)
+        {
+            SaveStandingPermission(turn, choice, toolName, functionCall);
+        }
+
         return choice switch
         {
             AgentToolApprovalChoice.AllowOnce => request.CreateResponse(true, "Approved once by the user."),
@@ -263,6 +366,64 @@ internal sealed class AliAgentHarnessRunner
                 request.CreateAlwaysApproveToolResponse("Approved for this tool for the current agent session by the user."),
             _ => request.CreateResponse(false, "Denied by the user.")
         };
+    }
+
+    private void SaveStandingPermission(
+        CoordinatorTurnContext turn,
+        AgentToolApprovalChoice choice,
+        string toolName,
+        FunctionCallContent? functionCall)
+    {
+        if (!TryGetActiveUser(out var activeUser))
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                "Standing permission was not saved",
+                "Select the active user profile first. This approval still applies to the current agent run.");
+            return;
+        }
+
+        if (choice == AgentToolApprovalChoice.AlwaysAllowArguments && functionCall is null)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                "Standing permission was not saved",
+                "The framework did not provide arguments to scope this approval safely.");
+            return;
+        }
+
+        try
+        {
+            var scope = choice == AgentToolApprovalChoice.AlwaysAllowTool
+                ? AgentToolPermissionScope.Tool
+                : AgentToolPermissionScope.ExactArguments;
+            _toolPermissions.Save(activeUser, toolName, scope, functionCall?.Arguments);
+            turn.Report(
+                AgentActivityKind.Status,
+                "Saved revocable permission",
+                scope == AgentToolPermissionScope.Tool
+                    ? $"{activeUser.DisplayName} allowed this tool until the rule is revoked in Settings."
+                    : $"{activeUser.DisplayName} allowed these exact arguments until the rule is revoked in Settings.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                "Standing permission was not saved",
+                $"The current run remains approved, but the permission file could not be updated: {ex.Message}");
+        }
+    }
+
+    private bool TryGetActiveUser(out ActiveUser activeUser)
+    {
+        if (_activeUsers is null || _activeUsers.RequiresSelection)
+        {
+            activeUser = null!;
+            return false;
+        }
+
+        activeUser = _activeUsers.Current;
+        return true;
     }
 
     private static MeaiChatMessage ToExtensionsAiMessage(RuntimeChatMessage message) =>

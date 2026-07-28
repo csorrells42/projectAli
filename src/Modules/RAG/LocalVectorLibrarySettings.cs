@@ -11,6 +11,28 @@ public sealed record LocalVectorLibrarySettings
 
     public bool Enabled { get; init; } = true;
 
+    public bool UseManagedLocalQdrant { get; init; } = true;
+
+    public bool AutoStartQdrant { get; init; } = true;
+
+    public bool EnableRipgrep { get; init; } = true;
+
+    public int RipgrepTimeoutSeconds { get; init; } = 5;
+
+    public string QdrantHost { get; init; } = "127.0.0.1";
+
+    public int QdrantHttpPort { get; init; } = 6333;
+
+    public int QdrantGrpcPort { get; init; } = 6334;
+
+    public bool QdrantUseTls { get; init; }
+
+    public string QdrantApiKeyEnvironmentVariable { get; init; } = "ALI_QDRANT_API_KEY";
+
+    public string QdrantCollectionName { get; init; } = "ali_local_library";
+
+    public int QdrantRequestTimeoutSeconds { get; init; } = 15;
+
     public string RootDirectory { get; init; } = DefaultRootDirectory();
 
     public string EmbeddingEndpoint { get; init; } = DefaultEmbeddingEndpoint;
@@ -77,8 +99,11 @@ public static class LocalVectorLibrarySettingsStore
     public static string GetSettingsPath(string dataRoot) =>
         Path.Combine(dataRoot, "Sources", "local_vector_library_settings.json");
 
-    public static string GetIndexPath(string dataRoot) =>
-        Path.Combine(ResolveUserDataRoot(dataRoot), "RAG", "local_vector_library_index.json");
+    public static string GetQdrantDataPath(string dataRoot) =>
+        Path.Combine(ResolveUserDataRoot(dataRoot), "RAG", "Qdrant");
+
+    public static string GetScanStatePath(string dataRoot) =>
+        Path.Combine(ResolveUserDataRoot(dataRoot), "RAG", "local_library_scan_state.json");
 
     public static LocalVectorLibrarySettings LoadOrDefault(string dataRoot)
     {
