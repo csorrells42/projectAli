@@ -7,6 +7,7 @@
         xmlns:controls="clr-namespace:Ali.UI.Controls"
         mc:Ignorable="d"
         Title="{Binding AssistantWindowTitle}"
+        Icon="/Ali;component/Assets/ali.ico"
         Height="980"
         MinHeight="820"
         Width="1600"

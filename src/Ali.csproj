@@ -9,12 +9,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Assets\ali.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Agent Framework's file-access API is preview in 1.15.0; usage is isolated behind Modules/WorkstationFiles. -->
     <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Ali.Framework.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\ali.ico" />
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="depricated\**\*.cs" />
