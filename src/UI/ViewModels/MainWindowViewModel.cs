@@ -197,6 +197,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _services = services;
         McpSettings = new McpSettingsViewModel(_services.McpClients);
         McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
+        LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
+        UserMemorySettings = new UserMemorySettingsViewModel(_services);
         _pendingAssistantName = AssistantName;
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);
@@ -397,6 +399,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public McpSettingsViewModel McpSettings { get; }
 
     public McpServerSettingsViewModel McpServerSettings { get; }
+
+    public LocalKnowledgeSettingsViewModel LocalKnowledgeSettings { get; }
+
+    public UserMemorySettingsViewModel UserMemorySettings { get; }
 
     public ConversationHistoryItemViewModel? SelectedConversationHistoryItem
     {

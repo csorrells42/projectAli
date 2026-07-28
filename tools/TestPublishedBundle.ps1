@@ -42,7 +42,7 @@ foreach ($entry in @($manifest.requiredFiles)) {
 }
 
 $python = Join-Path $root 'runtime\python\python.exe'
-& $python -c "import mediapipe, faster_whisper, kittentts, piper; print('Published Python imports verified')"
+& $python -c "import mediapipe, faster_whisper, kittentts, piper, mem0, qdrant_client; print('Published Python imports verified')"
 if ($LASTEXITCODE -ne 0) { throw "Published Python runtime smoke test failed (exit $LASTEXITCODE)." }
 
 $ffmpeg = Join-Path $root 'dependencies\ffmpeg\win-x64\ffmpeg.exe'

@@ -10,6 +10,8 @@ namespace Ali;
 
 public partial class App : System.Windows.Application
 {
+    private AliServices? _services;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         DispatcherUnhandledException += OnDispatcherUnhandledException;
@@ -21,10 +23,25 @@ public partial class App : System.Windows.Application
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         var assistantProfile = LoadOrCreateAssistantProfile();
         var services = AliServices.CreateForDesktop(assistantProfile);
+        _services = services;
         var viewModel = new MainWindowViewModel(services);
         var mainWindow = new MainWindow(viewModel);
         MainWindow = mainWindow;
         mainWindow.Show();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try
+        {
+            _services?.UserMemories.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _services?.Qdrant.StopAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Shutdown must continue even if the owned helper process has already exited.
+        }
+        base.OnExit(e);
     }
 
     private static AssistantProfile LoadOrCreateAssistantProfile()

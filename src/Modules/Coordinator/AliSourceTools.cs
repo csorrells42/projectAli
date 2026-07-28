@@ -56,7 +56,7 @@ internal sealed class AliSourceTools(
     }
 
     public async Task<CoordinatorSourceResult> SearchLocalLibraryAsync(
-        [Description("A focused semantic query for the user's indexed local documents.")] string query,
+        [Description("A focused local-document query. Ali combines fast exact-text search with semantic vector retrieval.")] string query,
         CancellationToken cancellationToken)
     {
         var result = await localLibrary.RetrieveAsync(query, cancellationToken).ConfigureAwait(false);

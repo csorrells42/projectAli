@@ -12,6 +12,10 @@ internal sealed class AliToolPermissionPolicy(Func<CoordinatorTurnContext?> turn
     private static readonly HashSet<string> ApprovalRequiredTools =
     [
         AliCapabilityCatalog.RememberFactName,
+        AliCapabilityCatalog.RememberCurrentUserName,
+        AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+        AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+        AliCapabilityCatalog.ListCurrentUserMemoriesName,
         AliCapabilityCatalog.CreateReminderName,
         AliCapabilityCatalog.ResearchWebName
     ];

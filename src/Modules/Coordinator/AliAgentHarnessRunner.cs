@@ -135,6 +135,10 @@ internal sealed class AliAgentHarnessRunner
             memoryContext.Memories.Count == 0
                 ? "No relevant saved memory matched this request."
                 : $"Loaded {memoryContext.Memories.Count} relevant saved memory item(s).");
+        foreach (var warning in memoryContext.Warnings)
+        {
+            turn.Report(AgentActivityKind.Warning, "Memory recall failed safely", warning);
+        }
         // The UI conversation history is the canonical state. A fresh Harness session per
         // visible turn prevents an unfinished high-effort tool loop from leaking into the
         // user's next message while preserving one session across this turn's tool calls.

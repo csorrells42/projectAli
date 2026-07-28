@@ -8,6 +8,7 @@ using Ali.Modules.Voice;
 using Ali.Modules.Storage;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Mcp;
+using Ali.Modules.UserMemory;
 
 namespace Ali;
 
@@ -37,7 +38,10 @@ public sealed class AliServices
         FileMemoryStore memories,
         FileReminderStore reminders,
         McpClientManager mcpClients,
-        McpServerHost mcpServer)
+        McpServerHost mcpServer,
+        QdrantServiceManager qdrant,
+        IActiveUserSession activeUsers,
+        Mem0UserMemoryService userMemories)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -56,6 +60,9 @@ public sealed class AliServices
         Reminders = reminders;
         McpClients = mcpClients;
         McpServer = mcpServer;
+        Qdrant = qdrant;
+        ActiveUsers = activeUsers;
+        UserMemories = userMemories;
     }
 
     public string DataRoot { get; }
@@ -74,7 +81,7 @@ public sealed class AliServices
 
     public string LocalVectorLibrarySettingsPath => LocalVectorLibrarySettingsStore.GetSettingsPath(DataRoot);
 
-    public string LocalVectorLibraryIndexPath => LocalVectorLibrarySettingsStore.GetIndexPath(DataRoot);
+    public string LocalVectorLibraryDataPath => LocalVectorLibrarySettingsStore.GetQdrantDataPath(DataRoot);
 
     public string InternetBackendSettingsPath => WebSourceBackendSettingsStore.GetSettingsPath(DataRoot);
 
@@ -83,6 +90,8 @@ public sealed class AliServices
     public string McpClientSettingsPath => McpClientSettingsStore.GetSettingsPath(DataRoot);
 
     public string McpServerSettingsPath => McpServerSettingsStore.GetSettingsPath(DataRoot);
+
+    public string UserMemorySettingsPath => UserMemorySettingsStore.GetPath(DataRoot);
 
     public SafeActivatingLocalRuntime RuntimeController { get; }
 
@@ -106,6 +115,12 @@ public sealed class AliServices
 
     public McpServerHost McpServer { get; }
 
+    public QdrantServiceManager Qdrant { get; }
+
+    public IActiveUserSession ActiveUsers { get; }
+
+    public Mem0UserMemoryService UserMemories { get; }
+
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
 
@@ -119,7 +134,13 @@ public sealed class AliServices
         LocalVectorLibrarySettingsStore.Save(DataRoot, settings);
 
     public LocalVectorLibraryRetriever CreateLocalVectorLibraryRetriever() =>
-        new(DataRoot, _runtimeHttpClient, LoadLocalVectorLibrarySettings());
+        new(DataRoot, _runtimeHttpClient, LoadLocalVectorLibrarySettings(), Qdrant);
+
+    public UserMemorySettings LoadUserMemorySettings() =>
+        UserMemorySettingsStore.LoadOrDefault(DataRoot);
+
+    public void SaveUserMemorySettings(UserMemorySettings settings) =>
+        UserMemorySettingsStore.Save(DataRoot, settings);
 
     public WebSourceBackendSettings LoadWebSourceBackendSettings() =>
         WebSourceBackendSettingsStore.LoadOrDefault(DataRoot);
@@ -206,9 +227,6 @@ public sealed class AliServices
         CopyMissingFiles(Path.Combine(legacyRoot, "Backups"), Path.Combine(LocalAliRoot, "Backups"));
         CopyMissingFiles(Path.Combine(legacyRoot, "Logs"), Path.Combine(DesktopUserDataRoot, "Logs"));
         CopyMissingFiles(LocalVectorLibrarySettings.LegacyDefaultRootDirectory(), Path.Combine(DesktopUserDataRoot, "RAG", "Library"));
-        CopyMissingFile(
-            Path.Combine(DesktopSettingsRoot, "Sources", "local_vector_library_index.json"),
-            Path.Combine(DesktopUserDataRoot, "RAG", "local_vector_library_index.json"));
     }
 
     public static AliServices CreateForDesktop(AssistantProfile? assistantProfile = null)
@@ -239,7 +257,19 @@ public sealed class AliServices
         var runtimeHttpClient = new HttpClient();
         runtimeHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
         var internetHttpClient = InternetHttpClientFactory.CreateClient();
-        var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient);
+        var qdrant = new QdrantServiceManager(dataRoot);
+        var activeUsers = new ActiveUserSession(
+            dataRoot,
+            Path.Combine(userDataRoot, "Vision"));
+        var mem0Client = new Mem0ProcessClient(
+            dataRoot,
+            qdrant,
+            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
+        var userMemories = new Mem0UserMemoryService(
+            mem0Client,
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
+        var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
             ? new OpenAiCompatibleLocalModelRuntime(runtimeHttpClient, configuredOptions, profile)
@@ -260,7 +290,10 @@ public sealed class AliServices
                 webResearch,
                 memories,
                 reminders,
-                profile));
+                profile,
+                userMemories,
+                activeUsers,
+                () => UserMemorySettingsStore.LoadOrDefault(dataRoot)));
         var coordinator = new AliToolCoordinator(
             runtime,
             runtime,
@@ -270,7 +303,10 @@ public sealed class AliServices
             memories,
             reminders,
             profile,
-            mcpClients);
+            mcpClients,
+            userMemories,
+            activeUsers,
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
         var orchestrator = new ConversationOrchestrator(
             runtime,
             correctionQueue,
@@ -299,7 +335,10 @@ public sealed class AliServices
             memories,
             reminders,
             mcpClients,
-            mcpServer);
+            mcpServer,
+            qdrant,
+            activeUsers,
+            userMemories);
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

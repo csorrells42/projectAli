@@ -4,6 +4,7 @@ using Ali.Modules.Memory;
 using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
+using Ali.Modules.UserMemory;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -28,10 +29,15 @@ internal sealed class AliToolCatalog
         IReminderStore reminders,
         AssistantProfile assistantProfile,
         McpClientManager mcpClients,
-        Func<CoordinatorTurnContext?> turnAccessor)
+        Func<CoordinatorTurnContext?> turnAccessor,
+        IUserMemoryService? userMemories = null,
+        IActiveUserSession? activeUsers = null,
+        Func<UserMemorySettings>? memorySettings = null)
     {
         var profile = assistantProfile.Normalize();
-        MemoryTools = new AliMemoryTools(memories, turnAccessor);
+        MemoryTools = userMemories is not null && activeUsers is not null && memorySettings is not null
+            ? new AliMemoryTools(userMemories, activeUsers, memorySettings, turnAccessor)
+            : new AliMemoryTools(memories, turnAccessor);
         var sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, turnAccessor);
         var reminderTools = new AliReminderTools(reminders, turnAccessor);
         var identityTimeTools = new AliIdentityTimeTools(profile);
@@ -51,6 +57,26 @@ internal sealed class AliToolCatalog
                 (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.RememberAsync,
                 AliCapabilityCatalog.RememberFactName,
                 "Save a fact in Ali's local memory only when the user explicitly asks Ali to remember or save it. Never call this merely because information seems useful.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.SearchAsync,
+                AliCapabilityCatalog.RecallUserMemoryName,
+                "Recall relevant durable memories for the active identity profile. The active stable user ID is resolved internally and cannot be supplied by the model.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.RememberAsync,
+                AliCapabilityCatalog.RememberCurrentUserName,
+                "Save a durable fact only when the user explicitly teaches or asks Ali to remember it. Ownership is always the active identity profile.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.CorrectAsync,
+                AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+                "Correct a durable memory for the active identity profile. This changes private local data and requires approval.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.ForgetAsync,
+                AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+                "Forget memories matching the current user's explicit request. This is destructive and requires approval.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.ListCurrentAsync,
+                AliCapabilityCatalog.ListCurrentUserMemoriesName,
+                "List only the active identity profile's memories. This reads private data and requires approval.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string?, CancellationToken, Task<CoordinatorSourceResult>>)sourceTools.SearchCurrentWebAsync,
                 AliCapabilityCatalog.SearchCurrentWebName,
