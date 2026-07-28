@@ -1080,8 +1080,14 @@
                             <StackPanel>
                                 <TextBlock Text="Active identity profile" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" />
                                 <ComboBox ItemsSource="{Binding Users}" SelectedItem="{Binding SelectedUser, Mode=TwoWay}"
-                                          DisplayMemberPath="DisplayName" Margin="0,6,12,0" MinHeight="28"
-                                          AutomationProperties.AutomationId="SettingsUserMemoryProfileComboBox" />
+                                          Margin="0,6,12,0" MinHeight="28"
+                                          AutomationProperties.AutomationId="SettingsUserMemoryProfileComboBox">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DisplayName}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
                                 <TextBlock Text="{Binding ActiveUserText}" Foreground="#FFCB6B" TextWrapping="Wrap" Margin="0,4,12,0" />
                             </StackPanel>
                             <StackPanel Grid.Column="1">
