@@ -1,4 +1,6 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.Coding.Debugging;
+using Ali.Modules.Coding.Engineering;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -8,7 +10,7 @@ namespace Ali.Modules.Coding;
 /// Composition root for Ali's C# engineering capability. The coordinator and MCP
 /// server share this one module instance and the same bounded tool definitions.
 /// </summary>
-public sealed class AliCodingModule
+public sealed class AliCodingModule : IAsyncDisposable
 {
     internal AliCodingModule(AliWorkstationFileAccess fileAccess)
     {
@@ -18,10 +20,14 @@ public sealed class AliCodingModule
         var resolver = new AliCodingProjectResolver(fileAccess);
         ProjectScaffolder = new AliDotNetProjectScaffolder(fileAccess, tracker, auditPath);
         Tools = new AliRoslynCodingTools(resolver, tracker, auditPath);
+        EngineeringLoop = new AliDotNetEngineeringLoop(resolver);
+        Debugger = new AliDotNetDebugger(resolver);
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
     internal AliRoslynCodingTools Tools { get; }
+    internal AliDotNetEngineeringLoop EngineeringLoop { get; }
+    internal AliDotNetDebugger Debugger { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
@@ -76,6 +82,51 @@ public sealed class AliCodingModule
         AIFunctionFactory.Create(
             (Func<string, string?, CancellationToken, Task<DotNetRunResult>>)Tools.RunAsync,
             AliCapabilityCatalog.DotNetRunName,
-            "Launch an already-built .NET application from an approved project after user approval.")
+            "Launch an already-built .NET application from an approved project after user approval."),
+        AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<DotNetTestResult>>)EngineeringLoop.TestAsync,
+            AliCapabilityCatalog.DotNetTestName,
+            "Discover and run tests for an approved .NET project or solution, returning structured failures and a stable TRX artifact."),
+        AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<DotNetVerificationResult>>)VerifyAsync,
+            AliCapabilityCatalog.DotNetVerifyName,
+            "Run Ali's bounded build-and-test engineering loop and return structured evidence for the next repair decision."),
+        AIFunctionFactory.Create(
+            (Func<string, string?, bool, string?, int?, CancellationToken, Task<DotNetDebugSessionResult>>)Debugger.LaunchAsync,
+            AliCapabilityCatalog.DotNetDebugLaunchName,
+            "Launch an approved built .NET project under the CLR debugger, optionally stopping at entry or one source breakpoint."),
+        AIFunctionFactory.Create(
+            (Func<string, int, CancellationToken, Task<DotNetDebugSessionResult>>)Debugger.AttachAsync,
+            AliCapabilityCatalog.DotNetDebugAttachName,
+            "Attach the CLR debugger to a process running from an approved project folder."),
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<DotNetDebugSnapshot>>)Debugger.InspectAsync,
+            AliCapabilityCatalog.DotNetDebugInspectName,
+            "Inspect debugger threads, stack frames, locals, and the latest exception or breakpoint stop."),
+        AIFunctionFactory.Create(
+            (Func<string, string, int?, CancellationToken, Task<DotNetDebugEvaluation>>)Debugger.EvaluateAsync,
+            AliCapabilityCatalog.DotNetDebugEvaluateName,
+            "Evaluate a C# watch expression in an active CLR debugger frame."),
+        AIFunctionFactory.Create(
+            (Func<string, string, string, int[], CancellationToken, Task<IReadOnlyList<DebugBreakpoint>>>)Debugger.SetBreakpointsAsync,
+            AliCapabilityCatalog.DotNetDebugBreakpointsName,
+            "Replace source breakpoints for one approved project document in an active CLR debugger session."),
+        AIFunctionFactory.Create(
+            (Func<string, string, CancellationToken, Task<DotNetDebugControlResult>>)Debugger.ControlAsync,
+            AliCapabilityCatalog.DotNetDebugControlName,
+            "Continue, pause, step over, step into, or step out in an active CLR debugger session."),
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<DotNetDebugControlResult>>)Debugger.StopAsync,
+            AliCapabilityCatalog.DotNetDebugStopName,
+            "Terminate an active CLR debugger session and its debuggee."),
+        AIFunctionFactory.Create(
+            (Func<string, DebugDiagnosticsHandoff>)Debugger.GetDiagnosticsHandoff,
+            AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName,
+            "Return the bounded process handoff used by Ali's coverage and performance-diagnostics modules.")
     ];
+
+    private Task<DotNetVerificationResult> VerifyAsync(string targetPath, string? configuration, CancellationToken cancellationToken) =>
+        EngineeringLoop.VerifyAsync(targetPath, configuration, Tools.BuildAsync, cancellationToken);
+
+    public ValueTask DisposeAsync() => Debugger.DisposeAsync();
 }

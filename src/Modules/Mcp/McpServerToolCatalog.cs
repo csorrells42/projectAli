@@ -40,7 +40,17 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.RoslynPreviewRenameName, "Preview a semantic solution-wide rename.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.RoslynApplyRenameName, "Apply a semantic solution-wide rename.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.DotNetBuildName, "Build an approved C# project with MSBuild.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
-        Policy(AliCapabilityCatalog.DotNetRunName, "Launch an approved compiled .NET application.", writesLocalData: true, readsPrivateData: true)
+        Policy(AliCapabilityCatalog.DotNetRunName, "Launch an approved compiled .NET application.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetTestName, "Discover and execute tests with structured TRX evidence.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetVerifyName, "Run a bounded build and test verification loop.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugLaunchName, "Launch an approved build under the CLR debugger.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugAttachName, "Attach the CLR debugger to an approved project process.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugInspectName, "Inspect private debugger state.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugEvaluateName, "Evaluate an expression in an active debugger.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugBreakpointsName, "Set source breakpoints in an active debugger.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugControlName, "Control an active debugger session.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugStopName, "Terminate an active debugger session.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName, "Return a diagnostics handoff for an active debugger.", readsPrivateData: true)
     ];
 
     public static IReadOnlyList<McpServerToolPolicy> CreateDefaultPolicies() =>

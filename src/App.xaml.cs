@@ -35,6 +35,7 @@ public partial class App : System.Windows.Application
         try
         {
             _services?.UserMemories.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _services?.CodingModule.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _services?.Qdrant.StopAsync().GetAwaiter().GetResult();
         }
         catch

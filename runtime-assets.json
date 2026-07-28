@@ -203,6 +203,32 @@
       ]
     },
     {
+      "id": "netcoredbg-windows",
+      "version": "3.2.0-1092",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/Samsung/netcoredbg/blob/3.2.0-1092/LICENSE",
+      "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-win64.zip",
+      "fileName": "netcoredbg-win64-3.2.0-1092.zip",
+      "size": 3524161,
+      "sha256": "3c410a45fa502415203a94fcb88654af65bf8e3dac158a5527a722e7a6b9274a",
+      "kind": "zip",
+      "mappings": [
+        { "from": "netcoredbg", "to": "dependencies/debugger/netcoredbg" }
+      ]
+    },
+    {
+      "id": "netcoredbg-license",
+      "version": "3.2.0-1092",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/Samsung/netcoredbg/blob/3.2.0-1092/LICENSE",
+      "url": "https://raw.githubusercontent.com/Samsung/netcoredbg/3.2.0-1092/LICENSE",
+      "fileName": "netcoredbg-LICENSE-3.2.0-1092.txt",
+      "size": 1085,
+      "sha256": "6cd03b0de8299b0800f22b35ae842c931ded7684a2d1ba4f1d4188bab9b09a11",
+      "kind": "file",
+      "destination": "dependencies/debugger/netcoredbg/LICENSE.txt"
+    },
+    {
       "id": "qdrant-windows",
       "version": "1.18.2",
       "license": "Apache-2.0",
@@ -258,6 +284,8 @@
   ],
   "requiredFiles": [
     { "path": "runtime/python/python.exe", "size": 104952, "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a" },
+    { "path": "dependencies/debugger/netcoredbg/netcoredbg.exe", "size": 2115072, "sha256": "23fc802866a03c5aa02484937d61ecbccf0ca731718d1840b0871f153340a823" },
+    { "path": "dependencies/debugger/netcoredbg/LICENSE.txt", "size": 1085, "sha256": "6cd03b0de8299b0800f22b35ae842c931ded7684a2d1ba4f1d4188bab9b09a11" },
     { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/decoder.int8.onnx", "size": 7257753, "sha256": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e" },
     { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx", "size": 652184296, "sha256": "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab" },
     { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/joiner.int8.onnx", "size": 1739080, "sha256": "7946164367946e7f9f29a122407c3252b680dbae9a51343eb2488d057c3c43d2" },

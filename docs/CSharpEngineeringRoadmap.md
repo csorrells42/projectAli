@@ -17,6 +17,12 @@ Acceptance requires zero-warning Release builds, direct module tests, cross-proj
 6. **Engineering loop** — solution build, test discovery and execution, structured failure parsing, bounded edit/build/test repair cycles, cancellation, timeouts, and stable result artifacts.
 7. **Debugger environment** — launch/attach, breakpoints, stepping, threads, stack frames, locals, watches, exception stops, process termination, coverage, and profiler handoff through a dedicated debugger module.
 
+Implemented checkpoint: the engineering loop runs bounded SDK test operations, parses
+TRX into structured evidence, preserves result artifacts, and refuses to call a zero-test
+run successful. The debugger module uses pinned MIT-licensed netcoredbg over DAP for
+launch/attach, source breakpoints, user-unhandled exception stops, threads, frames,
+locals, watches, stepping, termination, and a process handoff for diagnostics consumers.
+
 ## Layers 8-15: complete project delivery
 
 8. **Dependency engineering** — NuGet search, package compatibility, vulnerability/license visibility, restore, add/update/remove preview, lock-file awareness, and rollback.
@@ -29,3 +35,8 @@ Acceptance requires zero-warning Release builds, direct module tests, cross-proj
 15. **Autonomous delivery loop** — turn a user request into a visible plan, implement in bounded changes, inspect diffs, build, test, debug, verify the actual application, package it, and report evidence without claiming unfinished work is complete.
 
 Each layer remains useful independently and is committed only after its module, Agent Framework surface, MCP exposure, permissions, and tests agree.
+
+The orchestration contracts are intentionally language-neutral. Roslyn and netcoredbg
+are C# providers; later Python, HTML/CSS/JavaScript, Java, and C++ providers should reuse
+the same project graph, change preview, permission, MCP, build/test/debug evidence, and
+release-verification boundaries instead of duplicating a second agent architecture.

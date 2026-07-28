@@ -10,7 +10,8 @@ internal sealed record MsBuildExecutionResult(
     bool Success,
     int ExitCode,
     string Output,
-    string ToolsetPath);
+    string ToolsetPath,
+    bool TimedOut = false);
 
 /// <summary>
 /// Executes restore/build through Microsoft's in-process MSBuild API. This class is
@@ -26,7 +27,20 @@ internal static class AliMsBuildProjectExecutor
         string projectPath,
         string configuration,
         CancellationToken cancellationToken)
+        => await ExecuteAsync(projectPath, configuration, ["Restore", "Build"], cancellationToken).ConfigureAwait(false);
+
+    public static async Task<MsBuildExecutionResult> ExecuteAsync(
+        string targetPath,
+        string configuration,
+        IReadOnlyList<string> targets,
+        CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
+        if (targets.Count == 0 || targets.Any(target => target is not ("Restore" or "Build")))
+        {
+            throw new ArgumentException("Only the bounded Restore and Build MSBuild targets are permitted.", nameof(targets));
+        }
+
         var toolsetPath = AliMsBuildRuntime.EnsureRegistered();
         await BuildLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -42,10 +56,10 @@ internal static class AliMsBuildProjectExecutor
                 ["RestoreIgnoreFailedSources"] = "true"
             };
             var request = new BuildRequestData(
-                projectPath,
+                targetPath,
                 globalProperties,
                 toolsVersion: null,
-                targetsToBuild: ["Restore", "Build"],
+                targetsToBuild: targets.ToArray(),
                 hostServices: null,
                 flags: BuildRequestDataFlags.ClearCachesAfterBuild);
             var parameters = new BuildParameters(ProjectCollection.GlobalProjectCollection)
@@ -72,7 +86,8 @@ internal static class AliMsBuildProjectExecutor
                     false,
                     -1,
                     $"Build stopped after the {BuildTimeoutSeconds}-second safety timeout.{Environment.NewLine}{logger.Output}",
-                    toolsetPath);
+                    toolsetPath,
+                    TimedOut: true);
             }
         }
         finally

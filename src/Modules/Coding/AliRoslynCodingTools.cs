@@ -189,22 +189,18 @@ internal sealed class AliRoslynCodingTools
         string? configuration,
         CancellationToken cancellationToken)
     {
-        var project = _resolver.ResolveExistingProject(projectPath);
+        var target = _resolver.ResolveExistingTarget(projectPath);
         var normalizedConfiguration = NormalizeConfiguration(configuration);
-        var implementation = _projectTracker.CheckImplementationChanges(project.PhysicalPath);
-        if (!implementation.HasImplementationChanges)
+        if (!target.IsSolution)
         {
-            await WriteAuditAsync("build", projectPath, false, null, 0, implementation.Detail, cancellationToken)
-                .ConfigureAwait(false);
-            return new DotNetBuildResult(
-                false,
-                projectPath,
-                normalizedConfiguration,
-                null,
-                implementation.Detail,
-                "No requested implementation changes were detected after project scaffolding.",
-                null,
-                0);
+            var implementation = _projectTracker.CheckImplementationChanges(target.PhysicalPath);
+            if (!implementation.HasImplementationChanges)
+            {
+                await WriteAuditAsync("build", projectPath, false, null, 0, implementation.Detail, cancellationToken)
+                    .ConfigureAwait(false);
+                return new DotNetBuildResult(false, projectPath, normalizedConfiguration, null, implementation.Detail,
+                    "No requested implementation changes were detected after project scaffolding.", null, 0);
+            }
         }
 
         var started = Stopwatch.StartNew();
@@ -213,7 +209,7 @@ internal sealed class AliRoslynCodingTools
         {
             AliMsBuildRuntime.EnsureRegistered();
             execution = await AliMsBuildProjectExecutor.BuildAsync(
-                    project.PhysicalPath,
+                    target.PhysicalPath,
                     normalizedConfiguration,
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -235,8 +231,8 @@ internal sealed class AliRoslynCodingTools
         }
 
         started.Stop();
-        var artifact = execution.Success
-            ? FindBuiltArtifact(project.PhysicalPath, normalizedConfiguration)
+        var artifact = execution.Success && !target.IsSolution
+            ? FindBuiltArtifact(target.PhysicalPath, normalizedConfiguration)
             : null;
         await WriteAuditAsync(
                 "build",
@@ -253,7 +249,9 @@ internal sealed class AliRoslynCodingTools
             normalizedConfiguration,
             execution.ExitCode,
             execution.Success
-                ? artifact is null
+                ? target.IsSolution
+                    ? "Roslyn/MSBuild successfully restored and compiled the approved solution."
+                    : artifact is null
                     ? "Roslyn/MSBuild succeeded, but no launchable artifact was found under the project's bin folder."
                     : "Roslyn/MSBuild succeeded and produced a launchable artifact."
                 : "Roslyn/MSBuild failed. Review the diagnostics, correct the files, and build again.",
@@ -326,7 +324,7 @@ internal sealed class AliRoslynCodingTools
                 _ => throw new ArgumentException("Configuration must be Debug or Release.", nameof(configuration))
             };
 
-    private static string? FindBuiltArtifact(string projectPath, string configuration)
+    internal static string? FindBuiltArtifact(string projectPath, string configuration)
     {
         var projectDirectory = Path.GetDirectoryName(projectPath)!;
         var outputRoot = Path.Combine(projectDirectory, "bin", configuration);

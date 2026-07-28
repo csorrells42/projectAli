@@ -48,7 +48,8 @@ public sealed class AliServices
         Mem0UserMemoryService userMemories,
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
-        AliAgentWorkMemory agentWorkMemory)
+        AliAgentWorkMemory agentWorkMemory,
+        AliCodingModule codingModule)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -73,6 +74,7 @@ public sealed class AliServices
         ToolPermissions = toolPermissions;
         FileAccess = fileAccess;
         AgentWorkMemory = agentWorkMemory;
+        CodingModule = codingModule;
     }
 
     public string DataRoot { get; }
@@ -106,6 +108,8 @@ public sealed class AliServices
     public SafeActivatingLocalRuntime RuntimeController { get; }
 
     public ConversationOrchestrator Orchestrator { get; }
+
+    public AliCodingModule CodingModule { get; }
 
     public IVoiceRecorder VoiceRecorder { get; }
 
@@ -370,7 +374,8 @@ public sealed class AliServices
             userMemories,
             toolPermissions,
             fileAccess,
-            agentWorkMemory);
+            agentWorkMemory,
+            codingModule);
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

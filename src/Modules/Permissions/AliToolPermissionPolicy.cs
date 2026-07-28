@@ -29,7 +29,17 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.RoslynFormatProjectName, "Reformats existing C# source files with Roslyn"),
         new(AliCapabilityCatalog.RoslynApplyRenameName, "Renames a C# symbol and every semantic reference with Roslyn"),
         new(AliCapabilityCatalog.DotNetBuildName, "Executes the local .NET SDK and project build targets"),
-        new(AliCapabilityCatalog.DotNetRunName, "Launches a compiled local application")
+        new(AliCapabilityCatalog.DotNetRunName, "Launches a compiled local application"),
+        new(AliCapabilityCatalog.DotNetTestName, "Executes project test code and writes a TRX result artifact"),
+        new(AliCapabilityCatalog.DotNetVerifyName, "Executes approved build and test targets"),
+        new(AliCapabilityCatalog.DotNetDebugLaunchName, "Launches project code under the CLR debugger"),
+        new(AliCapabilityCatalog.DotNetDebugAttachName, "Attaches the debugger to an approved running process"),
+        new(AliCapabilityCatalog.DotNetDebugInspectName, "Reads private process, stack, and local-variable state"),
+        new(AliCapabilityCatalog.DotNetDebugEvaluateName, "Evaluates code in a paused process"),
+        new(AliCapabilityCatalog.DotNetDebugBreakpointsName, "Changes source breakpoints for a running process"),
+        new(AliCapabilityCatalog.DotNetDebugControlName, "Changes execution of a paused process"),
+        new(AliCapabilityCatalog.DotNetDebugStopName, "Terminates a debugger session and debuggee"),
+        new(AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName, "Reads process identity for diagnostics handoff")
     ];
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =

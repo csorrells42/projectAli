@@ -48,6 +48,16 @@ public static class AliCapabilityCatalog
     public const string RoslynApplyRenameName = "roslyn_apply_rename";
     public const string DotNetBuildName = "dotnet_build_project";
     public const string DotNetRunName = "dotnet_run_project";
+    public const string DotNetTestName = "dotnet_test_project";
+    public const string DotNetVerifyName = "dotnet_verify_project";
+    public const string DotNetDebugLaunchName = "dotnet_debug_launch";
+    public const string DotNetDebugAttachName = "dotnet_debug_attach";
+    public const string DotNetDebugInspectName = "dotnet_debug_inspect";
+    public const string DotNetDebugEvaluateName = "dotnet_debug_evaluate";
+    public const string DotNetDebugBreakpointsName = "dotnet_debug_set_breakpoints";
+    public const string DotNetDebugControlName = "dotnet_debug_control";
+    public const string DotNetDebugStopName = "dotnet_debug_stop";
+    public const string DotNetDebugDiagnosticsHandoffName = "dotnet_debug_diagnostics_handoff";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -92,7 +102,17 @@ public static class AliCapabilityCatalog
         new(RoslynPreviewRenameName, "Preview a Roslyn solution-wide semantic rename without changing files.", "Microsoft Roslyn refactoring"),
         new(RoslynApplyRenameName, "Apply a Roslyn solution-wide semantic rename after user approval.", "Microsoft Roslyn refactoring"),
         new(DotNetBuildName, "Restore and compile an approved C# .csproj through Microsoft's MSBuild API after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
-        new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Microsoft Roslyn/MSBuild coding tools")
+        new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
+        new(DotNetTestName, "Discover and run .NET tests with structured TRX failures and bounded timeouts.", "Ali .NET engineering loop"),
+        new(DotNetVerifyName, "Build and test an approved .NET project or solution and return stable verification evidence.", "Ali .NET engineering loop"),
+        new(DotNetDebugLaunchName, "Launch an approved built .NET project under the CLR debugger.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugAttachName, "Attach the CLR debugger to an approved project process.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugInspectName, "Inspect debugger threads, stack frames, locals, and stop reasons.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugEvaluateName, "Evaluate a C# watch expression in an active debugger frame.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugBreakpointsName, "Set one or more source breakpoints in an active CLR debugger session.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugControlName, "Continue, pause, and step an active CLR debugger session.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugStopName, "Terminate an active CLR debugger session and debuggee.", "Ali netcoredbg DAP module"),
+        new(DotNetDebugDiagnosticsHandoffName, "Return a safe debuggee process handoff for coverage and profiling modules.", "Ali netcoredbg DAP module")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>
