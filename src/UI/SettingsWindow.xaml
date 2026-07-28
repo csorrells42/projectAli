@@ -134,7 +134,7 @@
                                 </ToggleButton.Template>
                             </ToggleButton>
                             <ContentPresenter x:Name="ContentSite"
-                                              Content="{Binding SelectedItem, RelativeSource={RelativeSource TemplatedParent}}"
+                                              Content="{TemplateBinding SelectionBoxItem}"
                                               ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                               ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                               HorizontalAlignment="Left"
