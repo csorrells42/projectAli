@@ -17,7 +17,7 @@ public static class RuntimeSettingsStore
 
     public static OpenAiCompatibleRuntimeOptions GetDefaultOptions() =>
         new(
-            Enabled: false,
+            Enabled: true,
             Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Lemonade),
             Model: "gpt-oss-20b-mxfp4-GGUF",
             DisplayName: "GPT-OSS 20B - Lemonade",
@@ -25,8 +25,8 @@ public static class RuntimeSettingsStore
             Size: "20B",
             Quantization: "MXFP4",
             ContextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
-            OutputTokenLimit: 256,
-            Temperature: 0.2,
+            OutputTokenLimit: 2048,
+            Temperature: 1,
             TopP: null,
             StreamingEnabled: true,
             SupportsVision: false,
@@ -89,11 +89,41 @@ public static class RuntimeSettingsStore
     public static void Save(string dataDirectory, OpenAiCompatibleRuntimeOptions options)
     {
         Directory.CreateDirectory(dataDirectory);
-        File.WriteAllText(
-            GetSettingsPath(dataDirectory),
-            JsonSerializer.Serialize(OllamaRuntimeSafetyPolicy.Normalize(options), JsonOptions));
+        var filePath = GetSettingsPath(dataDirectory);
+        var temporaryPath = $"{filePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(
+                temporaryPath,
+                JsonSerializer.Serialize(OllamaRuntimeSafetyPolicy.Normalize(options), JsonOptions));
+            File.Move(temporaryPath, filePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
+    public static void EnsureValidOrReplace(string dataDirectory)
+    {
+        var filePath = GetSettingsPath(dataDirectory);
+        if (!File.Exists(filePath))
+        {
+            Save(dataDirectory, GetDefaultOptions());
+            return;
+        }
+
+        if (LoadOpenAiCompatibleOptions(dataDirectory) is not null)
+        {
+            return;
+        }
+
+        BackupInvalidFile(dataDirectory, filePath);
+        Save(dataDirectory, GetDefaultOptions());
+    }
     public static void WriteDefaultIfMissing(string dataDirectory)
     {
         var filePath = GetSettingsPath(dataDirectory);
@@ -103,6 +133,19 @@ public static class RuntimeSettingsStore
         }
 
         Save(dataDirectory, LoadOpenAiCompatibleOptions(dataDirectory) ?? GetDefaultOptions());
+    }
+
+    private static void BackupInvalidFile(string dataDirectory, string filePath)
+    {
+        var settingsRoot = Path.GetFullPath(dataDirectory);
+        var aliRoot = Directory.GetParent(settingsRoot)?.FullName ?? settingsRoot;
+        var backupDirectory = Path.Combine(
+            aliRoot,
+            "Backups",
+            "InvalidSettings",
+            DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ"));
+        Directory.CreateDirectory(backupDirectory);
+        File.Copy(filePath, Path.Combine(backupDirectory, Path.GetFileName(filePath)), overwrite: false);
     }
 
     public static void WriteExample(string dataDirectory)

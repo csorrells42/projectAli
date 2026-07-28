@@ -202,7 +202,8 @@ public sealed class MainWindowViewModel : ObservableObject
         AgentToolPermissions = new AgentToolPermissionsViewModel(
             _services.ToolPermissions,
             _services.ActiveUsers,
-            _services.FileAccess);
+            _services.FileAccess,
+            _services.AgentWorkMemory);
         _pendingAssistantName = AssistantName;
         ResourceMeters.Add(CpuMeter);
         ResourceMeters.Add(RamMeter);

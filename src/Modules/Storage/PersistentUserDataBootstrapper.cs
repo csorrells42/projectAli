@@ -25,7 +25,7 @@ public static class PersistentUserDataBootstrapper
             AssistantProfileStore.Save(dataRoot, assistantProfile);
         }
 
-        RuntimeSettingsStore.WriteDefaultIfMissing(dataRoot);
+        RuntimeSettingsStore.EnsureValidOrReplace(dataRoot);
         RuntimeSettingsStore.WriteExample(dataRoot);
         VoiceRuntimeSettingsStore.WriteDefaultIfMissing(dataRoot);
         WebSourceBackendSettingsStore.WriteDefaultIfMissing(dataRoot);

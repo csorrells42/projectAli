@@ -29,7 +29,7 @@
           AfterTargets="Publish"
           Condition="'$(MSBuildProjectName)' == 'Ali'">
     <ItemGroup>
-      <_AliNonEnglishSatelliteDirectory Include="$(PublishDir)cs;$(PublishDir)de;$(PublishDir)es;$(PublishDir)fr;$(PublishDir)it;$(PublishDir)ja;$(PublishDir)ko;$(PublishDir)pl;$(PublishDir)pt-BR;$(PublishDir)ru;$(PublishDir)tr" />
+      <_AliNonEnglishSatelliteDirectory Include="$(PublishDir)cs;$(PublishDir)de;$(PublishDir)es;$(PublishDir)fr;$(PublishDir)it;$(PublishDir)ja;$(PublishDir)ko;$(PublishDir)pl;$(PublishDir)pt-BR;$(PublishDir)ru;$(PublishDir)tr;$(PublishDir)zh-Hans;$(PublishDir)zh-Hant" />
     </ItemGroup>
     <RemoveDir Directories="@(_AliNonEnglishSatelliteDirectory)" />
   </Target>

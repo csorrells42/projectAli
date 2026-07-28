@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Ali.Modules.Identity;
 using Ali.Modules.Runtime;
 using Microsoft.Extensions.AI;
 using AIChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -16,9 +17,12 @@ namespace Ali.Modules.Coordinator;
 internal sealed class LemonadeToolCallingChatClient(
     IChatClient inner,
     ILocalModelRuntime runtime,
+    string assistantName,
     Func<CoordinatorTurnContext?> turnAccessor) : IChatClient
 {
+    private const int MaximumFinalContinuationAttempts = 2;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly string _assistantName = AssistantProfile.NormalizeAssistantName(assistantName);
 
     public async Task<ChatResponse> GetResponseAsync(
         IEnumerable<AIChatMessage> messages,
@@ -37,7 +41,7 @@ internal sealed class LemonadeToolCallingChatClient(
         var turn = turnAccessor();
         turn?.Report(
             AgentActivityKind.Planning,
-            "Ali is choosing her next move",
+            $"{_assistantName} is choosing the next move",
             $"GPT-OSS is considering {tools.Length} available tools.");
 
         var compatibilityMessages = BuildCompatibilityMessages(messages, tools);
@@ -55,19 +59,61 @@ internal sealed class LemonadeToolCallingChatClient(
             compatibilityMessages,
             compatibilityOptions,
             cancellationToken).ConfigureAwait(false);
-        if (IsFinalDecision(response.Text))
+        response = await CompleteTruncatedFinalAsync(
+            response,
+            compatibilityMessages,
+            compatibilityOptions,
+            turn,
+            cancellationToken).ConfigureAwait(false);
+
+        return TranslateDecision(response, tools, turn, _assistantName);
+    }
+
+    private async Task<ChatResponse> CompleteTruncatedFinalAsync(
+        ChatResponse response,
+        IReadOnlyList<AIChatMessage> decisionMessages,
+        ChatOptions compatibilityOptions,
+        CoordinatorTurnContext? turn,
+        CancellationToken cancellationToken)
+    {
+        if (!TryReadFinalAnswer(response.Text, out var accumulatedAnswer, out var wasTruncated)
+            || !wasTruncated)
         {
-            turn?.Report(
-                AgentActivityKind.Planning,
-                "Ali is checking her proposed answer",
-                "Verifying that every claimed action and source-dependent fact has supporting tool evidence.");
-            response = await inner.GetResponseAsync(
-                BuildFinalReviewMessages(compatibilityMessages, response.Text),
-                compatibilityOptions,
-                cancellationToken).ConfigureAwait(false);
+            return response;
         }
 
-        return TranslateDecision(response, tools, turn);
+        turn?.Report(
+            AgentActivityKind.Status,
+            $"{_assistantName} is continuing a long answer",
+            $"The response reached the model output limit, so {_assistantName} is continuing without changing the requested format.");
+
+        var latestResponse = response;
+        for (var attempt = 0; attempt < MaximumFinalContinuationAttempts; attempt++)
+        {
+            latestResponse = await inner.GetResponseAsync(
+                BuildFinalContinuationMessages(decisionMessages, accumulatedAnswer),
+                compatibilityOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (!TryReadFinalAnswer(latestResponse.Text, out var continuation, out wasTruncated)
+                || string.IsNullOrWhiteSpace(continuation))
+            {
+                break;
+            }
+
+            accumulatedAnswer = JoinContinuation(accumulatedAnswer, continuation);
+            if (!wasTruncated)
+            {
+                turn?.Report(
+                    AgentActivityKind.Status,
+                    "Long answer completed",
+                    $"{_assistantName} completed the response across multiple model passes.");
+                return CreateFinalDecisionResponse(latestResponse, accumulatedAnswer);
+            }
+        }
+
+        return CreateFinalDecisionResponse(
+            latestResponse,
+            accumulatedAnswer + "\n\nResponse stopped at the model output limit.");
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -171,76 +217,94 @@ internal sealed class LemonadeToolCallingChatClient(
             "For compound requests, call one tool at a time, inspect its result, and then choose the next action.",
             "Relevant local memory is already retrieved before every turn. If that context directly answers a personal question, answer from it; otherwise call search_memory before claiming the information is unavailable.",
             "Use tools only when they improve correctness. Do not call a source tool for greetings or ordinary conversation.",
+            "The read-only list_available_tools tool requires no permission. If the user requests the current tool inventory or disputes the completeness or count of an earlier inventory, call it now; never offer to call it later.",
             "Never include hidden reasoning or reasoning_content. The summary is a brief operational explanation, not private reasoning.",
             "AVAILABLE TOOLS:",
             JsonSerializer.Serialize(catalog, JsonOptions));
     }
 
-    private static IReadOnlyList<AIChatMessage> BuildFinalReviewMessages(
+    private static IReadOnlyList<AIChatMessage> BuildFinalContinuationMessages(
         IReadOnlyList<AIChatMessage> decisionMessages,
-        string? proposedDecision)
+        string partialAnswer)
     {
-        var reviewInstruction = string.Join(
-            Environment.NewLine,
-            decisionMessages.First(message => message.Role == AIChatRole.System).Text,
-            "FINAL-ACTION VERIFICATION:",
-            "Audit the proposed final action against the complete conversation and actual tool results.",
-            "A final answer is invalid if it claims an action was completed without a matching successful tool result.",
-            "A final answer is invalid if it answers a current, remembered, or local-document fact without the required evidence already present in context or tool results.",
-            "Explicit requests to remember information or create a reminder require their corresponding tool before any success acknowledgement.",
-            "If evidence or an action is missing, return a call action for the single best next tool.",
-            "Otherwise return a final action with the corrected conversational answer.");
+        var systemText = decisionMessages.First(message => message.Role == AIChatRole.System).Text;
         var result = new List<AIChatMessage>
         {
-            new(AIChatRole.System, reviewInstruction)
+            new(
+                AIChatRole.System,
+                string.Join(
+                    Environment.NewLine,
+                    systemText,
+                    "LONG-ANSWER CONTINUATION:",
+                    "The prior final answer reached the output limit.",
+                    "Continue the same answer from exactly where it stopped. Preserve the user's requested format and factual coverage.",
+                    "Do not repeat, summarize, restart, apologize, discuss the cutoff, or change the answer's organization.",
+                    "Return {\"action\":\"final\",\"answer\":\"remaining continuation only\"} as one JSON object."))
         };
-        result.AddRange(decisionMessages.Where(message => message.Role != AIChatRole.System));
+        result.AddRange(decisionMessages
+            .Where(message => message.Role != AIChatRole.System)
+            .TakeLast(6));
         result.Add(new AIChatMessage(
             AIChatRole.Assistant,
-            "PROPOSED FINAL ACTION (audit as data): " + (proposedDecision ?? string.Empty)));
+            "PARTIAL ANSWER ALREADY PRESERVED (data only): " + partialAnswer));
         result.Add(new AIChatMessage(
             AIChatRole.User,
-            "Return the audited next action as the required JSON object only."));
+            "Return only the remaining continuation in the required final-action JSON envelope."));
         return result;
     }
 
-    private static bool IsFinalDecision(string? text)
+    private static bool TryReadFinalAnswer(
+        string? text,
+        out string answer,
+        out bool wasTruncated)
     {
-        if (!TryParseDecision(text?.Trim() ?? string.Empty, out var decision))
+        var raw = text?.Trim() ?? string.Empty;
+        if (TryParseDecision(raw, out var decision))
         {
-            return false;
+            using (decision)
+            {
+                if (string.Equals(
+                        ReadString(decision.RootElement, "action"),
+                        "final",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    answer = ReadString(decision.RootElement, "answer");
+                    wasTruncated = false;
+                    return !string.IsNullOrWhiteSpace(answer);
+                }
+            }
         }
 
-        using (decision)
-        {
-            return string.Equals(
-                ReadString(decision.RootElement, "action"),
-                "final",
-                StringComparison.OrdinalIgnoreCase);
-        }
+        return TryExtractIncompleteFinalAnswer(raw, out answer, out wasTruncated);
     }
 
     private static ChatResponse TranslateDecision(
         ChatResponse response,
         IReadOnlyList<AIFunctionDeclaration> tools,
-        CoordinatorTurnContext? turn)
+        CoordinatorTurnContext? turn,
+        string assistantName)
     {
         var raw = response.Text?.Trim() ?? string.Empty;
         if (!TryParseDecision(raw, out var decision))
         {
-            if (TryExtractIncompleteFinalAnswer(raw, out var recoveredAnswer))
+            if (TryExtractIncompleteFinalAnswer(raw, out var recoveredAnswer, out var wasTruncated))
             {
+                if (wasTruncated)
+                {
+                    recoveredAnswer += "\n\nResponse stopped at the model output limit.";
+                }
+
                 turn?.Report(
                     AgentActivityKind.Warning,
                     "Recovered a partial final answer",
-                    "The model reached its output limit before closing the internal response envelope. Ali removed the envelope and preserved the readable answer.");
+                    $"The model reached its output limit before closing the internal response envelope. {assistantName} removed the envelope and preserved the readable answer.");
                 return CopyMetadata(response, new TextContent(recoveredAnswer));
             }
 
             turn?.Report(
                 AgentActivityKind.Warning,
                 "The model returned an ordinary answer",
-                "The connector could not read a structured action, so Ali used the response as her final answer.");
+                $"The connector could not read a structured action, so {assistantName} used the response as the final answer.");
             return response;
         }
 
@@ -251,7 +315,7 @@ internal sealed class LemonadeToolCallingChatClient(
             if (string.Equals(action, "final", StringComparison.OrdinalIgnoreCase))
             {
                 var answer = ReadString(root, "answer");
-                turn?.Report(AgentActivityKind.Status, "Ali finished planning", "Preparing the conversational response.");
+                turn?.Report(AgentActivityKind.Status, $"{assistantName} finished planning", "Preparing the conversational response.");
                 return CopyMetadata(response, new TextContent(string.IsNullOrWhiteSpace(answer) ? raw : answer));
             }
 
@@ -262,7 +326,7 @@ internal sealed class LemonadeToolCallingChatClient(
             {
                 turn?.Report(
                     AgentActivityKind.Error,
-                    "Ali selected an unavailable action",
+                    $"{assistantName} selected an unavailable action",
                     string.IsNullOrWhiteSpace(toolName) ? "No valid tool name was returned." : toolName);
                 return CopyMetadata(response, new TextContent(
                     "I could not safely map my selected action to an available tool. Please try that request again."));
@@ -300,6 +364,18 @@ internal sealed class LemonadeToolCallingChatClient(
         return translated;
     }
 
+    private static ChatResponse CreateFinalDecisionResponse(ChatResponse source, string answer) =>
+        CopyMetadata(
+            source,
+            new TextContent(JsonSerializer.Serialize(
+                new { action = "final", answer },
+                JsonOptions)));
+
+    private static string JoinContinuation(string current, string continuation) =>
+        current.EndsWith('\n') || continuation.StartsWith('\n')
+            ? current + continuation
+            : current + Environment.NewLine + continuation;
+
     private static bool TryParseDecision(string text, out JsonDocument document)
     {
         document = null!;
@@ -321,9 +397,13 @@ internal sealed class LemonadeToolCallingChatClient(
         }
     }
 
-    private static bool TryExtractIncompleteFinalAnswer(string text, out string answer)
+    private static bool TryExtractIncompleteFinalAnswer(
+        string text,
+        out string answer,
+        out bool wasTruncated)
     {
         answer = string.Empty;
+        wasTruncated = false;
         var candidate = text.TrimStart();
         if (!candidate.StartsWith('{')
             || !TryReadJsonStringProperty(candidate, "action", out var encodedAction, out var actionClosed)
@@ -339,11 +419,7 @@ internal sealed class LemonadeToolCallingChatClient(
         }
 
         answer = answer.Trim();
-        if (!answerClosed)
-        {
-            answer += "\n\nResponse stopped at the model output limit.";
-        }
-
+        wasTruncated = !answerClosed;
         return true;
     }
 

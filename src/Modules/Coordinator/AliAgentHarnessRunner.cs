@@ -2,6 +2,7 @@
 
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
@@ -35,6 +36,7 @@ internal sealed class AliAgentHarnessRunner
     private readonly McpClientManager _mcpClients;
     private readonly AgentToolPermissionStore _toolPermissions;
     private readonly AliWorkstationFileAccess _fileAccess;
+    private readonly AliAgentWorkMemory _workMemory;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
@@ -47,6 +49,7 @@ internal sealed class AliAgentHarnessRunner
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
+        AliAgentWorkMemory workMemory,
         IActiveUserSession? activeUsers,
         Func<CoordinatorTurnContext?> turnAccessor)
     {
@@ -58,9 +61,14 @@ internal sealed class AliAgentHarnessRunner
         _mcpClients = mcpClients;
         _toolPermissions = toolPermissions;
         _fileAccess = fileAccess;
+        _workMemory = workMemory;
         _activeUsers = activeUsers;
         _turnAccessor = turnAccessor;
-        _compatibilityClient = new LemonadeToolCallingChatClient(chatClient, runtime, turnAccessor);
+        _compatibilityClient = new LemonadeToolCallingChatClient(
+            chatClient,
+            runtime,
+            _assistantProfile.AssistantName,
+            turnAccessor);
         _agent = CreateAgent(_tools);
     }
 
@@ -70,15 +78,16 @@ internal sealed class AliAgentHarnessRunner
         return _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
-            Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, and approved workstation file tools.",
+            Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
             MaximumIterationsPerRequest = MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
             MaxContextWindowTokens = profile.ContextTokens,
             MaxOutputTokens = profile.OutputTokenLimit,
 #pragma warning restore MAAI001
             DisableWebSearch = true,
-            DisableFileMemory = true,
+            DisableFileMemory = false,
             DisableAgentSkillsProvider = true,
+            FileMemoryStore = _workMemory.Store,
             FileAccessStore = _fileAccess.Store,
             FileAccessProviderOptions = new FileAccessProviderOptions
             {
@@ -114,6 +123,10 @@ internal sealed class AliAgentHarnessRunner
         Action<AssistantStreamChunk> publish,
         CancellationToken cancellationToken)
     {
+        var workMemoryUser = _activeUsers is not null && !_activeUsers.RequiresSelection
+            ? _activeUsers.Current
+            : null;
+        using var workMemoryScope = _workMemory.EnterScope(turn.ConversationId, workMemoryUser);
         await using var mcpSession = await _mcpClients
             .CreateEnabledToolSessionAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -152,7 +165,7 @@ internal sealed class AliAgentHarnessRunner
         turn.Report(
             AgentActivityKind.Status,
             "Agent Framework started",
-            "Ali can answer directly, build a plan, or call one of her registered tools.");
+            $"{_assistantProfile.AssistantName} can answer directly, build a plan, use private conversation work memory, or call one of the registered tools.");
         var memoryContext = await _memoryTools.SearchAsync(userText, cancellationToken).ConfigureAwait(false);
         turn.Report(
             AgentActivityKind.ToolResult,

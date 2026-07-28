@@ -4,6 +4,7 @@ using System.Windows.Input;
 using Ali.Modules.Permissions;
 using Ali.Modules.UserMemory;
 using Ali.Modules.WorkstationFiles;
+using Ali.Modules.AgentWorkMemory;
 using WpfMessageBox = System.Windows.MessageBox;
 
 namespace Ali.UI.ViewModels;
@@ -13,6 +14,7 @@ public sealed class AgentToolPermissionsViewModel : ObservableObject
     private readonly AgentToolPermissionStore _store;
     private readonly IActiveUserSession _activeUsers;
     private readonly AliWorkstationFileAccess _fileAccess;
+    private readonly AliAgentWorkMemory _workMemory;
     private AgentToolPermissionGrantViewModel? _selectedGrant;
     private AgentPermissionProfileChoiceViewModel? _selectedPermissionProfile;
     private string _statusText = "Saved Agent Framework permissions have not been reviewed yet.";
@@ -20,11 +22,13 @@ public sealed class AgentToolPermissionsViewModel : ObservableObject
     public AgentToolPermissionsViewModel(
         AgentToolPermissionStore store,
         IActiveUserSession activeUsers,
-        AliWorkstationFileAccess fileAccess)
+        AliWorkstationFileAccess fileAccess,
+        AliAgentWorkMemory workMemory)
     {
         _store = store;
         _activeUsers = activeUsers;
         _fileAccess = fileAccess;
+        _workMemory = workMemory;
         PermissionProfileChoices =
         [
             new(AgentPermissionProfile.TrustedWorkstation, "Trusted Workstation"),
@@ -92,6 +96,12 @@ public sealed class AgentToolPermissionsViewModel : ObservableObject
     public string FileAuditPath => _fileAccess.Audit.Path;
 
     public string RecoverableTrashPath => _fileAccess.RecoverableTrashPath;
+
+    public string AgentWorkMemoryPath => _workMemory.RootPath;
+
+    public string AgentWorkMemoryAuditPath => _workMemory.AuditPath;
+
+    public string AgentWorkMemoryTrashPath => _workMemory.RecoverableTrashPath;
 
     public string StatusText
     {

@@ -1,5 +1,6 @@
 using System.Text;
 using Ali.Modules.Mcp;
+using Microsoft.Agents.AI;
 
 namespace Ali.Modules.Coordinator;
 
@@ -26,6 +27,13 @@ public static class AliCapabilityCatalog
     public const string FileSearchName = "file_access_grep";
     public const string FileReplaceName = "file_access_replace";
     public const string FileReplaceLinesName = "file_access_replace_lines";
+    public const string WorkMemoryWriteName = "file_memory_write";
+    public const string WorkMemoryReadName = "file_memory_read";
+    public const string WorkMemoryDeleteName = "file_memory_delete";
+    public const string WorkMemoryListName = "file_memory_ls";
+    public const string WorkMemorySearchName = "file_memory_grep";
+    public const string WorkMemoryReplaceName = "file_memory_replace";
+    public const string WorkMemoryReplaceLinesName = "file_memory_replace_lines";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -43,13 +51,20 @@ public static class AliCapabilityCatalog
         new(CreateReminderName, "Create a local reminder after an explicit user request."),
         new(GetAssistantIdentityName, "Return Ali's configured local assistant identity."),
         new(GetCurrentLocalTimeName, "Return the authoritative local computer date, time, and time zone."),
-        new(FileWriteName, "Create a new text file or, after approval, overwrite an existing file in Ali's approved workstation folders."),
-        new(FileReadName, "Read a text file from Ali's approved workstation folders."),
-        new(FileDeleteName, "Move a file from an approved workstation folder into Ali's recoverable trash after approval."),
-        new(FileListName, "List files and folders under Ali's approved workstation roots."),
-        new(FileSearchName, "Search text inside files under Ali's approved workstation roots."),
-        new(FileReplaceName, "Edit matching text in an existing file after approval."),
-        new(FileReplaceLinesName, "Edit specific lines in an existing file after approval.")
+        new(FileWriteName, "Create a new text file or, after approval, overwrite an existing file in Ali's approved workstation folders.", "Microsoft Agent Framework file access"),
+        new(FileReadName, "Read a text file from Ali's approved workstation folders.", "Microsoft Agent Framework file access"),
+        new(FileDeleteName, "Move a file from an approved workstation folder into Ali's recoverable trash after approval.", "Microsoft Agent Framework file access"),
+        new(FileListName, "List files and folders under Ali's approved workstation roots.", "Microsoft Agent Framework file access"),
+        new(FileSearchName, "Search text inside files under Ali's approved workstation roots.", "Microsoft Agent Framework file access"),
+        new(FileReplaceName, "Edit matching text in an existing file after approval.", "Microsoft Agent Framework file access"),
+        new(FileReplaceLinesName, "Edit specific lines in an existing file after approval.", "Microsoft Agent Framework file access"),
+        new(WorkMemoryWriteName, "Write a private working note or draft for the active user and conversation, optionally with a discovery description.", "Microsoft Agent Framework file memory"),
+        new(WorkMemoryReadName, "Read a private working note from the active user and conversation.", "Microsoft Agent Framework file memory"),
+        new(WorkMemoryDeleteName, "Move a private working note into Ali's recoverable work-memory trash.", "Microsoft Agent Framework file memory"),
+        new(WorkMemoryListName, "List private working notes and their descriptions for the active user and conversation.", "Microsoft Agent Framework file memory"),
+        new(WorkMemorySearchName, "Search private working notes for the active user and conversation.", "Microsoft Agent Framework file memory"),
+        new(WorkMemoryReplaceName, "Replace matching text in a private working note.", "Microsoft Agent Framework file memory"),
+        new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>
@@ -68,7 +83,8 @@ public static class AliCapabilityCatalog
                         McpClientManager.BuildModelToolName(server, tool.Name),
                         string.IsNullOrWhiteSpace(tool.Description)
                             ? $"Run {tool.Name} through the {server.Name} MCP integration."
-                            : $"{tool.Description} (MCP server: {server.Name})")))
+                            : $"{tool.Description} (MCP server: {server.Name})",
+                        $"External MCP: {server.Name}")))
                 .ToList()
             : [];
         return ListAvailableTools(additionalTools);
@@ -80,7 +96,7 @@ public static class AliCapabilityCatalog
         var allTools = Tools.Concat(additionalTools).ToList();
         return
         new(
-            $"Ali has {allTools.Count} configured model-callable tools. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
+            $"Ali has {allTools.Count} configured model-callable tools. This complete structured inventory is authoritative. Preserve every returned row and its Source when the user requests the full inventory; filtering and alternate formatting are allowed only when the user asks for them. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
             allTools);
     }
 

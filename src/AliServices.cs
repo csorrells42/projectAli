@@ -10,6 +10,7 @@ using Ali.Modules.Coordinator;
 using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Ali.Modules.WorkstationFiles;
+using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.UserMemory;
 
 namespace Ali;
@@ -45,7 +46,8 @@ public sealed class AliServices
         IActiveUserSession activeUsers,
         Mem0UserMemoryService userMemories,
         AgentToolPermissionStore toolPermissions,
-        AliWorkstationFileAccess fileAccess)
+        AliWorkstationFileAccess fileAccess,
+        AliAgentWorkMemory agentWorkMemory)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -69,6 +71,7 @@ public sealed class AliServices
         UserMemories = userMemories;
         ToolPermissions = toolPermissions;
         FileAccess = fileAccess;
+        AgentWorkMemory = agentWorkMemory;
     }
 
     public string DataRoot { get; }
@@ -130,6 +133,8 @@ public sealed class AliServices
     public AgentToolPermissionStore ToolPermissions { get; }
 
     public AliWorkstationFileAccess FileAccess { get; }
+
+    public AliAgentWorkMemory AgentWorkMemory { get; }
 
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
@@ -285,6 +290,7 @@ public sealed class AliServices
             profileDataRoot,
             toolPermissions,
             activeUsers);
+        var agentWorkMemory = new AliAgentWorkMemory(userDataRoot);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
@@ -322,6 +328,7 @@ public sealed class AliServices
             mcpClients,
             toolPermissions,
             fileAccess,
+            agentWorkMemory,
             userMemories,
             activeUsers,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
@@ -358,7 +365,8 @@ public sealed class AliServices
             activeUsers,
             userMemories,
             toolPermissions,
-            fileAccess);
+            fileAccess,
+            agentWorkMemory);
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

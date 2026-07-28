@@ -49,7 +49,8 @@ public sealed record CoordinatorIdentityResult(
 
 public sealed record CoordinatorCapability(
     string Name,
-    string Description);
+    string Description,
+    string Source = "Ali native");
 
 public sealed record CoordinatorCapabilityResult(
     string Status,

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
+using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
@@ -28,6 +29,7 @@ public sealed class AliToolCoordinator
     private readonly IUserMemoryService? _userMemories;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<UserMemorySettings>? _memorySettings;
+    private readonly string _assistantName;
 
     public AliToolCoordinator(
         ILocalModelRuntime runtime,
@@ -41,10 +43,12 @@ public sealed class AliToolCoordinator
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
+        AliAgentWorkMemory workMemory,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null)
     {
+        _assistantName = assistantProfile.Normalize().AssistantName;
         _userMemories = userMemories;
         _activeUsers = activeUsers;
         _memorySettings = memorySettings;
@@ -69,6 +73,7 @@ public sealed class AliToolCoordinator
             mcpClients,
             toolPermissions,
             fileAccess,
+            workMemory,
             activeUsers,
             () => _turn.Value);
     }
@@ -165,7 +170,7 @@ public sealed class AliToolCoordinator
 
             QueueBackgroundLearning(turn, userText, learnedAnswer.ToString());
 
-            turn.Report(AgentActivityKind.Complete, "Response complete", "Ali finished the agent run.");
+            turn.Report(AgentActivityKind.Complete, "Response complete", $"{_assistantName} finished the agent run.");
             writer.TryComplete();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

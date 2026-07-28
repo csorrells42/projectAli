@@ -18,7 +18,7 @@ foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md
 }
 
 $nonEnglishSatelliteDirectories = @(
-    @('cs', 'de', 'es', 'fr', 'it', 'ja', 'ko', 'pl', 'pt-BR', 'ru', 'tr') |
+    @('cs', 'de', 'es', 'fr', 'it', 'ja', 'ko', 'pl', 'pt-BR', 'ru', 'tr', 'zh-Hans', 'zh-Hant') |
         Where-Object { Test-Path -LiteralPath (Join-Path $root $_) -PathType Container }
 )
 if ($nonEnglishSatelliteDirectories.Count -gt 0) {

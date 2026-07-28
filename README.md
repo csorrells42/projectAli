@@ -29,11 +29,13 @@ dotnet run --project .\src\Ali.csproj --no-build
 ## Copy-Folder Publish
 
 ```powershell
-dotnet publish .\src\Ali.csproj -c Release -r win-x64 --self-contained true -o .\bin\Release\Ali
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\TestPublishedBundle.ps1 -PublishRoot .\bin\Release\Ali
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\PublishAliRelease.ps1
 ```
 
-Copy the published folder to the target computer and launch `Ali.exe`.
+This is the canonical Ali release command. It always rebuilds the self-contained
+bundle directly into `bin\Release\Ali`, validates every required asset, refreshes
+`Ali Dev Run.lnk` on the current user's Desktop, and removes compiler intermediates.
+Copy or zip that one published folder for a demo or transfer, then launch `Ali.exe`.
 Build fails when a required staged asset is absent. Publish performs the full
 model checksum pass before producing a copy-folder bundle, so a camera-, voice-,
 speech-, or FFmpeg-broken folder cannot be produced accidentally. Non-English
@@ -46,6 +48,13 @@ Ali keeps user-facing runtime data under:
 ```text
 %LOCALAPPDATA%\AliFiles
 ```
+
+Agent Framework file memory is stored beneath `Data\AgentWorkspaces` and is
+isolated by active user and conversation. It is Ali's private working notebook
+for intermediate notes and drafts—not personal Mem0 memory, the Qdrant document
+library, or a user-visible output folder. File-memory actions are metadata-audited
+under `Data\Logs`; deletes and overwritten working notes remain recoverable under
+`Data\RecoverableTrash\AgentWorkMemory`.
 
 Large package/runtime assets are intentionally ignored by Git. Their exact
 versions, licenses, immutable sources, destinations, sizes, and model checksums
@@ -70,16 +79,12 @@ is no rule-based English source or memory interceptor in front of the model.
 Connectors without native function calls use a compact routing envelope as a
 transport adapter, but the local model still makes the semantic routing decision.
 
-The authoritative callable catalog is defined once in `AliCapabilityCatalog`:
-
-- `list_available_tools`
-- `search_memory`
-- `remember_fact`
-- `search_current_web`
-- `search_local_library`
-- `create_reminder`
-- `get_assistant_identity`
-- `get_current_local_time`
+The authoritative callable catalog is defined once in `AliCapabilityCatalog`.
+It includes Ali's native memory, web/RAG, reminder, identity/time, and inventory
+tools; all seven Microsoft Agent Framework `file_access_*` tools; all seven
+Microsoft Agent Framework `file_memory_*` tools; and enabled external MCP tools.
+Call `list_available_tools` at runtime for the complete current inventory and
+source labels.
 
 Voice playback remains an application output setting rather than a model tool.
 Ali must not claim direct calendar, email, arbitrary file-system, shell, camera,
