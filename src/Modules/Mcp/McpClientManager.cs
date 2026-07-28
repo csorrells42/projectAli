@@ -1,4 +1,5 @@
 using System.Text;
+using Ali.Modules.Permissions;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Client;
 
@@ -76,6 +77,15 @@ public sealed class McpClientManager(string dataRoot)
     public string SettingsPath => McpClientSettingsStore.GetSettingsPath(dataRoot);
 
     public McpClientSettings LoadSettings() => McpClientSettingsStore.LoadOrDefault(dataRoot);
+
+    public bool RequiresApprovalByDefault(McpDiscoveredTool tool)
+    {
+        ArgumentNullException.ThrowIfNull(tool);
+        var profile = new AgentToolPermissionStore(dataRoot).CurrentProfile;
+        return profile == AgentPermissionProfile.LockedDown
+            || tool.DestructiveHint
+            || !tool.ReadOnlyHint;
+    }
 
     public void SaveSettings(McpClientSettings settings) => McpClientSettingsStore.Save(dataRoot, settings);
 

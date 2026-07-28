@@ -8,6 +8,7 @@ using Ali.Modules.Voice;
 using Ali.Modules.Storage;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Mcp;
+using Ali.Modules.Permissions;
 using Ali.Modules.UserMemory;
 
 namespace Ali;
@@ -41,7 +42,8 @@ public sealed class AliServices
         McpServerHost mcpServer,
         QdrantServiceManager qdrant,
         IActiveUserSession activeUsers,
-        Mem0UserMemoryService userMemories)
+        Mem0UserMemoryService userMemories,
+        AgentToolPermissionStore toolPermissions)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -63,6 +65,7 @@ public sealed class AliServices
         Qdrant = qdrant;
         ActiveUsers = activeUsers;
         UserMemories = userMemories;
+        ToolPermissions = toolPermissions;
     }
 
     public string DataRoot { get; }
@@ -120,6 +123,8 @@ public sealed class AliServices
     public IActiveUserSession ActiveUsers { get; }
 
     public Mem0UserMemoryService UserMemories { get; }
+
+    public AgentToolPermissionStore ToolPermissions { get; }
 
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
@@ -269,6 +274,7 @@ public sealed class AliServices
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
+        var toolPermissions = new AgentToolPermissionStore(dataRoot);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
@@ -304,6 +310,7 @@ public sealed class AliServices
             reminders,
             profile,
             mcpClients,
+            toolPermissions,
             userMemories,
             activeUsers,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
@@ -338,7 +345,8 @@ public sealed class AliServices
             mcpServer,
             qdrant,
             activeUsers,
-            userMemories);
+            userMemories,
+            toolPermissions);
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

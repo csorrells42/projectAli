@@ -135,7 +135,7 @@ public sealed class McpSettingsViewModel : ObservableObject
             return;
         }
 
-        SelectedServer.MergeDiscoveredTools(result.Tools);
+        SelectedServer.MergeDiscoveredTools(result.Tools, _manager.RequiresApprovalByDefault);
         Save();
         StatusText = result.Status
             + " New tools are disabled and require approval until you explicitly change them.";
@@ -327,7 +327,9 @@ public sealed class McpServerProfileViewModel : ObservableObject
         Tools = Tools.Select(tool => tool.ToModel()).ToList()
     };
 
-    public void MergeDiscoveredTools(IReadOnlyList<McpDiscoveredTool> discovered)
+    public void MergeDiscoveredTools(
+        IReadOnlyList<McpDiscoveredTool> discovered,
+        Func<McpDiscoveredTool, bool>? requiresApprovalByDefault = null)
     {
         var existing = Tools.ToDictionary(tool => tool.Name, StringComparer.OrdinalIgnoreCase);
         Tools.Clear();
@@ -345,7 +347,7 @@ public sealed class McpServerProfileViewModel : ObservableObject
                     Name = tool.Name,
                     Description = tool.Description,
                     Enabled = false,
-                    RequiresApproval = true,
+                    RequiresApproval = requiresApprovalByDefault?.Invoke(tool) ?? true,
                     ReadOnlyHint = tool.ReadOnlyHint,
                     DestructiveHint = tool.DestructiveHint
                 }));

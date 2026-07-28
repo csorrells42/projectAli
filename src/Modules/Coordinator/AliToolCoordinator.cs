@@ -6,6 +6,7 @@ using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
 using Ali.Modules.Mcp;
+using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 using Ali.Modules.Runtime;
 using Ali.Modules.UserMemory;
@@ -37,6 +38,7 @@ public sealed class AliToolCoordinator
         IReminderStore reminders,
         AssistantProfile assistantProfile,
         McpClientManager mcpClients,
+        AgentToolPermissionStore toolPermissions,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null)
@@ -52,6 +54,7 @@ public sealed class AliToolCoordinator
             reminders,
             assistantProfile,
             mcpClients,
+            toolPermissions,
             () => _turn.Value,
             userMemories,
             activeUsers,
@@ -62,6 +65,8 @@ public sealed class AliToolCoordinator
             assistantProfile,
             catalog,
             mcpClients,
+            toolPermissions,
+            activeUsers,
             () => _turn.Value);
     }
 

@@ -29,6 +29,7 @@ internal sealed class AliToolCatalog
         IReminderStore reminders,
         AssistantProfile assistantProfile,
         McpClientManager mcpClients,
+        AgentToolPermissionStore toolPermissions,
         Func<CoordinatorTurnContext?> turnAccessor,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
@@ -41,7 +42,7 @@ internal sealed class AliToolCatalog
         var sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, turnAccessor);
         var reminderTools = new AliReminderTools(reminders, turnAccessor);
         var identityTimeTools = new AliIdentityTimeTools(profile);
-        var permissionPolicy = new AliToolPermissionPolicy(turnAccessor);
+        var permissionPolicy = new AliToolPermissionPolicy(turnAccessor, () => toolPermissions.CurrentProfile);
 
         Tools =
         [
