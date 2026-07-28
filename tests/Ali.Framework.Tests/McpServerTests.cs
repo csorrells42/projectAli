@@ -6,6 +6,9 @@ using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Mcp;
 using Ali.Modules.Storage;
+using Ali.Modules.Coding;
+using Ali.Modules.Permissions;
+using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Framework.Tests;
@@ -163,13 +166,24 @@ public sealed class McpServerTests
         var localSources = new RecordingSourceRetriever("local");
         var memories = new FileMemoryStore(root);
         var reminders = new FileReminderStore(root);
+        var codingRoot = Path.Combine(root, "workspace", "McpCode");
+        Directory.CreateDirectory(codingRoot);
+        await File.WriteAllTextAsync(
+            Path.Combine(codingRoot, "McpCode.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>",
+            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(codingRoot, "Example.cs"),
+            "namespace McpCode; public sealed class Example;",
+            TestContext.Current.CancellationToken);
         var toolFactory = new AliMcpServerToolFactory(
             localSources,
             webSources,
             new McpWebResearchClient(static () => new WebSourceBackendSettings { UseMcpResearch = false }),
             memories,
             reminders,
-            AssistantProfile.Create("Ali"));
+            AssistantProfile.Create("Ali"),
+            CreateCodingModule(root));
         await using var host = new McpServerHost(root, toolFactory);
         host.SaveSettings(new McpServerSettings
         {
@@ -247,6 +261,10 @@ public sealed class McpServerTests
             });
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.GetAssistantIdentityName, []);
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.GetCurrentLocalTimeName, []);
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.RoslynInspectSolutionName, new()
+            {
+                ["targetPath"] = "Workspace/McpCode/McpCode.csproj"
+            });
 
             Assert.Single(memories.List().Memories);
             Assert.Single(reminders.List().Reminders);
@@ -346,6 +364,17 @@ public sealed class McpServerTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    private static AliCodingModule CreateCodingModule(string root)
+    {
+        var permissions = new AgentToolPermissionStore(root);
+        var store = new AliWorkstationFileStore(
+        [
+            new AliWorkstationFileMount("Workspace", Path.Combine(root, "workspace"))
+        ], Path.Combine(root, "trash"));
+        var audit = new AgentFileActionAuditStore(root, activeUsers: null);
+        return new AliCodingModule(new AliWorkstationFileAccess(store, audit, permissions));
     }
 
     private static string CreateTemporaryRoot()

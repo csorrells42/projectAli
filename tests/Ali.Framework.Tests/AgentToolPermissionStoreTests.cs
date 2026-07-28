@@ -16,7 +16,7 @@ public sealed class AgentToolPermissionStoreTests
         Assert.True(AliToolPermissionPolicy.RequiresApproval("research_web"));
         Assert.False(AliToolPermissionPolicy.RequiresApproval("search_current_web"));
         Assert.False(AliToolPermissionPolicy.RequiresApproval("search_local_library"));
-        Assert.Equal(16, AliToolPermissionPolicy.ProtectedTools.Count);
+        Assert.Equal(17, AliToolPermissionPolicy.ProtectedTools.Count);
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileWriteName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileDeleteName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReplaceName));
@@ -24,12 +24,18 @@ public sealed class AgentToolPermissionStoreTests
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileMoveName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetCreateProjectName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFormatProjectName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynApplyRenameName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetBuildName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetRunName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReadName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynAnalyzeProjectName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFindSymbolName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynGetCompletionsName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynInspectSolutionName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynInspectDocumentName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynInspectPositionName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFindReferencesName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynPreviewRenameName));
         Assert.All(
             AliToolPermissionPolicy.ProtectedTools,
             policy =>

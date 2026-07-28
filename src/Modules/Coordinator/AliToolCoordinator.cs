@@ -45,6 +45,7 @@ public sealed class AliToolCoordinator
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
         AliAgentWorkMemory workMemory,
+        AliCodingModule? codingModule = null,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null)
@@ -53,11 +54,7 @@ public sealed class AliToolCoordinator
         _userMemories = userMemories;
         _activeUsers = activeUsers;
         _memorySettings = memorySettings;
-        var dotNetAuditPath = Path.Combine(Path.GetDirectoryName(fileAccess.Audit.Path)!, "dotnet-actions.jsonl");
-        var codingProjectTracker = new AliCodingProjectTracker();
-        var codingProjectResolver = new AliCodingProjectResolver(fileAccess);
-        var dotNetProjectScaffolder = new AliDotNetProjectScaffolder(fileAccess, codingProjectTracker, dotNetAuditPath);
-        var dotNetTools = new AliRoslynCodingTools(codingProjectResolver, codingProjectTracker, dotNetAuditPath);
+        codingModule ??= new AliCodingModule(fileAccess);
         var catalog = new AliToolCatalog(
             localLibrary,
             webSources,
@@ -68,8 +65,7 @@ public sealed class AliToolCoordinator
             mcpClients,
             toolPermissions,
             fileAccess,
-            dotNetProjectScaffolder,
-            dotNetTools,
+            codingModule,
             () => _turn.Value,
             userMemories,
             activeUsers,

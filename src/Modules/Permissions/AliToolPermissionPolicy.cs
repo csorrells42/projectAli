@@ -27,6 +27,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.FileMoveName, "Renames or moves an existing workstation file"),
         new(AliCapabilityCatalog.DotNetCreateProjectName, "Executes the local .NET SDK to create a new project scaffold"),
         new(AliCapabilityCatalog.RoslynFormatProjectName, "Reformats existing C# source files with Roslyn"),
+        new(AliCapabilityCatalog.RoslynApplyRenameName, "Renames a C# symbol and every semantic reference with Roslyn"),
         new(AliCapabilityCatalog.DotNetBuildName, "Executes the local .NET SDK and project build targets"),
         new(AliCapabilityCatalog.DotNetRunName, "Launches a compiled local application")
     ];

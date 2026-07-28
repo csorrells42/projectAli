@@ -33,8 +33,7 @@ internal sealed class AliToolCatalog
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
-        AliDotNetProjectScaffolder dotNetProjectScaffolder,
-        AliRoslynCodingTools dotNetTools,
+        AliCodingModule codingModule,
         Func<CoordinatorTurnContext?> turnAccessor,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
@@ -107,34 +106,7 @@ internal sealed class AliToolCatalog
                 (Func<string>)identityTimeTools.GetCurrentLocalTime,
                 AliCapabilityCatalog.GetCurrentLocalTimeName,
                 "Return the authoritative local computer date, time, and time zone. Use for relative dates, deadlines, schedules, and reminders when an exact clock value matters.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)dotNetProjectScaffolder.CreateAsync,
-                AliCapabilityCatalog.DotNetCreateProjectName,
-                "Create a new C# project scaffold in an empty approved folder. projectPath must be a virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj; template must be wpf or console. This executes the fixed local .NET SDK template command and always requires user approval. After success, write the requested source files, build the project, fix any compiler errors, and run it only if the user asked.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<RoslynAnalysisResult>>)dotNetTools.AnalyzeAsync,
-                AliCapabilityCatalog.RoslynAnalyzeProjectName,
-                "Load an approved C# project through Roslyn/MSBuildWorkspace and return semantic compiler diagnostics with exact source locations. Use after writing source and whenever code correctness is uncertain. This is read-only and does not require approval.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<RoslynFormatResult>>)dotNetTools.FormatAsync,
-                AliCapabilityCatalog.RoslynFormatProjectName,
-                "Format all C# documents in an approved project using Roslyn's formatter. This edits existing source files and always requires user approval.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, string, CancellationToken, Task<RoslynSymbolResult>>)dotNetTools.FindSymbolAsync,
-                AliCapabilityCatalog.RoslynFindSymbolName,
-                "Find C# type or member declarations by semantic symbol name in an approved project. Use to understand or modify an existing codebase without guessing file locations.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, string, int, int, CancellationToken, Task<RoslynCompletionResult>>)dotNetTools.GetCompletionsAsync,
-                AliCapabilityCatalog.RoslynGetCompletionsName,
-                "Return Roslyn IntelliSense completion candidates at a one-based line and column in a C# document. projectPath and documentPath use approved virtual paths. Use when exact available APIs or members are uncertain.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, string?, CancellationToken, Task<DotNetBuildResult>>)dotNetTools.BuildAsync,
-                AliCapabilityCatalog.DotNetBuildName,
-                "Restore and compile one C# project through Microsoft's in-process MSBuild API. projectPath must be an approved virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj. configuration is Debug or Release. This executes project build targets and always requires user approval. An untouched SDK template is rejected; inspect returned diagnostics and correct errors before claiming success.")),
-            Protect(AIFunctionFactory.Create(
-                (Func<string, string?, CancellationToken, Task<DotNetRunResult>>)dotNetTools.RunAsync,
-                AliCapabilityCatalog.DotNetRunName,
-                "Launch the already-built artifact for one approved C# project. projectPath must be an approved virtual .csproj path and configuration must match the successful build. This starts local code and always requires user approval. Call only when the user explicitly asks to run or open the application.")),
+            .. codingModule.CreateFunctions().Select(Protect),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationFileMoveResult>>)fileAccess.MoveAsync,
                 AliCapabilityCatalog.FileMoveName,

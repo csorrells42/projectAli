@@ -1,10 +1,8 @@
-using System.Collections.Concurrent;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Formatting;
-using Microsoft.CodeAnalysis.MSBuild;
 
 namespace Ali.Modules.Coding;
 
@@ -59,90 +57,88 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
     private const int MaximumDiagnostics = 200;
     private const int MaximumMatches = 100;
     private const int MaximumCompletions = 100;
+    private readonly AliRoslynWorkspaceLoader _loader = new(resolver);
 
     public async Task<RoslynAnalysisResult> AnalyzeAsync(string projectPath, CancellationToken cancellationToken)
     {
-        var resolved = resolver.ResolveExistingProject(projectPath);
-        var loaded = await LoadProjectAsync(resolved, cancellationToken).ConfigureAwait(false);
-        using (loaded.Workspace)
+        using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        var diagnostics = new List<RoslynDiagnosticItem>();
+        var documentCount = 0;
+        foreach (var project in session.Solution.Projects.Where(project => project.Language == LanguageNames.CSharp))
         {
-            var compilation = await loaded.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+            documentCount += project.DocumentIds.Count;
+            var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
             if (compilation is null)
             {
-                return new RoslynAnalysisResult(
-                    false,
-                    projectPath,
-                    "Roslyn could not create a compilation for this project.",
-                    loaded.Project.DocumentIds.Count,
-                    [],
-                    loaded.Warnings);
+                continue;
             }
 
-            var diagnostics = compilation.GetDiagnostics(cancellationToken)
+            diagnostics.AddRange(compilation.GetDiagnostics(cancellationToken)
                 .Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
-                .OrderByDescending(diagnostic => diagnostic.Severity)
-                .ThenBy(diagnostic => diagnostic.Location.GetLineSpan().Path, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(diagnostic => diagnostic.Location.GetLineSpan().StartLinePosition.Line)
-                .Take(MaximumDiagnostics)
-                .Select(ToDiagnosticItem)
-                .ToList();
-            var errors = diagnostics.Count(item => item.Severity == "Error");
-            var warnings = diagnostics.Count - errors;
-            return new RoslynAnalysisResult(
-                errors == 0,
-                projectPath,
-                $"Roslyn loaded {loaded.Project.DocumentIds.Count} C# document(s) and found {errors} error(s) and {warnings} warning(s).",
-                loaded.Project.DocumentIds.Count,
-                diagnostics,
-                loaded.Warnings);
+                .Select(ToDiagnosticItem));
         }
+
+        diagnostics = diagnostics
+            .OrderByDescending(diagnostic => diagnostic.Severity == "Error")
+            .ThenBy(diagnostic => diagnostic.File, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(diagnostic => diagnostic.Line)
+            .Take(MaximumDiagnostics)
+            .ToList();
+        var errors = diagnostics.Count(item => item.Severity == "Error");
+        var warnings = diagnostics.Count - errors;
+        return new RoslynAnalysisResult(
+            errors == 0,
+            projectPath,
+            $"Roslyn loaded {documentCount} C# document(s) and found {errors} error(s) and {warnings} warning(s).",
+            documentCount,
+            diagnostics,
+            session.Warnings);
     }
 
     public async Task<RoslynFormatResult> FormatAsync(string projectPath, CancellationToken cancellationToken)
     {
-        var resolved = resolver.ResolveExistingProject(projectPath);
-        var loaded = await LoadProjectAsync(resolved, cancellationToken).ConfigureAwait(false);
-        using (loaded.Workspace)
+        using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        var changed = new List<string>();
+        foreach (var document in session.Solution.Projects
+            .Where(project => project.Language == LanguageNames.CSharp)
+            .SelectMany(project => project.Documents)
+            .Where(document => document.SourceCodeKind == SourceCodeKind.Regular))
         {
-            var changed = new List<string>();
-            foreach (var document in loaded.Project.Documents.Where(document => document.SourceCodeKind == SourceCodeKind.Regular))
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(document.FilePath))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(document.FilePath))
-                {
-                    continue;
-                }
-
-                var fullPath = Path.GetFullPath(document.FilePath);
-                var projectPrefix = Path.TrimEndingDirectorySeparator(resolved.ProjectDirectory) + Path.DirectorySeparatorChar;
-                if (!fullPath.StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                AliCodingProjectResolver.RejectReparsePoints(resolved.MountRoot, fullPath);
-                var original = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-                var formattedDocument = await Formatter.FormatAsync(document, cancellationToken: cancellationToken).ConfigureAwait(false);
-                var formatted = await formattedDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
-                if (original.ContentEquals(formatted))
-                {
-                    continue;
-                }
-
-                var encoding = formatted.Encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-                await File.WriteAllTextAsync(fullPath, formatted.ToString(), encoding, cancellationToken).ConfigureAwait(false);
-                changed.Add(Path.GetRelativePath(resolved.ProjectDirectory, fullPath));
+                continue;
             }
 
-            return new RoslynFormatResult(
-                true,
-                projectPath,
-                changed.Count == 0
-                    ? "Roslyn found no C# formatting changes to apply."
-                    : $"Roslyn formatted {changed.Count} C# file(s).",
-                changed,
-                loaded.Warnings);
+            var fullPath = Path.GetFullPath(document.FilePath);
+            var targetPrefix = Path.TrimEndingDirectorySeparator(session.Target.RootDirectory) + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(targetPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            AliCodingProjectResolver.RejectReparsePoints(session.Target.MountRoot, fullPath);
+            var original = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+            var formattedDocument = await Formatter.FormatAsync(document, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var formatted = await formattedDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
+            if (original.ContentEquals(formatted))
+            {
+                continue;
+            }
+
+            var encoding = formatted.Encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            await File.WriteAllTextAsync(fullPath, formatted.ToString(), encoding, cancellationToken).ConfigureAwait(false);
+            changed.Add(Path.GetRelativePath(session.Target.RootDirectory, fullPath));
         }
+
+        return new RoslynFormatResult(
+            true,
+            projectPath,
+            changed.Count == 0
+                ? "Roslyn found no C# formatting changes to apply."
+                : $"Roslyn formatted {changed.Count} C# file(s).",
+            changed,
+            session.Warnings);
     }
 
     public async Task<RoslynSymbolResult> FindSymbolAsync(
@@ -151,25 +147,21 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
-        var resolved = resolver.ResolveExistingProject(projectPath);
-        var loaded = await LoadProjectAsync(resolved, cancellationToken).ConfigureAwait(false);
-        using (loaded.Workspace)
-        {
-            var symbols = await SymbolFinder.FindDeclarationsAsync(
-                    loaded.Project,
-                    query.Trim(),
-                    ignoreCase: true,
-                    SymbolFilter.TypeAndMember,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            var matches = symbols.Take(MaximumMatches).Select(symbol => ToSymbolLocation(symbol, resolved.ProjectDirectory)).ToList();
-            return new RoslynSymbolResult(
-                true,
-                projectPath,
-                query,
-                matches.Count == 0 ? "Roslyn found no matching declarations." : $"Roslyn found {matches.Count} matching declaration(s).",
-                matches);
-        }
+        using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        var symbols = await SymbolFinder.FindSourceDeclarationsAsync(
+                session.Solution,
+                query.Trim(),
+                ignoreCase: true,
+                SymbolFilter.TypeAndMember,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var matches = symbols.Take(MaximumMatches).Select(symbol => ToSymbolLocation(symbol, session.Target.RootDirectory)).ToList();
+        return new RoslynSymbolResult(
+            true,
+            projectPath,
+            query,
+            matches.Count == 0 ? "Roslyn found no matching declarations." : $"Roslyn found {matches.Count} matching declaration(s).",
+            matches);
     }
 
     public async Task<RoslynCompletionResult> GetCompletionsAsync(
@@ -179,81 +171,33 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
         int column,
         CancellationToken cancellationToken)
     {
-        if (line < 1 || column < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(line), "Line and column are one-based and must be positive.");
-        }
-
-        var resolved = resolver.ResolveExistingProject(projectPath);
-        var physicalDocument = resolver.ResolveDocument(resolved, documentPath);
-        var loaded = await LoadProjectAsync(resolved, cancellationToken).ConfigureAwait(false);
-        using (loaded.Workspace)
-        {
-            var document = loaded.Project.Documents.FirstOrDefault(candidate =>
-                candidate.FilePath?.Equals(physicalDocument, StringComparison.OrdinalIgnoreCase) == true)
-                ?? throw new InvalidOperationException("Roslyn did not load the requested document as part of this project.");
-            var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-            if (line > text.Lines.Count)
-            {
-                throw new ArgumentOutOfRangeException(nameof(line), "The requested line is beyond the end of the document.");
-            }
-
-            var textLine = text.Lines[line - 1];
-            var zeroBasedColumn = column - 1;
-            if (zeroBasedColumn > textLine.Span.Length)
-            {
-                throw new ArgumentOutOfRangeException(nameof(column), "The requested column is beyond the end of the line.");
-            }
-
-            var service = CompletionService.GetService(document)
-                ?? throw new InvalidOperationException("Roslyn completion services are unavailable for this document.");
-            var completions = await service.GetCompletionsAsync(
-                    document,
-                    textLine.Start + zeroBasedColumn,
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            var items = completions?.ItemsList
-                .Select(item => item.DisplayText)
-                .Distinct(StringComparer.Ordinal)
-                .Take(MaximumCompletions)
-                .ToList() ?? [];
-            return new RoslynCompletionResult(
-                true,
-                projectPath,
-                documentPath,
-                line,
-                column,
-                items.Count == 0 ? "Roslyn found no completions at this location." : $"Roslyn returned {items.Count} completion candidate(s).",
-                items);
-        }
-    }
-
-    private static async Task<LoadedRoslynProject> LoadProjectAsync(
-        AliResolvedCodingProject resolved,
-        CancellationToken cancellationToken)
-    {
-        AliMsBuildRuntime.EnsureRegistered();
-        var workspace = MSBuildWorkspace.Create(new Dictionary<string, string>
-        {
-            ["Configuration"] = "Debug",
-            ["RestoreIgnoreFailedSources"] = "true"
-        });
-        var warnings = new ConcurrentQueue<string>();
-        workspace.RegisterWorkspaceFailedHandler(args => warnings.Enqueue(args.Diagnostic.Message));
-        try
-        {
-            var project = await workspace.OpenProjectAsync(
-                    resolved.PhysicalPath,
-                    progress: null,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            return new LoadedRoslynProject(workspace, project, warnings.ToArray());
-        }
-        catch
-        {
-            workspace.Dispose();
-            throw;
-        }
+        using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        var (document, position) = await _loader.ResolvePositionAsync(
+            session,
+            documentPath,
+            line,
+            column,
+            cancellationToken).ConfigureAwait(false);
+        var service = CompletionService.GetService(document)
+            ?? throw new InvalidOperationException("Roslyn completion services are unavailable for this document.");
+        var completions = await service.GetCompletionsAsync(
+                document,
+                position,
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        var items = completions?.ItemsList
+            .Select(item => item.DisplayText)
+            .Distinct(StringComparer.Ordinal)
+            .Take(MaximumCompletions)
+            .ToList() ?? [];
+        return new RoslynCompletionResult(
+            true,
+            projectPath,
+            documentPath,
+            line,
+            column,
+            items.Count == 0 ? "Roslyn found no completions at this location." : $"Roslyn returned {items.Count} completion candidate(s).",
+            items);
     }
 
     private static RoslynDiagnosticItem ToDiagnosticItem(Diagnostic diagnostic)
@@ -285,6 +229,4 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
             lineSpan?.StartLinePosition.Line + 1,
             symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
     }
-
-    private sealed record LoadedRoslynProject(MSBuildWorkspace Workspace, Project Project, IReadOnlyList<string> Warnings);
 }

@@ -40,6 +40,12 @@ public static class AliCapabilityCatalog
     public const string RoslynFormatProjectName = "roslyn_format_project";
     public const string RoslynFindSymbolName = "roslyn_find_symbol";
     public const string RoslynGetCompletionsName = "roslyn_get_completions";
+    public const string RoslynInspectSolutionName = "roslyn_inspect_solution";
+    public const string RoslynInspectDocumentName = "roslyn_inspect_document";
+    public const string RoslynInspectPositionName = "roslyn_inspect_position";
+    public const string RoslynFindReferencesName = "roslyn_find_references";
+    public const string RoslynPreviewRenameName = "roslyn_preview_rename";
+    public const string RoslynApplyRenameName = "roslyn_apply_rename";
     public const string DotNetBuildName = "dotnet_build_project";
     public const string DotNetRunName = "dotnet_run_project";
 
@@ -79,6 +85,12 @@ public static class AliCapabilityCatalog
         new(RoslynFormatProjectName, "Format every C# document in an approved project with Roslyn after user approval.", "Microsoft Roslyn coding intelligence"),
         new(RoslynFindSymbolName, "Find C# type and member declarations semantically with Roslyn.", "Microsoft Roslyn coding intelligence"),
         new(RoslynGetCompletionsName, "Return Roslyn IntelliSense completion candidates at a C# source location.", "Microsoft Roslyn coding intelligence"),
+        new(RoslynInspectSolutionName, "Inspect a C# project or solution graph with Roslyn.", "Microsoft Roslyn workspace intelligence"),
+        new(RoslynInspectDocumentName, "Return Roslyn outline, live diagnostics, and semantic classifications for a C# document.", "Microsoft Roslyn editor intelligence"),
+        new(RoslynInspectPositionName, "Return Roslyn hover, definition, and signature information at a C# source position.", "Microsoft Roslyn editor intelligence"),
+        new(RoslynFindReferencesName, "Find all semantic references to the C# symbol at a source position.", "Microsoft Roslyn solution intelligence"),
+        new(RoslynPreviewRenameName, "Preview a Roslyn solution-wide semantic rename without changing files.", "Microsoft Roslyn refactoring"),
+        new(RoslynApplyRenameName, "Apply a Roslyn solution-wide semantic rename after user approval.", "Microsoft Roslyn refactoring"),
         new(DotNetBuildName, "Restore and compile an approved C# .csproj through Microsoft's MSBuild API after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
         new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Microsoft Roslyn/MSBuild coding tools")
     ];

@@ -12,6 +12,7 @@ using Ali.Modules.Permissions;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.UserMemory;
+using Ali.Modules.Coding;
 
 namespace Ali;
 
@@ -291,6 +292,7 @@ public sealed class AliServices
             toolPermissions,
             activeUsers);
         var agentWorkMemory = new AliAgentWorkMemory(userDataRoot);
+        var codingModule = new AliCodingModule(fileAccess);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }
@@ -315,7 +317,8 @@ public sealed class AliServices
                 profile,
                 userMemories,
                 activeUsers,
-                () => UserMemorySettingsStore.LoadOrDefault(dataRoot)));
+                () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+                codingModule));
         var coordinator = new AliToolCoordinator(
             runtime,
             runtime,
@@ -329,6 +332,7 @@ public sealed class AliServices
             toolPermissions,
             fileAccess,
             agentWorkMemory,
+            codingModule,
             userMemories,
             activeUsers,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));

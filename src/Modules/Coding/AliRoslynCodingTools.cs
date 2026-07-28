@@ -32,6 +32,9 @@ internal sealed class AliRoslynCodingTools
     private readonly AliCodingProjectResolver _resolver;
     private readonly AliCodingProjectTracker _projectTracker;
     private readonly AliRoslynProjectIntelligence _intelligence;
+    private readonly AliRoslynSolutionIntelligence _solutionIntelligence;
+    private readonly AliRoslynDocumentIntelligence _documentIntelligence;
+    private readonly AliRoslynRefactoringService _refactoring;
     private readonly string _auditPath;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
 
@@ -43,6 +46,10 @@ internal sealed class AliRoslynCodingTools
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _projectTracker = projectTracker ?? throw new ArgumentNullException(nameof(projectTracker));
         _intelligence = new AliRoslynProjectIntelligence(resolver);
+        var workspaceLoader = new AliRoslynWorkspaceLoader(resolver);
+        _solutionIntelligence = new AliRoslynSolutionIntelligence(workspaceLoader);
+        _documentIntelligence = new AliRoslynDocumentIntelligence(workspaceLoader);
+        _refactoring = new AliRoslynRefactoringService(workspaceLoader);
         ArgumentException.ThrowIfNullOrWhiteSpace(auditPath);
         _auditPath = Path.GetFullPath(auditPath);
     }
@@ -96,6 +103,86 @@ internal sealed class AliRoslynCodingTools
         int column,
         CancellationToken cancellationToken) =>
         PrepareRoslyn().GetCompletionsAsync(projectPath, documentPath, line, column, cancellationToken);
+
+    public Task<RoslynSolutionOverviewResult> InspectSolutionAsync(
+        string targetPath,
+        CancellationToken cancellationToken)
+    {
+        AliMsBuildRuntime.EnsureRegistered();
+        return _solutionIntelligence.InspectAsync(targetPath, cancellationToken);
+    }
+
+    public Task<RoslynReferenceResult> FindReferencesAsync(
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken)
+    {
+        AliMsBuildRuntime.EnsureRegistered();
+        return _solutionIntelligence.FindReferencesAsync(targetPath, documentPath, line, column, cancellationToken);
+    }
+
+    public Task<RoslynDocumentResult> InspectDocumentAsync(
+        string targetPath,
+        string documentPath,
+        CancellationToken cancellationToken)
+    {
+        AliMsBuildRuntime.EnsureRegistered();
+        return _documentIntelligence.InspectDocumentAsync(targetPath, documentPath, cancellationToken);
+    }
+
+    public Task<RoslynPositionResult> InspectPositionAsync(
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken)
+    {
+        AliMsBuildRuntime.EnsureRegistered();
+        return _documentIntelligence.InspectPositionAsync(targetPath, documentPath, line, column, cancellationToken);
+    }
+
+    public Task<RoslynRenameResult> PreviewRenameAsync(
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        string newName,
+        CancellationToken cancellationToken)
+    {
+        AliMsBuildRuntime.EnsureRegistered();
+        return _refactoring.PreviewRenameAsync(targetPath, documentPath, line, column, newName, cancellationToken);
+    }
+
+    public async Task<RoslynRenameResult> ApplyRenameAsync(
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        string newName,
+        CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.StartNew();
+        AliMsBuildRuntime.EnsureRegistered();
+        var result = await _refactoring.ApplyRenameAsync(
+            targetPath,
+            documentPath,
+            line,
+            column,
+            newName,
+            cancellationToken).ConfigureAwait(false);
+        started.Stop();
+        await WriteAuditAsync(
+            "rename",
+            targetPath,
+            result.Success,
+            null,
+            started.ElapsedMilliseconds,
+            result.Summary,
+            cancellationToken).ConfigureAwait(false);
+        return result;
+    }
 
     public async Task<DotNetBuildResult> BuildAsync(
         string projectPath,

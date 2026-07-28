@@ -118,6 +118,133 @@ public sealed class DotNetCodingToolsTests
     }
 
     [Fact]
+    public async Task RoslynLayersOneThroughFive_LoadNavigateClassifyPreviewAndRenameAcrossSolution()
+    {
+        await WithCodingToolsAsync(async (root, access, tools, auditPath) =>
+        {
+            await access.Store.WriteAsync(
+                "Workspace/SemanticSolution/SemanticSolution.slnx",
+                """
+                <Solution>
+                  <Project Path="Library/Library.csproj" />
+                  <Project Path="App/App.csproj" />
+                </Solution>
+                """,
+                TestContext.Current.CancellationToken);
+            await access.Store.WriteAsync(
+                "Workspace/SemanticSolution/Library/Library.csproj",
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+                </Project>
+                """,
+                TestContext.Current.CancellationToken);
+            await access.Store.WriteAsync(
+                "Workspace/SemanticSolution/App/App.csproj",
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+                  <ItemGroup><ProjectReference Include="..\Library\Library.csproj" /></ItemGroup>
+                </Project>
+                """,
+                TestContext.Current.CancellationToken);
+            const string librarySource = """
+                namespace SemanticSolution.Library;
+
+                public sealed class Calculator
+                {
+                    public int Add(int left, int right) => left + right;
+                }
+                """;
+            const string appSource = """
+                using SemanticSolution.Library;
+
+                var calculator = new Calculator();
+                Console.WriteLine(calculator.Add(1, 2));
+                """;
+            await access.Store.WriteAsync(
+                "Workspace/SemanticSolution/Library/Calculator.cs",
+                librarySource,
+                TestContext.Current.CancellationToken);
+            await access.Store.WriteAsync(
+                "Workspace/SemanticSolution/App/Program.cs",
+                appSource,
+                TestContext.Current.CancellationToken);
+
+            const string target = "Workspace/SemanticSolution/SemanticSolution.slnx";
+            var overview = await tools.InspectSolutionAsync(target, TestContext.Current.CancellationToken);
+            Assert.True(overview.Success, overview.Summary);
+            Assert.Equal(2, overview.Projects.Count);
+            Assert.Contains(overview.Projects, project => project.Name == "Library" && project.TargetFrameworks.Contains("net10.0"));
+            Assert.Contains(overview.Projects, project => project.Name == "App" && project.ProjectReferences.Contains("Library"));
+
+            var document = await tools.InspectDocumentAsync(
+                target,
+                "Workspace/SemanticSolution/Library/Calculator.cs",
+                TestContext.Current.CancellationToken);
+            Assert.True(document.Success, document.Summary);
+            Assert.Contains(document.Outline, symbol => symbol.Name == "Calculator" && symbol.Kind == "NamedType");
+            Assert.Contains(document.Outline, symbol => symbol.Name == "Add" && symbol.Kind == "Method");
+            Assert.Contains(document.Classifications, span => span.Text == "Calculator");
+
+            var addColumn = appSource.Split('\n')[3].IndexOf("Add", StringComparison.Ordinal) + 1;
+            var position = await tools.InspectPositionAsync(
+                target,
+                "Workspace/SemanticSolution/App/Program.cs",
+                4,
+                addColumn,
+                TestContext.Current.CancellationToken);
+            Assert.True(position.Success, position.Summary);
+            Assert.Contains("Add", position.Symbol, StringComparison.Ordinal);
+            Assert.Contains(position.Definitions, definition => definition.File?.EndsWith("Library\\Calculator.cs", StringComparison.OrdinalIgnoreCase) == true);
+            Assert.Contains(position.Signatures, signature => signature.Contains("Add(int left, int right)", StringComparison.Ordinal));
+
+            var references = await tools.FindReferencesAsync(
+                target,
+                "Workspace/SemanticSolution/Library/Calculator.cs",
+                5,
+                16,
+                TestContext.Current.CancellationToken);
+            Assert.True(references.Success, references.Summary);
+            Assert.Contains(references.Locations, location =>
+                location.Kind == "Reference"
+                && location.File?.EndsWith("App\\Program.cs", StringComparison.OrdinalIgnoreCase) == true);
+
+            var preview = await tools.PreviewRenameAsync(
+                target,
+                "Workspace/SemanticSolution/Library/Calculator.cs",
+                5,
+                16,
+                "Sum",
+                TestContext.Current.CancellationToken);
+            Assert.True(preview.Success, preview.Summary);
+            Assert.False(preview.Applied);
+            Assert.Equal(2, preview.ChangedFiles.Count);
+            Assert.Contains("Add", await access.Store.ReadAsync(
+                "Workspace/SemanticSolution/App/Program.cs",
+                TestContext.Current.CancellationToken), StringComparison.Ordinal);
+
+            var applied = await tools.ApplyRenameAsync(
+                target,
+                "Workspace/SemanticSolution/Library/Calculator.cs",
+                5,
+                16,
+                "Sum",
+                TestContext.Current.CancellationToken);
+            Assert.True(applied.Success, applied.Summary);
+            Assert.True(applied.Applied);
+            Assert.Contains("Sum", await access.Store.ReadAsync(
+                "Workspace/SemanticSolution/Library/Calculator.cs",
+                TestContext.Current.CancellationToken), StringComparison.Ordinal);
+            Assert.Contains("calculator.Sum", await access.Store.ReadAsync(
+                "Workspace/SemanticSolution/App/Program.cs",
+                TestContext.Current.CancellationToken), StringComparison.Ordinal);
+            var audit = await File.ReadAllTextAsync(auditPath, TestContext.Current.CancellationToken);
+            Assert.Contains("\"operation\":\"rename\"", audit, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task CreateBuildAndRun_CreatesARealWpfTicTacToeApplication()
     {
         await WithProjectToolsAsync(async (root, access, scaffolder, tools, auditPath) =>
@@ -443,6 +570,12 @@ public sealed class DotNetCodingToolsTests
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFormatProjectName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFindSymbolName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynGetCompletionsName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynInspectSolutionName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynInspectDocumentName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynInspectPositionName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFindReferencesName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynPreviewRenameName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynApplyRenameName);
         });
     }
 

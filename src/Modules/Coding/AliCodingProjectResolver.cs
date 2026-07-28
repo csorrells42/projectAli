@@ -8,6 +8,13 @@ internal sealed record AliResolvedCodingProject(
     string MountRoot,
     string ProjectDirectory);
 
+internal sealed record AliResolvedCodingTarget(
+    string VirtualPath,
+    string PhysicalPath,
+    string MountRoot,
+    string RootDirectory,
+    bool IsSolution);
+
 internal sealed class AliCodingProjectResolver(AliWorkstationFileAccess fileAccess)
 {
     public AliResolvedCodingProject ResolveExistingProject(string projectPath)
@@ -32,12 +39,44 @@ internal sealed class AliCodingProjectResolver(AliWorkstationFileAccess fileAcce
             Path.GetDirectoryName(resolved.PhysicalPath)!);
     }
 
+    public AliResolvedCodingTarget ResolveExistingTarget(string targetPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
+        var resolved = fileAccess.ResolvePhysicalFilePath(targetPath);
+        var extension = Path.GetExtension(resolved.PhysicalPath);
+        var isSolution = extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase);
+        if (!isSolution && !extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Roslyn accepts an approved .csproj, .sln, or .slnx path.", nameof(targetPath));
+        }
+
+        if (!File.Exists(resolved.PhysicalPath))
+        {
+            throw new FileNotFoundException("The requested Roslyn target does not exist.", resolved.PhysicalPath);
+        }
+
+        RejectReparsePoints(resolved.MountRoot, resolved.PhysicalPath);
+        return new AliResolvedCodingTarget(
+            targetPath,
+            resolved.PhysicalPath,
+            resolved.MountRoot,
+            Path.GetDirectoryName(resolved.PhysicalPath)!,
+            isSolution);
+    }
+
     public string ResolveDocument(AliResolvedCodingProject project, string documentPath)
+        => ResolveDocument(project.MountRoot, project.ProjectDirectory, documentPath);
+
+    public string ResolveDocument(AliResolvedCodingTarget target, string documentPath)
+        => ResolveDocument(target.MountRoot, target.RootDirectory, documentPath);
+
+    private string ResolveDocument(string mountRoot, string targetRoot, string documentPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(documentPath);
         var resolved = fileAccess.ResolvePhysicalFilePath(documentPath);
         var fullPath = Path.GetFullPath(resolved.PhysicalPath);
-        var projectRoot = Path.TrimEndingDirectorySeparator(project.ProjectDirectory) + Path.DirectorySeparatorChar;
+        var projectRoot = Path.TrimEndingDirectorySeparator(targetRoot) + Path.DirectorySeparatorChar;
         if (!fullPath.StartsWith(projectRoot, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("The requested document is outside the approved project folder.");
@@ -48,7 +87,7 @@ internal sealed class AliCodingProjectResolver(AliWorkstationFileAccess fileAcce
             throw new FileNotFoundException("The requested project document does not exist.", fullPath);
         }
 
-        RejectReparsePoints(project.MountRoot, fullPath);
+        RejectReparsePoints(mountRoot, fullPath);
         return fullPath;
     }
 

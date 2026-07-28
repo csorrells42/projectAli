@@ -1,4 +1,5 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.Coding;
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
@@ -26,7 +27,20 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.SearchLocalLibraryName, "Search Ali's local documents with ripgrep exact matching and Qdrant semantic retrieval.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.CreateReminderName, "Create a reminder in Ali's local reminder store.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.GetAssistantIdentityName, "Return Ali's configured assistant identity.", readsPrivateData: true),
-        Policy(AliCapabilityCatalog.GetCurrentLocalTimeName, "Return the computer's current local time and time zone.")
+        Policy(AliCapabilityCatalog.GetCurrentLocalTimeName, "Return the computer's current local time and time zone."),
+        Policy(AliCapabilityCatalog.DotNetCreateProjectName, "Create a bounded C# project scaffold.", writesLocalData: true),
+        Policy(AliCapabilityCatalog.RoslynAnalyzeProjectName, "Analyze C# compiler diagnostics with Roslyn.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynFormatProjectName, "Format C# source with Roslyn.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynFindSymbolName, "Find C# declarations semantically with Roslyn.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynGetCompletionsName, "Return Roslyn IntelliSense completions.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynInspectSolutionName, "Inspect a C# project or solution graph.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynInspectDocumentName, "Inspect C# document outline, diagnostics, and classifications.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynInspectPositionName, "Inspect hover, definition, and signature information.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynFindReferencesName, "Find semantic C# references across a solution.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynPreviewRenameName, "Preview a semantic solution-wide rename.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.RoslynApplyRenameName, "Apply a semantic solution-wide rename.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetBuildName, "Build an approved C# project with MSBuild.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetRunName, "Launch an approved compiled .NET application.", writesLocalData: true, readsPrivateData: true)
     ];
 
     public static IReadOnlyList<McpServerToolPolicy> CreateDefaultPolicies() =>
@@ -85,6 +99,7 @@ internal sealed class AliMcpServerToolFactory
     private readonly AliSourceTools _sourceTools;
     private readonly AliReminderTools _reminderTools;
     private readonly AliIdentityTimeTools _identityTimeTools;
+    private readonly AliCodingModule? _codingModule;
 
     public AliMcpServerToolFactory(
         ISourceRetriever localLibrary,
@@ -92,12 +107,14 @@ internal sealed class AliMcpServerToolFactory
         McpWebResearchClient webResearch,
         IMemoryStore memories,
         IReminderStore reminders,
-        AssistantProfile assistantProfile)
+        AssistantProfile assistantProfile,
+        AliCodingModule? codingModule = null)
     {
         _memoryTools = new AliMemoryTools(memories, static () => null);
         _sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, static () => null);
         _reminderTools = new AliReminderTools(reminders, static () => null);
         _identityTimeTools = new AliIdentityTimeTools(assistantProfile);
+        _codingModule = codingModule;
     }
 
     public AliMcpServerToolFactory(
@@ -109,12 +126,14 @@ internal sealed class AliMcpServerToolFactory
         AssistantProfile assistantProfile,
         IUserMemoryService userMemories,
         IActiveUserSession activeUsers,
-        Func<UserMemorySettings> memorySettings)
+        Func<UserMemorySettings> memorySettings,
+        AliCodingModule? codingModule = null)
     {
         _memoryTools = new AliMemoryTools(userMemories, activeUsers, memorySettings, static () => null);
         _sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, static () => null);
         _reminderTools = new AliReminderTools(reminders, static () => null);
         _identityTimeTools = new AliIdentityTimeTools(assistantProfile);
+        _codingModule = codingModule;
     }
 
     public IReadOnlyList<McpServerTool> CreateTools(McpServerSettings settings)
@@ -187,6 +206,14 @@ internal sealed class AliMcpServerToolFactory
                 AliCapabilityCatalog.GetCurrentLocalTimeName,
                 "Return the authoritative local computer date, time, and time zone.")
         };
+
+        if (_codingModule is not null)
+        {
+            foreach (var function in _codingModule.CreateFunctions())
+            {
+                functions[function.Name] = function;
+            }
+        }
 
         return settings.Tools
             .Where(policy => policy.Enabled && functions.ContainsKey(policy.Name))
