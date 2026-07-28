@@ -35,6 +35,7 @@ public static class AliCapabilityCatalog
     public const string WorkMemorySearchName = "file_memory_grep";
     public const string WorkMemoryReplaceName = "file_memory_replace";
     public const string WorkMemoryReplaceLinesName = "file_memory_replace_lines";
+    public const string DotNetCreateProjectName = "dotnet_create_project";
     public const string DotNetBuildName = "dotnet_build_project";
     public const string DotNetRunName = "dotnet_run_project";
 
@@ -69,6 +70,7 @@ public static class AliCapabilityCatalog
         new(WorkMemorySearchName, "Search private working notes for the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceName, "Replace matching text in a private working note.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory"),
+        new(DotNetCreateProjectName, "Create a new WPF or console C# project in an empty approved folder after user approval.", "Ali .NET coding tools"),
         new(DotNetBuildName, "Restore and compile an approved C# .csproj with the local .NET SDK after user approval.", "Ali .NET coding tools"),
         new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Ali .NET coding tools")
     ];

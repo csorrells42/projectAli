@@ -44,6 +44,9 @@ public sealed class LemonadeToolCallingChatClientTests
 
         Assert.Equal(answer, response.Text);
         Assert.Equal(1, inner.CallCount);
+        var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
+        Assert.Contains("use them instead of claiming incapability", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("giving manual shell instructions", decisionPrompt, StringComparison.Ordinal);
     }
 
     [Fact]

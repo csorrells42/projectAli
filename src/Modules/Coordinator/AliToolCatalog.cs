@@ -33,6 +33,7 @@ internal sealed class AliToolCatalog
         McpClientManager mcpClients,
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
+        AliDotNetProjectScaffolder dotNetProjectScaffolder,
         AliDotNetCodingTools dotNetTools,
         Func<CoordinatorTurnContext?> turnAccessor,
         IUserMemoryService? userMemories = null,
@@ -107,6 +108,10 @@ internal sealed class AliToolCatalog
                 AliCapabilityCatalog.GetCurrentLocalTimeName,
                 "Return the authoritative local computer date, time, and time zone. Use for relative dates, deadlines, schedules, and reminders when an exact clock value matters.")),
             Protect(AIFunctionFactory.Create(
+                (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)dotNetProjectScaffolder.CreateAsync,
+                AliCapabilityCatalog.DotNetCreateProjectName,
+                "Create a new C# project scaffold in an empty approved folder. projectPath must be a virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj; template must be wpf or console. This executes the fixed local .NET SDK template command and always requires user approval. After success, write the requested source files, build the project, fix any compiler errors, and run it only if the user asked.")),
+            Protect(AIFunctionFactory.Create(
                 (Func<string, string?, CancellationToken, Task<DotNetBuildResult>>)dotNetTools.BuildAsync,
                 AliCapabilityCatalog.DotNetBuildName,
                 "Restore and compile one C# project using the installed .NET SDK. projectPath must be an approved virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj. configuration is Debug or Release. This executes project build targets and always requires user approval. Inspect the returned compiler output and correct errors before claiming success.")),
@@ -150,7 +155,8 @@ internal sealed class AliToolCatalog
             "Use the Agent Framework file_access tools for direct file requests. Translate named locations into virtual paths yourself: desktop -> Desktop/<file>, documents -> Documents/<file>, downloads -> Downloads/<file>, and exports -> Exports/<file>. Never ask the user for an absolute path. If a path call fails, correct it using an approved virtual root and retry.",
             "Create new requested text artifacts with overwrite=false and default to Exports when the user did not name a location. Never claim a file was created, edited, or deleted without a successful file tool result.",
             "When the user asks to rename or move a file, use file_access_move. Do not imitate a rename by creating a second file and deleting the first. After any failed file operation, inspect the error and do not claim the requested change occurred.",
-            "For C# applications, create a complete .csproj and source files inside one approved folder. When the user asks to compile, test, build, or run the app, call dotnet_build_project, inspect its compiler output, fix errors with file tools, and rebuild until successful. Call dotnet_run_project only after a successful build and only when the user explicitly asks to launch the app. These tools never provide a general shell.",
+            "When registered tools can fulfill a request, use them instead of claiming incapability or giving the user shell commands to perform the work manually.",
+            "For a new C# application, call dotnet_create_project with an approved empty project folder, then write the complete requested source files. When the user asks to compile, test, build, or run the app, call dotnet_build_project, inspect its compiler output, fix errors with file tools, and rebuild until successful. Call dotnet_run_project only after a successful build and only when the user explicitly asks to launch the app. These tools never provide a general shell.",
             "When the user requests your current tool inventory or disputes the completeness or count of an earlier inventory, call list_available_tools immediately without asking permission. For a full inventory, preserve every returned tool and its Source. You may use any requested table, list, explanation, grouping, or filtering, but never relabel native tools as MCP, invent tools, blame omissions on trimming, or offer to fetch the catalog later.",
             "Break compound requests into steps, call one tool at a time, inspect every result, and continue until the whole request is answered. Keep internal task tracking out of ordinary conversational answers; use private file memory only when a genuinely multi-step task needs durable working state.",
             "Correctness is more important than avoiding a necessary tool call. Do not invent current facts when live evidence is unavailable.",
