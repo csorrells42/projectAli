@@ -1,6 +1,10 @@
 using Ali.Modules.Coordinator;
 using Ali.Modules.Coding.Debugging;
 using Ali.Modules.Coding.Engineering;
+using Ali.Modules.Coding.Dependencies;
+using Ali.Modules.Coding.SourceControl;
+using Ali.Modules.Coding.Architecture;
+using Ali.Modules.Coding.Quality;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -22,12 +26,21 @@ public sealed class AliCodingModule : IAsyncDisposable
         Tools = new AliRoslynCodingTools(resolver, tracker, auditPath);
         EngineeringLoop = new AliDotNetEngineeringLoop(resolver);
         Debugger = new AliDotNetDebugger(resolver);
+        Dependencies = new AliDependencyEngineering(resolver);
+        SourceControl = new AliSourceControlEngineering(resolver);
+        var workspaceLoader = new AliRoslynWorkspaceLoader(resolver);
+        Architecture = new AliArchitectureEngineering(workspaceLoader);
+        Quality = new AliQualityEngineering(resolver, Tools);
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
     internal AliRoslynCodingTools Tools { get; }
     internal AliDotNetEngineeringLoop EngineeringLoop { get; }
     internal AliDotNetDebugger Debugger { get; }
+    internal AliDependencyEngineering Dependencies { get; }
+    internal AliSourceControlEngineering SourceControl { get; }
+    internal AliArchitectureEngineering Architecture { get; }
+    internal AliQualityEngineering Quality { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
@@ -122,7 +135,33 @@ public sealed class AliCodingModule : IAsyncDisposable
         AIFunctionFactory.Create(
             (Func<string, DebugDiagnosticsHandoff>)Debugger.GetDiagnosticsHandoff,
             AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName,
-            "Return the bounded process handoff used by Ali's coverage and performance-diagnostics modules.")
+            "Return the bounded process handoff used by Ali's coverage and performance-diagnostics modules."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<DependencyInspectionResult>>)Dependencies.InspectAsync,
+            AliCapabilityCatalog.DotNetDependencyInspectName, "Inspect exact PackageReferences, lock-file state, and NuGet vulnerability/deprecation audit results."),
+        AIFunctionFactory.Create((Func<string, string, string, string?, CancellationToken, Task<DependencyChangeResult>>)Dependencies.PreviewChangeAsync,
+            AliCapabilityCatalog.DotNetDependencyPreviewName, "Preview an exact add, update, or remove PackageReference edit without writing the project."),
+        AIFunctionFactory.Create((Func<string, string, string, string?, CancellationToken, Task<DependencyChangeResult>>)Dependencies.ApplyChangeAsync,
+            AliCapabilityCatalog.DotNetDependencyApplyName, "Apply a previously considered exact PackageReference add, update, or remove after approval."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<SourceControlResult>>)SourceControl.StatusAsync,
+            AliCapabilityCatalog.GitStatusName, "Return authoritative Git branch and working-tree status for an approved coding target."),
+        AIFunctionFactory.Create((Func<string, bool, CancellationToken, Task<SourceControlResult>>)SourceControl.DiffAsync,
+            AliCapabilityCatalog.GitDiffName, "Return the current staged or unstaged Git patch for review."),
+        AIFunctionFactory.Create((Func<string, int, CancellationToken, Task<SourceControlResult>>)SourceControl.HistoryAsync,
+            AliCapabilityCatalog.GitHistoryName, "Return bounded Git commit history with hashes, timestamps, authors, and subjects."),
+        AIFunctionFactory.Create((Func<string, string, CancellationToken, Task<SourceControlResult>>)SourceControl.BlameAsync,
+            AliCapabilityCatalog.GitBlameName, "Return Git line history for one approved project document."),
+        AIFunctionFactory.Create((Func<string, string, CancellationToken, Task<SourceControlResult>>)SourceControl.CreateBranchAsync,
+            AliCapabilityCatalog.GitCreateBranchName, "Create and switch to a validated Git branch after approval."),
+        AIFunctionFactory.Create((Func<string, string, CancellationToken, Task<SourceControlResult>>)SourceControl.CommitAsync,
+            AliCapabilityCatalog.GitCommitName, "Commit already-staged changes with a bounded one-line message after approval."),
+        AIFunctionFactory.Create((Func<string, string, string, CancellationToken, Task<SourceControlResult>>)SourceControl.PushAsync,
+            AliCapabilityCatalog.GitPushName, "Push one validated branch to one validated remote after approval."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<ArchitectureInspectionResult>>)Architecture.InspectAsync,
+            AliCapabilityCatalog.ArchitectureInspectName, "Build semantic project and call graphs and report project cycles."),
+        AIFunctionFactory.Create((Func<string, ArchitectureBoundaryRule[], CancellationToken, Task<ArchitectureBoundaryResult>>)Architecture.CheckBoundariesAsync,
+            AliCapabilityCatalog.ArchitectureCheckName, "Evaluate explicit namespace dependency boundary rules against Roslyn semantic call edges."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<QualityScanResult>>)Quality.ScanAsync,
+            AliCapabilityCatalog.DotNetQualityScanName, "Run Roslyn diagnostics and bounded secret checks and write a stable SARIF quality artifact.")
     ];
 
     private Task<DotNetVerificationResult> VerifyAsync(string targetPath, string? configuration, CancellationToken cancellationToken) =>

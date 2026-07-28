@@ -39,7 +39,13 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.DotNetDebugBreakpointsName, "Changes source breakpoints for a running process"),
         new(AliCapabilityCatalog.DotNetDebugControlName, "Changes execution of a paused process"),
         new(AliCapabilityCatalog.DotNetDebugStopName, "Terminates a debugger session and debuggee"),
-        new(AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName, "Reads process identity for diagnostics handoff")
+        new(AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName, "Reads process identity for diagnostics handoff"),
+        new(AliCapabilityCatalog.DotNetDependencyInspectName, "Transmits package IDs to configured NuGet sources for audit"),
+        new(AliCapabilityCatalog.DotNetDependencyApplyName, "Changes project package dependencies"),
+        new(AliCapabilityCatalog.GitCreateBranchName, "Changes the repository branch"),
+        new(AliCapabilityCatalog.GitCommitName, "Creates a durable source-control commit"),
+        new(AliCapabilityCatalog.GitPushName, "Transmits commits to a remote repository"),
+        new(AliCapabilityCatalog.DotNetQualityScanName, "Reads project source and writes a SARIF result artifact")
     ];
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =

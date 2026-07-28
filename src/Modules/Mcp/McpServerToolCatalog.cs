@@ -50,7 +50,20 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.DotNetDebugBreakpointsName, "Set source breakpoints in an active debugger.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.DotNetDebugControlName, "Control an active debugger session.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.DotNetDebugStopName, "Terminate an active debugger session.", writesLocalData: true, readsPrivateData: true),
-        Policy(AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName, "Return a diagnostics handoff for an active debugger.", readsPrivateData: true)
+        Policy(AliCapabilityCatalog.DotNetDebugDiagnosticsHandoffName, "Return a diagnostics handoff for an active debugger.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDependencyInspectName, "Inspect PackageReferences and NuGet audit evidence.", usesNetwork: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDependencyPreviewName, "Preview an exact PackageReference change.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDependencyApplyName, "Apply an exact PackageReference change.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitStatusName, "Inspect Git status.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitDiffName, "Inspect Git patches.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitHistoryName, "Inspect Git history.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitBlameName, "Inspect Git line history.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitCreateBranchName, "Create a Git branch.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitCommitName, "Commit staged Git changes.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.GitPushName, "Push a Git branch.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.ArchitectureInspectName, "Inspect semantic project and call graphs.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.ArchitectureCheckName, "Check semantic architecture boundaries.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetQualityScanName, "Run quality checks and write SARIF evidence.", writesLocalData: true, readsPrivateData: true)
     ];
 
     public static IReadOnlyList<McpServerToolPolicy> CreateDefaultPolicies() =>

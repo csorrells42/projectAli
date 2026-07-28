@@ -58,6 +58,19 @@ public static class AliCapabilityCatalog
     public const string DotNetDebugControlName = "dotnet_debug_control";
     public const string DotNetDebugStopName = "dotnet_debug_stop";
     public const string DotNetDebugDiagnosticsHandoffName = "dotnet_debug_diagnostics_handoff";
+    public const string DotNetDependencyInspectName = "dotnet_dependency_inspect";
+    public const string DotNetDependencyPreviewName = "dotnet_dependency_preview";
+    public const string DotNetDependencyApplyName = "dotnet_dependency_apply";
+    public const string GitStatusName = "git_status";
+    public const string GitDiffName = "git_diff";
+    public const string GitHistoryName = "git_history";
+    public const string GitBlameName = "git_blame";
+    public const string GitCreateBranchName = "git_create_branch";
+    public const string GitCommitName = "git_commit";
+    public const string GitPushName = "git_push";
+    public const string ArchitectureInspectName = "architecture_inspect";
+    public const string ArchitectureCheckName = "architecture_check_boundaries";
+    public const string DotNetQualityScanName = "dotnet_quality_scan";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -112,7 +125,20 @@ public static class AliCapabilityCatalog
         new(DotNetDebugBreakpointsName, "Set one or more source breakpoints in an active CLR debugger session.", "Ali netcoredbg DAP module"),
         new(DotNetDebugControlName, "Continue, pause, and step an active CLR debugger session.", "Ali netcoredbg DAP module"),
         new(DotNetDebugStopName, "Terminate an active CLR debugger session and debuggee.", "Ali netcoredbg DAP module"),
-        new(DotNetDebugDiagnosticsHandoffName, "Return a safe debuggee process handoff for coverage and profiling modules.", "Ali netcoredbg DAP module")
+        new(DotNetDebugDiagnosticsHandoffName, "Return a safe debuggee process handoff for coverage and profiling modules.", "Ali netcoredbg DAP module"),
+        new(DotNetDependencyInspectName, "Inspect direct packages, lock state, and NuGet vulnerability/deprecation evidence.", "Ali dependency engineering"),
+        new(DotNetDependencyPreviewName, "Preview an exact PackageReference add, update, or remove without writing.", "Ali dependency engineering"),
+        new(DotNetDependencyApplyName, "Apply an exact PackageReference add, update, or remove after approval.", "Ali dependency engineering"),
+        new(GitStatusName, "Inspect authoritative Git branch and working-tree status.", "Ali source-control engineering"),
+        new(GitDiffName, "Inspect staged or unstaged Git patches.", "Ali source-control engineering"),
+        new(GitHistoryName, "Inspect bounded commit history.", "Ali source-control engineering"),
+        new(GitBlameName, "Inspect line-level Git history for an approved project document.", "Ali source-control engineering"),
+        new(GitCreateBranchName, "Create and switch to a validated Git branch after approval.", "Ali source-control engineering"),
+        new(GitCommitName, "Commit already-staged changes after approval.", "Ali source-control engineering"),
+        new(GitPushName, "Push a validated branch and remote after approval.", "Ali source-control engineering"),
+        new(ArchitectureInspectName, "Build semantic project/call graphs and identify project cycles.", "Ali architecture engineering"),
+        new(ArchitectureCheckName, "Check explicit namespace dependency boundaries semantically.", "Ali architecture engineering"),
+        new(DotNetQualityScanName, "Run Roslyn/secret quality checks and produce SARIF evidence.", "Ali quality engineering")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>
