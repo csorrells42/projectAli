@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Runtime;
+using Ali.UI.ViewModels;
 using Microsoft.Extensions.AI;
 using AIChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using AIChatRole = Microsoft.Extensions.AI.ChatRole;
@@ -9,6 +10,15 @@ namespace Ali.Framework.Tests;
 
 public sealed class LemonadeToolCallingChatClientTests
 {
+    [Fact]
+    public void GptOssRuntimeOffersLargeJobOutputLimits()
+    {
+        var choice = Assert.Single(RuntimeModelChoiceCatalog.KnownChoices());
+
+        Assert.Contains(4096, choice.OutputTokenLimits);
+        Assert.Contains(8192, choice.OutputTokenLimits);
+    }
+
     [Fact]
     public async Task PlainFinalAnswer_IsReturnedWithoutASecondModelPassOrRewrite()
     {
@@ -71,9 +81,94 @@ public sealed class LemonadeToolCallingChatClientTests
             || (item.ActivityDetail?.Contains("Ali", StringComparison.Ordinal) ?? false));
     }
 
-    private sealed class RecordingChatClient(ChatResponse response) : IChatClient
+    [Fact]
+    public async Task TruncatedFinalAnswer_ContinuesWithoutResendingTheToolCatalog()
     {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"final","answer":"public class Game {\n"""))
+            {
+                FinishReason = ChatFinishReason.Length
+            },
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"final","answer":"    static void Main() {}\n}"}"""))
+            {
+                FinishReason = ChatFinishReason.Stop
+            });
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Charlie",
+            () => null);
+        var tool = AIFunctionFactory.Create(
+            () => "ok",
+            "file_access_write",
+            "Create a requested file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Write a C# game.")],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("public class Game", response.Text, StringComparison.Ordinal);
+        Assert.Contains("static void Main", response.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("output limit", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, inner.CallCount);
+        Assert.DoesNotContain(
+            "AVAILABLE TOOLS",
+            string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text)),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TruncatedToolCall_ContinuesAndRunsAsOneCompleteToolRequest()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"call","tool":"file_access_write","arguments":{"fileName":"Desktop/Game.cs","content":"public class Game {\n"""))
+            {
+                FinishReason = ChatFinishReason.Length
+            },
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """    static void Main() {}\n}","overwrite":false},"summary":"Create the game"}"""))
+            {
+                FinishReason = ChatFinishReason.Stop
+            });
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Charlie",
+            () => null);
+        var tool = AIFunctionFactory.Create(
+            () => "ok",
+            "file_access_write",
+            "Create a requested file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Create Desktop/Game.cs.")],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", call.Name);
+        var content = Assert.IsType<System.Text.Json.JsonElement>(call.Arguments!["content"]);
+        Assert.Contains("static void Main", content.GetString(), StringComparison.Ordinal);
+        Assert.Equal(2, inner.CallCount);
+    }
+
+    private sealed class RecordingChatClient(params ChatResponse[] responses) : IChatClient
+    {
+        private readonly Queue<ChatResponse> _responses = new(responses);
+
         public int CallCount { get; private set; }
+
+        public List<IReadOnlyList<AIChatMessage>> ObservedMessages { get; } = [];
 
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<AIChatMessage> messages,
@@ -81,7 +176,10 @@ public sealed class LemonadeToolCallingChatClientTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
-            return Task.FromResult(response);
+            ObservedMessages.Add(messages.ToList());
+            return Task.FromResult(_responses.Count > 0
+                ? _responses.Dequeue()
+                : new ChatResponse(new AIChatMessage(AIChatRole.Assistant, "script exhausted")));
         }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

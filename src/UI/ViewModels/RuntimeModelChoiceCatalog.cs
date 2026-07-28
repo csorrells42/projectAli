@@ -184,7 +184,7 @@ internal sealed record RuntimeModelChoice(
     private static IReadOnlyList<int> BuildOutputChoices(string model, int? preferred) =>
         AddPreferred(
             model.Contains("gpt-oss", StringComparison.OrdinalIgnoreCase)
-                ? [512, 1024, 2048]
+                ? [512, 1024, 2048, 3072, 4096, 8192]
                 : [128, 256, 512],
             preferred,
             minimum: 1);
