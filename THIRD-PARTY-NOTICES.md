@@ -1,5 +1,12 @@
 # Third-Party Notices
 
+## Node.js
+
+- Version: 24.18.0
+- License: MIT
+- Source: https://github.com/nodejs/node/tree/v24.18.0
+- Used as Ali's portable JavaScript and web-project runtime. The complete Node.js distribution includes its own dependency notices.
+
 The root MIT license covers original Project Ali source code contributed to
 this repository. It does not replace or alter licenses for third-party source,
 binary packages, native libraries, or model assets.

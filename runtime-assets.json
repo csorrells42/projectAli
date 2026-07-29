@@ -229,6 +229,20 @@
       "destination": "dependencies/debugger/netcoredbg/LICENSE.txt"
     },
     {
+      "id": "nodejs-windows",
+      "version": "24.18.0",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/nodejs/node/blob/v24.18.0/LICENSE",
+      "url": "https://nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip",
+      "fileName": "node-v24.18.0-win-x64.zip",
+      "size": 37176245,
+      "sha256": "0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821",
+      "kind": "zip",
+      "mappings": [
+        { "from": "node-v24.18.0-win-x64", "to": "dependencies/coding/node" }
+      ]
+    },
+    {
       "id": "qdrant-windows",
       "version": "1.18.2",
       "license": "Apache-2.0",
@@ -284,6 +298,7 @@
   ],
   "requiredFiles": [
     { "path": "runtime/python/python.exe", "size": 104952, "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a" },
+    { "path": "dependencies/coding/node/node.exe", "size": 92534088, "sha256": "9a4eb5f1c29c6a2e93852ead46b999e284a6a5ca8bab4d4e241d587d025a52de" },
     { "path": "dependencies/debugger/netcoredbg/netcoredbg.exe", "size": 2115072, "sha256": "23fc802866a03c5aa02484937d61ecbccf0ca731718d1840b0871f153340a823" },
     { "path": "dependencies/debugger/netcoredbg/LICENSE.txt", "size": 1085, "sha256": "6cd03b0de8299b0800f22b35ae842c931ded7684a2d1ba4f1d4188bab9b09a11" },
     { "path": "dependencies/audio/parakeet/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/decoder.int8.onnx", "size": 7257753, "sha256": "b6bb64963457237b900e496ee9994b59294526439fbcc1fecf705b31a15c6b4e" },
