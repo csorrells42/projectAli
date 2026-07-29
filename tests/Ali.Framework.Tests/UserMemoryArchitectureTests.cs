@@ -202,6 +202,29 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
+    public async Task ModelRecallMarksItsResultAsAuthoritativeWithoutMarkingBackgroundPreRecall()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "What is my bridge validation codeword?",
+            _ => { });
+        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var tools = new AliMemoryTools(
+            new CapturingMemoryService(),
+            new FakeActiveSession(user),
+            () => new UserMemorySettings(),
+            () => turn);
+
+        await tools.SearchAsync("background context", CancellationToken.None);
+        Assert.False(turn.UsedEvidenceTool);
+
+        await tools.SearchAsModelToolAsync("bridge validation codeword", CancellationToken.None);
+        Assert.True(turn.UsedEvidenceTool);
+    }
+
+    [Fact]
     public void RecallFiltering_RejectsWeakMatchesAndKeepsOnlyTheConfidentSemanticCluster()
     {
         var settings = new UserMemorySettings
@@ -346,6 +369,70 @@ public sealed class UserMemoryArchitectureTests
         Assert.Equal("people: My shop foreman is Bill", service.StoredFact);
         var recalled = await memoryTools.SearchAsync("Who is my shop foreman?", TestContext.Current.CancellationToken);
         Assert.Contains(recalled.Memories, memory => memory.Text == "people: My shop foreman is Bill");
+    }
+
+    [Fact]
+    public async Task DeniedNativeMemoryTool_DoesNotExecuteRetryOrMutate()
+    {
+        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var service = new PersistingMemoryService();
+        var memoryTools = new AliMemoryTools(
+            service,
+            new FakeActiveSession(user),
+            () => new UserMemorySettings(),
+            static () => null);
+        var policy = new AliToolPermissionPolicy(static () => null);
+        var rememberFunction = policy.Apply(AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)memoryTools.RememberAsync,
+            AliCapabilityCatalog.RememberCurrentUserName,
+            "Save an explicitly requested memory."));
+        using var client = new ScriptedChatClient(
+        [
+            ToolCall(AliCapabilityCatalog.RememberCurrentUserName, new Dictionary<string, object?>
+            {
+                ["fact"] = "This must not be saved",
+                ["category"] = "test"
+            }),
+            FinalAnswer("Understood. I did not save that memory because you denied the request.")
+        ]);
+        var agent = client.AsHarnessAgent(new HarnessAgentOptions
+        {
+            MaximumIterationsPerRequest = 4,
+            DisableWebSearch = true,
+            DisableFileMemory = true,
+            DisableAgentSkillsProvider = true,
+            DisableTodoProvider = true,
+            DisableAgentModeProvider = true,
+            ChatOptions = new ChatOptions
+            {
+                Tools = [rememberFunction],
+                ToolMode = ChatToolMode.Auto
+            }
+        });
+        var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
+
+        var first = await agent.RunAsync(
+            "Remember this test fact.",
+            session,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var request = Assert.Single(first.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ToolApprovalRequestContent>());
+
+        var second = await agent.RunAsync(
+            new ChatMessage(ChatRole.User,
+            [
+                request.CreateResponse(false, "Denied by the user.")
+            ]),
+            session,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Null(service.StoredFact);
+        Assert.Contains("did not save", second.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, client.CallCount);
+        Assert.Empty(second.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<ToolApprovalRequestContent>());
     }
 
     [Fact]
@@ -498,11 +585,16 @@ public sealed class UserMemoryArchitectureTests
     {
         private readonly Queue<ChatResponse> _responses = new(responses);
 
+        public int CallCount { get; private set; }
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(_responses.Count > 0 ? _responses.Dequeue() : FinalAnswer("script exhausted"));
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(_responses.Count > 0 ? _responses.Dequeue() : FinalAnswer("script exhausted"));
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,

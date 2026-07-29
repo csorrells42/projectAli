@@ -2,11 +2,52 @@ using Ali.Modules.Coordinator;
 using Ali.Modules.Permissions;
 using Ali.Modules.Mcp;
 using Ali.Modules.UserMemory;
+using Microsoft.Extensions.AI;
 
 namespace Ali.Framework.Tests;
 
 public sealed class AgentToolPermissionStoreTests
 {
+    [Fact]
+    public async Task DeniedTurn_BlocksEveryLaterProtectedToolBeforeSavedApprovalOrExecution()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Do not continue after I deny this.",
+            activity.Add);
+        var invocationCount = 0;
+        var inner = AIFunctionFactory.Create(
+            () =>
+            {
+                invocationCount++;
+                return "mutated";
+            },
+            "protected_test_write",
+            "Mutate test state.");
+        var guarded = new AliToolPermissionPolicy(() => turn).Apply(inner, requiresApproval: true);
+
+        turn.RecordPermissionDecision(AgentToolApprovalChoice.AllowOnce);
+        Assert.False(turn.PermissionDenied);
+        Assert.False(turn.UsedEvidenceTool);
+        turn.RecordPermissionDecision(AgentToolApprovalChoice.Deny);
+        turn.RecordPermissionDecision(AgentToolApprovalChoice.AllowOnce);
+        Assert.True(turn.PermissionDenied);
+        Assert.True(turn.UsedEvidenceTool);
+
+        var result = await guarded.InvokeAsync(
+            new AIFunctionArguments(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, invocationCount);
+        Assert.Contains("denied earlier", System.Text.Json.JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(activity, item =>
+            item.ActivityKind == AgentActivityKind.Warning
+            && item.Text.Contains("Blocked follow-up protected action", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void NativeRiskClassification_KeepsWritesAndPaidResearchApprovalGated()
     {

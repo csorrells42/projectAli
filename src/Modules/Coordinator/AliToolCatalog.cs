@@ -58,7 +58,7 @@ internal sealed class AliToolCatalog
                 AliCapabilityCatalog.ListAvailableToolsName,
                 "Return the exact authoritative list of model-callable tools registered for Ali right now, including a Source label for native and external MCP tools. This is a harmless read-only tool and never needs user permission. Call it immediately when the user requests Ali's current tool inventory or disputes the completeness or count of an earlier inventory. Never offer to call it later and never infer additional generic tools.")),
             Protect(AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.SearchAsync,
+                (Func<string, CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.SearchAsModelToolAsync,
                 AliCapabilityCatalog.RecallUserMemoryName,
                 "Recall relevant durable memories for the active identity profile. The active stable user ID is resolved internally and cannot be supplied by the model.")),
             Protect(AIFunctionFactory.Create(
@@ -129,6 +129,7 @@ internal sealed class AliToolCatalog
             $"You are {assistantName}, a local personal assistant.",
             "Interpret the user's complete request yourself. No application router classifies English before you receive it.",
             "Treat the newest user message as authoritative. Never carry forward or retry an earlier failed action unless the user explicitly asks to retry it or it remains necessary for the newest request.",
+            "If the user denies any permission request, stop that action plan immediately. Do not retry the denied operation, switch to an alternate tool, exploit a saved permission, or perform an equivalent mutation in the same turn. State accurately that the action was not performed.",
             TypoInterpretationInstruction,
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "If the user explicitly asks you not to use tools or not to modify anything, obey that instruction and answer directly. Do not call an Agent Skill, file tool, search tool, or any other tool in that turn.",

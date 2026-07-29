@@ -18,6 +18,7 @@ public sealed class ConversationBridgeTests
             var second = ConversationBridgeSettingsStore.LoadOrCreate(root);
 
             Assert.False(first.Enabled);
+            Assert.True(first.AllowPermissionDecisions);
             Assert.Equal("127.0.0.1", new Uri(first.Endpoint).Host);
             Assert.Equal(64, first.AuthenticationToken.Length);
             Assert.Equal(first, second);
@@ -36,6 +37,7 @@ public sealed class ConversationBridgeTests
         var port = ReserveLoopbackPort();
         var token = new ConversationBridgeSettings().AuthenticationToken;
         var submitted = new List<string>();
+        var approvalDecisions = new List<ConversationBridgeApprovalDecisionRequest>();
         var snapshot = CreateSnapshot("Ready");
         var host = new ConversationBridgeHost(
             root,
@@ -45,10 +47,20 @@ public sealed class ConversationBridgeTests
                 snapshot = CreateSnapshot("Response complete", text);
                 return Task.FromResult(snapshot);
             },
-            () => snapshot);
+            () => snapshot,
+            (request, _) =>
+            {
+                approvalDecisions.Add(request);
+                return Task.FromResult(new ConversationBridgeApprovalDecisionResult(
+                    request.RequestId == "approval-test",
+                    request.RequestId == "approval-test" ? "accepted" : "expired",
+                    request.RequestId,
+                    request.Decision));
+            });
         host.SaveSettings(new ConversationBridgeSettings
         {
             Enabled = true,
+            AllowPermissionDecisions = true,
             Port = port,
             AuthenticationToken = token
         });
@@ -83,10 +95,37 @@ public sealed class ConversationBridgeTests
             Assert.Equal("Response complete", completed.Status);
             Assert.Contains(completed.Messages, message => message.Text == "hello from bridge");
 
+            host.SaveSettings(host.LoadSettings() with { AllowPermissionDecisions = false });
+            var disabledApproval = await client.PostAsJsonAsync(
+                "/v1/approvals",
+                new ConversationBridgeApprovalDecisionRequest("approval-test", "deny"),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Forbidden, disabledApproval.StatusCode);
+            host.SaveSettings(host.LoadSettings() with { AllowPermissionDecisions = true });
+
+            var approvalResponse = await client.PostAsJsonAsync(
+                "/v1/approvals",
+                new ConversationBridgeApprovalDecisionRequest("approval-test", "deny"),
+                TestContext.Current.CancellationToken);
+            approvalResponse.EnsureSuccessStatusCode();
+            Assert.Collection(
+                approvalDecisions,
+                decision =>
+                {
+                    Assert.Equal("approval-test", decision.RequestId);
+                    Assert.Equal("deny", decision.Decision);
+                });
+
+            var staleApproval = await client.PostAsJsonAsync(
+                "/v1/approvals",
+                new ConversationBridgeApprovalDecisionRequest("stale-request", "allow-once"),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Conflict, staleApproval.StatusCode);
+
             var health = await client.GetStringAsync(
                 "/health",
                 TestContext.Current.CancellationToken);
-            Assert.Contains("\"canApprovePermissions\":false", health, StringComparison.Ordinal);
+            Assert.Contains("\"canApprovePermissions\":true", health, StringComparison.Ordinal);
         }
         finally
         {
@@ -96,7 +135,7 @@ public sealed class ConversationBridgeTests
     }
 
     [Fact]
-    public void SettingsTab_ExposesLiveSessionControlsAndUserOnlyApprovalBoundary()
+    public void SettingsTab_ExposesAuthenticatedTrustedControllerApprovalBoundary()
     {
         var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "SettingsWindow.xaml"));
         var architecture = File.ReadAllText(FindRepositoryFile("docs", "AgentFrameworkArchitecture.md"));
@@ -104,9 +143,11 @@ public sealed class ConversationBridgeTests
         Assert.Contains("SettingsConversationBridgeEnabled", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsConversationBridgeToken", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsSaveConversationBridge", xaml, StringComparison.Ordinal);
-        Assert.Contains("cannot approve permission prompts", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SettingsConversationBridgeApprovalControl", xaml, StringComparison.Ordinal);
+        Assert.Contains("permission decisions can be turned off separately", xaml, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("same typed-input method used by the Send button", architecture, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no permission-decision endpoint", architecture, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("exact currently visible request ID", architecture, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale or mismatched IDs fail closed", architecture, StringComparison.OrdinalIgnoreCase);
         var mainViewModel = File.ReadAllText(FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
         Assert.Contains(
             "externalCancellationToken: cancellationToken",
@@ -120,6 +161,9 @@ public sealed class ConversationBridgeTests
         var helper = File.ReadAllText(FindRepositoryFile("tools", "TalkToAli.ps1"));
         Assert.Contains("/v1/session", helper, StringComparison.Ordinal);
         Assert.Contains("/v1/turns", helper, StringComparison.Ordinal);
+        Assert.Contains("/v1/approvals", helper, StringComparison.Ordinal);
+        Assert.Contains("ApproveOnce", helper, StringComparison.Ordinal);
+        Assert.Contains("Deny", helper, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Host $settings.authenticationToken", helper, StringComparison.OrdinalIgnoreCase);
     }
 

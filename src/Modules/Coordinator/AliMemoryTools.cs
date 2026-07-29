@@ -71,11 +71,20 @@ internal sealed class AliMemoryTools
             result.Warnings));
     }
 
+    public Task<CoordinatorMemoryResult> SearchAsModelToolAsync(
+        [Description("The personal fact or prior detail to recall.")] string query,
+        CancellationToken cancellationToken)
+    {
+        MarkAuthoritativeToolUsed();
+        return SearchAsync(query, cancellationToken);
+    }
+
     public Task<CoordinatorMemoryWriteResult> RememberAsync(
         [Description("The exact fact the user explicitly asked Ali to remember.")] string fact,
         [Description("A short category such as person, preference, location, project, or general.")] string? category,
         CancellationToken cancellationToken)
     {
+        MarkAuthoritativeToolUsed();
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(fact))
         {
@@ -116,6 +125,7 @@ internal sealed class AliMemoryTools
         [Description("The corrected durable fact for the current user.")] string correction,
         CancellationToken cancellationToken)
     {
+        MarkAuthoritativeToolUsed();
         if (_userMemories is null || _activeUsers is null)
             return new(false, "Per-user correction is unavailable in the legacy memory store.");
         if (_activeUsers.RequiresSelection)
@@ -128,6 +138,7 @@ internal sealed class AliMemoryTools
         [Description("What the current user explicitly asked Ali to forget.")] string request,
         CancellationToken cancellationToken)
     {
+        MarkAuthoritativeToolUsed();
         if (_userMemories is null || _activeUsers is null)
             return new(false, "Per-user forgetting is unavailable in the legacy memory store.");
         if (_activeUsers.RequiresSelection)
@@ -138,6 +149,7 @@ internal sealed class AliMemoryTools
 
     public async Task<CoordinatorMemoryResult> ListCurrentAsync(CancellationToken cancellationToken)
     {
+        MarkAuthoritativeToolUsed();
         if (_userMemories is null || _activeUsers is null)
             return await SearchAsync(string.Empty, cancellationToken).ConfigureAwait(false);
         if (_activeUsers.RequiresSelection)
@@ -169,6 +181,15 @@ internal sealed class AliMemoryTools
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException)
         {
             return new("Memory recall failed safely; Ali continued without it.", [], [$"Per-user memory unavailable: {ex.Message}"]);
+        }
+    }
+
+    private void MarkAuthoritativeToolUsed()
+    {
+        var turn = _turnAccessor();
+        if (turn is not null)
+        {
+            turn.UsedEvidenceTool = true;
         }
     }
 

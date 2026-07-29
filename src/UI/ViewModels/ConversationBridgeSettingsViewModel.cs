@@ -7,6 +7,7 @@ public sealed class ConversationBridgeSettingsViewModel : ObservableObject
 {
     private readonly ConversationBridgeHost _host;
     private bool _enabled;
+    private bool _allowPermissionDecisions;
     private string _portText = "8772";
     private string _authenticationToken = string.Empty;
     private bool _isRunning;
@@ -30,6 +31,12 @@ public sealed class ConversationBridgeSettingsViewModel : ObservableObject
     {
         get => _enabled;
         set => SetProperty(ref _enabled, value);
+    }
+
+    public bool AllowPermissionDecisions
+    {
+        get => _allowPermissionDecisions;
+        set => SetProperty(ref _allowPermissionDecisions, value);
     }
 
     public string PortText
@@ -108,6 +115,7 @@ public sealed class ConversationBridgeSettingsViewModel : ObservableObject
     {
         var settings = _host.LoadSettings();
         Enabled = settings.Enabled;
+        AllowPermissionDecisions = settings.AllowPermissionDecisions;
         PortText = settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         AuthenticationToken = settings.AuthenticationToken;
         Endpoint = settings.Endpoint;
@@ -165,6 +173,7 @@ public sealed class ConversationBridgeSettingsViewModel : ObservableObject
         return new ConversationBridgeSettings
         {
             Enabled = Enabled,
+            AllowPermissionDecisions = AllowPermissionDecisions,
             Port = port,
             AuthenticationToken = AuthenticationToken
         }.Normalize();

@@ -448,6 +448,7 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("QUALITY CONTROL PASS", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("choose the exact next tool call", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("warningCount", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("denied or rejected permission", auditPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -494,6 +495,7 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("selection basis and limits", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("does not itself prove that ranking", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("Do not claim the search was exhaustive", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("copy them verbatim", auditPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -654,6 +656,101 @@ public sealed class LemonadeToolCallingChatClientTests
             && item.Text.Contains("checking the evidence", StringComparison.OrdinalIgnoreCase));
         var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
         Assert.Contains("unsupported superlative", auditPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeMemoryRecallFinal_IsAuditedWhenItContradictsTheRetrievedFact()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "What is my bridge validation codeword? Answer from durable memory only.",
+            _ => { })
+        {
+            UsedEvidenceTool = true
+        };
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "I do not have a durable record of that codeword.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"Your saved bridge validation codeword is cobalt-heron-4729.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null);
+        using var activeTurn = client.BeginTurn(turn);
+        var recall = AIFunctionFactory.Create(() => "ok", "recall_user_memory", "Recall durable memory.");
+        var memoryResult = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        memoryResult.Contents.Add(new FunctionResultContent(
+            "call-recall",
+            new
+            {
+                status = "Found 1 matching saved memories.",
+                memories = new[] { new { text = "temporary test fact: the bridge validation codeword is cobalt-heron-4729" } }
+            }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), memoryResult],
+            new ChatOptions { Tools = [recall] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("cobalt-heron-4729", response.Text, StringComparison.Ordinal);
+        Assert.Equal(2, inner.CallCount);
+        Assert.Contains(
+            "cobalt-heron-4729",
+            string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text)),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeDeniedPermissionFinal_IsAuditedBeforeClaimingTheMutationSucceeded()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Correct my saved memory from raven-2048 to raven-7777.",
+            activity.Add);
+        turn.RecordPermissionDecision(AgentToolApprovalChoice.Deny);
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "I've updated the memory to the correct value.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"I did not update that memory because permission was denied.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null);
+        using var activeTurn = client.BeginTurn(turn);
+        var correct = AIFunctionFactory.Create(() => "ok", "correct_current_user_memory", "Correct durable memory.");
+        var deniedResult = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        deniedResult.Contents.Add(new FunctionResultContent(
+            "call-correct",
+            "Tool call invocation rejected. Denied by the user."));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), deniedResult],
+            new ChatOptions { Tools = [correct] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("did not update", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("permission was denied", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, inner.CallCount);
+        Assert.Contains(activity, item =>
+            item.IsActivity
+            && item.ActivityKind == AgentActivityKind.Planning
+            && item.Text.Contains("checking the evidence", StringComparison.OrdinalIgnoreCase));
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("Denied by the user", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("final boundary", auditPrompt, StringComparison.Ordinal);
     }
 
     [Fact]

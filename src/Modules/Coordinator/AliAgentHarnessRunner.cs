@@ -444,6 +444,7 @@ internal sealed class AliAgentHarnessRunner
             choice == AgentToolApprovalChoice.Deny ? AgentActivityKind.Warning : AgentActivityKind.Status,
             choice == AgentToolApprovalChoice.Deny ? "Permission denied" : "Permission granted",
             choice.ToString());
+        turn.RecordPermissionDecision(choice);
 
         if (choice is AgentToolApprovalChoice.AlwaysAllowArguments or AgentToolApprovalChoice.AlwaysAllowTool)
         {

@@ -126,8 +126,35 @@ internal sealed class AliToolPermissionPolicy(
     {
         var observable = new ActivityReportingAIFunction(function, turnAccessor);
         return requiresApproval
-            ? new ApprovalRequiredAIFunction(observable)
+            ? new TurnDenialGuardAIFunction(new ApprovalRequiredAIFunction(observable), turnAccessor)
             : observable;
+    }
+}
+
+internal sealed class TurnDenialGuardAIFunction(
+    AIFunction innerFunction,
+    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
+{
+    protected override ValueTask<object?> InvokeCoreAsync(
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var turn = turnAccessor();
+        if (turn?.PermissionDenied != true)
+        {
+            return InnerFunction.InvokeAsync(arguments, cancellationToken);
+        }
+
+        turn.Report(
+            AgentActivityKind.Warning,
+            $"Blocked follow-up protected action {Name.Replace('_', ' ')}",
+            "A protected action was denied earlier in this turn. Ali will not retry it through another tool or saved permission.");
+        return ValueTask.FromResult<object?>(new
+        {
+            success = false,
+            denied = true,
+            message = "A protected action was denied earlier in this turn. Stop the action plan, do not call an alternate tool, and tell the user that no further protected action was performed."
+        });
     }
 }
 

@@ -2,6 +2,16 @@ namespace Ali.Modules.ConversationBridge;
 
 public sealed record ConversationBridgeTurnRequest(string Text);
 
+public sealed record ConversationBridgeApprovalDecisionRequest(
+    string RequestId,
+    string Decision);
+
+public sealed record ConversationBridgeApprovalDecisionResult(
+    bool Accepted,
+    string Message,
+    string RequestId,
+    string Decision);
+
 public sealed record ConversationBridgeRenderBlock(
     string Kind,
     string Text = "",

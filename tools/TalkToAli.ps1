@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Status', 'Send', 'Health')]
+    [ValidateSet('Status', 'Send', 'Health', 'ApproveOnce', 'ApproveArguments', 'ApproveTool', 'Deny')]
     [string]$Action = 'Status',
 
     [Parameter(Position = 1)]
@@ -34,6 +34,32 @@ if ($Action -eq 'Health') {
 $headers = @{ Authorization = "Bearer $($settings.authenticationToken)" }
 if ($Action -eq 'Status') {
     Invoke-RestMethod -Method Get -Uri "$endpoint/v1/session" -Headers $headers |
+        ConvertTo-Json -Depth 20
+    exit 0
+}
+
+if ($Action -in @('ApproveOnce', 'ApproveArguments', 'ApproveTool', 'Deny')) {
+    $session = Invoke-RestMethod -Method Get -Uri "$endpoint/v1/session" -Headers $headers
+    $requestId = if ([string]::IsNullOrWhiteSpace($Text)) {
+        $session.waitingForUserApproval.requestId
+    } else {
+        $Text.Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($requestId)) {
+        throw 'Ali is not currently waiting for a permission decision.'
+    }
+
+    $decision = switch ($Action) {
+        'ApproveOnce' { 'allow-once' }
+        'ApproveArguments' { 'allow-arguments' }
+        'ApproveTool' { 'allow-tool' }
+        'Deny' { 'deny' }
+    }
+    $approvalBody = @{
+        requestId = $requestId
+        decision = $decision
+    } | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method Post -Uri "$endpoint/v1/approvals" -Headers $headers -ContentType 'application/json' -Body $approvalBody |
         ConvertTo-Json -Depth 20
     exit 0
 }

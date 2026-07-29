@@ -17,6 +17,7 @@ public sealed class ConversationBridgeHost : IAsyncDisposable
     private readonly string _dataRoot;
     private readonly Func<string, CancellationToken, Task<ConversationBridgeSnapshot>> _submitTurn;
     private readonly Func<ConversationBridgeSnapshot> _captureSnapshot;
+    private readonly Func<ConversationBridgeApprovalDecisionRequest, CancellationToken, Task<ConversationBridgeApprovalDecisionResult>> _submitApprovalDecision;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private readonly object _statusLock = new();
@@ -26,12 +27,14 @@ public sealed class ConversationBridgeHost : IAsyncDisposable
     public ConversationBridgeHost(
         string dataRoot,
         Func<string, CancellationToken, Task<ConversationBridgeSnapshot>> submitTurn,
-        Func<ConversationBridgeSnapshot> captureSnapshot)
+        Func<ConversationBridgeSnapshot> captureSnapshot,
+        Func<ConversationBridgeApprovalDecisionRequest, CancellationToken, Task<ConversationBridgeApprovalDecisionResult>> submitApprovalDecision)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         _dataRoot = dataRoot;
         _submitTurn = submitTurn ?? throw new ArgumentNullException(nameof(submitTurn));
         _captureSnapshot = captureSnapshot ?? throw new ArgumentNullException(nameof(captureSnapshot));
+        _submitApprovalDecision = submitApprovalDecision ?? throw new ArgumentNullException(nameof(submitApprovalDecision));
         var settings = LoadSettings();
         _status = new ConversationBridgeRuntimeStatus(
             false,
@@ -120,10 +123,11 @@ public sealed class ConversationBridgeHost : IAsyncDisposable
                     service = "Ali Live Conversation Bridge",
                     state = "running",
                     mode = "live-ui-session",
-                    canApprovePermissions = false
+                    canApprovePermissions = settings.AllowPermissionDecisions
                 }));
                 application.MapGet("/v1/session", () => Results.Json(_captureSnapshot()));
                 application.MapPost("/v1/turns", SubmitTurnAsync);
+                application.MapPost("/v1/approvals", SubmitApprovalDecisionAsync);
                 await application.StartAsync(cancellationToken).ConfigureAwait(false);
                 _application = application;
                 application = null;
@@ -245,6 +249,40 @@ public sealed class ConversationBridgeHost : IAsyncDisposable
         {
             _turnGate.Release();
         }
+    }
+
+    private async Task<IResult> SubmitApprovalDecisionAsync(
+        ConversationBridgeApprovalDecisionRequest request,
+        HttpContext context)
+    {
+        if (!LoadSettings().AllowPermissionDecisions)
+        {
+            return Results.Json(
+                new { error = "Authenticated bridge permission decisions are disabled in Ali Settings." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var requestId = request.RequestId?.Trim() ?? string.Empty;
+        var decision = request.Decision?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (requestId.Length == 0)
+        {
+            return Results.BadRequest(new { error = "The pending approval request ID is required." });
+        }
+
+        if (decision is not ("allow-once" or "allow-arguments" or "allow-tool" or "deny"))
+        {
+            return Results.BadRequest(new
+            {
+                error = "Decision must be allow-once, allow-arguments, allow-tool, or deny."
+            });
+        }
+
+        var result = await _submitApprovalDecision(
+            new ConversationBridgeApprovalDecisionRequest(requestId, decision),
+            context.RequestAborted).ConfigureAwait(false);
+        return result.Accepted
+            ? Results.Json(result)
+            : Results.Conflict(result);
     }
 
     private static bool HasValidBearerToken(HttpContext context, string expectedToken)

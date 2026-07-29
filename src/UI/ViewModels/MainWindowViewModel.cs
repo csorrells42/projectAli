@@ -213,7 +213,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _conversationBridge = new ConversationBridgeHost(
             _services.DataRoot,
             SubmitConversationBridgeTurnAsync,
-            CaptureConversationBridgeSnapshot);
+            CaptureConversationBridgeSnapshot,
+            SubmitConversationBridgeApprovalDecisionAsync);
         ConversationBridgeSettings = new ConversationBridgeSettingsViewModel(_conversationBridge);
         McpSettings = new McpSettingsViewModel(_services.McpClients);
         McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
@@ -2659,6 +2660,50 @@ public sealed class MainWindowViewModel : ObservableObject
                 activity.CreatedAt,
                 activity.ElapsedMilliseconds)).ToArray(),
             DateTimeOffset.UtcNow);
+    }
+
+    private async Task<ConversationBridgeApprovalDecisionResult> SubmitConversationBridgeApprovalDecisionAsync(
+        ConversationBridgeApprovalDecisionRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dispatcher = System.Windows.Application.Current?.Dispatcher
+            ?? throw new InvalidOperationException("Ali's UI dispatcher is unavailable.");
+        if (!dispatcher.CheckAccess())
+        {
+            return await dispatcher.InvokeAsync(
+                    () => SubmitConversationBridgeApprovalDecisionAsync(request, cancellationToken))
+                .Task.Unwrap()
+                .ConfigureAwait(false);
+        }
+
+        var active = _activeBridgeApproval;
+        if (active is null)
+        {
+            return new(false, "Ali is not waiting for a permission decision.", request.RequestId, request.Decision);
+        }
+
+        if (!string.Equals(active.RequestId, request.RequestId, StringComparison.Ordinal))
+        {
+            return new(false, "The supplied request ID does not match Ali's current pending approval.", request.RequestId, request.Decision);
+        }
+
+        var choice = request.Decision switch
+        {
+            "allow-once" => AgentToolApprovalChoice.AllowOnce,
+            "allow-arguments" => AgentToolApprovalChoice.AlwaysAllowArguments,
+            "allow-tool" => AgentToolApprovalChoice.AlwaysAllowTool,
+            "deny" => AgentToolApprovalChoice.Deny,
+            _ => throw new InvalidOperationException("The bridge supplied an unsupported approval decision.")
+        };
+        var accepted = AgentToolApprovalWindow.TryResolve(active.RequestId, choice);
+        return new(
+            accepted,
+            accepted
+                ? $"Ali accepted the authenticated bridge decision '{request.Decision}' for the current visible approval."
+                : "The visible approval expired before the bridge decision could be applied.",
+            request.RequestId,
+            request.Decision);
     }
 
     private static ConversationBridgeMessage ToConversationBridgeMessage(ChatMessageViewModel message) => new(

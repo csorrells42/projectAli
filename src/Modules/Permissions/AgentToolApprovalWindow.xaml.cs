@@ -6,10 +6,15 @@ namespace Ali.Modules.Permissions;
 
 public partial class AgentToolApprovalWindow : Window
 {
+    private static readonly object ActiveWindowLock = new();
+    private static AgentToolApprovalWindow? _activeWindow;
+
+    private readonly string _requestId;
     private bool _finished;
 
     private AgentToolApprovalWindow(AgentToolApprovalPrompt prompt)
     {
+        _requestId = prompt.RequestId;
         InitializeComponent();
         NativeTitleBarTheme.ApplyDarkTitleBar(this);
         DataContext = new ApprovalViewModel(
@@ -32,8 +37,43 @@ public partial class AgentToolApprovalWindow : Window
         using var cancellationRegistration = cancellationToken.Register(() =>
             window.Dispatcher.BeginInvoke(new Action(() =>
                 window.Finish(AgentToolApprovalChoice.Deny, false))));
-        _ = window.ShowDialog();
+        lock (ActiveWindowLock)
+        {
+            _activeWindow = window;
+        }
+        try
+        {
+            _ = window.ShowDialog();
+        }
+        finally
+        {
+            lock (ActiveWindowLock)
+            {
+                if (ReferenceEquals(_activeWindow, window))
+                {
+                    _activeWindow = null;
+                }
+            }
+        }
         return window.Choice;
+    }
+
+    public static bool TryResolve(string requestId, AgentToolApprovalChoice choice)
+    {
+        AgentToolApprovalWindow? window;
+        lock (ActiveWindowLock)
+        {
+            window = _activeWindow;
+        }
+
+        if (window is null || !string.Equals(window._requestId, requestId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return window.Dispatcher.CheckAccess()
+            ? window.TryFinish(choice)
+            : window.Dispatcher.Invoke(() => window.TryFinish(choice));
     }
 
     private void DenyButton_OnClick(object sender, RoutedEventArgs e) =>
@@ -62,6 +102,17 @@ public partial class AgentToolApprovalWindow : Window
             DialogResult = dialogResult;
         }
         Close();
+    }
+
+    private bool TryFinish(AgentToolApprovalChoice choice)
+    {
+        if (_finished)
+        {
+            return false;
+        }
+
+        Finish(choice, choice != AgentToolApprovalChoice.Deny);
+        return true;
     }
 
     private sealed record ApprovalViewModel(

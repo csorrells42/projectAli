@@ -7,6 +7,8 @@ public sealed record ConversationBridgeSettings
 {
     public bool Enabled { get; init; }
 
+    public bool AllowPermissionDecisions { get; init; } = true;
+
     public int Port { get; init; } = 8772;
 
     public string AuthenticationToken { get; init; } = CreateToken();

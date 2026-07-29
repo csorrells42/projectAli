@@ -75,9 +75,23 @@ internal sealed class CoordinatorTurnContext(
 
     public bool UsedEvidenceTool { get; set; }
 
+    public bool PermissionDenied { get; private set; }
+
     public int WebSearchAttempts { get; set; }
 
     public List<CoordinatorSourceItem> WebSources { get; } = [];
+
+    public void RecordPermissionDecision(AgentToolApprovalChoice choice)
+    {
+        if (choice == AgentToolApprovalChoice.Deny)
+        {
+            PermissionDenied = true;
+            // A denial is an authoritative tool outcome. Force the same bounded
+            // final-answer audit used for retrieved evidence so the model cannot
+            // acknowledge the rejection and then falsely claim the action ran.
+            UsedEvidenceTool = true;
+        }
+    }
 
     public void Report(
         AgentActivityKind kind,
