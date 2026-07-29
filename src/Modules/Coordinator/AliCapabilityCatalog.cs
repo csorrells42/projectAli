@@ -43,7 +43,11 @@ public static class AliCapabilityCatalog
     public const string CodingFormatProjectName = "coding_format_project";
     public const string CodingBuildProjectName = "coding_build_project";
     public const string CodingTestProjectName = "coding_test_project";
+    public const string CodingRunProjectName = "coding_run_project";
     public const string CodingInspectArchitectureName = "coding_inspect_architecture";
+    public const string CodingBuildContextName = "coding_build_context";
+    public const string CodingProbeServiceName = "coding_probe_http_service";
+    public const string CodingInspectProcessName = "coding_inspect_process";
     public const string DotNetCreateProjectName = "dotnet_create_project";
     public const string RoslynAnalyzeProjectName = "roslyn_analyze_project";
     public const string RoslynFormatProjectName = "roslyn_format_project";
@@ -127,7 +131,11 @@ public static class AliCapabilityCatalog
         new(CodingFormatProjectName, "Format a project through its detected provider after approval.", "Ali multi-language coding foundation"),
         new(CodingBuildProjectName, "Build a project through its detected language provider.", "Ali multi-language coding foundation"),
         new(CodingTestProjectName, "Run a project's native test system through its detected provider.", "Ali multi-language coding foundation"),
+        new(CodingRunProjectName, "Execute a project through its detected provider with bounded runtime evidence.", "Ali shared coding operations"),
         new(CodingInspectArchitectureName, "Map cross-language dependencies, cycles, hotspots, and Mermaid architecture from local source evidence.", "Ali cross-language architecture intelligence"),
+        new(CodingBuildContextName, "Select bounded, query-relevant source snippets from a large local project.", "Ali shared coding operations"),
+        new(CodingProbeServiceName, "Probe an explicit external HTTP service after approval and return a bounded response preview.", "Ali shared coding operations"),
+        new(CodingInspectProcessName, "Capture a live process CPU, memory, thread, and responsiveness snapshot after approval.", "Ali shared coding operations"),
         new(DotNetCreateProjectName, "Create a new WPF or console C# project in an empty approved folder after user approval.", "Ali .NET coding tools"),
         new(RoslynAnalyzeProjectName, "Load a C# project with Roslyn and return semantic compiler diagnostics.", "Microsoft Roslyn coding intelligence"),
         new(RoslynFormatProjectName, "Format every C# document in an approved project with Roslyn after user approval.", "Microsoft Roslyn coding intelligence"),

@@ -27,6 +27,21 @@ internal sealed class AliCppLanguageProvider : IAliLanguageProvider
 
     public bool CanHandle(AliResolvedLanguageProject project) => project.Language == AliProgrammingLanguage.Cpp;
 
+    public AliLanguageCapability GetAvailableCapabilities(AliResolvedLanguageProject? project = null)
+    {
+        var tools = InspectToolchains(project);
+        var available = AliLanguageCapability.Inspect | AliLanguageCapability.Index
+            | AliLanguageCapability.Dependencies | AliLanguageCapability.Architecture;
+        if (tools.First(item => item.Name == "MSVC").Available)
+        {
+            available |= AliLanguageCapability.Analyze | AliLanguageCapability.Build
+                | AliLanguageCapability.Test | AliLanguageCapability.Run;
+        }
+        if (tools.First(item => item.Name == "clang-format").Available) available |= AliLanguageCapability.Format;
+        if (tools.First(item => item.Name == "OpenDebugAD7").Available) available |= AliLanguageCapability.Debug;
+        return available;
+    }
+
     public IReadOnlyList<AliLanguageToolchainStatus> InspectToolchains(AliResolvedLanguageProject? project = null)
     {
         var msvc = ResolveMsvc();
@@ -122,6 +137,22 @@ internal sealed class AliCppLanguageProvider : IAliLanguageProvider
             if (!run.Success) return new(false, Id, "test", $"Native test {name} failed.", run.ExitCode, duration, transcript.ToString().Trim(), artifacts);
         }
         return new(true, Id, "test", $"{tests.Length} native test executable(s) compiled and passed.", 0, duration, transcript.ToString().Trim(), artifacts);
+    }
+
+    public async Task<AliLanguageOperationResult> RunAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken)
+    {
+        var build = await BuildAsync(project, configuration, cancellationToken).ConfigureAwait(false);
+        if (!build.Success || build.Artifacts.Count == 0)
+        {
+            return build with { Operation = "run", Summary = "Native execution could not start because the build did not produce an executable." };
+        }
+        var result = await AliBoundedProcessRunner.RunAsync(
+            build.Artifacts[0],
+            project.ProjectDirectory,
+            [],
+            TimeSpan.FromMinutes(2),
+            cancellationToken).ConfigureAwait(false);
+        return From(result, "run", result.Success ? "The native application executed successfully." : "The native application failed or timed out.", build.Artifacts);
     }
 
     private static Task<BoundedProcessResult> RunCompilerAsync(AliMsvcToolchain toolchain, string root, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken token) =>

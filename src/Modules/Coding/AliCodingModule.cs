@@ -15,6 +15,7 @@ using Ali.Modules.Coding.Python;
 using Ali.Modules.Coding.Web;
 using Ali.Modules.Coding.Java;
 using Ali.Modules.Coding.Cpp;
+using Ali.Modules.Coding.Operations;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -60,6 +61,7 @@ public sealed class AliCodingModule : IAsyncDisposable
             LanguageProviders,
             sourceIndex);
         CrossLanguageArchitecture = new AliCrossLanguageArchitecture(languageResolver, sourceIndex);
+        Operations = new AliCodingOperations(languageResolver, LanguageProviders);
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
@@ -77,6 +79,7 @@ public sealed class AliCodingModule : IAsyncDisposable
     internal AliLanguageProviderRegistry LanguageProviders { get; }
     internal AliMultiLanguageCodingTools MultiLanguage { get; }
     internal AliCrossLanguageArchitecture CrossLanguageArchitecture { get; }
+    internal AliCodingOperations Operations { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
@@ -113,9 +116,25 @@ public sealed class AliCodingModule : IAsyncDisposable
             AliCapabilityCatalog.CodingTestProjectName,
             "Run an approved project's native test system through its registered language provider."),
         AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.RunAsync,
+            AliCapabilityCatalog.CodingRunProjectName,
+            "Execute an approved project through its detected language provider with a bounded runtime after user approval."),
+        AIFunctionFactory.Create(
             (Func<string, CancellationToken, Task<AliCrossLanguageArchitectureReport>>)CrossLanguageArchitecture.InspectAsync,
             AliCapabilityCatalog.CodingInspectArchitectureName,
             "Build a bounded evidence-backed dependency graph, cycle list, hotspot ranking, and Mermaid view across C#, Python, web, Java, and C/C++ source."),
+        AIFunctionFactory.Create(
+            (Func<string, string, int?, int?, CancellationToken, Task<AliCodeContextReport>>)Operations.BuildContextAsync,
+            AliCapabilityCatalog.CodingBuildContextName,
+            "Narrow a very large approved project into ranked, bounded source snippets relevant to one explicit question or symbol."),
+        AIFunctionFactory.Create(
+            (Func<string, string, string?, CancellationToken, Task<AliExternalServiceProbeResult>>)Operations.ProbeHttpAsync,
+            AliCapabilityCatalog.CodingProbeServiceName,
+            "Send an approved bounded GET or HEAD request to an explicit HTTP service and return status plus a capped response preview. Never sends credentials or request bodies."),
+        AIFunctionFactory.Create(
+            (Func<string, int, AliRuntimeProcessSnapshot>)Operations.InspectProcess,
+            AliCapabilityCatalog.CodingInspectProcessName,
+            "Capture a live point-in-time CPU, memory, thread, and responsiveness snapshot for an explicitly identified process after user approval."),
         AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)ProjectScaffolder.CreateAsync,
             AliCapabilityCatalog.DotNetCreateProjectName,
@@ -266,6 +285,7 @@ public sealed class AliCodingModule : IAsyncDisposable
         {
             await provider.DisposeAsync().ConfigureAwait(false);
         }
+        Operations.Dispose();
         await Debugger.DisposeAsync().ConfigureAwait(false);
     }
 }

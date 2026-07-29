@@ -19,15 +19,20 @@ public sealed class JavaCodingProviderTests
 
             var inspection = module.MultiLanguage.InspectProject("Workspace/Java/pom.xml");
             var analysis = await module.MultiLanguage.AnalyzeAsync("Workspace/Java/pom.xml", TestContext.Current.CancellationToken);
-            var build = await module.MultiLanguage.BuildAsync("Workspace/Java/pom.xml", null, TestContext.Current.CancellationToken);
-            var test = await module.MultiLanguage.TestAsync("Workspace/Java/pom.xml", null, TestContext.Current.CancellationToken);
-
             Assert.Equal(AliProgrammingLanguage.Java, inspection.Language);
             Assert.Equal("java-temurin", inspection.Provider);
             Assert.True(analysis.Success, analysis.Output);
+
+            var build = await module.MultiLanguage.BuildAsync("Workspace/Java/pom.xml", null, TestContext.Current.CancellationToken);
             Assert.True(build.Success, build.Output);
+
+            var test = await module.MultiLanguage.TestAsync("Workspace/Java/pom.xml", null, TestContext.Current.CancellationToken);
             Assert.True(test.Success, test.Output);
             Assert.Contains("PASS", test.Output, StringComparison.Ordinal);
+
+            var run = await module.MultiLanguage.RunAsync("Workspace/Java/pom.xml", null, TestContext.Current.CancellationToken);
+            Assert.True(run.Success, run.Output);
+            Assert.Contains("PASS", run.Output, StringComparison.Ordinal);
         });
     }
 

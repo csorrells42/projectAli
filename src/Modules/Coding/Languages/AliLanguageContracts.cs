@@ -42,6 +42,7 @@ public sealed record AliLanguageProviderStatus(
     string DisplayName,
     IReadOnlyList<AliProgrammingLanguage> Languages,
     AliLanguageCapability Capabilities,
+    AliLanguageCapability AvailableCapabilities,
     IReadOnlyList<AliLanguageToolchainStatus> Toolchains);
 
 public sealed record AliLanguageCapabilityReport(
@@ -66,12 +67,14 @@ internal interface IAliLanguageProvider : IAsyncDisposable
     string DisplayName { get; }
     IReadOnlySet<AliProgrammingLanguage> Languages { get; }
     AliLanguageCapability Capabilities { get; }
+    AliLanguageCapability GetAvailableCapabilities(AliResolvedLanguageProject? project = null);
     bool CanHandle(AliResolvedLanguageProject project);
     IReadOnlyList<AliLanguageToolchainStatus> InspectToolchains(AliResolvedLanguageProject? project = null);
     Task<AliLanguageOperationResult> AnalyzeAsync(AliResolvedLanguageProject project, CancellationToken cancellationToken);
     Task<AliLanguageOperationResult> FormatAsync(AliResolvedLanguageProject project, CancellationToken cancellationToken);
     Task<AliLanguageOperationResult> BuildAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken);
     Task<AliLanguageOperationResult> TestAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken);
+    Task<AliLanguageOperationResult> RunAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken);
 }
 
 internal sealed class AliLanguageProviderRegistry

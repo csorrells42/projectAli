@@ -23,6 +23,7 @@ public sealed class CppCodingProviderTests
             var analysis = await module.MultiLanguage.AnalyzeAsync("Workspace/Cpp/CMakeLists.txt", TestContext.Current.CancellationToken);
             var build = await module.MultiLanguage.BuildAsync("Workspace/Cpp/CMakeLists.txt", "Release", TestContext.Current.CancellationToken);
             var test = await module.MultiLanguage.TestAsync("Workspace/Cpp/CMakeLists.txt", null, TestContext.Current.CancellationToken);
+            var run = await module.MultiLanguage.RunAsync("Workspace/Cpp/CMakeLists.txt", "Release", TestContext.Current.CancellationToken);
 
             Assert.Equal(AliProgrammingLanguage.Cpp, inspection.Language);
             Assert.Equal("cpp-msvc", inspection.Provider);
@@ -31,6 +32,8 @@ public sealed class CppCodingProviderTests
             Assert.Contains(build.Artifacts, File.Exists);
             Assert.True(test.Success, test.Output);
             Assert.Contains("PASS", test.Output, StringComparison.Ordinal);
+            Assert.True(run.Success, run.Output);
+            Assert.Contains("5", run.Output, StringComparison.Ordinal);
         });
     }
 

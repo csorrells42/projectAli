@@ -36,6 +36,7 @@ internal sealed class AliMultiLanguageCodingTools
                 provider.DisplayName,
                 provider.Languages.OrderBy(language => language).ToArray(),
                 provider.Capabilities,
+                provider.GetAvailableCapabilities(),
                 provider.InspectToolchains()))
             .ToArray();
         return new AliLanguageCapabilityReport(
@@ -65,7 +66,7 @@ internal sealed class AliMultiLanguageCodingTools
             project.ManifestName,
             project.Language,
             provider?.Id,
-            provider?.Capabilities ?? (AliLanguageCapability.Inspect | AliLanguageCapability.Index),
+            provider?.GetAvailableCapabilities(project) ?? (AliLanguageCapability.Inspect | AliLanguageCapability.Index),
             provider?.InspectToolchains(project) ?? []);
     }
 
@@ -90,6 +91,9 @@ internal sealed class AliMultiLanguageCodingTools
 
     public Task<AliLanguageOperationResult> TestAsync(string targetPath, string? configuration, CancellationToken cancellationToken) =>
         WithProviderAsync(targetPath, (provider, project) => provider.TestAsync(project, configuration, cancellationToken));
+
+    public Task<AliLanguageOperationResult> RunAsync(string targetPath, string? configuration, CancellationToken cancellationToken) =>
+        WithProviderAsync(targetPath, (provider, project) => provider.RunAsync(project, configuration, cancellationToken));
 
     private Task<AliLanguageOperationResult> WithProviderAsync(
         string targetPath,

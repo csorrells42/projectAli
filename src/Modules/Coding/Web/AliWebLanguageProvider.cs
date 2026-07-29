@@ -23,6 +23,22 @@ internal sealed class AliWebLanguageProvider : IAliLanguageProvider
 
     public bool CanHandle(AliResolvedLanguageProject project) => Languages.Contains(project.Language);
 
+    public AliLanguageCapability GetAvailableCapabilities(AliResolvedLanguageProject? project = null)
+    {
+        var tools = InspectToolchains(project);
+        var available = AliLanguageCapability.Inspect | AliLanguageCapability.Index
+            | AliLanguageCapability.Analyze | AliLanguageCapability.Dependencies
+            | AliLanguageCapability.Architecture;
+        if (tools.First(item => item.Name == "node").Available)
+        {
+            available |= AliLanguageCapability.Build | AliLanguageCapability.Test
+                | AliLanguageCapability.Run | AliLanguageCapability.Profile;
+        }
+        if (tools.First(item => item.Name == "prettier").Available) available |= AliLanguageCapability.Format;
+        if (tools.First(item => item.Name == "vscode-js-debug").Available) available |= AliLanguageCapability.Debug;
+        return available;
+    }
+
     public IReadOnlyList<AliLanguageToolchainStatus> InspectToolchains(AliResolvedLanguageProject? project = null)
     {
         var node = ResolveNode();
@@ -93,6 +109,24 @@ internal sealed class AliWebLanguageProvider : IAliLanguageProvider
         if (HasScript(project.ProjectDirectory, "test")) return await RunNpmAsync(node, project.ProjectDirectory, "test", "test", cancellationToken).ConfigureAwait(false);
         var result = await AliBoundedProcessRunner.RunAsync(node, project.ProjectDirectory, ["--test"], OperationLimit, cancellationToken).ConfigureAwait(false);
         return From(result, "test", result.Success ? "Node's native web tests passed." : "Node's native web tests failed.");
+    }
+
+    public async Task<AliLanguageOperationResult> RunAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken)
+    {
+        var node = RequireNode();
+        if (project.PhysicalPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase)
+            || project.PhysicalPath.EndsWith(".mjs", StringComparison.OrdinalIgnoreCase)
+            || project.PhysicalPath.EndsWith(".cjs", StringComparison.OrdinalIgnoreCase))
+        {
+            var direct = await AliBoundedProcessRunner.RunAsync(node, project.ProjectDirectory,
+                [project.PhysicalPath], TimeSpan.FromMinutes(2), cancellationToken).ConfigureAwait(false);
+            return From(direct, "run", direct.Success ? "Node executed the selected JavaScript entry point." : "Node execution failed or timed out.");
+        }
+        if (HasScript(project.ProjectDirectory, "start"))
+        {
+            return await RunNpmAsync(node, project.ProjectDirectory, "start", "run", cancellationToken).ConfigureAwait(false);
+        }
+        return Missing("run", "Select a JavaScript source file or define a package.json start script before running this web project.");
     }
 
     private string? ResolveNode()

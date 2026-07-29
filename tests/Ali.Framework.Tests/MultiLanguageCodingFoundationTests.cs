@@ -106,7 +106,11 @@ public sealed class MultiLanguageCodingFoundationTests
                 AliCapabilityCatalog.CodingAnalyzeProjectName,
                 AliCapabilityCatalog.CodingFormatProjectName,
                 AliCapabilityCatalog.CodingBuildProjectName,
-                AliCapabilityCatalog.CodingTestProjectName
+                AliCapabilityCatalog.CodingTestProjectName,
+                AliCapabilityCatalog.CodingRunProjectName,
+                AliCapabilityCatalog.CodingBuildContextName,
+                AliCapabilityCatalog.CodingProbeServiceName,
+                AliCapabilityCatalog.CodingInspectProcessName
             };
             Assert.All(expected, name => Assert.Contains(functions, function => function.Name == name));
             Assert.All(expected, name => Assert.Contains(AliCapabilityCatalog.Tools, capability => capability.Name == name));
@@ -114,6 +118,7 @@ public sealed class MultiLanguageCodingFoundationTests
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingFormatProjectName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingBuildProjectName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingTestProjectName));
+            Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingRunProjectName));
             Assert.Contains(report.Providers, provider => provider.Id == "dotnet-roslyn" && provider.Capabilities.HasFlag(AliLanguageCapability.Debug));
             Assert.Contains(report.SharedInfrastructure, item => item.Contains("Language Server Protocol", StringComparison.Ordinal));
             Assert.Contains(report.SharedInfrastructure, item => item.Contains("Debug Adapter Protocol", StringComparison.Ordinal));

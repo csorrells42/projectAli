@@ -198,6 +198,41 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Equal(2, inner.CallCount);
     }
 
+    [Fact]
+    public async Task ApprovedToolResult_IsPresentedAsAuthoritativeExecutionEvidence()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"Created Desktop/touch.txt.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Charlie",
+            () => null);
+        var tool = AIFunctionFactory.Create(
+            () => "ok",
+            "file_access_write",
+            "Create a requested file.");
+        var callId = $"call-{Guid.NewGuid():N}";
+        var assistant = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        assistant.Contents.Add(new FunctionCallContent(callId, "file_access_write",
+            new Dictionary<string, object?> { ["fileName"] = "Desktop/touch.txt" }));
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(callId, new { success = true, path = "Desktop/touch.txt" }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Create touch.txt on the desktop."), assistant, result],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("Created", response.Text, StringComparison.Ordinal);
+        var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
+        Assert.Contains("resumes the exact suspended tool call", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("authoritative evidence", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Never contradict a successful result", decisionPrompt, StringComparison.Ordinal);
+    }
+
     private sealed class RecordingChatClient(params ChatResponse[] responses) : IChatClient
     {
         private readonly Queue<ChatResponse> _responses = new(responses);

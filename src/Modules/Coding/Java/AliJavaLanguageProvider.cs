@@ -23,6 +23,21 @@ internal sealed partial class AliJavaLanguageProvider : IAliLanguageProvider
 
     public bool CanHandle(AliResolvedLanguageProject project) => project.Language == AliProgrammingLanguage.Java;
 
+    public AliLanguageCapability GetAvailableCapabilities(AliResolvedLanguageProject? project = null)
+    {
+        var tools = InspectToolchains(project);
+        var available = AliLanguageCapability.Inspect | AliLanguageCapability.Index
+            | AliLanguageCapability.Dependencies | AliLanguageCapability.Architecture;
+        if (tools.First(item => item.Name == "javac").Available)
+        {
+            available |= AliLanguageCapability.Analyze | AliLanguageCapability.Build | AliLanguageCapability.Test;
+        }
+        if (tools.First(item => item.Name == "java").Available) available |= AliLanguageCapability.Run;
+        if (tools.First(item => item.Name == "jdb").Available) available |= AliLanguageCapability.Debug;
+        if (tools.First(item => item.Name == "jfr").Available) available |= AliLanguageCapability.Profile;
+        return available;
+    }
+
     public IReadOnlyList<AliLanguageToolchainStatus> InspectToolchains(AliResolvedLanguageProject? project = null)
     {
         var home = ResolveJavaHome();
@@ -101,6 +116,21 @@ internal sealed partial class AliJavaLanguageProvider : IAliLanguageProvider
             if (!result.Success) return new(false, Id, "test", $"Java test {candidate.Class} failed.", result.ExitCode, duration, combined.ToString().Trim(), []);
         }
         return new(true, Id, "test", $"{candidates.Length} executable Java test class(es) passed with assertions enabled.", 0, duration, combined.ToString().Trim(), []);
+    }
+
+    public async Task<AliLanguageOperationResult> RunAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken)
+    {
+        var build = await BuildAsync(project, configuration, cancellationToken).ConfigureAwait(false);
+        if (!build.Success) return build with { Operation = "run", Summary = "Java execution could not start because compilation failed." };
+        var entry = SourceFiles(project.ProjectDirectory).FirstOrDefault(HasMain);
+        if (entry is null) return Missing("run", "No Java class containing static void main was found.");
+        var result = await AliBoundedProcessRunner.RunAsync(
+            RequireTool("java"),
+            project.ProjectDirectory,
+            ["-cp", build.Artifacts[0], QualifiedClassName(entry)],
+            TimeSpan.FromMinutes(2),
+            cancellationToken).ConfigureAwait(false);
+        return From(result, "run", result.Success ? $"Java executed {QualifiedClassName(entry)} successfully." : "Java execution failed or timed out.", build.Artifacts);
     }
 
     private async Task<BoundedProcessResult> CompileAsync(string root, string output, CancellationToken cancellationToken)

@@ -22,12 +22,14 @@ public sealed class WebCodingProviderTests
             var analysis = await module.MultiLanguage.AnalyzeAsync("Workspace/Web/package.json", TestContext.Current.CancellationToken);
             var build = await module.MultiLanguage.BuildAsync("Workspace/Web/package.json", null, TestContext.Current.CancellationToken);
             var test = await module.MultiLanguage.TestAsync("Workspace/Web/package.json", null, TestContext.Current.CancellationToken);
+            var run = await module.MultiLanguage.RunAsync("Workspace/Web/math.js", null, TestContext.Current.CancellationToken);
 
             Assert.Equal("web-node", inspection.Provider);
             Assert.True(analysis.Success, analysis.Output);
             Assert.True(build.Success, build.Output);
             Assert.True(test.Success, test.Output);
             Assert.Contains("pass 1", test.Output, StringComparison.OrdinalIgnoreCase);
+            Assert.True(run.Success, run.Output);
         });
     }
 

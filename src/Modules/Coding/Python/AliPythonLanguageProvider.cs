@@ -25,10 +25,28 @@ internal sealed class AliPythonLanguageProvider : IAliLanguageProvider
     public AliLanguageCapability Capabilities =>
         AliLanguageCapability.Inspect | AliLanguageCapability.Index | AliLanguageCapability.Analyze
         | AliLanguageCapability.Format | AliLanguageCapability.Build | AliLanguageCapability.Test
+        | AliLanguageCapability.Run
         | AliLanguageCapability.Dependencies | AliLanguageCapability.Architecture
         | AliLanguageCapability.Coverage | AliLanguageCapability.Debug | AliLanguageCapability.Profile;
 
     public bool CanHandle(AliResolvedLanguageProject project) => project.Language == AliProgrammingLanguage.Python;
+
+    public AliLanguageCapability GetAvailableCapabilities(AliResolvedLanguageProject? project = null)
+    {
+        var tools = InspectToolchains(project);
+        var available = AliLanguageCapability.Inspect | AliLanguageCapability.Index
+            | AliLanguageCapability.Dependencies | AliLanguageCapability.Architecture;
+        if (tools.First(item => item.Name == "python").Available)
+        {
+            available |= AliLanguageCapability.Analyze | AliLanguageCapability.Build
+                | AliLanguageCapability.Test | AliLanguageCapability.Run;
+        }
+        if (tools.First(item => item.Name == "ruff").Available) available |= AliLanguageCapability.Format;
+        if (tools.First(item => item.Name == "debugpy").Available) available |= AliLanguageCapability.Debug;
+        if (tools.First(item => item.Name == "coverage").Available) available |= AliLanguageCapability.Coverage;
+        if (tools.First(item => item.Name == "py-spy").Available) available |= AliLanguageCapability.Profile;
+        return available;
+    }
 
     public IReadOnlyList<AliLanguageToolchainStatus> InspectToolchains(AliResolvedLanguageProject? project = null)
     {
@@ -163,6 +181,31 @@ internal sealed class AliPythonLanguageProvider : IAliLanguageProvider
             result.Success, Id, "test",
             result.Success ? $"Python {runner} tests passed." : $"Python {runner} tests failed or timed out.",
             result.ExitCode, result.DurationMilliseconds, result.Output, artifacts);
+    }
+
+    public async Task<AliLanguageOperationResult> RunAsync(
+        AliResolvedLanguageProject project,
+        string? configuration,
+        CancellationToken cancellationToken)
+    {
+        var entryPoint = project.PhysicalPath.EndsWith(".py", StringComparison.OrdinalIgnoreCase)
+            ? project.PhysicalPath
+            : new[] { "main.py", "__main__.py", "app.py" }
+                .Select(name => Path.Combine(project.ProjectDirectory, name))
+                .FirstOrDefault(File.Exists);
+        if (entryPoint is null)
+        {
+            return Unavailable("run", "No explicit Python source target or conventional main.py, __main__.py, or app.py entry point was found.");
+        }
+
+        var result = await AliBoundedProcessRunner.RunAsync(
+            RequirePython(project),
+            project.ProjectDirectory,
+            [entryPoint],
+            TimeSpan.FromMinutes(2),
+            cancellationToken).ConfigureAwait(false);
+        return FromProcess(result, "run",
+            result.Success ? $"Python executed {Path.GetFileName(entryPoint)} successfully." : "Python execution failed or timed out.");
     }
 
     private string? ResolvePython(string? projectDirectory)

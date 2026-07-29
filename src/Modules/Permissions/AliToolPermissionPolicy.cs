@@ -28,6 +28,9 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CodingFormatProjectName, "Reformats existing source files through the detected language provider"),
         new(AliCapabilityCatalog.CodingBuildProjectName, "Executes the detected local build toolchain and project targets"),
         new(AliCapabilityCatalog.CodingTestProjectName, "Executes project test code through the detected language provider"),
+        new(AliCapabilityCatalog.CodingRunProjectName, "Executes project code through the detected language provider"),
+        new(AliCapabilityCatalog.CodingProbeServiceName, "Transmits an explicit request to an external HTTP service"),
+        new(AliCapabilityCatalog.CodingInspectProcessName, "Reads live process resource and thread state"),
         new(AliCapabilityCatalog.DotNetCreateProjectName, "Executes the local .NET SDK to create a new project scaffold"),
         new(AliCapabilityCatalog.RoslynFormatProjectName, "Reformats existing C# source files with Roslyn"),
         new(AliCapabilityCatalog.RoslynApplyRenameName, "Renames a C# symbol and every semantic reference with Roslyn"),
@@ -68,7 +71,8 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CodingIndexProjectName, "Reads and indexes private project source"),
         new(AliCapabilityCatalog.CodingSearchSymbolsName, "Searches a private project source index"),
         new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer"),
-        new(AliCapabilityCatalog.CodingInspectArchitectureName, "Reads private source to build a cross-language dependency graph")
+        new(AliCapabilityCatalog.CodingInspectArchitectureName, "Reads private source to build a cross-language dependency graph"),
+        new(AliCapabilityCatalog.CodingBuildContextName, "Reads private source to select relevant large-project context")
     ];
 
     internal static IReadOnlyList<AgentToolPermissionDefinition> ProtectedTools => TrustedWorkstationTools;

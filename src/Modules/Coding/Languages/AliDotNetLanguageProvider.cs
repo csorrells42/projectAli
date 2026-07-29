@@ -31,6 +31,19 @@ internal sealed class AliDotNetLanguageProvider : IAliLanguageProvider
 
     public bool CanHandle(AliResolvedLanguageProject project) => project.Language == AliProgrammingLanguage.CSharp;
 
+    public AliLanguageCapability GetAvailableCapabilities(AliResolvedLanguageProject? project = null)
+    {
+        var tools = InspectToolchains(project);
+        var available = tools.First(item => item.Name == "dotnet").Available
+            ? Capabilities
+            : AliLanguageCapability.Inspect | AliLanguageCapability.Index | AliLanguageCapability.Architecture;
+        if (!tools.First(item => item.Name == "netcoredbg").Available)
+        {
+            available &= ~AliLanguageCapability.Debug;
+        }
+        return available;
+    }
+
     public IReadOnlyList<AliLanguageToolchainStatus> InspectToolchains(AliResolvedLanguageProject? project = null)
     {
         var dotnet = _locator.Resolve(OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
@@ -72,6 +85,20 @@ internal sealed class AliDotNetLanguageProvider : IAliLanguageProvider
         var result = await _engineering.TestAsync(project.VirtualPath, configuration, cancellationToken).ConfigureAwait(false);
         return new AliLanguageOperationResult(result.Success, Id, "test", result.Summary, result.Success ? 0 : 1,
             result.DurationMilliseconds, result.Output, result.ResultsPath is null ? [] : [result.ResultsPath]);
+    }
+
+    public async Task<AliLanguageOperationResult> RunAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken)
+    {
+        var result = await _tools.RunAsync(project.VirtualPath, configuration, cancellationToken).ConfigureAwait(false);
+        return new AliLanguageOperationResult(
+            result.Success,
+            Id,
+            "run",
+            result.ProcessId is null ? result.Summary : $"{result.Summary} Process ID: {result.ProcessId}.",
+            result.Success ? 0 : null,
+            0,
+            result.Summary,
+            result.ArtifactPath is null ? [] : [result.ArtifactPath]);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
