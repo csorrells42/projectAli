@@ -205,6 +205,7 @@ public sealed class MainWindowViewModel : ObservableObject
         McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
         LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
         UserMemorySettings = new UserMemorySettingsViewModel(_services);
+        AgentOrchestrationSettings = new AgentOrchestrationSettingsViewModel(_services);
         AgentToolPermissions = new AgentToolPermissionsViewModel(
             _services.ToolPermissions,
             _services.ActiveUsers,
@@ -422,6 +423,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public LocalKnowledgeSettingsViewModel LocalKnowledgeSettings { get; }
 
     public UserMemorySettingsViewModel UserMemorySettings { get; }
+
+    public AgentOrchestrationSettingsViewModel AgentOrchestrationSettings { get; }
 
     public AgentToolPermissionsViewModel AgentToolPermissions { get; }
 

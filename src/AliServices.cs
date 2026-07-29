@@ -105,6 +105,10 @@ public sealed class AliServices
 
     public string UserMemorySettingsPath => UserMemorySettingsStore.GetPath(DataRoot);
 
+    public string AgentOrchestrationSettingsPath => AgentOrchestrationSettingsStore.GetPath(DataRoot);
+
+    public string WorkflowCheckpointPath => AgentOrchestrationSettingsStore.GetCheckpointPath(UserDataRoot);
+
     public SafeActivatingLocalRuntime RuntimeController { get; }
 
     public ConversationOrchestrator Orchestrator { get; }
@@ -161,6 +165,12 @@ public sealed class AliServices
 
     public void SaveUserMemorySettings(UserMemorySettings settings) =>
         UserMemorySettingsStore.Save(DataRoot, settings);
+
+    public AgentOrchestrationSettings LoadAgentOrchestrationSettings() =>
+        AgentOrchestrationSettingsStore.LoadOrDefault(DataRoot);
+
+    public void SaveAgentOrchestrationSettings(AgentOrchestrationSettings settings) =>
+        AgentOrchestrationSettingsStore.Save(DataRoot, settings);
 
     public WebSourceBackendSettings LoadWebSourceBackendSettings() =>
         WebSourceBackendSettingsStore.LoadOrDefault(DataRoot);
@@ -339,7 +349,9 @@ public sealed class AliServices
             codingModule,
             userMemories,
             activeUsers,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+            AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot),
+            () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot));
         var orchestrator = new ConversationOrchestrator(
             runtime,
             correctionQueue,

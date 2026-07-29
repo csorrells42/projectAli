@@ -26,13 +26,14 @@ namespace Ali.Modules.Coordinator;
 internal sealed class AliAgentHarnessRunner
 {
     private const int MaximumToolIterations = 8;
-    private readonly IReadOnlyList<AITool> _tools;
+    private readonly IReadOnlyList<AITool> _baseTools;
     private readonly AliMemoryTools _memoryTools;
-    private readonly AIAgent _agent;
+    private readonly AliSpecialistTeam _specialistTeam;
+    private readonly AliAgentWorkflowFactory _workflowFactory;
     private readonly IChatClient _compatibilityClient;
     private readonly ILocalModelRuntime _runtime;
     private readonly AssistantProfile _assistantProfile;
-    private readonly string _instructions;
+    private readonly Func<AgentOrchestrationSettings> _orchestrationSettings;
     private readonly McpClientManager _mcpClients;
     private readonly AgentToolPermissionStore _toolPermissions;
     private readonly AliWorkstationFileAccess _fileAccess;
@@ -51,7 +52,9 @@ internal sealed class AliAgentHarnessRunner
         AliWorkstationFileAccess fileAccess,
         AliAgentWorkMemory workMemory,
         IActiveUserSession? activeUsers,
-        Func<CoordinatorTurnContext?> turnAccessor)
+        Func<CoordinatorTurnContext?> turnAccessor,
+        string checkpointPath,
+        Func<AgentOrchestrationSettings> orchestrationSettings)
     {
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
@@ -64,25 +67,29 @@ internal sealed class AliAgentHarnessRunner
             _compatibilityClient,
             runtime,
             turnAccessor);
-        var specialistTeam = specialistFactory.CreateTeam(catalog.Tools);
-        var workflowTools = new AliAgentWorkflowFactory(_compatibilityClient, runtime, turnAccessor)
-            .CreateTools(specialistTeam);
-        _tools = catalog.Tools
-            .Concat(specialistTeam.Tools)
-            .Concat(workflowTools)
+        _specialistTeam = specialistFactory.CreateTeam(catalog.Tools);
+        _workflowFactory = new AliAgentWorkflowFactory(
+            _compatibilityClient,
+            runtime,
+            turnAccessor,
+            checkpointPath);
+        _baseTools = catalog.Tools
+            .Concat(_specialistTeam.Tools)
+            .Concat(_workflowFactory.CreateStandardTools(_specialistTeam))
             .ToArray();
         _memoryTools = catalog.MemoryTools;
-        _instructions = catalog.Instructions;
+        _orchestrationSettings = orchestrationSettings;
         _mcpClients = mcpClients;
         _toolPermissions = toolPermissions;
         _fileAccess = fileAccess;
         _workMemory = workMemory;
         _activeUsers = activeUsers;
         _turnAccessor = turnAccessor;
-        _agent = CreateAgent(_tools);
     }
 
-    private AIAgent CreateAgent(IReadOnlyList<AITool> tools)
+    private AIAgent CreateAgent(
+        IReadOnlyList<AITool> tools,
+        AgentOrchestrationSettings orchestrationSettings)
     {
         var profile = _runtime.ActiveProfile;
         var skillsRoot = Path.Combine(AppContext.BaseDirectory, "skills");
@@ -121,7 +128,9 @@ internal sealed class AliAgentHarnessRunner
             },
             ChatOptions = new ChatOptions
             {
-                Instructions = _instructions,
+                Instructions = AliToolCatalog.BuildInstructions(
+                    _assistantProfile.AssistantName,
+                    orchestrationSettings),
                 Tools = tools.ToList(),
                 ToolMode = ChatToolMode.Auto,
                 AllowMultipleToolCalls = false,
@@ -129,6 +138,25 @@ internal sealed class AliAgentHarnessRunner
             }
         });
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
+    }
+
+    private IReadOnlyList<AITool> BuildPolicyTools(AgentOrchestrationSettings settings)
+    {
+        var normalized = settings.Normalize();
+        if (normalized.MagenticPolicy == MagenticPolicies.Off)
+        {
+            return _baseTools;
+        }
+
+        var permissionPolicy = new AliToolPermissionPolicy(
+            _turnAccessor,
+            () => _toolPermissions.CurrentProfile);
+        var magentic = _workflowFactory.CreateMagenticTool(_specialistTeam, normalized);
+        return _baseTools
+            .Append((AITool)permissionPolicy.Apply(
+                magentic,
+                normalized.MagenticPolicy == MagenticPolicies.AskFirst))
+            .ToArray();
     }
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision) =>
@@ -158,16 +186,17 @@ internal sealed class AliAgentHarnessRunner
                 warning.Message);
         }
 
-        IReadOnlyList<AITool> activeTools = _tools;
-        var activeAgent = _agent;
+        var orchestrationSettings = _orchestrationSettings().Normalize();
+        IReadOnlyList<AITool> activeTools = BuildPolicyTools(orchestrationSettings);
+        var activeAgent = CreateAgent(activeTools, orchestrationSettings);
         if (mcpSession.Tools.Count > 0)
         {
             var permissionPolicy = new AliToolPermissionPolicy(_turnAccessor, () => _toolPermissions.CurrentProfile);
-            activeTools = _tools
+            activeTools = activeTools
                 .Concat(mcpSession.Tools.Select(tool =>
                     (AITool)permissionPolicy.Apply(tool.Function, tool.RequiresApproval)))
                 .ToList();
-            activeAgent = CreateAgent(activeTools);
+            activeAgent = CreateAgent(activeTools, orchestrationSettings);
             turn.Report(
                 AgentActivityKind.Status,
                 "Loaded enabled MCP integrations",

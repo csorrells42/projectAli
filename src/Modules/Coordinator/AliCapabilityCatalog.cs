@@ -113,6 +113,7 @@ public static class AliCapabilityCatalog
     public const string ConsultOfficeSpecialistName = "consult_office_artifact_specialist";
     public const string RunResearchArtifactWorkflowName = "run_research_artifact_workflow";
     public const string RunProgrammingGroupChatName = "run_programming_group_chat";
+    public const string RunMagenticOrchestrationName = "run_magentic_orchestration";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -222,15 +223,26 @@ public static class AliCapabilityCatalog
         new(ConsultResearcherName, "Consult Ali's private synchronous evidence-research specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
         new(ConsultOfficeSpecialistName, "Consult Ali's private synchronous office-artifact specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
         new(RunResearchArtifactWorkflowName, "Run Ali's synchronous Researcher-to-Office sequential workflow for evidence-backed artifact drafting.", "Microsoft Agent Framework workflow"),
-        new(RunProgrammingGroupChatName, "Run Ali's bounded four-turn programming maker/checker group chat; Ali remains the final actor and voice.", "Microsoft Agent Framework workflow")
+        new(RunProgrammingGroupChatName, "Run Ali's bounded four-turn programming maker/checker group chat; Ali remains the final actor and voice.", "Microsoft Agent Framework workflow"),
+        new(RunMagenticOrchestrationName, "Run bounded Magentic orchestration for eligible open-ended multi-domain work, subject to the configured activation policy.", "Microsoft Agent Framework workflow")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>
-        ListAvailableTools(additionalTools: []);
+        ListAvailableTools(additionalTools: [], new AgentOrchestrationSettings());
+
+    public static CoordinatorCapabilityResult ListAvailableTools(
+        AgentOrchestrationSettings orchestrationSettings) =>
+        ListAvailableTools(additionalTools: [], orchestrationSettings);
 
     public static CoordinatorCapabilityResult ListAvailableTools(McpClientManager mcpClients)
+        => ListAvailableTools(mcpClients, new AgentOrchestrationSettings());
+
+    public static CoordinatorCapabilityResult ListAvailableTools(
+        McpClientManager mcpClients,
+        AgentOrchestrationSettings orchestrationSettings)
     {
         ArgumentNullException.ThrowIfNull(mcpClients);
+        ArgumentNullException.ThrowIfNull(orchestrationSettings);
         var settings = mcpClients.LoadSettings();
         var additionalTools = settings.Enabled
             ? settings.Servers
@@ -245,24 +257,33 @@ public static class AliCapabilityCatalog
                         $"External MCP: {server.Name}")))
                 .ToList()
             : [];
-        return ListAvailableTools(additionalTools);
+        return ListAvailableTools(additionalTools, orchestrationSettings);
     }
 
     private static CoordinatorCapabilityResult ListAvailableTools(
-        IReadOnlyList<CoordinatorCapability> additionalTools)
+        IReadOnlyList<CoordinatorCapability> additionalTools,
+        AgentOrchestrationSettings orchestrationSettings)
     {
-        var allTools = Tools.Concat(additionalTools).ToList();
+        var policy = orchestrationSettings.Normalize().MagenticPolicy;
+        var nativeTools = policy == MagenticPolicies.Off
+            ? Tools.Where(tool => tool.Name != RunMagenticOrchestrationName)
+            : Tools;
+        var allTools = nativeTools.Concat(additionalTools).ToList();
         return
         new(
-            $"Ali has {allTools.Count} configured model-callable tools. This complete structured inventory is authoritative. Preserve every returned row and its Source when the user requests the full inventory; filtering and alternate formatting are allowed only when the user asks for them. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
+            $"Ali has {allTools.Count} configured model-callable tools. This complete structured inventory is authoritative. Magentic policy: {policy}. Preserve every returned row and its Source when the user requests the full inventory; filtering and alternate formatting are allowed only when the user asks for them. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
             allTools);
     }
 
-    public static string BuildPromptManifest()
+    public static string BuildPromptManifest(AgentOrchestrationSettings? orchestrationSettings = null)
     {
+        var settings = (orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize();
+        var visibleTools = settings.MagenticPolicy == MagenticPolicies.Off
+            ? Tools.Where(tool => tool.Name != RunMagenticOrchestrationName)
+            : Tools;
         var manifest = new StringBuilder()
             .AppendLine("REGISTERED MODEL-CALLABLE TOOLS (authoritative; these are the only tools you may claim to have):");
-        foreach (var tool in Tools)
+        foreach (var tool in visibleTools)
         {
             manifest.Append("- ")
                 .Append(tool.Name)
@@ -270,7 +291,8 @@ public static class AliCapabilityCatalog
                 .AppendLine(tool.Description);
         }
 
-        manifest.Append("Additional tools whose names begin with mcp_ are external MCP integrations explicitly enabled by the user. "
+        manifest.Append($"Magentic activation policy is {settings.MagenticPolicy}. "
+            + "Additional tools whose names begin with mcp_ are external MCP integrations explicitly enabled by the user. "
             + "Use list_available_tools for their configured catalog and obey approval requests. "
             + "Voice playback is an application output setting, not a model-callable tool. "
             + "Never claim calendar, email, arbitrary file-system, shell, camera, or generic browser-control access unless an enabled tool with that exact capability appears in the current turn.");

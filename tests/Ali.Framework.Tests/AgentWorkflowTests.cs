@@ -1,4 +1,5 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -15,10 +16,13 @@ public sealed class AgentWorkflowTests
             .Where(item => item.Source == "Microsoft Agent Framework workflow")
             .ToArray();
 
-        Assert.Equal(2, workflows.Length);
+        Assert.Equal(3, workflows.Length);
         Assert.Contains(workflows, item => item.Name == AliCapabilityCatalog.RunResearchArtifactWorkflowName);
         Assert.Contains(workflows, item => item.Name == AliCapabilityCatalog.RunProgrammingGroupChatName);
+        Assert.Contains(workflows, item => item.Name == AliCapabilityCatalog.RunMagenticOrchestrationName);
         Assert.Equal(4, AliAgentWorkflowFactory.ProgrammingMaximumTurns);
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.RunMagenticOrchestrationName));
     }
 
     [Fact]
@@ -55,12 +59,56 @@ public sealed class AgentWorkflowTests
         Assert.Equal(AliAgentWorkflowFactory.ProgrammingMaximumTurns, client.CallCount);
     }
 
-    private static IReadOnlyList<AITool> CreateWorkflowTools(CountingChatClient client)
+    [Fact]
+    public void MagenticTool_IsConstructedWithConfiguredBound()
+    {
+        var client = new CountingChatClient();
+        var runtime = new DevelopmentLocalModelRuntime();
+        var team = new AliSpecialistAgentFactory(client, runtime, () => null).CreateTeam([]);
+        var checkpointPath = CreateCheckpointPath();
+        var tool = new AliAgentWorkflowFactory(client, runtime, () => null, checkpointPath)
+            .CreateMagenticTool(team, new AgentOrchestrationSettings
+            {
+                MagenticPolicy = MagenticPolicies.Automatic,
+                MagenticMaximumRounds = 7
+            });
+
+        Assert.Equal(AliCapabilityCatalog.RunMagenticOrchestrationName, tool.Name);
+        Assert.Contains("Maximum coordination rounds: 7", tool.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkflowExecution_PersistsDurableCheckpointFiles()
+    {
+        var client = new CountingChatClient();
+        var checkpointPath = CreateCheckpointPath();
+        var tools = CreateWorkflowTools(client, checkpointPath);
+        var sequential = Assert.Single(
+            tools.OfType<AIFunction>(),
+            item => item.Name == AliCapabilityCatalog.RunResearchArtifactWorkflowName);
+
+        await sequential.InvokeAsync(
+            new AIFunctionArguments { ["query"] = "Research and draft a short checkpoint test." },
+            TestContext.Current.CancellationToken);
+
+        Assert.True(Directory.Exists(checkpointPath));
+        Assert.NotEmpty(Directory.EnumerateFiles(checkpointPath, "*", SearchOption.AllDirectories));
+    }
+
+    private static IReadOnlyList<AITool> CreateWorkflowTools(
+        CountingChatClient client,
+        string? checkpointPath = null)
     {
         var runtime = new DevelopmentLocalModelRuntime();
         var team = new AliSpecialistAgentFactory(client, runtime, () => null).CreateTeam([]);
-        return new AliAgentWorkflowFactory(client, runtime, () => null).CreateTools(team);
+        return new AliAgentWorkflowFactory(client, runtime, () => null, checkpointPath ?? CreateCheckpointPath())
+            .CreateStandardTools(team);
     }
+
+    private static string CreateCheckpointPath() => Path.Combine(
+        Path.GetTempPath(),
+        "AliAgentWorkflowTests",
+        Guid.NewGuid().ToString("N"));
 
     private sealed class CountingChatClient : IChatClient
     {

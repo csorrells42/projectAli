@@ -1,6 +1,7 @@
 using Ali.Modules.Runtime;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -13,11 +14,14 @@ namespace Ali.Modules.Coordinator;
 internal sealed class AliAgentWorkflowFactory(
     IChatClient chatClient,
     ILocalModelRuntime runtime,
-    Func<CoordinatorTurnContext?> turnAccessor)
+    Func<CoordinatorTurnContext?> turnAccessor,
+    string checkpointPath)
 {
     internal const int ProgrammingMaximumTurns = 4;
+    private readonly IWorkflowExecutionEnvironment _executionEnvironment =
+        CreateCheckpointEnvironment(checkpointPath);
 
-    public IReadOnlyList<AITool> CreateTools(AliSpecialistTeam team)
+    public IReadOnlyList<AITool> CreateStandardTools(AliSpecialistTeam team)
     {
         ArgumentNullException.ThrowIfNull(team);
         var researchArtifact = CreateResearchArtifactWorkflow(team);
@@ -35,6 +39,33 @@ internal sealed class AliAgentWorkflowFactory(
                 "Programming Maker Checker Workflow",
                 "Run a bounded synchronous programming maker/checker conversation for substantial software creation, repair, architecture, or delivery work. It uses at most four agent turns and returns reviewed guidance to Ali, who performs approvals and final actions.")
         ];
+    }
+
+    public AIFunction CreateMagenticTool(
+        AliSpecialistTeam team,
+        AgentOrchestrationSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(team);
+        ArgumentNullException.ThrowIfNull(settings);
+        var normalized = settings.Normalize();
+        var workflow = AgentWorkflowBuilder
+            .CreateMagenticBuilderWith(CreateMagenticManager())
+            .AddParticipants(
+            [
+                team.Get(AliCapabilityCatalog.ConsultSoftwareEngineerName),
+                team.Get(AliCapabilityCatalog.ConsultResearcherName),
+                team.Get(AliCapabilityCatalog.ConsultOfficeSpecialistName)
+            ])
+            .WithMaxRounds(normalized.MagenticMaximumRounds)
+            .WithMaxResets(1)
+            .WithMaxStalls(2)
+            .RequirePlanSignoff(false)
+            .Build();
+        return (AIFunction)HostAsTool(
+            workflow,
+            AliCapabilityCatalog.RunMagenticOrchestrationName,
+            "Magentic Orchestration",
+            $"Run bounded synchronous Magentic orchestration for an open-ended multi-domain objective that cannot be handled by one specialist or an established workflow. Maximum coordination rounds: {normalized.MagenticMaximumRounds}. Never use for greetings, factual questions, memory recall, ordinary search, one file edit, or routine build/test work.");
     }
 
     internal static Workflow CreateResearchArtifactWorkflow(AliSpecialistTeam team) =>
@@ -92,6 +123,34 @@ internal sealed class AliAgentWorkflowFactory(
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(reviewer, turnAccessor, "Programming Reviewer");
     }
 
+    private AIAgent CreateMagenticManager()
+    {
+        var profile = runtime.ActiveProfile;
+        AIAgent manager = chatClient.AsHarnessAgent(new HarnessAgentOptions
+        {
+            Name = "MagenticManager",
+            Description = "Private bounded manager for Ali's multi-domain Magentic orchestration.",
+            MaximumIterationsPerRequest = 2,
+            MaxContextWindowTokens = profile.ContextTokens,
+            MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096),
+            DisableWebSearch = true,
+            DisableFileMemory = true,
+            DisableTodoProvider = true,
+            DisableAgentSkillsProvider = true,
+            DisableOpenTelemetry = false,
+            OpenTelemetrySourceName = "ProjectAli.AgentFramework.Magentic",
+            ChatOptions = new ChatOptions
+            {
+                Instructions = "Coordinate Ali's private specialists for one open-ended, multi-domain objective. Create the smallest useful plan, select one specialist at a time, monitor concrete progress, replan only when evidence requires it, and stop when a sufficient result is ready for Ali. Never perform user-facing conversation, claim unverified actions, or expand the objective beyond the request.",
+                Tools = [],
+                ToolMode = ChatToolMode.None,
+                AllowMultipleToolCalls = false,
+                MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096)
+            }
+        });
+        return AliAgentFrameworkMiddleware.WithVisibleLifecycle(manager, turnAccessor, "Magentic Manager");
+    }
+
     private AITool HostAsTool(
         Workflow workflow,
         string toolName,
@@ -102,7 +161,7 @@ internal sealed class AliAgentWorkflowFactory(
             id: toolName,
             name: role.Replace(" ", string.Empty, StringComparison.Ordinal),
             description: description,
-            executionEnvironment: InProcessExecution.Lockstep,
+            executionEnvironment: _executionEnvironment,
             includeExceptionDetails: false,
             includeWorkflowOutputsInResponse: true);
         hosted = AliAgentFrameworkMiddleware.WithVisibleLifecycle(hosted, turnAccessor, role);
@@ -111,5 +170,13 @@ internal sealed class AliAgentWorkflowFactory(
             Name = toolName,
             Description = description
         });
+    }
+
+    private static IWorkflowExecutionEnvironment CreateCheckpointEnvironment(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var directory = Directory.CreateDirectory(Path.GetFullPath(path));
+        var manager = CheckpointManager.CreateJson(new FileSystemJsonCheckpointStore(directory));
+        return InProcessExecution.Lockstep.WithCheckpointing(manager);
     }
 }

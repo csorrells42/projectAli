@@ -48,7 +48,9 @@ public sealed class AliToolCoordinator
         AliCodingModule? codingModule = null,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
-        Func<UserMemorySettings>? memorySettings = null)
+        Func<UserMemorySettings>? memorySettings = null,
+        string? workflowCheckpointPath = null,
+        Func<AgentOrchestrationSettings>? orchestrationSettings = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _userMemories = userMemories;
@@ -69,7 +71,8 @@ public sealed class AliToolCoordinator
             () => _turn.Value,
             userMemories,
             activeUsers,
-            memorySettings);
+            memorySettings,
+            orchestrationSettings);
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
@@ -80,7 +83,9 @@ public sealed class AliToolCoordinator
             fileAccess,
             workMemory,
             activeUsers,
-            () => _turn.Value);
+            () => _turn.Value,
+            workflowCheckpointPath ?? Path.Combine(Path.GetTempPath(), "ProjectAli", "WorkflowCheckpoints"),
+            orchestrationSettings ?? (() => new AgentOrchestrationSettings()));
     }
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision)

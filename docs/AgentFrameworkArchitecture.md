@@ -41,3 +41,15 @@ Agent Skills are loaded only from Ali's shipped, reviewed skill directory. Skill
 - `run_programming_group_chat` is an official round-robin group chat: Software Engineer and a workflow-only Programming Reviewer, capped at four participant turns.
 
 Both workflows are hosted as Agent Framework agents and then exposed as model-callable functions. They use the lockstep in-process execution environment. Ali inspects their result, performs approval-requiring actions, and gives the only user-facing final response.
+
+## Bounded Magentic and durable checkpoints
+
+`run_magentic_orchestration` uses the official Agent Framework Magentic builder with the same three private specialists. It runs synchronously in the lockstep environment with a configurable maximum of 2-12 coordination rounds, one reset, two stalls, and no automatic plan-signoff pause. Tool permissions still surround every action; Magentic itself requires the ordinary approval window when the policy is **Ask first**.
+
+The **Settings > Agents** tab provides three activation policies:
+
+- **Off:** removes Magentic from Ali's model-callable inventory.
+- **Ask first:** keeps it available but requires explicit activation approval.
+- **Automatic for complex work:** permits model selection only under the eligibility boundary above.
+
+Workflow state uses the Agent Framework JSON checkpoint manager and a file-backed checkpoint store under Ali's local data directory. The Settings tab reports the stored checkpoint count and can archive checkpoints recoverably into a timestamped sibling folder. Checkpointing does not introduce concurrent or background execution.
