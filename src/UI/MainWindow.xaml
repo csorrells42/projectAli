@@ -860,8 +860,14 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-                <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,8">
+                <ItemsControl Grid.ColumnSpan="2"
+                              ItemsSource="{Binding Attachments}"
+                              Margin="0,0,0,8">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <WrapPanel />
@@ -883,13 +889,8 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <Expander Grid.Column="0"
+                <Grid Grid.Row="1" Grid.Column="0">
+                    <Expander
                           AutomationProperties.AutomationId="AliActivityPanel"
                           IsExpanded="{Binding IsAgentActivityExpanded, Mode=TwoWay}"
                           Foreground="{StaticResource TextBrush}"
@@ -969,45 +970,17 @@
                     </Grid>
                     </Expander>
 
-                    <StackPanel Grid.Column="1"
-                                AutomationProperties.AutomationId="MainChatReasoningEffort"
-                                Orientation="Vertical"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Bottom"
-                                Margin="0,0,8,8"
-                                ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
-                        <TextBlock Text="Effort"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   FontSize="10"
-                                   FontWeight="SemiBold"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,0,0,1" />
-                        <StackPanel Orientation="Horizontal">
-                            <RadioButton Content="Low"
-                                         GroupName="ReasoningEffort"
-                                         IsChecked="{Binding IsReasoningLow}"
-                                         Foreground="{StaticResource TextBrush}"
-                                         Margin="0,0,12,0" />
-                            <RadioButton Content="Medium"
-                                         GroupName="ReasoningEffort"
-                                         IsChecked="{Binding IsReasoningMedium}"
-                                         Foreground="{StaticResource TextBrush}"
-                                         Margin="0,0,12,0" />
-                            <RadioButton Content="High"
-                                         GroupName="ReasoningEffort"
-                                         IsChecked="{Binding IsReasoningHigh}"
-                                         Foreground="{StaticResource TextBrush}" />
-                        </StackPanel>
-                    </StackPanel>
                 </Grid>
 
                 <Border Grid.Row="2"
+                        Grid.Column="0"
                         Background="#242426"
                         BorderBrush="#38383D"
                         BorderThickness="1"
                         CornerRadius="26"
                         Padding="8"
-                        HorizontalAlignment="Stretch">
+                        HorizontalAlignment="Stretch"
+                        Margin="0,0,12,0">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -1064,7 +1037,40 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="3" Margin="6,8,6,0">
+                <StackPanel Grid.Row="1"
+                            Grid.RowSpan="2"
+                            Grid.Column="1"
+                            AutomationProperties.AutomationId="MainChatReasoningEffort"
+                            Orientation="Vertical"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,8,8"
+                            ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
+                    <TextBlock Text="Effort"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,2" />
+                    <StackPanel Orientation="Vertical">
+                        <RadioButton Content="Low"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningLow}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,0,2" />
+                        <RadioButton Content="Medium"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningMedium}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,0,2" />
+                        <RadioButton Content="High"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningHigh}"
+                                     Foreground="{StaticResource TextBrush}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />

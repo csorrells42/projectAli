@@ -46,10 +46,11 @@ public sealed class MainWindowLayoutTests
 
         Assert.Contains("AutomationProperties.AutomationId=\"MainChatReasoningEffort\"", xaml, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment=\"Bottom\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<StackPanel Grid.Column=\"1\"\n                                AutomationProperties.AutomationId=\"MainChatReasoningEffort\"\n                                Orientation=\"Vertical\"", normalizedXaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.RowSpan=\"2\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"1\"\n                            AutomationProperties.AutomationId=\"MainChatReasoningEffort\"\n                            Orientation=\"Vertical\"", normalizedXaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Effort\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("<StackPanel Orientation=\"Horizontal\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("<StackPanel Orientation=\"Vertical\">", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Low\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Medium\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"High\"", xaml, StringComparison.Ordinal);
