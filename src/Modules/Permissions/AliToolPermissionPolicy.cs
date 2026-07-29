@@ -37,6 +37,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.ArduinoSearchLibrariesName, "Transmits a query to the Arduino library catalog"),
         new(AliCapabilityCatalog.ArduinoInstallCoreName, "Downloads and installs an Arduino board core"),
         new(AliCapabilityCatalog.ArduinoInstallLibraryName, "Downloads and installs an Arduino library"),
+        new(AliCapabilityCatalog.ArduinoCreateCompileName, "Creates source code and executes the Arduino compiler"),
         new(AliCapabilityCatalog.ArduinoCompileName, "Executes an Arduino board compiler and writes firmware"),
         new(AliCapabilityCatalog.ArduinoUploadName, "Writes firmware to an explicitly selected hardware port"),
         new(AliCapabilityCatalog.ArduinoOpenIdeName, "Launches Arduino IDE with an approved sketch"),

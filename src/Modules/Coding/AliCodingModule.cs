@@ -57,7 +57,7 @@ public sealed class AliCodingModule : IAsyncDisposable
         var toolchainLocator = new AliToolchainLocator();
         VisualStudio = new AliVisualStudioIntegration(languageResolver);
         GnuNative = new AliGnuNativeTools(languageResolver, toolchainLocator);
-        Arduino = new AliArduinoTools(languageResolver);
+        Arduino = new AliArduinoTools(languageResolver, fileAccess);
         RaspberryPi = new AliRaspberryPiTools(languageResolver);
         LanguageProviders.Register(new AliDotNetLanguageProvider(Tools, EngineeringLoop, toolchainLocator));
         LanguageProviders.Register(new AliPythonLanguageProvider(toolchainLocator));
@@ -124,6 +124,9 @@ public sealed class AliCodingModule : IAsyncDisposable
         AIFunctionFactory.Create((Func<string, string?, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.InstallLibraryAsync,
             AliCapabilityCatalog.ArduinoInstallLibraryName,
             "Install an explicit Arduino library and optional version after approval."),
+        AIFunctionFactory.Create((Func<string, string, string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.CreateAndCompileAsync,
+            AliCapabilityCatalog.ArduinoCreateCompileName,
+            "Create one new compile-ready Arduino .ino file at an approved virtual path and compile it for an explicit FQBN in the same verified operation. The sketch filename must match its parent folder. This never overwrites an existing file."),
         AIFunctionFactory.Create((Func<string, string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.CompileAsync,
             AliCapabilityCatalog.ArduinoCompileName,
             "Compile an approved Arduino sketch for an explicit fully-qualified board name."),

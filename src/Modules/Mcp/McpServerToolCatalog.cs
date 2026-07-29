@@ -48,6 +48,7 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.ArduinoSearchLibrariesName, "Search the Arduino library catalog.", usesNetwork: true),
         Policy(AliCapabilityCatalog.ArduinoInstallCoreName, "Install an Arduino board core.", writesLocalData: true, usesNetwork: true),
         Policy(AliCapabilityCatalog.ArduinoInstallLibraryName, "Install an Arduino library.", writesLocalData: true, usesNetwork: true),
+        Policy(AliCapabilityCatalog.ArduinoCreateCompileName, "Create and compile a new Arduino sketch for an explicit board.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.ArduinoCompileName, "Compile an approved Arduino sketch.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.ArduinoUploadName, "Upload firmware to an explicit Arduino board.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.ArduinoOpenIdeName, "Open an approved sketch in Arduino IDE.", readsPrivateData: true),

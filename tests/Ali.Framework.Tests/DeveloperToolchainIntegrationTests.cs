@@ -57,6 +57,24 @@ public sealed class DeveloperToolchainIntegrationTests
             Assert.True(pico.Success, pico.Output);
             Assert.NotEmpty(uno.Artifacts);
             Assert.NotEmpty(pico.Artifacts);
+
+            var generated = await module.Arduino.CreateAndCompileAsync(
+                "Workspace/JamAlarm/JamAlarm.ino",
+                sketch,
+                "arduino:avr:uno",
+                TestContext.Current.CancellationToken);
+            Assert.True(generated.Success, generated.Output);
+            Assert.Equal("create_and_compile", generated.Operation);
+            Assert.Contains(generated.Artifacts, artifact => artifact.EndsWith("JamAlarm.ino", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(generated.Artifacts, artifact => artifact.EndsWith(".hex", StringComparison.OrdinalIgnoreCase));
+
+            var overwrite = await module.Arduino.CreateAndCompileAsync(
+                "Workspace/JamAlarm/JamAlarm.ino",
+                "void setup(){} void loop(){}",
+                "arduino:avr:uno",
+                TestContext.Current.CancellationToken);
+            Assert.False(overwrite.Success);
+            Assert.Contains("did not overwrite", overwrite.Summary, StringComparison.OrdinalIgnoreCase);
         });
     }
 
@@ -71,7 +89,8 @@ public sealed class DeveloperToolchainIntegrationTests
                 AliCapabilityCatalog.GnuNativeInspectName, AliCapabilityCatalog.GnuNativeExecuteName,
                 AliCapabilityCatalog.ArduinoInspectName, AliCapabilityCatalog.ArduinoSearchLibrariesName,
                 AliCapabilityCatalog.ArduinoInstallCoreName, AliCapabilityCatalog.ArduinoInstallLibraryName,
-                AliCapabilityCatalog.ArduinoCompileName, AliCapabilityCatalog.ArduinoUploadName, AliCapabilityCatalog.ArduinoOpenIdeName,
+                AliCapabilityCatalog.ArduinoCreateCompileName, AliCapabilityCatalog.ArduinoCompileName,
+                AliCapabilityCatalog.ArduinoUploadName, AliCapabilityCatalog.ArduinoOpenIdeName,
                 AliCapabilityCatalog.RaspberryPiLibrariesName, AliCapabilityCatalog.RaspberryPiProbeName,
                 AliCapabilityCatalog.RaspberryPiInspectLibrariesName, AliCapabilityCatalog.RaspberryPiSearchPackagesName,
                 AliCapabilityCatalog.RaspberryPiDeployName
@@ -91,10 +110,16 @@ public sealed class DeveloperToolchainIntegrationTests
             Assert.Contains(libraries, item => item.Name == "libgpiod" && item.Language == "C/C++");
             Assert.Contains(libraries, item => item.Name == "Pico SDK");
 
-            var staleFiles = Directory.EnumerateFiles(RepositoryRoot, "*", SearchOption.AllDirectories)
+            var staleFiles = Directory.EnumerateFiles(RepositoryRoot, "*", new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    IgnoreInaccessible = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint
+                })
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
                 .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}artifacts{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
                 .Where(path => Path.GetExtension(path) is ".vsix" or ".vsixmanifest")
                 .ToArray();
             Assert.Empty(staleFiles);

@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Ali.Modules.Coding.Infrastructure;
 using Ali.Modules.Coding.Languages;
 using Ali.Modules.Coding.Toolchains;
+using Ali.Modules.WorkstationFiles;
 
 namespace Ali.Modules.Coding.Embedded.Arduino;
 
@@ -26,7 +27,9 @@ public sealed record AliArduinoOperationResult(
     string Output,
     IReadOnlyList<string> Artifacts);
 
-internal sealed class AliArduinoTools(AliLanguageProjectResolver resolver)
+internal sealed class AliArduinoTools(
+    AliLanguageProjectResolver resolver,
+    AliWorkstationFileAccess fileAccess)
 {
     private static readonly Regex SafeIdentifier = new("^[A-Za-z0-9_.:@/+-]{1,160}$", RegexOptions.CultureInvariant);
 
@@ -72,6 +75,66 @@ internal sealed class AliArduinoTools(AliLanguageProjectResolver resolver)
         var spec = string.IsNullOrWhiteSpace(version) ? library : $"{library}@{version}";
         var result = await RunCliAsync(["lib", "install", spec], TimeSpan.FromMinutes(30), cancellationToken).ConfigureAwait(false);
         return From(result, "install_library", result.Success ? $"Arduino library {spec} is installed." : $"Arduino library {spec} could not be installed.");
+    }
+
+    public async Task<AliArduinoOperationResult> CreateAndCompileAsync(
+        string sketchPath,
+        string source,
+        string fqbn,
+        CancellationToken cancellationToken)
+    {
+        Validate(fqbn, nameof(fqbn));
+        if (string.IsNullOrWhiteSpace(source) || source.Length > 200_000)
+        {
+            throw new ArgumentException("Provide a non-empty Arduino sketch no larger than 200,000 characters.", nameof(source));
+        }
+
+        var resolved = fileAccess.ResolvePhysicalFilePath(sketchPath);
+        if (!Path.GetExtension(resolved.PhysicalPath).Equals(".ino", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("The new Arduino sketch path must end in .ino.", nameof(sketchPath));
+        }
+
+        var sketchName = Path.GetFileNameWithoutExtension(resolved.PhysicalPath);
+        var directoryName = Path.GetFileName(Path.GetDirectoryName(resolved.PhysicalPath));
+        if (!string.Equals(sketchName, directoryName, StringComparison.OrdinalIgnoreCase))
+        {
+            return new AliArduinoOperationResult(
+                false,
+                "create_and_compile",
+                "Arduino requires the main .ino filename to match its parent sketch folder.",
+                null,
+                0,
+                $"Use a path such as Desktop/{sketchName}/{sketchName}.ino.",
+                []);
+        }
+
+        if (File.Exists(resolved.PhysicalPath))
+        {
+            return new AliArduinoOperationResult(
+                false,
+                "create_and_compile",
+                "The target sketch already exists; Ali did not overwrite it.",
+                null,
+                0,
+                resolved.PhysicalPath,
+                [resolved.PhysicalPath]);
+        }
+
+        await fileAccess.Store.WriteAsync(sketchPath, source, cancellationToken).ConfigureAwait(false);
+        var compiled = await CompileOrUploadAsync(sketchPath, fqbn, null, upload: false, cancellationToken).ConfigureAwait(false);
+        var artifacts = new[] { resolved.PhysicalPath }
+            .Concat(compiled.Artifacts)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return compiled with
+        {
+            Operation = "create_and_compile",
+            Summary = compiled.Success
+                ? $"Created {sketchPath} and compiled it successfully for {fqbn}."
+                : $"Created {sketchPath}, but its {fqbn} compilation failed; the compiler diagnostics are included.",
+            Artifacts = artifacts
+        };
     }
 
     public Task<AliArduinoOperationResult> CompileAsync(string sketchPath, string fqbn, CancellationToken cancellationToken) =>

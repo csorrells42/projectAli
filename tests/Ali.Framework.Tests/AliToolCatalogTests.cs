@@ -28,5 +28,8 @@ public sealed class AliToolCatalogTests
         Assert.Contains("choose a new unique sibling name", instructions, StringComparison.Ordinal);
         Assert.Contains("roslyn_analyze_project", instructions, StringComparison.Ordinal);
         Assert.Contains("untouched template is never", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("explicitly asks you not to use tools", instructions, StringComparison.Ordinal);
+        Assert.Contains("arduino_create_and_compile", instructions, StringComparison.Ordinal);
+        Assert.Contains("Never invent a skill name or script name", instructions, StringComparison.Ordinal);
     }
 }

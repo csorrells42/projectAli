@@ -55,6 +55,7 @@ public static class AliCapabilityCatalog
     public const string ArduinoSearchLibrariesName = "arduino_search_libraries";
     public const string ArduinoInstallCoreName = "arduino_install_core";
     public const string ArduinoInstallLibraryName = "arduino_install_library";
+    public const string ArduinoCreateCompileName = "arduino_create_and_compile";
     public const string ArduinoCompileName = "arduino_compile";
     public const string ArduinoUploadName = "arduino_upload";
     public const string ArduinoOpenIdeName = "arduino_open_ide";
@@ -164,6 +165,7 @@ public static class AliCapabilityCatalog
         new(ArduinoSearchLibrariesName, "Search the Arduino Library Manager catalog.", "Ali Arduino integration"),
         new(ArduinoInstallCoreName, "Install an explicit Arduino board core.", "Ali Arduino integration"),
         new(ArduinoInstallLibraryName, "Install an explicit Arduino library and version.", "Ali Arduino integration"),
+        new(ArduinoCreateCompileName, "Create a new Arduino sketch in an approved folder and compile it for an explicit board in one verified operation.", "Ali Arduino integration"),
         new(ArduinoCompileName, "Compile an approved Arduino sketch for an explicit board.", "Ali Arduino integration"),
         new(ArduinoUploadName, "Upload firmware to an explicit Arduino board and port.", "Ali Arduino integration"),
         new(ArduinoOpenIdeName, "Open an approved sketch in Arduino IDE.", "Ali Arduino integration"),

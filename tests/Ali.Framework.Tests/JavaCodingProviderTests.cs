@@ -52,7 +52,7 @@ public sealed class JavaCodingProviderTests
 
     private static async Task WithAccessAsync(Func<string, AliWorkstationFileAccess, Task> action)
     {
-        var root = Path.Combine(Path.GetTempPath(), "AliJavaProviderTests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "AliJavaProviderTests_" + Guid.NewGuid().ToString("N"));
         try
         {
             var permissions = new AgentToolPermissionStore(root);

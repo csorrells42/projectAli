@@ -57,7 +57,9 @@ internal sealed partial class AliJavaLanguageProvider : IAliLanguageProvider
 
     public async Task<AliLanguageOperationResult> AnalyzeAsync(AliResolvedLanguageProject project, CancellationToken cancellationToken)
     {
-        var temporary = Path.Combine(Path.GetTempPath(), "AliJavaAnalysis", Guid.NewGuid().ToString("N"));
+        // Use one uniquely named leaf directly under Temp. A shared parent can inherit
+        // an administrator-only ACL when another elevated toolchain pass creates it.
+        var temporary = Path.Combine(Path.GetTempPath(), "AliJavaAnalysis_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
         try
         {
@@ -150,6 +152,13 @@ internal sealed partial class AliJavaLanguageProvider : IAliLanguageProvider
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             var text = await File.ReadAllTextAsync(source, cancellationToken).ConfigureAwait(false);
             await File.WriteAllTextAsync(destination, text.TrimStart('\uFEFF'), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+            var package = PackageRegex().Match(text);
+            if (package.Success)
+            {
+                // Some constrained Windows child-process tokens may write files but may not
+                // create a new package directory. Create it in Ali's audited parent process.
+                Directory.CreateDirectory(Path.Combine(output, package.Groups[1].Value.Replace('.', Path.DirectorySeparatorChar)));
+            }
             normalizedSources.Add(destination);
         }
         var argumentFile = Path.Combine(output, "ali-javac.args");
