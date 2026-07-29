@@ -46,7 +46,10 @@ internal sealed class LemonadeToolCallingChatClient(
             $"{_assistantName} is choosing the next move",
             $"GPT-OSS is considering {tools.Length} available tools.");
 
-        var compatibilityMessages = BuildCompatibilityMessages(messages, tools);
+        var compatibilityMessages = BuildCompatibilityMessages(
+            messages,
+            tools,
+            turn?.OriginalUserText);
         var compatibilityOptions = options?.Clone() ?? new ChatOptions();
         compatibilityOptions.Tools = null;
         compatibilityOptions.ToolMode = ChatToolMode.None;
@@ -230,7 +233,8 @@ internal sealed class LemonadeToolCallingChatClient(
 
     private static IReadOnlyList<AIChatMessage> BuildCompatibilityMessages(
         IEnumerable<AIChatMessage> messages,
-        IReadOnlyList<AIFunctionDeclaration> tools)
+        IReadOnlyList<AIFunctionDeclaration> tools,
+        string? currentUserRequest)
     {
         var sourceMessages = messages.ToList();
         var frameworkInstructions = sourceMessages
@@ -243,7 +247,7 @@ internal sealed class LemonadeToolCallingChatClient(
                 AIChatRole.System,
                 string.Join(
                     Environment.NewLine,
-                    frameworkInstructions.Append(BuildDecisionInstruction(tools))))
+                    frameworkInstructions.Append(BuildDecisionInstruction(tools, currentUserRequest))))
         };
         foreach (var message in sourceMessages.Where(message => message.Role != AIChatRole.System))
         {
@@ -287,7 +291,9 @@ internal sealed class LemonadeToolCallingChatClient(
         return result;
     }
 
-    private static string BuildDecisionInstruction(IReadOnlyList<AIFunctionDeclaration> tools)
+    private static string BuildDecisionInstruction(
+        IReadOnlyList<AIFunctionDeclaration> tools,
+        string? currentUserRequest)
     {
         var catalog = tools.Select(tool => new
         {
@@ -299,7 +305,11 @@ internal sealed class LemonadeToolCallingChatClient(
             Environment.NewLine,
             "You are the decision engine inside a tool-calling agent harness.",
             "Interpret the complete conversation and choose exactly one next action.",
+            "CURRENT HUMAN TURN (authoritative data): "
+                + JsonSerializer.Serialize(currentUserRequest?.Trim() ?? string.Empty, JsonOptions),
+            "Every tool result below belongs to that current human turn. A tool-result message becoming the newest framework message does not replace or broaden the current human request.",
             "The newest user message is authoritative. Do not resume or retry an earlier failed action unless the newest message explicitly requests a retry or completing that action is still necessary to satisfy the newest request.",
+            "A final answer must answer only the CURRENT HUMAN TURN. Do not prepend, repeat, summarize, or finish an answer to an earlier human turn unless the current request explicitly asks for it.",
             "Return exactly one JSON object and no Markdown or commentary.",
             "To call a tool: {\"action\":\"call\",\"tool\":\"exact_tool_name\",\"arguments\":{},\"summary\":\"short user-visible reason\"}",
             "To answer: {\"action\":\"final\",\"answer\":\"complete conversational answer\"}",

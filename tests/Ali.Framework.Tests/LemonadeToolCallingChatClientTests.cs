@@ -233,6 +233,53 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("Never contradict a successful result", decisionPrompt, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ToolContinuation_PreservesCurrentHumanTurnAndRejectsStalePriorAnswer()
+    {
+        const string currentRequest = "Tell me only the exact tool count and major source categories.";
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-current",
+            "assistant-current",
+            currentRequest,
+            activity.Add);
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"108 tools across Ali native, Agent Framework, Roslyn, and integration sources.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        var tool = AIFunctionFactory.Create(() => "108", "list_available_tools", "Return the current tool inventory.");
+        var toolCallId = $"call-{Guid.NewGuid():N}";
+        var oldAssistant = new AIChatMessage(AIChatRole.Assistant, "Name: Chris. Current time: yesterday.");
+        var call = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        call.Contents.Add(new FunctionCallContent(toolCallId, "list_available_tools"));
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(toolCallId, new { count = 108 }));
+
+        var response = await client.GetResponseAsync(
+            [
+                new AIChatMessage(AIChatRole.User, "What is my name and the current time?"),
+                oldAssistant,
+                new AIChatMessage(AIChatRole.User, currentRequest),
+                call,
+                result
+            ],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("Current time", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("108 tools", response.Text, StringComparison.OrdinalIgnoreCase);
+        var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
+        Assert.Contains("CURRENT HUMAN TURN", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains(currentRequest, decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not prepend, repeat, summarize", decisionPrompt, StringComparison.Ordinal);
+    }
+
     private sealed class RecordingChatClient(params ChatResponse[] responses) : IChatClient
     {
         private readonly Queue<ChatResponse> _responses = new(responses);
