@@ -14,6 +14,7 @@ using Ali.Modules.Coding.Languages;
 using Ali.Modules.Coding.Python;
 using Ali.Modules.Coding.Web;
 using Ali.Modules.Coding.Java;
+using Ali.Modules.Coding.Cpp;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -52,6 +53,7 @@ public sealed class AliCodingModule : IAsyncDisposable
         LanguageProviders.Register(new AliPythonLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliWebLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliJavaLanguageProvider(toolchainLocator));
+        LanguageProviders.Register(new AliCppLanguageProvider(toolchainLocator));
         MultiLanguage = new AliMultiLanguageCodingTools(
             languageResolver,
             LanguageProviders,

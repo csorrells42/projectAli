@@ -13,7 +13,16 @@ internal static class AliBoundedProcessRunner
         string workingDirectory,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        await RunAsync(executable, workingDirectory, arguments, timeout, cancellationToken, environment: null).ConfigureAwait(false);
+
+    public static async Task<BoundedProcessResult> RunAsync(
+        string executable,
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment)
     {
         var started = Stopwatch.StartNew();
         var startInfo = new ProcessStartInfo(executable)
@@ -24,6 +33,10 @@ internal static class AliBoundedProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        if (environment is not null)
+        {
+            foreach (var pair in environment) startInfo.Environment[pair.Key] = pair.Value;
+        }
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = startInfo };
         var output = new StringBuilder();
