@@ -30,6 +30,10 @@ public sealed class AliToolCatalogTests
         Assert.Contains("untouched template is never", instructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("explicitly asks you not to use tools", instructions, StringComparison.Ordinal);
         Assert.Contains("arduino_create_and_compile", instructions, StringComparison.Ordinal);
+        Assert.Contains("virtual such as Desktop/Blink/Blink.ino or absolute", instructions, StringComparison.Ordinal);
+        Assert.Contains("Do not split this request into generic file_access_write", instructions, StringComparison.Ordinal);
         Assert.Contains("Never invent a skill name or script name", instructions, StringComparison.Ordinal);
+        Assert.Contains("distinguish what the retrieved material directly reports", instructions, StringComparison.Ordinal);
+        Assert.Contains("unsupported superlative", instructions, StringComparison.Ordinal);
     }
 }

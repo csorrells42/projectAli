@@ -126,7 +126,7 @@ public sealed class AliCodingModule : IAsyncDisposable
             "Install an explicit Arduino library and optional version after approval."),
         AIFunctionFactory.Create((Func<string, string, string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.CreateAndCompileAsync,
             AliCapabilityCatalog.ArduinoCreateCompileName,
-            "Create one new compile-ready Arduino .ino file at an approved virtual path and compile it for an explicit FQBN in the same verified operation. The sketch filename must match its parent folder. This never overwrites an existing file."),
+            "Create one new compile-ready Arduino .ino file at an approved Desktop, Documents, Downloads, Exports, or Workspace path and compile it for an explicit FQBN in the same verified operation. Accept either a virtual path such as Desktop/Blink/Blink.ino or an absolute path already inside an approved root. The sketch filename must match its parent folder. This creates missing sketch folders and never overwrites an existing file."),
         AIFunctionFactory.Create((Func<string, string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.CompileAsync,
             AliCapabilityCatalog.ArduinoCompileName,
             "Compile an approved Arduino sketch for an explicit fully-qualified board name."),

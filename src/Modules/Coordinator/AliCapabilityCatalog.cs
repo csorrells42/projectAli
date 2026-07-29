@@ -165,7 +165,7 @@ public static class AliCapabilityCatalog
         new(ArduinoSearchLibrariesName, "Search the Arduino Library Manager catalog.", "Ali Arduino integration"),
         new(ArduinoInstallCoreName, "Install an explicit Arduino board core.", "Ali Arduino integration"),
         new(ArduinoInstallLibraryName, "Install an explicit Arduino library and version.", "Ali Arduino integration"),
-        new(ArduinoCreateCompileName, "Create a new Arduino sketch in an approved folder and compile it for an explicit board in one verified operation.", "Ali Arduino integration"),
+        new(ArduinoCreateCompileName, "Create a new Arduino sketch, including its missing folder, at an approved virtual or absolute path and compile it for an explicit board in one verified operation.", "Ali Arduino integration"),
         new(ArduinoCompileName, "Compile an approved Arduino sketch for an explicit board.", "Ali Arduino integration"),
         new(ArduinoUploadName, "Upload firmware to an explicit Arduino board and port.", "Ali Arduino integration"),
         new(ArduinoOpenIdeName, "Open an approved sketch in Arduino IDE.", "Ali Arduino integration"),

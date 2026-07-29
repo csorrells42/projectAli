@@ -41,7 +41,7 @@ public sealed class DeveloperToolchainIntegrationTests
     [Fact]
     public async Task ArduinoCliCompilesUnoAndPicoSketchesAndSharesTheInstalledIdeStore()
     {
-        await WithModuleAsync(async (_, access, module) =>
+        await WithModuleAsync(async (root, access, module) =>
         {
             const string sketch = "void setup(){pinMode(LED_BUILTIN, OUTPUT);}\nvoid loop(){digitalWrite(LED_BUILTIN, HIGH); delay(10); digitalWrite(LED_BUILTIN, LOW); delay(10);}\n";
             await access.Store.WriteAsync("Workspace/Blink/Blink.ino", sketch, TestContext.Current.CancellationToken);
@@ -58,8 +58,9 @@ public sealed class DeveloperToolchainIntegrationTests
             Assert.NotEmpty(uno.Artifacts);
             Assert.NotEmpty(pico.Artifacts);
 
+            var generatedPath = Path.Combine(root, "workspace", "JamAlarm", "JamAlarm.ino");
             var generated = await module.Arduino.CreateAndCompileAsync(
-                "Workspace/JamAlarm/JamAlarm.ino",
+                generatedPath,
                 sketch,
                 "arduino:avr:uno",
                 TestContext.Current.CancellationToken);
@@ -69,7 +70,7 @@ public sealed class DeveloperToolchainIntegrationTests
             Assert.Contains(generated.Artifacts, artifact => artifact.EndsWith(".hex", StringComparison.OrdinalIgnoreCase));
 
             var overwrite = await module.Arduino.CreateAndCompileAsync(
-                "Workspace/JamAlarm/JamAlarm.ino",
+                generatedPath,
                 "void setup(){} void loop(){}",
                 "arduino:avr:uno",
                 TestContext.Current.CancellationToken);

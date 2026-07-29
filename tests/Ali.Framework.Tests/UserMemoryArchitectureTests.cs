@@ -12,6 +12,13 @@ namespace Ali.Framework.Tests;
 public sealed class UserMemoryArchitectureTests
 {
     [Fact]
+    public void Mem0Warmup_DoesNotThrashAColdCpuEmbeddingWorker()
+    {
+        Assert.True(Mem0UserMemoryService.WarmupAttemptTimeout >= TimeSpan.FromSeconds(20));
+        Assert.True(Mem0UserMemoryService.WarmupOverallTimeout > Mem0UserMemoryService.WarmupAttemptTimeout);
+    }
+
+    [Fact]
     public void EmptyIdentityStoreCreatesStableJohnDoeTestProfile()
     {
         var root = TemporaryRoot();

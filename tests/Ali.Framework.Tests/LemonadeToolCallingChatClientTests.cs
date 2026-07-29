@@ -451,6 +451,52 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task SingleEvidenceToolResult_IsAuditedForClaimCalibration()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "What are the two most important developments today? Distinguish reporting from inference.",
+            _ => { })
+        {
+            UsedEvidenceTool = true
+        };
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"These are unquestionably the two most important developments.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"From the limited results returned, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        using var activeTurn = client.BeginTurn(turn);
+        var search = AIFunctionFactory.Create(() => "ok", "search_current_web", "Search current web sources.");
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(
+            "call-search",
+            new { status = "Found two excerpts", sources = new[] { "one", "two" } }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), result],
+            new ChatOptions { Tools = [search] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("limited results", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, inner.CallCount);
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("distinguish what the retrieved material directly reports", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("unsupported superlative", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("selection basis and limits", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("does not itself prove that ranking", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not claim the search was exhaustive", auditPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ToolResultsAreCountedAcrossFrameworkPacketsForOneTurn()
     {
         var turn = new CoordinatorTurnContext(
@@ -561,6 +607,53 @@ public sealed class LemonadeToolCallingChatClientTests
             item.IsActivity
             && item.ActivityKind == AgentActivityKind.Planning
             && item.Text.Contains("checking the evidence", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task NativeToolCallingFinal_IsAuditedAfterOneEvidenceResult()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "What are the two most important developments today? Distinguish reporting from inference.",
+            activity.Add)
+        {
+            UsedEvidenceTool = true
+        };
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "These are unquestionably the two most important developments.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"From the five returned excerpts, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null);
+        using var activeTurn = client.BeginTurn(turn);
+        var search = AIFunctionFactory.Create(() => "ok", "search_current_web", "Search current web sources.");
+        var searchResult = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        searchResult.Contents.Add(new FunctionResultContent(
+            "call-search",
+            new { status = "Found five excerpts", sources = new[] { "one", "two", "three", "four", "five" } }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), searchResult],
+            new ChatOptions { Tools = [search] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("five returned excerpts", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, inner.CallCount);
+        Assert.Contains(activity, item =>
+            item.IsActivity
+            && item.ActivityKind == AgentActivityKind.Planning
+            && item.Text.Contains("checking the evidence", StringComparison.OrdinalIgnoreCase));
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("unsupported superlative", auditPrompt, StringComparison.Ordinal);
     }
 
     [Fact]

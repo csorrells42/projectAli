@@ -2348,7 +2348,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task SendTextAsync(
         string text,
         VoiceInputOrigin inputOrigin,
-        VoiceTurnMetadata? voiceMetadata)
+        VoiceTurnMetadata? voiceMetadata,
+        CancellationToken externalCancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text) || IsBusy)
         {
@@ -2390,7 +2391,9 @@ public sealed class MainWindowViewModel : ObservableObject
         Messages.Add(userMessage);
         Messages.Add(assistantMessage);
 
-        _activeResponse = new CancellationTokenSource();
+        _activeResponse = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token,
+            externalCancellationToken);
         var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
         var reachedOutputLimit = false;
@@ -2446,7 +2449,8 @@ public sealed class MainWindowViewModel : ObservableObject
                         {
                             var choice = AgentToolApprovalWindow.Show(
                                 System.Windows.Application.Current?.MainWindow,
-                                approvalPrompt);
+                                approvalPrompt,
+                                _activeResponse.Token);
                             if (!_services.Orchestrator.ResolveToolApproval(new AgentToolApprovalDecision(
                                     approvalPrompt.RequestId,
                                     choice)))
@@ -2617,7 +2621,11 @@ public sealed class MainWindowViewModel : ObservableObject
                 .ConfigureAwait(false);
         }
 
-        await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+        await SendTextAsync(
+            text,
+            VoiceInputOrigin.Typed,
+            voiceMetadata: null,
+            externalCancellationToken: cancellationToken).ConfigureAwait(true);
         return CaptureConversationBridgeSnapshot();
     }
 

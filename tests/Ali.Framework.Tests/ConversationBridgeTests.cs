@@ -109,9 +109,14 @@ public sealed class ConversationBridgeTests
         Assert.Contains("no permission-decision endpoint", architecture, StringComparison.OrdinalIgnoreCase);
         var mainViewModel = File.ReadAllText(FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
         Assert.Contains(
-            "await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null)",
+            "externalCancellationToken: cancellationToken",
             mainViewModel,
             StringComparison.Ordinal);
+        Assert.Contains("CreateLinkedTokenSource", mainViewModel, StringComparison.Ordinal);
+        var approvalWindow = File.ReadAllText(FindRepositoryFile(
+            "src", "Modules", "Permissions", "AgentToolApprovalWindow.xaml.cs"));
+        Assert.Contains("cancellationToken.Register", approvalWindow, StringComparison.Ordinal);
+        Assert.Contains("AgentToolApprovalChoice.Deny", approvalWindow, StringComparison.Ordinal);
         var helper = File.ReadAllText(FindRepositoryFile("tools", "TalkToAli.ps1"));
         Assert.Contains("/v1/session", helper, StringComparison.Ordinal);
         Assert.Contains("/v1/turns", helper, StringComparison.Ordinal);

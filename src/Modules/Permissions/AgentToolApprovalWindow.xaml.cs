@@ -6,6 +6,8 @@ namespace Ali.Modules.Permissions;
 
 public partial class AgentToolApprovalWindow : Window
 {
+    private bool _finished;
+
     private AgentToolApprovalWindow(AgentToolApprovalPrompt prompt)
     {
         InitializeComponent();
@@ -18,12 +20,18 @@ public partial class AgentToolApprovalWindow : Window
 
     public AgentToolApprovalChoice Choice { get; private set; } = AgentToolApprovalChoice.Deny;
 
-    public static AgentToolApprovalChoice Show(Window? owner, AgentToolApprovalPrompt prompt)
+    public static AgentToolApprovalChoice Show(
+        Window? owner,
+        AgentToolApprovalPrompt prompt,
+        CancellationToken cancellationToken = default)
     {
         var window = new AgentToolApprovalWindow(prompt)
         {
             Owner = owner
         };
+        using var cancellationRegistration = cancellationToken.Register(() =>
+            window.Dispatcher.BeginInvoke(new Action(() =>
+                window.Finish(AgentToolApprovalChoice.Deny, false))));
         _ = window.ShowDialog();
         return window.Choice;
     }
@@ -42,8 +50,17 @@ public partial class AgentToolApprovalWindow : Window
 
     private void Finish(AgentToolApprovalChoice choice, bool dialogResult)
     {
+        if (_finished)
+        {
+            return;
+        }
+
+        _finished = true;
         Choice = choice;
-        DialogResult = dialogResult;
+        if (IsVisible)
+        {
+            DialogResult = dialogResult;
+        }
         Close();
     }
 

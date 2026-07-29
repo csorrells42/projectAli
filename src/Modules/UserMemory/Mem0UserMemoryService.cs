@@ -2,6 +2,13 @@ namespace Ali.Modules.UserMemory;
 
 public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
 {
+    // FastEmbed's first CPU model load can legitimately take well over eight
+    // seconds on a cold machine. Killing and restarting the private worker at
+    // that point discards all loading work and can turn one cold start into a
+    // series of guaranteed foreground recall misses.
+    internal static readonly TimeSpan WarmupAttemptTimeout = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan WarmupOverallTimeout = TimeSpan.FromSeconds(75);
+
     private readonly Mem0ProcessClient _client;
     private readonly Func<UserMemorySettings> _settings;
     private readonly object _warmupSync = new();
@@ -115,11 +122,11 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
     {
         if (!_settings().Normalize().Enabled) return;
         using var overallTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        overallTimeout.CancelAfter(TimeSpan.FromSeconds(45));
-        for (var attempt = 1; attempt <= 5 && !overallTimeout.IsCancellationRequested; attempt++)
+        overallTimeout.CancelAfter(WarmupOverallTimeout);
+        for (var attempt = 1; attempt <= 3 && !overallTimeout.IsCancellationRequested; attempt++)
         {
             using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(overallTimeout.Token);
-            attemptTimeout.CancelAfter(TimeSpan.FromSeconds(8));
+            attemptTimeout.CancelAfter(WarmupAttemptTimeout);
             try
             {
                 // Exercise the same embedding and Qdrant path used by foreground recall.
@@ -143,7 +150,7 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
                 or InvalidOperationException
                 or TimeoutException)
             {
-                if (_lifetime.IsCancellationRequested || overallTimeout.IsCancellationRequested || attempt == 5)
+                if (_lifetime.IsCancellationRequested || overallTimeout.IsCancellationRequested || attempt == 3)
                 {
                     return;
                 }

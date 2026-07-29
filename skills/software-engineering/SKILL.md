@@ -17,6 +17,6 @@ Use Ali's live coding capability inventory instead of describing limitations fro
 7. When the user asks for execution, run only after a successful build.
 8. Report changed artifacts, verification evidence, remaining uncertainty, and any approval-gated next action.
 
-For a new Arduino sketch, prefer the registered `arduino_create_and_compile` operation: supply the complete source, a virtual `.ino` path whose filename matches the parent folder, and an explicit board FQBN. Use the returned compiler result and firmware artifacts as evidence. Never invent an Arduino Agent Skill or claim the compiler is unavailable without checking the live capability registry.
+For a new Arduino sketch, prefer the registered `arduino_create_and_compile` operation: supply the complete source, an approved virtual or absolute `.ino` path whose filename matches the parent folder, and an explicit board FQBN. The operation creates a missing sketch folder itself. Use the returned compiler result and firmware artifacts as evidence. Never split the job through generic file writing, invent an Arduino Agent Skill, or claim the compiler is unavailable without checking the live capability registry.
 
 Never claim a build, test, launch, file mutation, or external action occurred without a successful tool result. Preserve existing modular boundaries and avoid unrelated cleanup.

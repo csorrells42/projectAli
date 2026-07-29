@@ -72,7 +72,8 @@ internal sealed class LemonadeToolCallingChatClient(
             var nativeResponse = await inner
                 .GetResponseAsync(materializedMessages, options, cancellationToken)
                 .ConfigureAwait(false);
-            if (ContainsFunctionCall(nativeResponse) || observedToolResultCount < 2)
+            if (ContainsFunctionCall(nativeResponse)
+                || (turn?.UsedEvidenceTool != true && observedToolResultCount < 2))
             {
                 return nativeResponse;
             }
@@ -175,7 +176,8 @@ internal sealed class LemonadeToolCallingChatClient(
         CoordinatorTurnContext? turn,
         CancellationToken cancellationToken)
     {
-        if (toolResultCount < 2 || !IsFinalDecision(response.Text))
+        var usedEvidenceTool = turn?.UsedEvidenceTool == true;
+        if ((!usedEvidenceTool && toolResultCount < 2) || !IsFinalDecision(response.Text))
         {
             return response;
         }
@@ -204,6 +206,10 @@ internal sealed class LemonadeToolCallingChatClient(
                 "If diagnostics, warnings, failed calls, or contradictory evidence remain unresolved, continue with the appropriate tool instead of declaring success.",
                 "Do not claim a test ran, runtime behavior was verified, a framework was identified, or a change occurred unless the corresponding tool/source evidence proves it.",
                 "If the human required a fact to come from a specific file, document, service, or other evidence source, inference from a different tool result is not a substitute; call the tool that reads or inspects the specified source.",
+                "For web, document, and memory evidence, distinguish what the retrieved material directly reports from your own inference. Label consequential inference and uncertainty explicitly.",
+                "Do not promote a limited result set into an unsupported superlative, ranking, causal conclusion, consensus, or claim of completeness. When the human asks for the most important or best items, state the selection basis and limits unless the evidence itself establishes the ranking.",
+                "A human request for the most important, best, leading, or representative items does not itself prove that ranking. Selecting items from search results is analysis: identify it as your selection from the returned evidence and say what limited evidence the selection was based on.",
+                "Phrases such as 'stand out', 'top results', or 'no other results appeared' do not cure an unsupported ranking or completeness claim. Do not claim the search was exhaustive unless a tool result explicitly establishes that.",
                 "If the work is complete but the draft overstates evidence, return a corrected final answer. Accept it unchanged only when every requested step and every factual claim are supported.")));
 
         var audited = await GetStructuredDecisionResponseAsync(
@@ -223,11 +229,15 @@ internal sealed class LemonadeToolCallingChatClient(
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
+        var criticRevisedAnswer = IsFinalDecision(audited.Text)
+            && !string.Equals(audited.Text, response.Text, StringComparison.Ordinal);
         turn?.Report(
             AgentActivityKind.Status,
             "Evidence check completed",
             IsFinalDecision(audited.Text)
-                ? $"{_assistantName}'s answer passed the bounded critic pass."
+                ? criticRevisedAnswer
+                    ? $"The bounded critic revised {_assistantName}'s answer to match the available evidence."
+                    : $"{_assistantName}'s answer passed the bounded critic unchanged."
                 : $"The critic returned the work to {_assistantName}'s tool loop for another concrete action.");
         return audited;
     }
