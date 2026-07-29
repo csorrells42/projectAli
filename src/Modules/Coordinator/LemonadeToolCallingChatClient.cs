@@ -143,6 +143,12 @@ internal sealed class LemonadeToolCallingChatClient(
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
+        response = await RepairRepeatedCompletedToolCallAsync(
+            response,
+            compatibilityMessages,
+            compatibilityOptions,
+            turn,
+            cancellationToken).ConfigureAwait(false);
         response = await AuditSubstantialFinalDecisionAsync(
             response,
             observedToolResultCount,
@@ -242,7 +248,8 @@ internal sealed class LemonadeToolCallingChatClient(
                 "If the human required a fact to come from a specific file, document, service, or other evidence source, inference from a different tool result is not a substitute; call the tool that reads or inspects the specified source.",
                 "For web, document, and memory evidence, distinguish what the retrieved material directly reports from your own inference. Label consequential inference and uncertainty explicitly.",
                 "For current, live, latest, or today requests, RetrievedAt proves only when Ali fetched an excerpt. It does not prove that the source observation itself is current. Compare every stated observation/publication date with the requested timeframe. If the evidence is older than requested or does not establish freshness, do not label it current; use a remaining search attempt or state that the current value could not be verified.",
-                "When the user requests exact identifiers, paths, names, codes, or stored values, copy them verbatim from the authoritative tool result. Do not decorate, normalize, paraphrase, or add characters inside an exact value.",
+            "When the user requests exact identifiers, paths, names, codes, or stored values, copy them verbatim from the authoritative tool result. Do not decorate, normalize, paraphrase, or add characters inside an exact value.",
+            "When an authoritative collection result supplies a total and item rows, preserve exactly that many rows in a requested complete list or table. Never invent variants, extrapolate names, duplicate entries, or continue after the final returned item.",
                 "Do not promote a limited result set into an unsupported superlative, ranking, causal conclusion, consensus, or claim of completeness. When the human asks for the most important or best items, state the selection basis and limits unless the evidence itself establishes the ranking.",
                 "A human request for the most important, best, leading, or representative items does not itself prove that ranking. Selecting items from search results is analysis: identify it as your selection from the returned evidence and say what limited evidence the selection was based on.",
                 "Phrases such as 'stand out', 'top results', or 'no other results appeared' do not cure an unsupported ranking or completeness claim. Do not claim the search was exhaustive unless a tool result explicitly establishes that.",
@@ -352,6 +359,11 @@ internal sealed class LemonadeToolCallingChatClient(
         CoordinatorTurnContext? turn,
         IReadOnlyList<AIChatMessage> messages)
     {
+        var callsById = messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .GroupBy(call => call.CallId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
         var results = messages
             .SelectMany(message => message.Contents)
             .OfType<FunctionResultContent>()
@@ -362,11 +374,15 @@ internal sealed class LemonadeToolCallingChatClient(
         }
 
         var tracker = _toolResultsByTurn.GetOrAdd(turn.AssistantMessageId, _ => new ToolResultTracker());
-        lock (tracker.CallIds)
+        lock (tracker)
         {
             foreach (var result in results)
             {
                 tracker.CallIds.Add(result.CallId);
+                if (callsById.TryGetValue(result.CallId, out var call))
+                {
+                    tracker.CompletedCallFingerprints.Add(BuildToolCallFingerprint(call.Name, call.Arguments));
+                }
             }
             return tracker.CallIds.Count;
         }
@@ -375,6 +391,95 @@ internal sealed class LemonadeToolCallingChatClient(
     private sealed class ToolResultTracker
     {
         public HashSet<string> CallIds { get; } = new(StringComparer.Ordinal);
+
+        public HashSet<string> CompletedCallFingerprints { get; } = new(StringComparer.Ordinal);
+    }
+
+    private async Task<ChatResponse> RepairRepeatedCompletedToolCallAsync(
+        ChatResponse response,
+        IReadOnlyList<AIChatMessage> decisionMessages,
+        ChatOptions compatibilityOptions,
+        CoordinatorTurnContext? turn,
+        CancellationToken cancellationToken)
+    {
+        if (turn is null || !TryGetDecisionCallFingerprint(response.Text, out var fingerprint))
+        {
+            return response;
+        }
+
+        if (!_toolResultsByTurn.TryGetValue(turn.AssistantMessageId, out var tracker))
+        {
+            return response;
+        }
+
+        lock (tracker)
+        {
+            if (!tracker.CompletedCallFingerprints.Contains(fingerprint))
+            {
+                return response;
+            }
+        }
+
+        turn.Report(
+            AgentActivityKind.Warning,
+            "Blocked a repeated completed tool call",
+            $"{_assistantName} already received the result for that exact tool and arguments, so the connector is asking for the final answer without running it twice.");
+        var repairMessages = decisionMessages
+            .Append(new AIChatMessage(
+                AIChatRole.System,
+                "DUPLICATE TOOL CALL BLOCKED: The exact selected tool and arguments already completed in this current turn. "
+                + "Do not call it again. Use its existing authoritative result to return the requested final answer now. "
+                + "For a complete collection, preserve exactly its declared Total rows and do not invent, duplicate, or omit entries."))
+            .ToArray();
+        var repaired = await GetStructuredDecisionResponseAsync(
+            repairMessages,
+            compatibilityOptions,
+            turn,
+            cancellationToken).ConfigureAwait(false);
+        return await CompleteTruncatedDecisionAsync(
+            repaired,
+            repairMessages,
+            compatibilityOptions,
+            turn,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool TryGetDecisionCallFingerprint(string? text, out string fingerprint)
+    {
+        fingerprint = string.Empty;
+        if (!TryParseDecision(text?.Trim() ?? string.Empty, out var decision))
+        {
+            return false;
+        }
+
+        using (decision)
+        {
+            var root = decision.RootElement;
+            if (!string.Equals(ReadString(root, "action"), "call", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var toolName = ReadString(root, "tool");
+            if (string.IsNullOrWhiteSpace(toolName))
+            {
+                return false;
+            }
+
+            var arguments = _toolArgumentNormalizer(toolName, NormalizeToolArguments(toolName, ParseArguments(root)));
+            fingerprint = BuildToolCallFingerprint(toolName, arguments);
+            return true;
+        }
+    }
+
+    private static string BuildToolCallFingerprint(
+        string toolName,
+        IDictionary<string, object?>? arguments)
+    {
+        var orderedArguments = arguments is null
+            ? new SortedDictionary<string, object?>(StringComparer.Ordinal)
+            : new SortedDictionary<string, object?>(arguments, StringComparer.Ordinal);
+        return toolName + "\n" + JsonSerializer.Serialize(orderedArguments, JsonOptions);
     }
 
     private CoordinatorTurnContext? CurrentTurn() =>
@@ -1142,10 +1247,25 @@ internal sealed class LemonadeToolCallingChatClient(
                 new { action = "final", answer },
                 JsonOptions)));
 
-    private static string JoinContinuation(string current, string continuation) =>
-        current.EndsWith('\n') || continuation.StartsWith('\n')
+    private static string JoinContinuation(string current, string continuation)
+    {
+        var currentLineStart = current.LastIndexOf('\n') + 1;
+        var partialLine = current[currentLineStart..].TrimEnd('\r');
+        var continuationLineEnd = continuation.IndexOf('\n');
+        var firstContinuationLine = (continuationLineEnd >= 0
+                ? continuation[..continuationLineEnd]
+                : continuation)
+            .TrimEnd('\r');
+        if (partialLine.Length >= 8
+            && firstContinuationLine.StartsWith(partialLine, StringComparison.Ordinal))
+        {
+            return current[..currentLineStart] + continuation;
+        }
+
+        return current.EndsWith('\n') || continuation.StartsWith('\n')
             ? current + continuation
             : current + Environment.NewLine + continuation;
+    }
 
     private static bool TryParseDecision(string text, out JsonDocument document)
     {
@@ -1366,6 +1486,11 @@ internal sealed class LemonadeToolCallingChatClient(
 
     internal static string SerializeToolResultForModel(object? value)
     {
+        if (value is CoordinatorCapabilityResult inventory)
+        {
+            return SerializeAuthoritativeInventory(inventory);
+        }
+
         var serialized = value switch
         {
             null => "null",
@@ -1382,6 +1507,39 @@ internal sealed class LemonadeToolCallingChatClient(
         var remaining = MaximumToolResultCharacters - marker.Length;
         var headLength = remaining / 2;
         return serialized[..headLength] + marker + serialized[^(remaining - headLength)..];
+    }
+
+    private static string SerializeAuthoritativeInventory(CoordinatorCapabilityResult inventory)
+    {
+        var sources = inventory.Tools
+            .Select(tool => tool.Source)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var sourceIds = sources
+            .Select((source, index) => (source, index))
+            .ToDictionary(item => item.source, item => item.index, StringComparer.Ordinal);
+
+        var payload = new
+        {
+            Authoritative = true,
+            Total = inventory.Tools.Count,
+            Schema = new[] { "name", "sourceId" },
+            Sources = sources.Select((source, index) => new object[] { index, source }).ToArray(),
+            Tools = inventory.Tools.Select(tool => new object[]
+            {
+                tool.Name,
+                sourceIds[tool.Source]
+            }).ToArray()
+        };
+        var serialized = JsonSerializer.Serialize(payload, JsonOptions);
+        if (serialized.Length <= MaximumToolResultCharacters)
+        {
+            return serialized;
+        }
+
+        throw new InvalidOperationException(
+            $"The authoritative inventory of {inventory.Tools.Count} tools cannot fit within "
+            + $"{MaximumToolResultCharacters} characters without dropping tool names or sources.");
     }
 
     internal static string CompactContextText(string value, int maximumCharacters, string label)

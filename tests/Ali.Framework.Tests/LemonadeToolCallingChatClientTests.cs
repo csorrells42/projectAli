@@ -260,6 +260,40 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task TruncatedFinalAnswer_ReplacesRestartedPartialLineAtContinuationSeam()
+    {
+        const string toolName = "dotnet_release_publish";
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"| dotnet_application_verify | Verify the app. |\\n| dotnet_release_publish | Create a .NET publish folder with a\"}"))
+            {
+                FinishReason = ChatFinishReason.Length
+            },
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"| dotnet_release_publish | Create a .NET publish folder with a manifest. |\\n| dotnet_delivery_verify | Verify delivery. |\"}"))
+            {
+                FinishReason = ChatFinishReason.Stop
+            });
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var tool = AIFunctionFactory.Create(() => "ok", "list_available_tools", "List every tool.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "List every tool row.")],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, response.Text.Split(toolName, StringSplitOptions.None).Length - 1);
+        Assert.Contains("with a manifest", response.Text, StringComparison.Ordinal);
+        Assert.Contains("dotnet_delivery_verify", response.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ClosedFinalEnvelopeWithLengthFinishReason_StillContinues()
     {
         using var inner = new RecordingChatClient(
@@ -416,6 +450,51 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task RepeatedCompletedToolCall_IsBlockedAndRepairedIntoFinalAnswer()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "List every tool.",
+            activity.Add);
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"list_available_tools\",\"arguments\":{},\"summary\":\"List again\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"Here are all 120 authoritative rows.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        var tool = AIFunctionFactory.Create(() => "ok", "list_available_tools", "List every tool.");
+        var callId = $"call-{Guid.NewGuid():N}";
+        var priorCall = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        priorCall.Contents.Add(new FunctionCallContent(
+            callId,
+            "list_available_tools",
+            new Dictionary<string, object?>()));
+        var priorResult = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        priorResult.Contents.Add(new FunctionResultContent(callId, new { total = 120 }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "List every tool."), priorCall, priorResult],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
+        Assert.Contains("120 authoritative rows", response.Text, StringComparison.Ordinal);
+        Assert.Equal(2, inner.CallCount);
+        var repairPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("DUPLICATE TOOL CALL BLOCKED", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains(activity, item => item.Text.Contains("Blocked a repeated completed tool call", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task OversizedFrameworkAndToolText_AreCompactedBeforeCallingTheLocalModel()
     {
         using var inner = new RecordingChatClient(
@@ -447,6 +526,24 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("framework instructions compacted", observedPrompt, StringComparison.Ordinal);
         Assert.Contains("tool message compacted", observedPrompt, StringComparison.Ordinal);
         Assert.Contains("tool result compacted", observedPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuthoritativeToolInventory_PreservesEveryToolRowWithoutHeadTailCompaction()
+    {
+        var inventory = AliCapabilityCatalog.ListAvailableTools(new AgentOrchestrationSettings());
+
+        var serialized = LemonadeToolCallingChatClient.SerializeToolResultForModel(inventory);
+        using var document = System.Text.Json.JsonDocument.Parse(serialized);
+        var root = document.RootElement;
+        var rows = root.GetProperty("tools").EnumerateArray().ToArray();
+
+        Assert.Equal(inventory.Tools.Count, root.GetProperty("total").GetInt32());
+        Assert.Equal(inventory.Tools.Count, rows.Length);
+        Assert.Equal(inventory.Tools.Select(tool => tool.Name), rows.Select(row => row[0].GetString()));
+        Assert.All(rows, row => Assert.Equal(2, row.GetArrayLength()));
+        Assert.DoesNotContain("tool result compacted", serialized, StringComparison.Ordinal);
+        Assert.True(serialized.Length <= 6_000, $"Compact inventory was {serialized.Length:N0} characters.");
     }
 
     [Fact]
