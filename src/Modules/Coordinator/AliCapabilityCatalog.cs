@@ -108,6 +108,9 @@ public static class AliCapabilityCatalog
     public const string DotNetReleasePublishName = "dotnet_release_publish";
     public const string DotNetArchitectureReportName = "dotnet_architecture_report";
     public const string DotNetDeliveryVerifyName = "dotnet_delivery_verify";
+    public const string ConsultSoftwareEngineerName = "consult_software_engineer";
+    public const string ConsultResearcherName = "consult_researcher";
+    public const string ConsultOfficeSpecialistName = "consult_office_artifact_specialist";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -212,7 +215,10 @@ public static class AliCapabilityCatalog
         new(DotNetApplicationVerifyName, "Smoke-test the actual console, desktop, service, or loopback-web application and capture visible evidence.", "Ali application verification"),
         new(DotNetReleasePublishName, "Create a .NET publish folder with a cryptographic file manifest after approval.", "Ali release engineering"),
         new(DotNetArchitectureReportName, "Generate a source-backed Markdown architecture report.", "Ali release engineering"),
-        new(DotNetDeliveryVerifyName, "Run final architecture, quality, build, test, application, and release evidence gates.", "Ali autonomous delivery")
+        new(DotNetDeliveryVerifyName, "Run final architecture, quality, build, test, application, and release evidence gates.", "Ali autonomous delivery"),
+        new(ConsultSoftwareEngineerName, "Consult Ali's private synchronous software-engineering specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
+        new(ConsultResearcherName, "Consult Ali's private synchronous evidence-research specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
+        new(ConsultOfficeSpecialistName, "Consult Ali's private synchronous office-artifact specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>

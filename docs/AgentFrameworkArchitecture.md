@@ -6,6 +6,8 @@
 
 Ali is the only user-facing identity and owns every final answer. Private Software Engineer, Researcher, and Office/Artifact agents may be invoked as bounded tools. They do not introduce additional assistant identities into the conversation and do not receive authority beyond their assigned tool sets.
 
+The first implementation registers exactly three synchronous Agent Framework agents as tools: `consult_software_engineer`, `consult_researcher`, and `consult_office_artifact_specialist`. Each invocation uses a fresh private session. Specialists receive only domain-relevant, non-approval tools; Ali retains all mutating and approval-requiring operations so the existing permission window remains authoritative.
+
 ## Orchestration policy
 
 - **Direct Ali:** greetings, casual conversation, stable knowledge, simple questions, and one-step tool actions.
@@ -32,4 +34,3 @@ Magentic is never used for greetings, ordinary factual answers, a single file ed
 Framework middleware, Ali's permission policy, and activity events surround every agent and workflow. Activity exposes role, step, tool choice, result, elapsed time, approval, and failure state. Hidden reasoning is never quoted, spoken, stored in conversation history, or shown as activity.
 
 Agent Skills are loaded only from Ali's shipped, reviewed skill directory. Skill scripts are not enabled in the initial framework checkpoint.
-

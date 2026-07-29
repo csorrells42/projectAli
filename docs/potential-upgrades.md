@@ -4,9 +4,21 @@ These are optional improvements to evaluate only after the current stable behavi
 
 ## Committed post-framework priority queue
 
-1. **Completion integrity:** Fix responses that promise to create or return something but terminate without a tool result or deliverable. Fix full authoritative inventories and other long structured answers being clipped or silently reduced (observed: 102 registered tools became a 25-row table). Add output-limit, continuation, complete-table, and promised-action regression tests.
+1. **Completion integrity:** Fix responses that promise to create or return something but terminate without a tool result or deliverable. Fix full authoritative inventories and other long structured answers being clipped or silently reduced (observed: 102 registered tools became a 25-row table). Reject unsupported incapability responses when the live registry contains the requested capability; the exact regression request is a C# WPF Tic-Tac-Toe app created on Desktop, built, verified, and run with normal approvals. Add output-limit, continuation, complete-table, promised-action, capability-inspection, and evidence-backed delivery tests.
 2. **Mem0 reliability:** Immediately harden per-user durable memory after the Agent Framework upgrade. Verify approval-to-write, persistence, identity isolation, startup recovery, recall-before-search, correction, deletion, and transfer-folder behavior.
 3. **Google-quality live search:** Immediately after Mem0, select and integrate a current supported direct Google search API/backend, expose its configuration and health in Settings, retain provider fallback, and repair the Software Engineering Radar workflow. Measure relevance, latency, quotas, and cost with Ali-specific queries before making it the default.
+
+## Residual C# capability audit
+
+Validate these against the live registry before implementation; they came from a model self-assessment and may understate existing Roslyn and Visual Studio features:
+
+- Interactive C# REPL/scripting with retained state.
+- Authenticated NuGet/private-feed support without exposing credentials to the model.
+- Mixed managed/native debugging and unmanaged memory inspection.
+- Reusable Docker, Azure Functions, and serverless delivery templates.
+- Dedicated OWASP-oriented .NET security rules and evidence.
+- IDE integration gaps involving non-code assets and project-system operations.
+- Dynamic IL/JIT inspection only if a real user workflow justifies the risk and complexity.
 
 ## Deferred Python engineering big-guns review
 

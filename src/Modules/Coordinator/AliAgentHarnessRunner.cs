@@ -53,10 +53,19 @@ internal sealed class AliAgentHarnessRunner
         IActiveUserSession? activeUsers,
         Func<CoordinatorTurnContext?> turnAccessor)
     {
-        _tools = catalog.Tools;
-        _memoryTools = catalog.MemoryTools;
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
+        _compatibilityClient = new LemonadeToolCallingChatClient(
+            chatClient,
+            runtime,
+            _assistantProfile.AssistantName,
+            turnAccessor);
+        var specialistFactory = new AliSpecialistAgentFactory(
+            _compatibilityClient,
+            runtime,
+            turnAccessor);
+        _tools = catalog.Tools.Concat(specialistFactory.CreateTools(catalog.Tools)).ToArray();
+        _memoryTools = catalog.MemoryTools;
         _instructions = catalog.Instructions;
         _mcpClients = mcpClients;
         _toolPermissions = toolPermissions;
@@ -64,11 +73,6 @@ internal sealed class AliAgentHarnessRunner
         _workMemory = workMemory;
         _activeUsers = activeUsers;
         _turnAccessor = turnAccessor;
-        _compatibilityClient = new LemonadeToolCallingChatClient(
-            chatClient,
-            runtime,
-            _assistantProfile.AssistantName,
-            turnAccessor);
         _agent = CreateAgent(_tools);
     }
 

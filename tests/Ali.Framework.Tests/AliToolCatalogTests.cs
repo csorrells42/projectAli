@@ -21,6 +21,8 @@ public sealed class AliToolCatalogTests
         Assert.Contains("use file_access_move", instructions, StringComparison.Ordinal);
         Assert.Contains("use them instead of claiming incapability", instructions, StringComparison.Ordinal);
         Assert.Contains("call dotnet_create_project", instructions, StringComparison.Ordinal);
+        Assert.Contains("name collision, not missing permission", instructions, StringComparison.Ordinal);
+        Assert.Contains("choose a new unique sibling name", instructions, StringComparison.Ordinal);
         Assert.Contains("roslyn_analyze_project", instructions, StringComparison.Ordinal);
         Assert.Contains("untouched template is never", instructions, StringComparison.OrdinalIgnoreCase);
     }
