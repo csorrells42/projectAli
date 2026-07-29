@@ -45,7 +45,8 @@ internal sealed class AliSourceTools(
         var coordinatorResult = ToCoordinatorSourceResult(
             result,
             "live internet",
-            canRetryWhenEmpty: turn is null || turn.WebSearchAttempts < MaximumWebSearchAttemptsPerTurn);
+            canRetry: turn is not null
+                && turn.WebSearchAttempts < MaximumWebSearchAttemptsPerTurn);
         if (turn is not null)
         {
             turn.UsedEvidenceTool = true;
@@ -89,7 +90,7 @@ internal sealed class AliSourceTools(
     private static CoordinatorSourceResult ToCoordinatorSourceResult(
         SourceRetrievalResult result,
         string sourceKind,
-        bool canRetryWhenEmpty = false)
+        bool canRetry = false)
     {
         var items = result.Excerpts
             .Take(MaximumResults)
@@ -107,7 +108,7 @@ internal sealed class AliSourceTools(
             status,
             items,
             result.Warnings,
-            CanRetry: items.Count == 0 && canRetryWhenEmpty);
+            CanRetry: canRetry);
     }
 
     private static string TrimExcerpt(string excerpt)

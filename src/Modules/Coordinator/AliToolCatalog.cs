@@ -88,7 +88,7 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<CoordinatorSourceResult>>)sourceTools.SearchLocalLibraryAsync,
                 AliCapabilityCatalog.SearchLocalLibraryName,
-                "Search the user's indexed local RAG library. Use for questions about the user's documents, manuals, local reference files, or stored project material.")),
+                "Search the user's indexed local RAG library only for their documents, manuals, reference files, or stored project material. Never use it for ordinary conversation or stable general knowledge.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<CoordinatorReminderResult>>)reminderTools.CreateAsync,
                 AliCapabilityCatalog.CreateReminderName,
@@ -134,9 +134,9 @@ internal sealed class AliToolCatalog
             "Relevant per-user Mem0 memory is retrieved before every turn. When the retrieved set is nonempty and directly answers the user's question, answer from it immediately. Do not convert a recalled fact into a todo item, note-taking task, reminder, or web search. Call recall_user_memory only when the initial recalled set does not answer the personal question.",
             "For current events or facts that may have changed, use search_current_web promptly and answer from its evidence.",
             "Ordinary harmless requests for predictions, forecasts, opinions, comparisons, and analysis are allowed. Never give a generic refusal merely because an outcome is uncertain; separate evidence from judgment and state the uncertainty.",
-            "A source result's CanRetry field is authoritative for the current turn. If CanRetry is false, do not call that same source tool again; explain the evidence limitation and give the best cautious answer possible from available context, or ask for one necessary clarification.",
+            "A source result's CanRetry field is authoritative for the current turn. If returned excerpts do not directly support the requested claim and CanRetry is true, run one refined search that names the missing fact and prioritizes an authoritative or primary source. If CanRetry is false, do not call that same source tool again; explain the evidence limitation and give the best cautious answer possible from available context, or ask for one necessary clarification.",
             "For complex nested or comparative research, use research_web only when one or two focused searches cannot answer reliably; it requires user approval.",
-            "Use search_local_library only for the user's indexed documents and local reference material.",
+            "Use search_local_library only for the user's indexed documents and local reference material. Never use it for greetings, arithmetic, spelling correction, stable general knowledge, or facts that the user did not tie to local material.",
             "Use file_memory tools as your private working notebook for intermediate research notes, partial drafts, calculations, and multi-step task state that should remain available in this user's current conversation. File memory is not personal long-term memory, not the indexed document library, and not a user-visible final artifact.",
             "Use file_memory descriptions to make substantial working notes discoverable. Store durable personal facts only through the explicit memory tools, and place requested deliverables in file_access Exports or another approved user folder.",
             "Use the Agent Framework file_access tools for direct file requests. Translate named locations into virtual paths yourself: desktop -> Desktop/<file>, documents -> Documents/<file>, downloads -> Downloads/<file>, and exports -> Exports/<file>. Never ask the user for an absolute path. If a path call fails, correct it using an approved virtual root and retry.",

@@ -158,6 +158,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 && excerpts.Count < maxExtractedPages
                 && !result.Provider.Equals("Firecrawl", StringComparison.OrdinalIgnoreCase)
                 && !result.Provider.Equals("Google Grounding", StringComparison.OrdinalIgnoreCase)
+                && (string.IsNullOrWhiteSpace(excerpt) || excerpt.Length < 600)
                 && !string.IsNullOrWhiteSpace(result.Url))
             {
                 var scraped = await TryScrapeWithFirecrawlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);

@@ -89,6 +89,38 @@ public sealed class AgentTurnIsolationTests
         Assert.Contains("limit was reached", third.Status, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task CurrentWebSearch_AllowsOneRefinementWhenFirstResultsAreOffTarget()
+    {
+        var retriever = new NonEmptySourceRetriever();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user",
+            "assistant",
+            "verify a current fact",
+            _ => { });
+        var sourceTools = new AliSourceTools(
+            retriever,
+            retriever,
+            null!,
+            () => turn);
+
+        var first = await sourceTools.SearchCurrentWebAsync(
+            "broad current query",
+            "general",
+            TestContext.Current.CancellationToken);
+        var second = await sourceTools.SearchCurrentWebAsync(
+            "refined authoritative query",
+            "general",
+            TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(first.Sources);
+        Assert.True(first.CanRetry);
+        Assert.NotEmpty(second.Sources);
+        Assert.False(second.CanRetry);
+        Assert.Equal(2, retriever.CallCount);
+    }
+
     private sealed class EmptySourceRetriever : ISourceRetriever
     {
         public int CallCount { get; private set; }
@@ -103,6 +135,31 @@ public sealed class AgentTurnIsolationTests
         {
             CallCount++;
             return Task.FromResult(new SourceRetrievalResult([], ["No sources"], true));
+        }
+    }
+
+    private sealed class NonEmptySourceRetriever : ISourceRetriever
+    {
+        public int CallCount { get; private set; }
+
+        public Task<SourceRetrievalResult> RetrieveAsync(string userText, CancellationToken cancellationToken) =>
+            RetrieveAsync(
+                new SourceQueryPlan(true, true, "current_web", userText, [userText], ["general"]),
+                cancellationToken);
+
+        public Task<SourceRetrievalResult> RetrieveAsync(SourceQueryPlan plan, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(new SourceRetrievalResult(
+                [new SourceExcerpt(
+                    1,
+                    "general",
+                    "Example source",
+                    "https://example.com/current",
+                    DateTimeOffset.UtcNow,
+                    "A result that may or may not directly answer the model's current question.")],
+                [],
+                true));
         }
     }
 }
