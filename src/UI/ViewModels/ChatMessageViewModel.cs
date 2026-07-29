@@ -10,6 +10,7 @@ public sealed class ChatMessageViewModel : ObservableObject
     private string _text;
     private EvidenceStatus _evidenceStatus;
     private bool _isFlaggedForCorrection;
+    private bool _isResponseComplete;
 
     public ChatMessageViewModel(
         string id,
@@ -23,7 +24,8 @@ public sealed class ChatMessageViewModel : ObservableObject
         string? sourceUserMessageId = null,
         string? sourceQuestion = null,
         IReadOnlyList<StoredAttachmentMetadata>? attachmentMetadata = null,
-        string? correctionId = null)
+        string? correctionId = null,
+        bool isResponseComplete = true)
     {
         Id = id;
         Role = role;
@@ -37,6 +39,7 @@ public sealed class ChatMessageViewModel : ObservableObject
         SourceQuestion = sourceQuestion;
         AttachmentMetadata = attachmentMetadata;
         CorrectionId = correctionId;
+        _isResponseComplete = isResponseComplete;
     }
 
     public string Id { get; }
@@ -70,6 +73,20 @@ public sealed class ChatMessageViewModel : ObservableObject
     public string? CorrectionId { get; private set; }
 
     public bool CanFlagAsIncorrect => Role == ChatRole.Assistant;
+
+    public bool AreActionsVisible => _isResponseComplete;
+
+    public bool IsResponseComplete
+    {
+        get => _isResponseComplete;
+        set
+        {
+            if (SetProperty(ref _isResponseComplete, value))
+            {
+                OnPropertyChanged(nameof(AreActionsVisible));
+            }
+        }
+    }
 
     public string Text
     {

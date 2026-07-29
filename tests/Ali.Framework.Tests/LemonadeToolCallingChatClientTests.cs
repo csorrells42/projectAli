@@ -304,7 +304,13 @@ public sealed class LemonadeToolCallingChatClientTests
             },
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                """{"action":"final","answer":"Rows eighty-four through one hundred twenty."}"""))
+                "Rows eighty-four through one hundred ten."))
+            {
+                FinishReason = ChatFinishReason.Length
+            },
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "Rows one hundred eleven through one hundred twenty."))
             {
                 FinishReason = ChatFinishReason.Stop
             });
@@ -326,9 +332,12 @@ public sealed class LemonadeToolCallingChatClientTests
         }
 
         Assert.Contains("one through eighty-three", text.ToString(), StringComparison.Ordinal);
-        Assert.Contains("eighty-four through one hundred twenty", text.ToString(), StringComparison.Ordinal);
+        Assert.Contains("eighty-four through one hundred ten", text.ToString(), StringComparison.Ordinal);
+        Assert.Contains("one hundred eleven through one hundred twenty", text.ToString(), StringComparison.Ordinal);
         Assert.Equal(ChatFinishReason.Stop, finishReason);
-        Assert.Equal(2, inner.CallCount);
+        Assert.Equal(3, inner.CallCount);
+        Assert.Null(inner.Formats[1]);
+        Assert.Null(inner.Formats[2]);
     }
 
     [Fact]
@@ -959,6 +968,8 @@ public sealed class LemonadeToolCallingChatClientTests
 
         public List<IReadOnlyList<AIChatMessage>> ObservedMessages { get; } = [];
 
+        public List<ChatResponseFormat?> Formats { get; } = [];
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<AIChatMessage> messages,
             ChatOptions? options = null,
@@ -966,6 +977,7 @@ public sealed class LemonadeToolCallingChatClientTests
         {
             CallCount++;
             ObservedMessages.Add(messages.ToList());
+            Formats.Add(options?.ResponseFormat);
             return Task.FromResult(_responses.Count > 0
                 ? _responses.Dequeue()
                 : new ChatResponse(new AIChatMessage(AIChatRole.Assistant, "script exhausted")));

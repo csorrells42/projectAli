@@ -2420,7 +2420,8 @@ public sealed class MainWindowViewModel : ObservableObject
             sourceInputOrigin: inputOrigin,
             sourceVoiceMetadata: voiceMetadata,
             sourceUserMessageId: userMessageId,
-            sourceQuestion: text);
+            sourceQuestion: text,
+            isResponseComplete: false);
 
         var history = Messages.Select(message => message.ToCoreMessage()).ToList();
         Messages.Add(userMessage);
@@ -2585,6 +2586,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         finally
         {
+            assistantMessage.IsResponseComplete = true;
+
             if (!completed)
             {
                 CancelStreamingSpeech(streamingSpeech);

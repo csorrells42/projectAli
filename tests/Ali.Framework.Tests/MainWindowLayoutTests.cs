@@ -10,10 +10,49 @@ public sealed class MainWindowLayoutTests
         Assert.Contains("x:Key=\"ChatActionLinkButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Style=\"{StaticResource ChatActionLinkButton}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Margin=\"0,3,0,0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding AreActionsVisible, Converter={StaticResource BoolToVisibilityConverter}}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Speech speed\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Read replies aloud\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Enable PTT\"", xaml, StringComparison.Ordinal);
         Assert.Contains("MainChatVoiceStatusText", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChatMessageActions_AppearOnlyAfterStreamingCompletes()
+    {
+        var message = new Ali.UI.ViewModels.ChatMessageViewModel(
+            "assistant-message",
+            Ali.Modules.Runtime.ChatRole.Assistant,
+            string.Empty,
+            DateTimeOffset.UtcNow,
+            Ali.Modules.Evidence.EvidenceStatus.Unknown,
+            isResponseComplete: false);
+        var changedProperties = new List<string?>();
+        message.PropertyChanged += (_, args) => changedProperties.Add(args.PropertyName);
+
+        Assert.False(message.AreActionsVisible);
+
+        message.IsResponseComplete = true;
+
+        Assert.True(message.AreActionsVisible);
+        Assert.Contains(nameof(message.AreActionsVisible), changedProperties);
+    }
+
+    [Fact]
+    public void ReasoningEffort_HasCompactHeadingAboveButtonsAndStaysPinned()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));
+        var normalizedXaml = xaml.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains("AutomationProperties.AutomationId=\"MainChatReasoningEffort\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VerticalAlignment=\"Bottom\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<StackPanel Grid.Column=\"1\"\n                                AutomationProperties.AutomationId=\"MainChatReasoningEffort\"\n                                Orientation=\"Vertical\"", normalizedXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Effort\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<StackPanel Orientation=\"Horizontal\">", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Low\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Medium\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"High\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]

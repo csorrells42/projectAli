@@ -827,7 +827,8 @@
                                                               Foreground="{StaticResource TextBrush}" />
                                 <StackPanel Orientation="Horizontal"
                                             Margin="0,3,0,0"
-                                            HorizontalAlignment="{Binding MessageAlignment}">
+                                            HorizontalAlignment="{Binding MessageAlignment}"
+                                            Visibility="{Binding AreActionsVisible, Converter={StaticResource BoolToVisibilityConverter}}">
                                     <Button Content="Copy"
                                             Style="{StaticResource ChatActionLinkButton}"
                                             Command="{Binding DataContext.CopyMessageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -969,34 +970,34 @@
                     </Expander>
 
                     <StackPanel Grid.Column="1"
-                                Orientation="Horizontal"
+                                AutomationProperties.AutomationId="MainChatReasoningEffort"
+                                Orientation="Vertical"
                                 HorizontalAlignment="Right"
-                                VerticalAlignment="Top"
-                                Margin="0,9,8,8"
+                                VerticalAlignment="Bottom"
+                                Margin="0,0,8,8"
                                 ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
                         <TextBlock Text="Effort"
                                    Foreground="{StaticResource MutedTextBrush}"
-                                   FontSize="11"
+                                   FontSize="10"
                                    FontWeight="SemiBold"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,12,0" />
-                        <RadioButton Content="Low"
-                                     GroupName="ReasoningEffort"
-                                     IsChecked="{Binding IsReasoningLow}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     VerticalAlignment="Center"
-                                     Margin="0,0,14,0" />
-                        <RadioButton Content="Medium"
-                                     GroupName="ReasoningEffort"
-                                     IsChecked="{Binding IsReasoningMedium}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     VerticalAlignment="Center"
-                                     Margin="0,0,14,0" />
-                        <RadioButton Content="High"
-                                     GroupName="ReasoningEffort"
-                                     IsChecked="{Binding IsReasoningHigh}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     VerticalAlignment="Center" />
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,1" />
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Content="Low"
+                                         GroupName="ReasoningEffort"
+                                         IsChecked="{Binding IsReasoningLow}"
+                                         Foreground="{StaticResource TextBrush}"
+                                         Margin="0,0,12,0" />
+                            <RadioButton Content="Medium"
+                                         GroupName="ReasoningEffort"
+                                         IsChecked="{Binding IsReasoningMedium}"
+                                         Foreground="{StaticResource TextBrush}"
+                                         Margin="0,0,12,0" />
+                            <RadioButton Content="High"
+                                         GroupName="ReasoningEffort"
+                                         IsChecked="{Binding IsReasoningHigh}"
+                                         Foreground="{StaticResource TextBrush}" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
 
@@ -1079,14 +1080,10 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,20,0">
-                            <TextBlock AutomationProperties.AutomationId="MainChatAttentionStatusText"
-                                       Text="{Binding AttentionStatus}"
-                                       Foreground="{StaticResource TextBrush}"
-                                       FontSize="12"
-                                       FontWeight="SemiBold"
-                                       TextAlignment="Right" />
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,0,0">
+                        <StackPanel Grid.Column="0"
+                                    Margin="0,0,20,0"
+                                    VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                 <TextBlock AutomationProperties.AutomationId="MainChatVoiceStatusText"
                                            Text="{Binding VoiceStatus}"
                                            Foreground="{StaticResource SubtleTextBrush}"
