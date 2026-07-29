@@ -20,7 +20,7 @@ public sealed class WebSourceBackendSettings
 
     public int GeminiMaxRequestsPerHour { get; set; } = 30;
 
-    public int GeminiMaxRequestsPerDay { get; set; } = 40;
+    public int GeminiMaxRequestsPerDay { get; set; } = 150;
 
     public decimal GeminiMonthlySpendLimitUsd { get; set; } = 5m;
 

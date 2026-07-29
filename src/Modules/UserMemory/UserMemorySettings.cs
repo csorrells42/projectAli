@@ -24,6 +24,20 @@ public sealed record UserMemorySettings
 
     public double RecallScoreWindow { get; init; } = 0.05;
 
+    // Semantic-only results need a stronger absolute score and a clear lead
+    // over the next candidate. This rejects the tight 0.40-0.47 noise clusters
+    // observed for facts that are not actually stored, while preserving a
+    // distinct paraphrase match such as 0.57 versus 0.44.
+    public double RecallSemanticOnlyMinimumScore { get; init; } = 0.50;
+
+    public double RecallSemanticOnlyStrongScore { get; init; } = 0.65;
+
+    public double RecallSemanticOnlyMinimumLead { get; init; } = 0.08;
+
+    // A small nonzero BM25 signal is meaningful for exact names, codes, and
+    // phrases whose normalized hybrid score can be lower than a dense match.
+    public double RecallMinimumKeywordScore { get; init; } = 0.08;
+
     public string CollectionName { get; init; } = "ali_user_memories";
 
     public string LemonadeEndpoint { get; init; } = "http://127.0.0.1:13305/api/v1";
@@ -46,6 +60,10 @@ public sealed record UserMemorySettings
         RecallTimeoutMilliseconds = Math.Clamp(RecallTimeoutMilliseconds, 250, 5000),
         RecallMinimumScore = Math.Clamp(RecallMinimumScore, 0, 1),
         RecallScoreWindow = Math.Clamp(RecallScoreWindow, 0, 0.25),
+        RecallSemanticOnlyMinimumScore = Math.Clamp(RecallSemanticOnlyMinimumScore, 0, 1),
+        RecallSemanticOnlyStrongScore = Math.Clamp(RecallSemanticOnlyStrongScore, 0, 1),
+        RecallSemanticOnlyMinimumLead = Math.Clamp(RecallSemanticOnlyMinimumLead, 0, 1),
+        RecallMinimumKeywordScore = Math.Clamp(RecallMinimumKeywordScore, 0, 1),
         CollectionName = string.IsNullOrWhiteSpace(CollectionName) ? "ali_user_memories" : CollectionName.Trim(),
         LemonadeEndpoint = RequireLoopback(LemonadeEndpoint, nameof(LemonadeEndpoint)),
         EmbeddingEndpoint = RequireLoopback(EmbeddingEndpoint, nameof(EmbeddingEndpoint)),

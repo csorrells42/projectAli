@@ -54,6 +54,7 @@ def parse_time(value):
 
 def item(value: dict) -> dict:
     metadata = value.get("metadata") or {}
+    score_details = value.get("score_details") or {}
     category = metadata.get("category") or (value.get("categories") or ["general"])[0]
     return {
         "memoryId": str(value.get("id", "")),
@@ -62,6 +63,9 @@ def item(value: dict) -> dict:
         "createdUtc": parse_time(value.get("created_at")),
         "updatedUtc": parse_time(value.get("updated_at")),
         "score": value.get("score"),
+        "semanticScore": score_details.get("semantic_score"),
+        "keywordScore": score_details.get("bm25_score"),
+        "entityBoost": score_details.get("entity_boost"),
         "explicitlyTaught": bool(metadata.get("explicitly_taught", False)),
         "source": str(metadata.get("source", "mem0")),
     }
@@ -149,7 +153,12 @@ class Worker:
         if operation == "recall":
             query = str(request.get("query", "")).strip()
             maximum = max(1, min(int(request.get("maximumResults", 5)), 8))
-            values = self.memory.search(query, top_k=maximum, filters={"user_id": stable_id})
+            values = self.memory.search(
+                query,
+                top_k=maximum,
+                filters={"user_id": stable_id},
+                explain=True,
+            )
             return self.ok("Memory recall complete.", values.get("results", []))
         if operation == "list":
             # C# deliberately sends a JSON null when the caller requests the

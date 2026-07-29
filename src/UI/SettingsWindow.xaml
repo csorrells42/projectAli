@@ -2662,7 +2662,7 @@
                                                      AutomationProperties.AutomationId="SettingsInternetGeminiMonthlySpendLimitTextBox" />
                                         </StackPanel>
                                     </Grid>
-                                    <TextBlock Text="Defaults: 30/hour, 40/day, and a $5 local estimated-spend breaker. Keep Google's project spend cap enabled as the independent second safety layer."
+                                    <TextBlock Text="Defaults: 30/hour, 150/day, and a $5 local estimated-spend breaker. Keep Google's project spend cap enabled as the independent second safety layer."
                                                TextWrapping="Wrap"
                                                FontSize="11"
                                                Foreground="{StaticResource SubtleTextBrush}"

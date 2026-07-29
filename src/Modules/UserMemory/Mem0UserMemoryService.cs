@@ -180,13 +180,35 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
             .ToList();
         if (scored.Count == 0)
         {
-            return memories.Take(Math.Clamp(maximumResults, 1, 8)).ToList();
+            // A recall result without relevance evidence must never be treated
+            // as a match. Listing memories remains available for inventory.
+            return [];
         }
 
         var topScore = scored[0].Score!.Value;
         if (topScore < normalized.RecallMinimumScore)
         {
             return [];
+        }
+
+        var keywordSupported = scored[0].KeywordScore.GetValueOrDefault()
+            >= normalized.RecallMinimumKeywordScore;
+        if (!keywordSupported)
+        {
+            var semanticScore = scored[0].SemanticScore ?? topScore;
+            if (semanticScore < normalized.RecallSemanticOnlyMinimumScore)
+            {
+                return [];
+            }
+
+            if (semanticScore < normalized.RecallSemanticOnlyStrongScore && scored.Count > 1)
+            {
+                var nextScore = scored[1].SemanticScore ?? scored[1].Score!.Value;
+                if (semanticScore - nextScore < normalized.RecallSemanticOnlyMinimumLead)
+                {
+                    return [];
+                }
+            }
         }
 
         var threshold = Math.Max(

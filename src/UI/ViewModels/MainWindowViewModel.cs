@@ -126,7 +126,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _internetGeminiGroundedSearchEnabled = true;
     private string _internetGeminiApiKeyText = string.Empty;
     private string _internetGeminiHourlyLimitText = "30";
-    private string _internetGeminiDailyLimitText = "40";
+    private string _internetGeminiDailyLimitText = "150";
     private string _internetGeminiMonthlySpendLimitText = "5.00";
     private bool _isGoogleBillingSettingsUnlocked;
     private string _googleBillingProtectionStatusText = "Google billing protection has not been configured yet.";

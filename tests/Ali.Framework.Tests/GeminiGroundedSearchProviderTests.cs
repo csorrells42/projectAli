@@ -7,6 +7,12 @@ namespace Ali.Framework.Tests;
 public sealed class GeminiGroundedSearchProviderTests
 {
     [Fact]
+    public void NewInstallDefaultsToApprovedOneHundredFiftyGroundedRequestsPerDay()
+    {
+        Assert.Equal(150, new WebSourceBackendSettings().GeminiMaxRequestsPerDay);
+    }
+
+    [Fact]
     public async Task ProviderPinsFlashLiteUsesGroundingMetadataAndNeverPlacesKeyInBody()
     {
         const string apiKey = "test-secret-key";

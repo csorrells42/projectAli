@@ -251,13 +251,54 @@ public sealed class UserMemoryArchitectureTests
     {
         var values = new UserMemory[]
         {
-            new("supported", "token: amber compass 9462", "token", null, null, .358, true, "explicit_user_request"),
+            new("supported", "token: amber compass 9462", "token", null, null, .358, true, "explicit_user_request", .46, .256),
             new("noise", "Unrelated recent task state.", "general", null, null, .274, false, "conversation")
         };
 
         var relevant = Mem0UserMemoryService.FilterRecallMatches(values, new UserMemorySettings(), 5);
 
         Assert.Collection(relevant, memory => Assert.Equal("supported", memory.MemoryId));
+    }
+
+    [Fact]
+    public void RecallFiltering_RejectsTightSemanticNoiseClusterForMissingFact()
+    {
+        var values = new UserMemory[]
+        {
+            new("name", "User's name is Chris.", "general", null, null, .465, true, "explicit_user_request", .465, 0),
+            new("desktop", "User requested a Desktop tree.", "general", null, null, .453, false, "conversation", .453, 0),
+            new("files", "User grants explicit file creation.", "general", null, null, .451, true, "explicit_user_request", .451, 0)
+        };
+
+        var relevant = Mem0UserMemoryService.FilterRecallMatches(values, new UserMemorySettings(), 5);
+
+        Assert.Empty(relevant);
+    }
+
+    [Fact]
+    public void RecallFiltering_KeepsClearlySeparatedSemanticParaphrase()
+    {
+        var values = new UserMemory[]
+        {
+            new("name", "User's name is Chris.", "general", null, null, .573, true, "explicit_user_request", .573, 0),
+            new("desktop", "User requested a Desktop tree.", "general", null, null, .444, false, "conversation", .444, 0),
+            new("files", "User grants explicit file creation.", "general", null, null, .440, true, "explicit_user_request", .440, 0)
+        };
+
+        var relevant = Mem0UserMemoryService.FilterRecallMatches(values, new UserMemorySettings(), 5);
+
+        Assert.Collection(relevant, memory => Assert.Equal("name", memory.MemoryId));
+    }
+
+    [Fact]
+    public void RecallFiltering_FailsClosedWhenWorkerReturnsNoScores()
+    {
+        var values = new UserMemory[]
+        {
+            new("unscored", "An unscored item is inventory, not recall evidence.", "general", null, null, null, false, "mem0")
+        };
+
+        Assert.Empty(Mem0UserMemoryService.FilterRecallMatches(values, new UserMemorySettings(), 5));
     }
 
     [Fact]
@@ -335,6 +376,18 @@ public sealed class UserMemoryArchitectureTests
 
         Assert.Contains("request.get(\"category\") or \"\"", listBlock, StringComparison.Ordinal);
         Assert.DoesNotContain("str(request.get(\"category\", \"\"))", listBlock, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mem0WorkerReturnsExplainableHybridRecallScores()
+    {
+        var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
+        var source = File.ReadAllText(path);
+        var recallBlock = source[source.IndexOf("if operation == \"recall\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"list\":", StringComparison.Ordinal)];
+
+        Assert.Contains("explain=True", recallBlock, StringComparison.Ordinal);
+        Assert.Contains("\"semanticScore\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"keywordScore\"", source, StringComparison.Ordinal);
     }
 
     [Fact]

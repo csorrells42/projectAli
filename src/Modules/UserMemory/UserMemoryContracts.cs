@@ -26,7 +26,10 @@ public sealed record UserMemory(
     DateTimeOffset? UpdatedUtc,
     double? Score,
     bool ExplicitlyTaught,
-    string Source);
+    string Source,
+    double? SemanticScore = null,
+    double? KeywordScore = null,
+    double? EntityBoost = null);
 
 public sealed record MemoryOperationResult(
     bool Success,
