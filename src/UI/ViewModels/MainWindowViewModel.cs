@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Ali.Modules.Conversation;
+using Ali.Modules.ConversationBridge;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Evidence;
 using Ali.Modules.Feedback;
@@ -56,6 +57,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
     private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
     private readonly AliServices _services;
+    private readonly ConversationBridgeHost _conversationBridge;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private AliInteractionRuntime? _interactionRuntime;
     private readonly DispatcherTimer _interactionTimer = new() { Interval = TimeSpan.FromMilliseconds(75) };
@@ -197,10 +199,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _assistantRenameStatus = "Changing the name preserves this assistant profile and takes effect after restart.";
     private bool _isAgentActivityExpanded;
     private string _agentActivitySummary = "Ready for the next request.";
+    private AgentToolApprovalPrompt? _activeBridgeApproval;
 
     public MainWindowViewModel(AliServices services)
     {
         _services = services;
+        _conversationBridge = new ConversationBridgeHost(
+            _services.DataRoot,
+            SubmitConversationBridgeTurnAsync,
+            CaptureConversationBridgeSnapshot);
+        ConversationBridgeSettings = new ConversationBridgeSettingsViewModel(_conversationBridge);
         McpSettings = new McpSettingsViewModel(_services.McpClients);
         McpServerSettings = new McpServerSettingsViewModel(_services.McpServer, _services.McpClients);
         LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
@@ -419,6 +427,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public McpSettingsViewModel McpSettings { get; }
 
     public McpServerSettingsViewModel McpServerSettings { get; }
+
+    public ConversationBridgeSettingsViewModel ConversationBridgeSettings { get; }
 
     public LocalKnowledgeSettingsViewModel LocalKnowledgeSettings { get; }
 
@@ -1815,6 +1825,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Task InitializeMcpServerAsync() => McpServerSettings.StartIfEnabledAsync();
 
+    public Task InitializeConversationBridgeAsync() => ConversationBridgeSettings.StartIfEnabledAsync();
+
     public async Task StartLocalRuntimeAsync()
     {
         var options = _services.LoadRuntimeSettings();
@@ -1873,6 +1885,15 @@ public sealed class MainWindowViewModel : ObservableObject
         catch
         {
             // Model and camera shutdown must continue even if the optional MCP server faults.
+        }
+
+        try
+        {
+            await _conversationBridge.StopAsync().ConfigureAwait(true);
+        }
+        catch
+        {
+            // Runtime and camera shutdown must continue if the optional debug bridge faults.
         }
 
         _interactionTimer.Stop();
@@ -2269,22 +2290,30 @@ public sealed class MainWindowViewModel : ObservableObject
                     AddAgentActivity(chunk);
                     if (chunk.ApprovalPrompt is { } approvalPrompt)
                     {
-                        var choice = AgentToolApprovalWindow.Show(
-                            System.Windows.Application.Current?.MainWindow,
-                            approvalPrompt);
-                        if (!_services.Orchestrator.ResolveToolApproval(new AgentToolApprovalDecision(
-                                approvalPrompt.RequestId,
-                                choice)))
+                        _activeBridgeApproval = approvalPrompt;
+                        try
                         {
-                            AddAgentActivity(new AssistantStreamChunk(
-                                chunk.ConversationId,
-                                chunk.UserMessageId,
-                                chunk.AssistantMessageId,
-                                "Approval response expired",
-                                EvidenceStatus.Unknown,
-                                IsActivity: true,
-                                ActivityKind: AgentActivityKind.Warning,
-                                ActivityDetail: "The agent run was no longer waiting for this permission decision."));
+                            var choice = AgentToolApprovalWindow.Show(
+                                System.Windows.Application.Current?.MainWindow,
+                                approvalPrompt);
+                            if (!_services.Orchestrator.ResolveToolApproval(new AgentToolApprovalDecision(
+                                    approvalPrompt.RequestId,
+                                    choice)))
+                            {
+                                AddAgentActivity(new AssistantStreamChunk(
+                                    chunk.ConversationId,
+                                    chunk.UserMessageId,
+                                    chunk.AssistantMessageId,
+                                    "Approval response expired",
+                                    EvidenceStatus.Unknown,
+                                    IsActivity: true,
+                                    ActivityKind: AgentActivityKind.Warning,
+                                    ActivityDetail: "The agent run was no longer waiting for this permission decision."));
+                            }
+                        }
+                        finally
+                        {
+                            _activeBridgeApproval = null;
                         }
                     }
 
@@ -2421,6 +2450,77 @@ public sealed class MainWindowViewModel : ObservableObject
         AgentActivities.Clear();
         AgentActivitySummary = "Ready for the next request.";
     }
+
+    private async Task<ConversationBridgeSnapshot> SubmitConversationBridgeTurnAsync(
+        string text,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dispatcher = System.Windows.Application.Current?.Dispatcher
+            ?? throw new InvalidOperationException("Ali's UI dispatcher is unavailable.");
+        if (!dispatcher.CheckAccess())
+        {
+            return await dispatcher.InvokeAsync(
+                    () => SubmitConversationBridgeTurnAsync(text, cancellationToken))
+                .Task.Unwrap()
+                .ConfigureAwait(false);
+        }
+
+        await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+        return CaptureConversationBridgeSnapshot();
+    }
+
+    private ConversationBridgeSnapshot CaptureConversationBridgeSnapshot()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            return dispatcher.Invoke(CaptureConversationBridgeSnapshot);
+        }
+
+        var approval = _activeBridgeApproval is null
+            ? null
+            : new ConversationBridgeApprovalWait(
+                _activeBridgeApproval.RequestId,
+                _activeBridgeApproval.ToolName,
+                _activeBridgeApproval.Arguments,
+                _activeBridgeApproval.Description);
+        return new ConversationBridgeSnapshot(
+            AssistantName,
+            _conversationId,
+            IsBusy,
+            StatusText,
+            AgentActivitySummary,
+            approval,
+            Messages.Select(ToConversationBridgeMessage).ToArray(),
+            AgentActivities.Select(activity => new ConversationBridgeActivity(
+                activity.Kind.ToString(),
+                activity.Title,
+                activity.Detail,
+                activity.CreatedAt,
+                activity.ElapsedMilliseconds)).ToArray(),
+            DateTimeOffset.UtcNow);
+    }
+
+    private static ConversationBridgeMessage ToConversationBridgeMessage(ChatMessageViewModel message) => new(
+        message.Id,
+        message.Role.ToString(),
+        message.Text,
+        message.EvidenceStatus.ToString(),
+        message.CreatedAt,
+        message.IsFlaggedForCorrection,
+        MarkdownMessageParser.Parse(message.Text).Select(ToConversationBridgeRenderBlock).ToArray());
+
+    private static ConversationBridgeRenderBlock ToConversationBridgeRenderBlock(MarkdownMessageBlock block) =>
+        block switch
+        {
+            MarkdownHeadingBlock heading => new("heading", heading.Text, Level: heading.Level),
+            MarkdownParagraphBlock paragraph => new("paragraph", paragraph.Text),
+            MarkdownListItemBlock item => new("list-item", item.Text, Marker: item.Marker),
+            MarkdownCodeBlock code => new("code", code.Text),
+            MarkdownTableBlock table => new("table", Headers: table.Headers, Rows: table.Rows),
+            _ => new("unknown", block.ToString() ?? string.Empty)
+        };
 
     private void Stop()
     {

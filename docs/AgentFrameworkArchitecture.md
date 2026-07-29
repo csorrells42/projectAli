@@ -53,3 +53,11 @@ The **Settings > Agents** tab provides three activation policies:
 - **Automatic for complex work:** permits model selection only under the eligibility boundary above.
 
 Workflow state uses the Agent Framework JSON checkpoint manager and a file-backed checkpoint store under Ali's local data directory. The Settings tab reports the stored checkpoint count and can archive checkpoints recoverably into a timestamped sibling folder. Checkpointing does not introduce concurrent or background execution.
+
+## Live conversation debugging bridge
+
+The optional **Settings > Agents > Live Ali debugging bridge** binds Codex and other local test clients to the active desktop conversation without screen automation. `POST /v1/turns` enters text through the same typed-input method used by the Send button. `GET /v1/session` returns the current transcript, parsed render blocks, evidence state, visible Agent Activity, busy/status state, and any permission-wait metadata.
+
+The bridge listens only on `127.0.0.1`, requires a generated bearer token, and is off by default. It deliberately has no permission-decision endpoint: approval remains a visible user action in Ali's real permission window. The bridge returns visible/rendered state only and never exports hidden model reasoning.
+
+Local debugging uses `tools\TalkToAli.ps1 Status` to clone the current visible session or `tools\TalkToAli.ps1 Send "message"` to submit through the live Send pipeline. The helper discovers Ali's current local data root and token without printing the token.
