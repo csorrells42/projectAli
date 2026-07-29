@@ -152,7 +152,9 @@ public sealed class AliWorkstationFileUtilities(AliWorkstationFileAccess access)
             EnsureDestinationAbsent(destination.PhysicalPath);
             var parent = Path.GetDirectoryName(destination.PhysicalPath)!;
             Directory.CreateDirectory(parent);
-            staging = Path.Combine(parent, $".ali-archive-{Guid.NewGuid():N}{Path.GetExtension(destination.PhysicalPath)}");
+            var stagingParent = ResolveArchiveStagingParent(source, destination, parent);
+            Directory.CreateDirectory(stagingParent);
+            staging = Path.Combine(stagingParent, $".ali-archive-{Guid.NewGuid():N}{Path.GetExtension(destination.PhysicalPath)}");
 
             switch (normalizedFormat)
             {
@@ -407,6 +409,35 @@ public sealed class AliWorkstationFileUtilities(AliWorkstationFileAccess access)
             using var archive = ZipFile.Open(destination, ZipArchiveMode.Create);
             archive.CreateEntryFromFile(source.PhysicalPath, Path.GetFileName(source.PhysicalPath), CompressionLevel.Optimal);
         }
+    }
+
+    private static string ResolveArchiveStagingParent(
+        ResolvedItem source,
+        AliResolvedWorkstationPath destination,
+        string destinationParent)
+    {
+        if (!source.IsDirectory || !IsWithinOrEqual(destinationParent, source.PhysicalPath))
+        {
+            return destinationParent;
+        }
+
+        var mountRoot = Path.TrimEndingDirectorySeparator(destination.MountRoot);
+        if (!IsWithinOrEqual(mountRoot, source.PhysicalPath))
+        {
+            return mountRoot;
+        }
+
+        throw new InvalidOperationException(
+            "Ali cannot place an archive inside the same approved mount root that is being archived. "
+            + "Choose a destination outside the source folder.");
+    }
+
+    private static bool IsWithinOrEqual(string candidatePath, string directoryPath)
+    {
+        var candidate = Path.GetFullPath(candidatePath);
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath));
+        return candidate.Equals(directory, StringComparison.OrdinalIgnoreCase)
+            || candidate.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void CreateTar(ResolvedItem source, string destination)

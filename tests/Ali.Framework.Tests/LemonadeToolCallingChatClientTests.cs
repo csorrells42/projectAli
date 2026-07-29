@@ -1018,8 +1018,39 @@ public sealed class LemonadeToolCallingChatClientTests
         var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
         Assert.Contains("CURRENT HUMAN TURN", decisionPrompt, StringComparison.Ordinal);
         Assert.Contains(currentRequest, decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Separate the requested action from its stated purpose", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("context, not authorization", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("do not call the same tool again with identical arguments", decisionPrompt, StringComparison.Ordinal);
         Assert.Contains("Do not prepend, repeat, summarize", decisionPrompt, StringComparison.Ordinal);
         Assert.Contains("Omit self-directed planning notes", decisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FileDeleteCatalog_AdvertisesRecoverableFolderDeletionDespiteFrameworkDefaultDescription()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"I can move that folder into recoverable trash after approval.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var delete = AIFunctionFactory.Create(
+            (Func<string, bool>)(_ => true),
+            AliCapabilityCatalog.FileDeleteName,
+            "Delete a file.");
+
+        _ = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Move this folder to recoverable trash.")],
+            new ChatOptions { Tools = [delete] },
+            TestContext.Current.CancellationToken);
+
+        var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
+        Assert.Contains("file or complete folder tree", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("trash destination is selected internally", decisionPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"description\":\"Delete a file.\"", decisionPrompt, StringComparison.Ordinal);
     }
 
     private sealed class RecordingChatClient(params ChatResponse[] responses) : IChatClient

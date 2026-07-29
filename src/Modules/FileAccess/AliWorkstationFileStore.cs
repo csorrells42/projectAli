@@ -149,16 +149,23 @@ public sealed class AliWorkstationFileStore : AgentFileStore
         return Task.CompletedTask;
     }
 
-    public override async Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
+    public override Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
     {
-        var resolved = ResolveFile(path);
-        if (!await resolved.Mount.Store.FileExistsAsync(resolved.RelativePath, cancellationToken).ConfigureAwait(false))
+        var resolved = ResolveExistingBareItemOrPath(path);
+        if (string.IsNullOrWhiteSpace(resolved.RelativePath))
         {
-            return false;
+            throw new ArgumentException("An item name is required beneath the workstation mount.", nameof(path));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         var source = resolved.Mount.ResolvePhysicalPath(resolved.RelativePath);
+        var isFile = File.Exists(source);
+        var isDirectory = Directory.Exists(source);
+        if (!isFile && !isDirectory)
+        {
+            return Task.FromResult(false);
+        }
+
         var trashDirectory = Path.Combine(
             _trashRoot,
             DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff"),
@@ -167,8 +174,15 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             trashDirectory,
             resolved.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        File.Move(source, destination);
-        return true;
+        if (isFile)
+        {
+            File.Move(source, destination);
+        }
+        else
+        {
+            Directory.Move(source, destination);
+        }
+        return Task.FromResult(true);
     }
 
     public override async Task<IReadOnlyList<FileStoreEntry>> ListChildrenAsync(

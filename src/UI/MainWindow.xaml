@@ -1037,38 +1037,44 @@
                     </Grid>
                 </Border>
 
-                <StackPanel Grid.Row="1"
-                            Grid.RowSpan="2"
-                            Grid.Column="1"
-                            AutomationProperties.AutomationId="MainChatReasoningEffort"
-                            Orientation="Vertical"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Bottom"
-                            Margin="0,0,8,8"
-                            ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
+                <Grid Grid.Row="1"
+                      Grid.RowSpan="2"
+                      Grid.Column="1"
+                      AutomationProperties.AutomationId="MainChatReasoningEffort"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Bottom"
+                      Margin="0,0,8,8"
+                      ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <TextBlock Text="Effort"
                                Foreground="{StaticResource MutedTextBrush}"
                                FontSize="10"
                                FontWeight="SemiBold"
                                HorizontalAlignment="Center"
                                Margin="0,0,0,2" />
-                    <StackPanel Orientation="Vertical">
-                        <RadioButton Content="Low"
-                                     GroupName="ReasoningEffort"
-                                     IsChecked="{Binding IsReasoningLow}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     Margin="0,0,0,2" />
-                        <RadioButton Content="Medium"
-                                     GroupName="ReasoningEffort"
-                                     IsChecked="{Binding IsReasoningMedium}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     Margin="0,0,0,2" />
-                        <RadioButton Content="High"
-                                     GroupName="ReasoningEffort"
-                                     IsChecked="{Binding IsReasoningHigh}"
-                                     Foreground="{StaticResource TextBrush}" />
-                    </StackPanel>
-                </StackPanel>
+                    <RadioButton Grid.Row="1"
+                                 Content="Low"
+                                 GroupName="ReasoningEffort"
+                                 IsChecked="{Binding IsReasoningLow}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 Margin="0,0,0,2" />
+                    <RadioButton Grid.Row="2"
+                                 Content="Medium"
+                                 GroupName="ReasoningEffort"
+                                 IsChecked="{Binding IsReasoningMedium}"
+                                 Foreground="{StaticResource TextBrush}"
+                                 Margin="0,0,0,2" />
+                    <RadioButton Grid.Row="3"
+                                 Content="High"
+                                 GroupName="ReasoningEffort"
+                                 IsChecked="{Binding IsReasoningHigh}"
+                                 Foreground="{StaticResource TextBrush}" />
+                </Grid>
 
                 <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>

@@ -126,12 +126,12 @@ public sealed class AliWorkstationFileAccess
         + "'documents' means Documents/<file>, 'downloads' means Downloads/<file>, and an export means Exports/<file>. "
         + "For example, a request for touch.txt on the desktop must use Desktop/touch.txt. "
         + "Never ask the user for an absolute path; if a path call fails, correct it with one of these virtual roots and retry. "
-        + "Read, list, and search files when useful. "
+        + "Read, list, and search files when useful. Delete can move either a file or a complete folder tree into recoverable trash. "
         + "Ali can also copy files or folders, create folders, inspect metadata and SHA-256 hashes, and create, list, or extract archives. "
         + "ZIP is the default archive format. Use TAR, GZip, or TAR.GZ when the user requests one of those formats, and use 7-Zip only when the user explicitly requests 7z/7-Zip. "
         + "For new artifacts, default to Exports unless the user names another approved root. "
         + "Write with overwrite=false when creating a new file. Existing-file overwrite, replace, line edits, and delete require approval. "
-        + "A delete moves the file into Ali's recoverable trash rather than erasing it permanently.";
+        + "A delete moves the selected file or folder into Ali's recoverable trash rather than erasing it permanently.";
 
     public static AliWorkstationFileAccess CreateDefault(
         string userDataRoot,

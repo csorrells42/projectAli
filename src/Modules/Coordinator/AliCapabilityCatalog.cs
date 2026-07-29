@@ -143,7 +143,7 @@ public static class AliCapabilityCatalog
         new(GetCurrentLocalTimeName, "Return the authoritative local computer date, time, and time zone."),
         new(FileWriteName, "Create a new text file or, after approval, overwrite an existing file in Ali's approved workstation folders.", "Microsoft Agent Framework file access"),
         new(FileReadName, "Read a text file from Ali's approved workstation folders.", "Microsoft Agent Framework file access"),
-        new(FileDeleteName, "Move a file from an approved workstation folder into Ali's recoverable trash after approval.", "Microsoft Agent Framework file access"),
+        new(FileDeleteName, "Move a file or folder from an approved workstation root into Ali's recoverable trash after approval.", "Microsoft Agent Framework file access"),
         new(FileListName, "List files and folders under Ali's approved workstation roots.", "Microsoft Agent Framework file access"),
         new(FileSearchName, "Search text inside files under Ali's approved workstation roots.", "Microsoft Agent Framework file access"),
         new(FileReplaceName, "Edit matching text in an existing file after approval.", "Microsoft Agent Framework file access"),

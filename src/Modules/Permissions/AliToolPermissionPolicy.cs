@@ -21,7 +21,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.ResearchWebName, "Starts metered deep web research"),
         new(AliCapabilityCatalog.RunMagenticOrchestrationName, "Starts bounded multi-agent Magentic orchestration", "Controlled by the Agents tab"),
         new(AliCapabilityCatalog.FileWriteName, "Creates or overwrites a workstation file", "New files allowed; overwrite asks"),
-        new(AliCapabilityCatalog.FileDeleteName, "Moves a workstation file to recoverable trash"),
+        new(AliCapabilityCatalog.FileDeleteName, "Moves a workstation file or folder to recoverable trash"),
         new(AliCapabilityCatalog.FileReplaceName, "Edits matching text in an existing file"),
         new(AliCapabilityCatalog.FileReplaceLinesName, "Edits specific lines in an existing file"),
         new(AliCapabilityCatalog.FileMoveName, "Renames or moves an existing workstation file"),

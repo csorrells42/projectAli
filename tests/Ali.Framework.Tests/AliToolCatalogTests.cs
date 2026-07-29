@@ -21,6 +21,9 @@ public sealed class AliToolCatalogTests
         Assert.Contains("Never use it for greetings", instructions, StringComparison.Ordinal);
         Assert.Contains("newest user message as authoritative", instructions, StringComparison.Ordinal);
         Assert.Contains("Never carry forward or retry an earlier failed action", instructions, StringComparison.Ordinal);
+        Assert.Contains("stated purpose, future plan, or explanation", instructions, StringComparison.Ordinal);
+        Assert.Contains("stop immediately after the named action succeeds", instructions, StringComparison.Ordinal);
+        Assert.Contains("never call the same tool again with identical arguments", instructions, StringComparison.Ordinal);
         Assert.Contains("If the user denies any permission request", instructions, StringComparison.Ordinal);
         Assert.Contains("exploit a saved permission", instructions, StringComparison.Ordinal);
         Assert.Contains("Never reduce a taught fact to its bare value", instructions, StringComparison.Ordinal);
@@ -28,6 +31,8 @@ public sealed class AliToolCatalogTests
         Assert.Contains("use only its exact memoryId", instructions, StringComparison.Ordinal);
         Assert.Contains("use file_access_move", instructions, StringComparison.Ordinal);
         Assert.Contains("Use file_access_copy", instructions, StringComparison.Ordinal);
+        Assert.Contains("file_access_delete accepts either one file or one complete folder tree", instructions, StringComparison.Ordinal);
+        Assert.Contains("never ask the user to supply a trash path", instructions, StringComparison.Ordinal);
         Assert.Contains("ZIP is the standard default", instructions, StringComparison.Ordinal);
         Assert.Contains("Use 7z only when the user explicitly asks", instructions, StringComparison.Ordinal);
         Assert.Contains("use them instead of claiming incapability", instructions, StringComparison.Ordinal);

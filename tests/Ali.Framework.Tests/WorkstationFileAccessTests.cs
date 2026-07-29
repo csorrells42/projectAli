@@ -418,6 +418,35 @@ public sealed class WorkstationFileAccessTests
     }
 
     [Fact]
+    public async Task ExistingDirectoryTree_IsMovedToRecoverableTrashAndMountRootCannotBeDeleted()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var directory = Path.Combine(root, "workspace", "delete-tree", "nested");
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(
+                Path.Combine(directory, "payload.txt"),
+                "recoverable folder payload",
+                TestContext.Current.CancellationToken);
+
+            Assert.True(await access.Store.DeleteAsync(
+                "Workspace/delete-tree",
+                TestContext.Current.CancellationToken));
+            Assert.False(Directory.Exists(Path.Combine(root, "workspace", "delete-tree")));
+            var recovered = Assert.Single(Directory.EnumerateFiles(
+                access.RecoverableTrashPath,
+                "payload.txt",
+                SearchOption.AllDirectories));
+            Assert.Equal(
+                "recoverable folder payload",
+                await File.ReadAllTextAsync(recovered, TestContext.Current.CancellationToken));
+            await Assert.ThrowsAsync<ArgumentException>(() => access.Store.DeleteAsync(
+                "Workspace",
+                TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
     public async Task BareExistingFile_FailsClearlyWhenMoreThanOneRootMatches()
     {
         await WithAccessAsync(async (root, access, permissions) =>
@@ -600,6 +629,45 @@ public sealed class WorkstationFileAccessTests
             Assert.False(rejected.Success);
             Assert.False(File.Exists(Path.Combine(root, "exports", "escape.txt")));
             Assert.False(Directory.Exists(Path.Combine(root, "exports", "malicious-output")));
+        });
+    }
+
+    [Fact]
+    public async Task ArchiveUtilities_CanPlaceArchiveInsideSourceFolderWithoutArchivingItsStagingFile()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var utilities = new AliWorkstationFileUtilities(access);
+            var source = Path.Combine(root, "workspace", "inside-source");
+            Directory.CreateDirectory(source);
+            await File.WriteAllTextAsync(
+                Path.Combine(source, "beta.txt"),
+                "beta",
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Combine(source, "gamma.txt"),
+                "gamma",
+                TestContext.Current.CancellationToken);
+
+            var created = await utilities.CreateArchiveAsync(
+                "Workspace/inside-source",
+                "Workspace/inside-source/bundle.zip",
+                "zip",
+                TestContext.Current.CancellationToken);
+
+            Assert.True(created.Success, created.Message);
+            var listed = await utilities.ListArchiveAsync(
+                created.ArchivePath,
+                TestContext.Current.CancellationToken);
+            Assert.True(listed.Success, listed.Message);
+            Assert.Equal(
+                ["beta.txt", "gamma.txt"],
+                listed.Entries.Select(entry => entry.Path.Replace('\\', '/')).Order(StringComparer.Ordinal));
+            Assert.DoesNotContain(listed.Entries, entry => entry.Path.Contains(".ali-archive-", StringComparison.Ordinal));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(
+                Path.Combine(root, "workspace"),
+                ".ali-archive-*",
+                SearchOption.TopDirectoryOnly));
         });
     }
 

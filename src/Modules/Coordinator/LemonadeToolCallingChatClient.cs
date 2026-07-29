@@ -846,7 +846,7 @@ internal sealed class LemonadeToolCallingChatClient(
         var catalog = tools.Select(tool => new
         {
             name = tool.Name,
-            description = CompactCatalogDescription(tool.Description),
+            description = CompactCatalogDescription(ResolveToolDescription(tool)),
             parameters = CompactToolSchema(tool.JsonSchema)
         });
         return string.Join(
@@ -857,6 +857,8 @@ internal sealed class LemonadeToolCallingChatClient(
                 + JsonSerializer.Serialize(currentUserRequest?.Trim() ?? string.Empty, JsonOptions),
             "Every tool result below belongs to that current human turn. A tool-result message becoming the newest framework message does not replace or broaden the current human request.",
             "The newest user message is authoritative. Do not resume or retry an earlier failed action unless the newest message explicitly requests a retry or completing that action is still necessary to satisfy the newest request.",
+            "Separate the requested action from its stated purpose. A reason, future plan, or explanation such as preparing for a later retry is context, not authorization to perform that later task now. If the newest request limits scope with only or just, stop after the named operation succeeds.",
+            "If a tool result reports failure, do not call the same tool again with identical arguments unless external state changed or an approval just resumed that exact suspended call. Use the error to choose a meaningfully different action or answer honestly.",
             "A final answer must answer only the CURRENT HUMAN TURN. Do not prepend, repeat, summarize, or finish an answer to an earlier human turn unless the current request explicitly asks for it.",
             "Return exactly one JSON object and no Markdown or commentary.",
             "To call a tool: {\"action\":\"call\",\"tool\":\"exact_tool_name\",\"arguments\":{},\"summary\":\"short user-visible reason\"}",
@@ -874,6 +876,11 @@ internal sealed class LemonadeToolCallingChatClient(
             "AVAILABLE TOOLS:",
             JsonSerializer.Serialize(catalog, JsonOptions));
     }
+
+    private static string? ResolveToolDescription(AIFunctionDeclaration tool) =>
+        string.Equals(tool.Name, AliCapabilityCatalog.FileDeleteName, StringComparison.OrdinalIgnoreCase)
+            ? "Move one existing file or complete folder tree into Ali-managed recoverable trash after approval. The trash destination is selected internally; never ask the user for one."
+            : tool.Description;
 
     private static string CompactCatalogDescription(string? description)
     {
