@@ -190,6 +190,39 @@
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
         </Style>
+        <Style x:Key="ChatActionLinkButton" TargetType="Button">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="#66D9EF" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,14,0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <TextBlock x:Name="LinkText"
+                                   Text="{TemplateBinding Content}"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   FontSize="12"
+                                   Padding="{TemplateBinding Padding}" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="LinkText" Property="TextDecorations" Value="Underline" />
+                                <Setter Property="Foreground" Value="#B8F2FF" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="LinkText" Property="TextDecorations" Value="Underline" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#66707A" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="Menu">
             <Setter Property="Background" Value="{StaticResource PanelBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
@@ -615,6 +648,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0"
                                AutomationProperties.AutomationId="MainChatStatusText"
@@ -645,6 +679,40 @@
                         </StackPanel>
                     </Border>
                     <ItemsControl Grid.Column="2"
+                                  AutomationProperties.AutomationId="MainChatStackStatus"
+                                  ItemsSource="{Binding StackComponents}"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,10,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:StackComponentStatusViewModel}">
+                                <Border BorderBrush="{Binding Brush}"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Padding="6,3"
+                                        Margin="0,0,5,0"
+                                        ToolTip="{Binding ToolTip}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="7"
+                                                 Height="7"
+                                                 Fill="{Binding Brush}"
+                                                 Margin="0,0,4,0"
+                                                 VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Label}"
+                                                   Foreground="{Binding Brush}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ItemsControl Grid.Column="3"
                                   ItemsSource="{Binding ResourceMeters}"
                                   VerticalAlignment="Center"
                                   Margin="0,0,14,0">
@@ -678,7 +746,7 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <ToggleButton Grid.Column="3"
+                    <ToggleButton Grid.Column="4"
                                   AutomationProperties.AutomationId="MainChatCameraBarToggleButton"
                                   AutomationProperties.Name="Camera controls"
                                   IsChecked="{Binding IsCameraBarExpanded, Mode=TwoWay}"
@@ -729,7 +797,7 @@
                             </ControlTemplate>
                         </ToggleButton.Template>
                     </ToggleButton>
-                    <Button Grid.Column="4"
+                    <Button Grid.Column="5"
                             Content="Settings"
                             AutomationProperties.AutomationId="MainChatSettingsButton"
                             Command="{Binding OpenSettingsCommand}"
@@ -748,7 +816,7 @@
                 <ItemsControl ItemsSource="{Binding Messages}" MaxWidth="840" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type vm:ChatMessageViewModel}">
-                            <StackPanel Margin="0,0,0,18"
+                            <StackPanel Margin="0,0,0,10"
                                         MaxWidth="760"
                                         HorizontalAlignment="{Binding MessageAlignment}">
                                 <controls:MarkdownMessageView Markdown="{Binding Text}"
@@ -758,29 +826,24 @@
                                                               FontSize="15"
                                                               Foreground="{StaticResource TextBrush}" />
                                 <StackPanel Orientation="Horizontal"
-                                            Margin="0,8,0,0"
+                                            Margin="0,3,0,0"
                                             HorizontalAlignment="{Binding MessageAlignment}">
                                     <Button Content="Copy"
+                                            Style="{StaticResource ChatActionLinkButton}"
                                             Command="{Binding DataContext.CopyMessageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}"
-                                            Height="28"
-                                            MinHeight="28"
-                                            Margin="0,0,8,0"
-                                            Padding="9,0"
-                                            FontSize="12" />
+                                            AutomationProperties.Name="Copy message" />
                                     <Button Content="Flag as incorrect"
+                                            Style="{StaticResource ChatActionLinkButton}"
                                             Command="{Binding DataContext.FlagIncorrectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}"
-                                            Height="28"
-                                            MinHeight="28"
                                             Margin="0"
-                                            Padding="9,0"
-                                            FontSize="12"
                                             Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
                                     <TextBlock Text="Flagged for correction"
-                                               Margin="8,6,0,0"
+                                               Margin="10,0,0,0"
                                                Foreground="#FBBF24"
                                                FontSize="12"
+                                               VerticalAlignment="Center"
                                                Visibility="{Binding IsFlaggedForCorrection, Converter={StaticResource BoolToVisibilityConverter}}" />
                                 </StackPanel>
                             </StackPanel>
@@ -1004,60 +1067,68 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding AttachmentStatus}" Foreground="{StaticResource SubtleTextBrush}" FontSize="12" TextWrapping="Wrap" />
-                    <StackPanel Grid.Column="1"
-                                Orientation="Horizontal"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Margin="18,0">
-                        <CheckBox Content="Read replies aloud"
-                                  IsChecked="{Binding AssistantReadsRepliesOutLoud, Mode=TwoWay}"
-                                  ToolTip="{Binding VoiceReadAloudToolTip}"
-                                  VerticalAlignment="Center"
-                                  Margin="0,0,18,0" />
-                        <CheckBox Content="Enable PTT"
-                                  AutomationProperties.AutomationId="MainChatEnablePttCheckBox"
-                                  IsChecked="{Binding AutoSendVoiceTranscripts, Mode=TwoWay}"
-                                  ToolTip="{Binding PushToTalkEnabledToolTip}"
-                                  VerticalAlignment="Center"
-                                  Margin="0,0,18,0" />
-                        <TextBlock Text="Speech speed"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0" />
-                        <Slider Minimum="0.75"
-                                Maximum="1.6"
-                                Width="160"
-                                TickFrequency="0.05"
-                                IsSnapToTickEnabled="True"
-                                SmallChange="0.05"
-                                LargeChange="0.1"
-                                Value="{Binding SpeechRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                VerticalAlignment="Center"
-                                Margin="0,0,8,0" />
-                        <TextBlock Text="{Binding SpeechRateLabel}"
-                                   Foreground="{StaticResource TextBrush}"
-                                   FontWeight="SemiBold"
-                                   MinWidth="40"
-                                   VerticalAlignment="Center" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
-                        <TextBlock AutomationProperties.AutomationId="MainChatAttentionStatusText"
-                                   Text="{Binding AttentionStatus}"
-                                   Foreground="{StaticResource TextBrush}"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   TextWrapping="Wrap"
-                                   TextAlignment="Right" />
-                        <TextBlock AutomationProperties.AutomationId="MainChatVoiceStatusText"
-                                   Text="{Binding VoiceStatus}"
-                                   Foreground="{StaticResource SubtleTextBrush}"
-                                   FontSize="11"
-                                   TextWrapping="Wrap"
-                                   TextAlignment="Right" />
-                    </StackPanel>
+                    <TextBlock Text="{Binding AttachmentStatus}"
+                               Foreground="{StaticResource SubtleTextBrush}"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center"
+                               Margin="0,0,28,0" />
+                    <Grid Grid.Column="1" HorizontalAlignment="Right">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,20,0">
+                            <TextBlock AutomationProperties.AutomationId="MainChatAttentionStatusText"
+                                       Text="{Binding AttentionStatus}"
+                                       Foreground="{StaticResource TextBrush}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       TextAlignment="Right" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,0,0">
+                                <TextBlock AutomationProperties.AutomationId="MainChatVoiceStatusText"
+                                           Text="{Binding VoiceStatus}"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="390"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,14,0" />
+                                <TextBlock Text="Speech speed"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <Slider Minimum="0.75"
+                                        Maximum="1.6"
+                                        Width="125"
+                                        TickFrequency="0.05"
+                                        IsSnapToTickEnabled="True"
+                                        SmallChange="0.05"
+                                        LargeChange="0.1"
+                                        Value="{Binding SpeechRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,8,0" />
+                                <TextBlock Text="{Binding SpeechRateLabel}"
+                                           Foreground="{StaticResource TextBrush}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           MinWidth="38"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <CheckBox Content="Read replies aloud"
+                                      IsChecked="{Binding AssistantReadsRepliesOutLoud, Mode=TwoWay}"
+                                      ToolTip="{Binding VoiceReadAloudToolTip}"
+                                      Margin="0,0,0,3" />
+                            <CheckBox Content="Enable PTT"
+                                      AutomationProperties.AutomationId="MainChatEnablePttCheckBox"
+                                      IsChecked="{Binding AutoSendVoiceTranscripts, Mode=TwoWay}"
+                                      ToolTip="{Binding PushToTalkEnabledToolTip}" />
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>

@@ -4,6 +4,7 @@ using Ali.Modules.Permissions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using System.Reflection;
+using System.IO.Compression;
 
 namespace Ali.Framework.Tests;
 
@@ -458,6 +459,192 @@ public sealed class WorkstationFileAccessTests
                 Path.Combine(root, "workspace", "touch.cs"),
                 TestContext.Current.CancellationToken));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileMoveName));
+        });
+    }
+
+    [Fact]
+    public async Task BinaryUtilities_CopyFoldersCreateDirectoriesAndHashFilesWithoutOverwrite()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var utilities = new AliWorkstationFileUtilities(access);
+            var source = Path.Combine(root, "workspace", "source");
+            Directory.CreateDirectory(source);
+            await File.WriteAllBytesAsync(
+                Path.Combine(source, "payload.bin"),
+                [0, 1, 2, 3, 255],
+                TestContext.Current.CancellationToken);
+
+            var copied = await utilities.CopyAsync(
+                "Workspace/source",
+                "Exports/copied",
+                TestContext.Current.CancellationToken);
+            Assert.True(copied.Success, copied.Message);
+            Assert.Equal(
+                new byte[] { 0, 1, 2, 3, 255 },
+                await File.ReadAllBytesAsync(Path.Combine(root, "exports", "copied", "payload.bin"), TestContext.Current.CancellationToken));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(
+                Path.Combine(root, "exports"),
+                ".ali-copy-*",
+                SearchOption.TopDirectoryOnly));
+
+            var collision = await utilities.CopyAsync(
+                "Workspace/source",
+                "Exports/copied",
+                TestContext.Current.CancellationToken);
+            Assert.False(collision.Success);
+
+            var directory = await utilities.CreateDirectoryAsync(
+                "Exports/empty-folder",
+                TestContext.Current.CancellationToken);
+            Assert.True(directory.Success, directory.Message);
+            Assert.True(Directory.Exists(Path.Combine(root, "exports", "empty-folder")));
+
+            var metadata = await utilities.GetMetadataAsync(
+                "Exports/copied/payload.bin",
+                includeSha256: true,
+                TestContext.Current.CancellationToken);
+            Assert.True(metadata.Success, metadata.Message);
+            Assert.Equal(5, metadata.SizeBytes);
+            Assert.Equal("ff5d8507b6a72bee2debce2c0054798deaccdc5d8a1b945b6280ce8aa9cba52e", metadata.Sha256);
+
+            var moved = await access.MoveAsync(
+                "Exports/copied",
+                "Exports/renamed",
+                TestContext.Current.CancellationToken);
+            Assert.True(moved.Success, moved.Message);
+            Assert.False(Directory.Exists(Path.Combine(root, "exports", "copied")));
+            Assert.True(File.Exists(Path.Combine(root, "exports", "renamed", "payload.bin")));
+        });
+    }
+
+    [Theory]
+    [InlineData(null, "Exports/default", "zip")]
+    [InlineData("tar", "Exports/sample.tar", "tar")]
+    [InlineData("tar.gz", "Exports/sample.tar.gz", "tar.gz")]
+    public async Task ArchiveUtilities_CreateListAndExtractPortableFormats(
+        string? requestedFormat,
+        string archivePath,
+        string expectedFormat)
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var utilities = new AliWorkstationFileUtilities(access);
+            var source = Path.Combine(root, "workspace", "archive-source");
+            Directory.CreateDirectory(Path.Combine(source, "nested"));
+            await File.WriteAllTextAsync(Path.Combine(source, "nested", "note.txt"), "portable archive", TestContext.Current.CancellationToken);
+
+            var created = await utilities.CreateArchiveAsync(
+                "Workspace/archive-source",
+                archivePath,
+                requestedFormat,
+                TestContext.Current.CancellationToken);
+            Assert.True(created.Success, created.Message);
+            Assert.Equal(expectedFormat, created.Format);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(
+                Path.Combine(root, "exports"),
+                ".ali-archive-*",
+                SearchOption.TopDirectoryOnly));
+
+            var listed = await utilities.ListArchiveAsync(created.ArchivePath, TestContext.Current.CancellationToken);
+            Assert.True(listed.Success, listed.Message);
+            Assert.Contains(listed.Entries, entry => entry.Path.Replace('\\', '/').EndsWith("nested/note.txt", StringComparison.Ordinal));
+
+            var extracted = await utilities.ExtractArchiveAsync(
+                created.ArchivePath,
+                $"Exports/extracted-{expectedFormat.Replace('.', '-')}",
+                TestContext.Current.CancellationToken);
+            Assert.True(extracted.Success, extracted.Message);
+            Assert.Equal(
+                "portable archive",
+                await File.ReadAllTextAsync(
+                    Path.Combine(root, "exports", $"extracted-{expectedFormat.Replace('.', '-')}", "nested", "note.txt"),
+                    TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
+    public async Task ArchiveUtilities_GZipSingleFileRoundTripsAndTraversalIsRejected()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var utilities = new AliWorkstationFileUtilities(access);
+            await File.WriteAllTextAsync(Path.Combine(root, "workspace", "single.txt"), "gzip payload", TestContext.Current.CancellationToken);
+            var gzip = await utilities.CreateArchiveAsync(
+                "Workspace/single.txt",
+                "Exports/single.txt.gz",
+                "gzip",
+                TestContext.Current.CancellationToken);
+            Assert.True(gzip.Success, gzip.Message);
+            var extracted = await utilities.ExtractArchiveAsync(
+                gzip.ArchivePath,
+                "Exports/gzip-output",
+                TestContext.Current.CancellationToken);
+            Assert.True(extracted.Success, extracted.Message);
+            Assert.Equal("gzip payload", await File.ReadAllTextAsync(
+                Path.Combine(root, "exports", "gzip-output", "single.txt"),
+                TestContext.Current.CancellationToken));
+
+            var maliciousPath = Path.Combine(root, "exports", "malicious.zip");
+            using (var archive = ZipFile.Open(maliciousPath, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("../escape.txt");
+                await using var writer = new StreamWriter(entry.Open());
+                await writer.WriteAsync("blocked");
+            }
+
+            var rejected = await utilities.ExtractArchiveAsync(
+                "Exports/malicious.zip",
+                "Exports/malicious-output",
+                TestContext.Current.CancellationToken);
+            Assert.False(rejected.Success);
+            Assert.False(File.Exists(Path.Combine(root, "exports", "escape.txt")));
+            Assert.False(Directory.Exists(Path.Combine(root, "exports", "malicious-output")));
+        });
+    }
+
+    [Fact]
+    public async Task ArchiveUtilities_UsesInstalled7ZipOnlyWhenExplicitlyRequested()
+    {
+        var sevenZip = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip", "7z.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip", "7z.exe")
+        }.FirstOrDefault(File.Exists);
+        if (sevenZip is null)
+        {
+            return;
+        }
+
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            var utilities = new AliWorkstationFileUtilities(access);
+            var source = Path.Combine(root, "workspace", "seven-source");
+            Directory.CreateDirectory(source);
+            await File.WriteAllTextAsync(Path.Combine(source, "seven.txt"), "explicit seven zip", TestContext.Current.CancellationToken);
+
+            var created = await utilities.CreateArchiveAsync(
+                "Workspace/seven-source",
+                "Exports/explicit.7z",
+                "7z",
+                TestContext.Current.CancellationToken);
+            Assert.True(created.Success, created.Message);
+            Assert.Equal("7z", created.Format);
+
+            var listed = await utilities.ListArchiveAsync(created.ArchivePath, TestContext.Current.CancellationToken);
+            Assert.True(listed.Success, listed.Message);
+            Assert.Contains(listed.Entries, entry => entry.Path.EndsWith("seven.txt", StringComparison.OrdinalIgnoreCase));
+
+            var extracted = await utilities.ExtractArchiveAsync(
+                created.ArchivePath,
+                "Exports/seven-output",
+                TestContext.Current.CancellationToken);
+            Assert.True(extracted.Success, extracted.Message);
+            var payload = Assert.Single(Directory.EnumerateFiles(
+                Path.Combine(root, "exports", "seven-output"),
+                "seven.txt",
+                SearchOption.AllDirectories));
+            Assert.Equal("explicit seven zip", await File.ReadAllTextAsync(payload, TestContext.Current.CancellationToken));
         });
     }
 

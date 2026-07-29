@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Runtime;
 using Ali.Modules.Runtime.Models;
@@ -288,6 +289,45 @@ public sealed class LemonadeToolCallingChatClientTests
 
         Assert.Contains("Desktops.exe", response.Text, StringComparison.Ordinal);
         Assert.Contains("end of the tree", response.Text, StringComparison.Ordinal);
+        Assert.Equal(2, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task StreamingBoundaryLengthFinish_ContinuesEvenWithoutRegisteredTools()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "Rows one through eighty-three."))
+            {
+                FinishReason = ChatFinishReason.Length
+            },
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"final","answer":"Rows eighty-four through one hundred twenty."}"""))
+            {
+                FinishReason = ChatFinishReason.Stop
+            });
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var text = new StringBuilder();
+        ChatFinishReason? finishReason = null;
+
+        await foreach (var update in client.GetStreamingResponseAsync(
+                           [new AIChatMessage(AIChatRole.User, "List every row.")],
+                           new ChatOptions(),
+                           TestContext.Current.CancellationToken))
+        {
+            text.Append(update.Text);
+            finishReason = update.FinishReason ?? finishReason;
+        }
+
+        Assert.Contains("one through eighty-three", text.ToString(), StringComparison.Ordinal);
+        Assert.Contains("eighty-four through one hundred twenty", text.ToString(), StringComparison.Ordinal);
+        Assert.Equal(ChatFinishReason.Stop, finishReason);
         Assert.Equal(2, inner.CallCount);
     }
 

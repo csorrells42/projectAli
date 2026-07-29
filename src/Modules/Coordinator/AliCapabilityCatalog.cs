@@ -26,6 +26,12 @@ public static class AliCapabilityCatalog
     public const string FileReplaceName = "file_access_replace";
     public const string FileReplaceLinesName = "file_access_replace_lines";
     public const string FileMoveName = "file_access_move";
+    public const string FileCopyName = "file_access_copy";
+    public const string FileCreateDirectoryName = "file_access_create_directory";
+    public const string FileMetadataName = "file_access_metadata";
+    public const string ArchiveCreateName = "archive_create";
+    public const string ArchiveListName = "archive_list";
+    public const string ArchiveExtractName = "archive_extract";
     public const string WorkMemoryWriteName = "file_memory_write";
     public const string WorkMemoryReadName = "file_memory_read";
     public const string WorkMemoryDeleteName = "file_memory_delete";
@@ -33,6 +39,11 @@ public static class AliCapabilityCatalog
     public const string WorkMemorySearchName = "file_memory_grep";
     public const string WorkMemoryReplaceName = "file_memory_replace";
     public const string WorkMemoryReplaceLinesName = "file_memory_replace_lines";
+    public const string GetAgentModeName = "mode_get";
+    public const string SetAgentModeName = "mode_set";
+    public const string LoadAgentSkillName = "load_skill";
+    public const string ReadAgentSkillResourceName = "read_skill_resource";
+    public const string RunAgentSkillScriptName = "run_skill_script";
     public const string CodingListCapabilitiesName = "coding_list_capabilities";
     public const string CodingInspectProjectName = "coding_inspect_project";
     public const string CodingIndexProjectName = "coding_index_project";
@@ -113,6 +124,8 @@ public static class AliCapabilityCatalog
     public const string RunResearchArtifactWorkflowName = "run_research_artifact_workflow";
     public const string RunProgrammingGroupChatName = "run_programming_group_chat";
     public const string RunMagenticOrchestrationName = "run_magentic_orchestration";
+    public const string ListRecoverableWorkflowsName = "list_recoverable_workflows";
+    public const string ResumeWorkflowCheckpointName = "resume_workflow_checkpoint";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -136,6 +149,12 @@ public static class AliCapabilityCatalog
         new(FileReplaceName, "Edit matching text in an existing file after approval.", "Microsoft Agent Framework file access"),
         new(FileReplaceLinesName, "Edit specific lines in an existing file after approval.", "Microsoft Agent Framework file access"),
         new(FileMoveName, "Rename or move an existing file between approved workstation folders after approval.", "Ali workstation file tools"),
+        new(FileCopyName, "Copy a file or folder to a new path without overwriting an existing item.", "Ali workstation file tools"),
+        new(FileCreateDirectoryName, "Create a folder beneath an approved workstation root.", "Ali workstation file tools"),
+        new(FileMetadataName, "Read file or folder metadata and optionally calculate a file SHA-256 hash.", "Ali workstation file tools"),
+        new(ArchiveCreateName, "Create ZIP, TAR, TAR.GZ, GZip, or explicitly requested 7z archives without overwriting.", "Ali workstation archive tools"),
+        new(ArchiveListName, "List and validate supported archive contents without extracting them.", "Ali workstation archive tools"),
+        new(ArchiveExtractName, "Safely extract a supported archive into a new approved folder with traversal and size checks.", "Ali workstation archive tools"),
         new(WorkMemoryWriteName, "Write a private working note or draft for the active user and conversation, optionally with a discovery description.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReadName, "Read a private working note from the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryDeleteName, "Move a private working note into Ali's recoverable work-memory trash.", "Microsoft Agent Framework file memory"),
@@ -143,6 +162,11 @@ public static class AliCapabilityCatalog
         new(WorkMemorySearchName, "Search private working notes for the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceName, "Replace matching text in a private working note.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory"),
+        new(GetAgentModeName, "Return the current framework operating mode for this agent session.", "Microsoft Agent Framework agent mode"),
+        new(SetAgentModeName, "Switch the framework operating mode only when the user explicitly authorizes the change.", "Microsoft Agent Framework agent mode"),
+        new(LoadAgentSkillName, "Load the instructions for one exact installed Agent Skill.", "Microsoft Agent Framework Agent Skills"),
+        new(ReadAgentSkillResourceName, "Read one exact resource referenced by a loaded Agent Skill.", "Microsoft Agent Framework Agent Skills"),
+        new(RunAgentSkillScriptName, "Run one exact script referenced by a loaded Agent Skill, subject to approval.", "Microsoft Agent Framework Agent Skills"),
         new(CodingListCapabilitiesName, "Return the live registered coding providers, toolchains, and shared execution/intelligence infrastructure.", "Ali multi-language coding foundation"),
         new(CodingInspectProjectName, "Detect an approved project's language, manifest, provider, capabilities, and toolchains.", "Ali multi-language coding foundation"),
         new(CodingIndexProjectName, "Build a bounded cross-language structural source index.", "Ali multi-language coding foundation"),
@@ -222,7 +246,9 @@ public static class AliCapabilityCatalog
         new(ConsultOfficeSpecialistName, "Consult Ali's private synchronous office-artifact specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
         new(RunResearchArtifactWorkflowName, "Run Ali's synchronous Researcher-to-Office sequential workflow for evidence-backed artifact drafting.", "Microsoft Agent Framework workflow"),
         new(RunProgrammingGroupChatName, "Run Ali's bounded four-turn programming maker/checker group chat; Ali remains the final actor and voice.", "Microsoft Agent Framework workflow"),
-        new(RunMagenticOrchestrationName, "Run bounded Magentic orchestration for eligible open-ended multi-domain work, subject to the configured activation policy.", "Microsoft Agent Framework workflow")
+        new(RunMagenticOrchestrationName, "Run bounded Magentic orchestration for eligible open-ended multi-domain work, subject to the configured activation policy.", "Microsoft Agent Framework workflow"),
+        new(ListRecoverableWorkflowsName, "List interrupted Agent Framework workflows that can be resumed from durable local checkpoints.", "Microsoft Agent Framework recovery"),
+        new(ResumeWorkflowCheckpointName, "Resume one interrupted Agent Framework workflow from its latest durable local checkpoint only after the user explicitly asks.", "Microsoft Agent Framework recovery")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>
@@ -293,6 +319,7 @@ public static class AliCapabilityCatalog
             + "Additional tools whose names begin with mcp_ are external MCP integrations explicitly enabled by the user. "
             + "Use list_available_tools for their configured catalog and obey approval requests. "
             + "Voice playback is an application output setting, not a model-callable tool. "
+            + "Never resume an interrupted workflow automatically; use list_recoverable_workflows when continuity matters and call resume_workflow_checkpoint only after the user explicitly asks to continue that saved run. "
             + "Never claim calendar, email, arbitrary file-system, shell, camera, or generic browser-control access unless an enabled tool with that exact capability appears in the current turn.");
         return manifest.ToString();
     }

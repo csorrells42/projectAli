@@ -63,6 +63,15 @@ public sealed class AgentToolPermissionStoreTests
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReplaceName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReplaceLinesName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileMoveName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileCopyName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileCreateDirectoryName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileMetadataName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.ArchiveCreateName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.ArchiveListName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.ArchiveExtractName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.ArchiveExtractName,
+            AgentPermissionProfile.LockedDown));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetCreateProjectName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFormatProjectName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynApplyRenameName));

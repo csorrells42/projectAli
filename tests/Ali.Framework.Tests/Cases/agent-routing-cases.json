@@ -1,32 +1,121 @@
 [
   {
     "name": "casual-direct-answer",
+    "category": "logic",
     "prompt": "How are you doing today?",
     "expectedTool": null,
-    "mustNotUse": ["search_current_web", "research_web"]
+    "mustNotUse": ["search_current_web", "research_web", "search_local_library"]
+  },
+  {
+    "name": "stable-arithmetic-direct-answer",
+    "category": "logic",
+    "prompt": "What is 17 plus 24?",
+    "expectedTool": null,
+    "mustNotUse": ["search_current_web", "research_web", "search_local_library"]
+  },
+  {
+    "name": "typo-tolerant-stable-answer",
+    "category": "logic",
+    "prompt": "wht is nucelar fussion",
+    "expectedTool": null,
+    "mustNotUse": ["search_current_web", "research_web", "search_local_library"]
   },
   {
     "name": "fast-current-news",
+    "category": "current-events",
     "prompt": "What are the most important current local news stories today?",
     "expectedTool": "search_current_web",
     "mustNotUse": ["research_web"]
   },
   {
+    "name": "typo-tolerant-current-search",
+    "category": "current-events",
+    "prompt": "whats the lattest alabama football news todya",
+    "expectedTool": "search_current_web",
+    "mustNotUse": ["search_local_library"]
+  },
+  {
     "name": "current-sports-prediction",
+    "category": "truthfulness",
     "prompt": "Give me your prediction of Alabama's performance in this year's college football playoff.",
     "expectedTool": "search_current_web",
     "mustNotUse": ["research_web"]
   },
   {
     "name": "nested-comparative-research",
+    "category": "research",
     "prompt": "Compare three current home battery systems, their warranties, recent recalls, installed cost, and which fits a 12 kWh daily load.",
     "expectedTool": "research_web",
     "requiresApproval": true
   },
   {
     "name": "remembered-person",
+    "category": "memory",
     "prompt": "What was the name of the person I asked you to remember?",
     "expectedTool": "recall_user_memory",
     "mustNotUse": ["search_current_web", "research_web"]
+  },
+  {
+    "name": "unknown-personal-fact",
+    "category": "truthfulness",
+    "prompt": "What is my favorite soup? Answer only from saved memory and do not guess.",
+    "expectedTool": "recall_user_memory",
+    "mustNotUse": ["search_current_web", "research_web"]
+  },
+  {
+    "name": "explicit-reminder",
+    "category": "calendar",
+    "prompt": "Remind me tomorrow at 9 AM to call Bill.",
+    "expectedTool": "create_calendar_event",
+    "requiresApproval": true
+  },
+  {
+    "name": "tool-inventory",
+    "category": "truthfulness",
+    "prompt": "Give me the complete current tool inventory as a table with every source.",
+    "expectedTool": "list_available_tools"
+  },
+  {
+    "name": "binary-folder-copy",
+    "category": "files",
+    "prompt": "Copy the Desktop/Drawings folder to Documents/DrawingsBackup without overwriting anything.",
+    "expectedTool": "file_access_copy"
+  },
+  {
+    "name": "default-zip-archive",
+    "category": "files",
+    "prompt": "Archive Documents/JobNotes into Exports/JobNotesBackup using the normal default format.",
+    "expectedTool": "archive_create"
+  },
+  {
+    "name": "explicit-seven-zip-archive",
+    "category": "files",
+    "prompt": "Create a 7z archive of Documents/JobNotes at Exports/JobNotes.7z.",
+    "expectedTool": "archive_create"
+  },
+  {
+    "name": "engineering-document-question",
+    "category": "shop-floor",
+    "prompt": "From our indexed roll-cutter drawing, explain which spacer goes behind the left bearing in shop-floor language.",
+    "expectedTool": "search_local_library",
+    "mustNotUse": ["search_current_web"]
+  },
+  {
+    "name": "code-investigation",
+    "category": "coding",
+    "prompt": "Inspect Workspace/PlantControl/PlantControl.csproj and identify where alarm 4177 is generated.",
+    "expectedTool": "coding_inspect_project"
+  },
+  {
+    "name": "recoverable-workflow-discovery",
+    "category": "recovery",
+    "prompt": "Do I have any interrupted agent work that can be recovered?",
+    "expectedTool": "list_recoverable_workflows"
+  },
+  {
+    "name": "explicit-workflow-resume",
+    "category": "recovery",
+    "prompt": "Resume the interrupted workflow with exact session ID abc123 from its checkpoint.",
+    "expectedTool": "resume_workflow_checkpoint"
   }
 ]

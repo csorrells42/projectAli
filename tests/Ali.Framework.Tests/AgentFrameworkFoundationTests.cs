@@ -8,7 +8,7 @@ public sealed class AgentFrameworkFoundationTests
     public void ReviewedSkillsAreShippedWithProgressiveDisclosureMetadata()
     {
         var skills = Directory.GetFiles(Path.Combine(RepositoryRoot, "skills"), "SKILL.md", SearchOption.AllDirectories);
-        Assert.Equal(3, skills.Length);
+        Assert.Equal(4, skills.Length);
         Assert.All(skills, path =>
         {
             var text = File.ReadAllText(path);
@@ -17,6 +17,7 @@ public sealed class AgentFrameworkFoundationTests
             Assert.Contains("description:", text, StringComparison.Ordinal);
             Assert.DoesNotContain("scripts/", text, StringComparison.OrdinalIgnoreCase);
         });
+        Assert.Contains(skills, path => path.Contains("engineering-shop-floor", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -28,6 +29,24 @@ public sealed class AgentFrameworkFoundationTests
         Assert.Contains("ProjectAli.AgentFramework", runner, StringComparison.Ordinal);
         Assert.Contains("AliAgentFrameworkMiddleware.WithVisibleLifecycle", runner, StringComparison.Ordinal);
         Assert.Contains("DisableTodoProvider = true", runner, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuthoritativeInventoryIncludesFrameworkModeAndSkillTools()
+    {
+        var inventory = Ali.Modules.Coordinator.AliCapabilityCatalog.ListAvailableTools(
+            new Ali.Modules.Coordinator.AgentOrchestrationSettings());
+        var names = inventory.Tools.Select(tool => tool.Name).ToArray();
+
+        Assert.Equal(120, names.Length);
+        Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.GetAgentModeName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.SetAgentModeName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.LoadAgentSkillName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.ReadAgentSkillResourceName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.RunAgentSkillScriptName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.ListRecoverableWorkflowsName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.ResumeWorkflowCheckpointName, names);
     }
 
     [Fact]

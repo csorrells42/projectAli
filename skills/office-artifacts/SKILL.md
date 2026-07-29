@@ -1,6 +1,6 @@
 ---
 name: office-artifact-delivery
-description: Turn user material into useful office artifacts such as reports, tables, charts, diagrams, documents, spreadsheets, presentations, and PDFs with an explicit quality check.
+description: Turn user material into useful office artifacts such as correspondence, reports, tables, charts, Mermaid diagrams, documents, spreadsheets, presentations, and PDFs with an explicit quality check.
 license: MIT
 ---
 
@@ -14,5 +14,8 @@ license: MIT
 6. Validate structure, calculations, links, file existence, and visual readability using available tools.
 7. Return the exact artifact path and a concise description of what was verified.
 
-Never claim an artifact was created or visually reviewed without tool evidence. If a required renderer is unavailable, produce the best supported intermediate format and say exactly what remains.
+For office correspondence, match the user's relationship and tone, state the requested action early, preserve names and dates exactly, and never claim that a message was sent unless a registered email tool succeeded.
 
+For Office or other binary documents, use binary-safe copy, metadata/hash, and archive tools. Never read or rewrite a binary file with a text-file operation. Use the indexed local-document tools for supported document interpretation and preserve the original file unless the user explicitly approves a change.
+
+Never claim an artifact was created or visually reviewed without tool evidence. If a required renderer is unavailable, produce the best supported intermediate format and say exactly what remains.

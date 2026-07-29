@@ -29,6 +29,7 @@ using Ali.Modules.RAG;
 using Ali.Modules.Storage;
 using Ali.Modules.Interaction;
 using Ali.Modules.Identity;
+using Ali.Modules.UserMemory;
 using AvatarBuilder.Modules.Pipeline;
 using AvatarBuilder.Modules.Webcam.Common;
 using Ali.UI;
@@ -67,12 +68,15 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _modelStatusTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer _stackHealthTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private string _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
     private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
     private string _conversationSearchText = string.Empty;
     private bool _loadingConversationHistorySelection;
     private bool _checkingModelConnectionStatus;
+    private bool _checkingStackHealth;
+    private UserMemoryStatus? _userMemoryRuntimeStatus;
     private bool _ollamaWasRunningAtStartup;
     private DateTimeOffset _nextOllamaStartAttemptAt = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _ollamaStartGate = new(1, 1);
@@ -206,6 +210,11 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isAgentActivityExpanded;
     private string _agentActivitySummary = "Ready for the next request.";
     private AgentToolApprovalPrompt? _activeBridgeApproval;
+    private readonly StackComponentStatusViewModel _memoryStackStatus = new("Memory");
+    private readonly StackComponentStatusViewModel _ragStackStatus = new("RAG");
+    private readonly StackComponentStatusViewModel _speechStackStatus = new("Speech");
+    private readonly StackComponentStatusViewModel _mcpStackStatus = new("MCP");
+    private readonly StackComponentStatusViewModel _bridgeStackStatus = new("Bridge");
 
     public MainWindowViewModel(AliServices services)
     {
@@ -231,6 +240,14 @@ public sealed class MainWindowViewModel : ObservableObject
         ResourceMeters.Add(RamMeter);
         ResourceMeters.Add(GpuMeter);
         ResourceMeters.Add(VramMeter);
+        StackComponents.Add(_memoryStackStatus);
+        StackComponents.Add(_ragStackStatus);
+        StackComponents.Add(_speechStackStatus);
+        StackComponents.Add(_mcpStackStatus);
+        StackComponents.Add(_bridgeStackStatus);
+        _services.Qdrant.StatusChanged += (_, _) => RefreshStackComponentsOnUiThread();
+        McpServerSettings.PropertyChanged += (_, _) => RefreshStackComponentsOnUiThread();
+        ConversationBridgeSettings.PropertyChanged += (_, _) => RefreshStackComponentsOnUiThread();
 
         SendCommand = CreateAsyncCommand(SendAsync, () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText));
         StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
@@ -357,6 +374,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _resourceMeterTimer.Start();
         _modelStatusTimer.Tick += async (_, _) => await RefreshModelConnectionStatusAsync(showWaiting: false).ConfigureAwait(true);
         _modelStatusTimer.Start();
+        _stackHealthTimer.Tick += async (_, _) => await RefreshStackHealthAsync().ConfigureAwait(true);
+        RefreshStackComponents();
         RefreshConversationHistory();
         RefreshMemoryReminders();
         StatusText = "New chat ready. Saved chats are available in the sidebar.";
@@ -417,6 +436,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ObservableCollection<ConversationHistoryItemViewModel> ConversationHistory { get; } = new();
 
     public ObservableCollection<ResourceMeterViewModel> ResourceMeters { get; } = new();
+
+    public ObservableCollection<StackComponentStatusViewModel> StackComponents { get; } = new();
 
     public ObservableCollection<CommandExplorerNodeViewModel> CommandExplorerRoots { get; } = new();
 
@@ -1269,7 +1290,13 @@ public sealed class MainWindowViewModel : ObservableObject
     public string VoiceStatus
     {
         get => _voiceStatus;
-        private set => SetProperty(ref _voiceStatus, value);
+        private set
+        {
+            if (SetProperty(ref _voiceStatus, value))
+            {
+                RefreshStackComponentsOnUiThread();
+            }
+        }
     }
 
     public string SttStatus
@@ -1979,6 +2006,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Task InitializeConversationBridgeAsync() => ConversationBridgeSettings.StartIfEnabledAsync();
 
+    public async Task InitializeStackHealthAsync()
+    {
+        await RefreshStackHealthAsync().ConfigureAwait(true);
+        _stackHealthTimer.Start();
+    }
+
     public async Task StartLocalRuntimeAsync()
     {
         var options = _services.LoadRuntimeSettings();
@@ -2060,6 +2093,7 @@ public sealed class MainWindowViewModel : ObservableObject
             await Task.Run(interactionRuntime.Dispose).ConfigureAwait(true);
         }
         _modelStatusTimer.Stop();
+        _stackHealthTimer.Stop();
         SetModelConnectionStatus("command sent, waiting on model to shut down", MediaBrushes.Gold);
         StatusText = "Shutting down local model...";
         await Task.Yield();
@@ -6710,6 +6744,148 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         ModelConnectionStatusText = text;
         ModelConnectionStatusBrush = brush;
+        RefreshStackComponentsOnUiThread();
+    }
+
+    private async Task RefreshStackHealthAsync()
+    {
+        if (_checkingStackHealth || _lifetimeCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _checkingStackHealth = true;
+        try
+        {
+            var settings = _services.LoadUserMemorySettings();
+            if (settings.Enabled)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(45));
+                _userMemoryRuntimeStatus = await _services.UserMemories
+                    .TestAsync(_services.ActiveUsers.Current, timeout.Token)
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                _userMemoryRuntimeStatus = new(false, false, false, "Disabled", "Per-user memory is disabled.");
+            }
+        }
+        catch (OperationCanceledException) when (!_lifetimeCancellation.IsCancellationRequested)
+        {
+            _userMemoryRuntimeStatus = null;
+        }
+        catch (Exception ex)
+        {
+            _userMemoryRuntimeStatus = new(true, false, false, "Unavailable", $"Memory check failed safely: {ex.Message}");
+        }
+        finally
+        {
+            _checkingStackHealth = false;
+            RefreshStackComponents();
+        }
+    }
+
+    private void RefreshStackComponentsOnUiThread()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(new Action(RefreshStackComponents));
+            return;
+        }
+
+        RefreshStackComponents();
+    }
+
+    private void RefreshStackComponents()
+    {
+        var memorySettings = _services.LoadUserMemorySettings();
+        if (!memorySettings.Enabled)
+        {
+            _memoryStackStatus.Update("Off", "Memory is intentionally disabled.", MediaBrushes.Gray);
+        }
+        else if (_userMemoryRuntimeStatus is { RuntimeAvailable: true } memoryStatus)
+        {
+            _memoryStackStatus.Update("Ready", $"Memory ready: {memoryStatus.Message}", MediaBrushes.LimeGreen);
+        }
+        else if (_userMemoryRuntimeStatus is { } failedMemoryStatus)
+        {
+            _memoryStackStatus.Update("Unavailable", failedMemoryStatus.Message, MediaBrushes.OrangeRed);
+        }
+        else
+        {
+            _memoryStackStatus.Update("Checking", "Memory is starting and its health check is still running.", MediaBrushes.Gold);
+        }
+
+        var ragSettings = _services.LoadLocalVectorLibrarySettings();
+        var qdrantNeeded = memorySettings.Enabled || ragSettings.Enabled;
+        var qdrantStatus = _services.Qdrant.Status;
+        if (!qdrantNeeded)
+        {
+            _ragStackStatus.Update("Off", "RAG and per-user vector memory are intentionally disabled.", MediaBrushes.Gray);
+        }
+        else if (qdrantStatus.IsReachable)
+        {
+            _ragStackStatus.Update("Ready", $"Qdrant ready: {qdrantStatus.Message}", MediaBrushes.LimeGreen);
+        }
+        else if (qdrantStatus.State.Contains("start", StringComparison.OrdinalIgnoreCase)
+                 || _userMemoryRuntimeStatus is null)
+        {
+            _ragStackStatus.Update("Starting", qdrantStatus.Message, MediaBrushes.Gold);
+        }
+        else
+        {
+            _ragStackStatus.Update("Unavailable", qdrantStatus.Message, MediaBrushes.OrangeRed);
+        }
+
+        if (_interactionRuntime is null)
+        {
+            _speechStackStatus.Update("Unavailable", $"Speech ingress unavailable. {VoiceStatus}", MediaBrushes.OrangeRed);
+        }
+        else if (VoiceStatus.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+                 || VoiceStatus.Contains("failed", StringComparison.OrdinalIgnoreCase))
+        {
+            _speechStackStatus.Update("Unavailable", $"{VoiceStatus}\nSTT: {SttStatus}\nTTS: {TtsStatus}", MediaBrushes.OrangeRed);
+        }
+        else
+        {
+            _speechStackStatus.Update("Ready", $"{VoiceStatus}\nSTT: {SttStatus}\nTTS: {TtsStatus}", MediaBrushes.LimeGreen);
+        }
+
+        if (!McpServerSettings.Enabled)
+        {
+            _mcpStackStatus.Update("Off", "Ali's MCP server is intentionally disabled. MCP client tools remain available on demand when configured.", MediaBrushes.Gray);
+        }
+        else if (McpServerSettings.IsRunning)
+        {
+            _mcpStackStatus.Update("Ready", $"MCP server ready at {McpServerSettings.Endpoint}. {McpServerSettings.StatusText}", MediaBrushes.LimeGreen);
+        }
+        else if (McpServerSettings.RuntimeState.Contains("start", StringComparison.OrdinalIgnoreCase))
+        {
+            _mcpStackStatus.Update("Starting", McpServerSettings.StatusText, MediaBrushes.Gold);
+        }
+        else
+        {
+            _mcpStackStatus.Update("Unavailable", McpServerSettings.StatusText, MediaBrushes.OrangeRed);
+        }
+
+        if (!ConversationBridgeSettings.Enabled)
+        {
+            _bridgeStackStatus.Update("Off", "The local debugging bridge is intentionally disabled.", MediaBrushes.Gray);
+        }
+        else if (ConversationBridgeSettings.IsRunning)
+        {
+            _bridgeStackStatus.Update("Ready", $"Debug bridge ready at {ConversationBridgeSettings.Endpoint}. {ConversationBridgeSettings.StatusText}", MediaBrushes.LimeGreen);
+        }
+        else if (ConversationBridgeSettings.RuntimeState.Contains("start", StringComparison.OrdinalIgnoreCase))
+        {
+            _bridgeStackStatus.Update("Starting", ConversationBridgeSettings.StatusText, MediaBrushes.Gold);
+        }
+        else
+        {
+            _bridgeStackStatus.Update("Unavailable", ConversationBridgeSettings.StatusText, MediaBrushes.OrangeRed);
+        }
     }
 
     private bool IsModelConnectedStatus() =>

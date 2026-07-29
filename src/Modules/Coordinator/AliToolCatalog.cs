@@ -48,6 +48,7 @@ internal sealed class AliToolCatalog
         var reminderTools = new AliReminderTools(reminders, turnAccessor);
         var identityTimeTools = new AliIdentityTimeTools(profile);
         var permissionPolicy = new AliToolPermissionPolicy(turnAccessor, () => toolPermissions.CurrentProfile);
+        var fileUtilities = new AliWorkstationFileUtilities(fileAccess);
 
         Tools =
         [
@@ -105,7 +106,31 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationFileMoveResult>>)fileAccess.MoveAsync,
                 AliCapabilityCatalog.FileMoveName,
-                "Rename or move one existing file without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source name can be resolved automatically. The destination is never overwritten. This changes an existing file and always requires user approval."))
+                "Rename or move one existing file or folder without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source file name can be resolved automatically. The destination is never overwritten. This changes an existing item and always requires user approval.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string, CancellationToken, Task<WorkstationFileOperationResult>>)fileUtilities.CopyAsync,
+                AliCapabilityCatalog.FileCopyName,
+                "Copy one existing file or folder to a new path under Ali's approved workstation roots. The destination is never overwritten. This operation is binary-safe.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<WorkstationFileOperationResult>>)fileUtilities.CreateDirectoryAsync,
+                AliCapabilityCatalog.FileCreateDirectoryName,
+                "Create a folder beneath an approved workstation root. Existing folders are left unchanged.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, bool, CancellationToken, Task<WorkstationFileMetadataResult>>)fileUtilities.GetMetadataAsync,
+                AliCapabilityCatalog.FileMetadataName,
+                "Read file or folder metadata. Set includeSha256=true to calculate an authoritative SHA-256 hash for a file.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string, string?, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.CreateArchiveAsync,
+                AliCapabilityCatalog.ArchiveCreateName,
+                "Create an archive from one approved file or folder. format may be auto, zip, tar, gzip, tar.gz, or 7z. ZIP is the default. Select 7z only when the user explicitly asks for 7z or 7-Zip. The destination is never overwritten.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.ListArchiveAsync,
+                AliCapabilityCatalog.ArchiveListName,
+                "List and validate the contents of a .zip, .tar, .tar.gz, .tgz, .gz, or .7z archive without extracting it.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, string, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.ExtractArchiveAsync,
+                AliCapabilityCatalog.ArchiveExtractName,
+                "Extract a supported archive into a new folder beneath an approved workstation root. Ali rejects traversal, excessive expansion, and existing destinations rather than overwriting files."))
         ];
 
         Instructions = BuildInstructions(
@@ -149,6 +174,8 @@ internal sealed class AliToolCatalog
             "Create new requested text artifacts with overwrite=false and default to Exports when the user did not name a location. Never claim a file was created, edited, or deleted without a successful file tool result.",
             "For file_access_replace_lines, each new_line value replaces exactly one physical line and must end with one newline character (encode the trailing newline as \\n in JSON). Never place an embedded newline or the literal two characters backslash-n inside the line content; use one separate edit entry for each line. Re-read the changed region before building.",
             "When the user asks to rename or move a file, use file_access_move. Do not imitate a rename by creating a second file and deleting the first. After any failed file operation, inspect the error and do not claim the requested change occurred.",
+            "Use file_access_copy for binary-safe file or folder copies and file_access_create_directory for explicit folder creation. Use file_access_metadata with includeSha256=true when an authoritative file hash is requested.",
+            "Use archive_create, archive_list, and archive_extract for archives. ZIP is the standard default. Use TAR, GZip, or TAR.GZ when the user asks for that format or supplies that extension. Use 7z only when the user explicitly asks for 7z or 7-Zip; never silently substitute it for ZIP.",
             "When registered tools can fulfill a request, use them instead of claiming incapability or giving the user shell commands to perform the work manually.",
             "Before claiming that you cannot inspect, create, edit, build, test, run, debug, profile, or integrate code, call coding_list_capabilities and rely on its live provider report. Never describe limitations from model memory when the registry reports the capability.",
             "For an existing coding target in any supported language, call coding_inspect_project to detect its provider. Use coding_index_project and coding_search_symbols for bounded repository understanding, then coding_analyze_project, coding_format_project, coding_build_project, or coding_test_project according to the user's request. Provider selection comes from the project manifest, never from guessing or hard-coded English routing.",

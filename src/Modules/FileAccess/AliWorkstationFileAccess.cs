@@ -48,6 +48,9 @@ public sealed class AliWorkstationFileAccess
     internal AliResolvedWorkstationPath ResolvePhysicalFilePath(string path) =>
         _rawStore.ResolvePhysicalFilePath(path);
 
+    internal AliResolvedWorkstationPath ResolvePhysicalDirectoryPath(string path) =>
+        _rawStore.ResolvePhysicalDirectoryPath(path);
+
     internal Dictionary<string, object?> NormalizeProviderToolArguments(
         string toolName,
         Dictionary<string, object?> arguments)
@@ -82,7 +85,7 @@ public sealed class AliWorkstationFileAccess
     {
         try
         {
-            await _rawStore.MoveFileAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false);
+            await _rawStore.MoveItemAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false);
             await Audit.AppendAsync(
                     "move",
                     $"{sourcePath} -> {destinationPath}",
@@ -94,7 +97,7 @@ public sealed class AliWorkstationFileAccess
                 true,
                 sourcePath,
                 destinationPath,
-                "The file was moved successfully.");
+                "The file or folder was moved successfully.");
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -124,6 +127,8 @@ public sealed class AliWorkstationFileAccess
         + "For example, a request for touch.txt on the desktop must use Desktop/touch.txt. "
         + "Never ask the user for an absolute path; if a path call fails, correct it with one of these virtual roots and retry. "
         + "Read, list, and search files when useful. "
+        + "Ali can also copy files or folders, create folders, inspect metadata and SHA-256 hashes, and create, list, or extract archives. "
+        + "ZIP is the default archive format. Use TAR, GZip, or TAR.GZ when the user requests one of those formats, and use 7-Zip only when the user explicitly requests 7z/7-Zip. "
         + "For new artifacts, default to Exports unless the user names another approved root. "
         + "Write with overwrite=false when creating a new file. Existing-file overwrite, replace, line edits, and delete require approval. "
         + "A delete moves the file into Ali's recoverable trash rather than erasing it permanently.";

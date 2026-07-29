@@ -27,6 +27,9 @@ public sealed class AliToolCatalogTests
         Assert.Contains("Semantic memory search is read-only", instructions, StringComparison.Ordinal);
         Assert.Contains("use only its exact memoryId", instructions, StringComparison.Ordinal);
         Assert.Contains("use file_access_move", instructions, StringComparison.Ordinal);
+        Assert.Contains("Use file_access_copy", instructions, StringComparison.Ordinal);
+        Assert.Contains("ZIP is the standard default", instructions, StringComparison.Ordinal);
+        Assert.Contains("Use 7z only when the user explicitly asks", instructions, StringComparison.Ordinal);
         Assert.Contains("use them instead of claiming incapability", instructions, StringComparison.Ordinal);
         Assert.Contains("call dotnet_create_project", instructions, StringComparison.Ordinal);
         Assert.Contains("name collision, not missing permission", instructions, StringComparison.Ordinal);

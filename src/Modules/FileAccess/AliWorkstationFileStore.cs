@@ -68,6 +68,16 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             resolved.Mount.ResolvePhysicalPath(resolved.RelativePath));
     }
 
+    internal AliResolvedWorkstationPath ResolvePhysicalDirectoryPath(string path)
+    {
+        var resolved = ResolveDirectory(path);
+        return new AliResolvedWorkstationPath(
+            resolved.Mount.Name,
+            resolved.Mount.RootPath,
+            resolved.RelativePath,
+            resolved.Mount.ResolvePhysicalPath(resolved.RelativePath));
+    }
+
     internal bool TryNormalizeApprovedAbsolutePath(
         string path,
         bool allowMountRoot,
@@ -105,28 +115,37 @@ public sealed class AliWorkstationFileStore : AgentFileStore
         return resolved.Mount.Store.ReadAsync(resolved.RelativePath, cancellationToken);
     }
 
-    internal Task MoveFileAsync(
+    internal Task MoveItemAsync(
         string sourcePath,
         string destinationPath,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var source = ResolveFile(sourcePath);
+        var source = ResolveExistingBareItemOrPath(sourcePath);
         var destination = ResolveDestinationFile(destinationPath, source.Mount);
         var sourcePhysicalPath = source.Mount.ResolvePhysicalPath(source.RelativePath);
         var destinationPhysicalPath = destination.Mount.ResolvePhysicalPath(destination.RelativePath);
-        if (!File.Exists(sourcePhysicalPath))
+        var sourceIsFile = File.Exists(sourcePhysicalPath);
+        var sourceIsDirectory = Directory.Exists(sourcePhysicalPath);
+        if (!sourceIsFile && !sourceIsDirectory)
         {
-            throw new FileNotFoundException("The source file does not exist.", sourcePhysicalPath);
+            throw new FileNotFoundException("The source file or folder does not exist.", sourcePhysicalPath);
         }
 
-        if (File.Exists(destinationPhysicalPath))
+        if (File.Exists(destinationPhysicalPath) || Directory.Exists(destinationPhysicalPath))
         {
-            throw new IOException("The destination file already exists. Ali will not overwrite it during a rename.");
+            throw new IOException("The destination already exists. Ali will not overwrite it during a move or rename.");
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPhysicalPath)!);
-        File.Move(sourcePhysicalPath, destinationPhysicalPath, overwrite: false);
+        if (sourceIsFile)
+        {
+            File.Move(sourcePhysicalPath, destinationPhysicalPath, overwrite: false);
+        }
+        else
+        {
+            Directory.Move(sourcePhysicalPath, destinationPhysicalPath);
+        }
         return Task.CompletedTask;
     }
 
@@ -246,6 +265,36 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             1 => matches[0],
             > 1 => throw new ArgumentException(
                 $"The bare file name '{trimmed}' exists in more than one approved root ({string.Join(", ", matches.Select(match => match.Mount.Name))}). Use a virtual root to disambiguate it.",
+                nameof(path)),
+            _ => Resolve(trimmed, allowMountRoot: false)
+        };
+    }
+
+    private ResolvedPath ResolveExistingBareItemOrPath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var trimmed = path.Trim();
+        if (Path.IsPathFullyQualified(trimmed)
+            || trimmed.Contains('/')
+            || trimmed.Contains('\\')
+            || _mounts.ContainsKey(trimmed))
+        {
+            return Resolve(trimmed, allowMountRoot: false);
+        }
+
+        var matches = _mounts.Values
+            .Select(mount => new ResolvedPath(mount, trimmed))
+            .Where(candidate =>
+            {
+                var physical = candidate.Mount.ResolvePhysicalPath(candidate.RelativePath);
+                return File.Exists(physical) || Directory.Exists(physical);
+            })
+            .ToArray();
+        return matches.Length switch
+        {
+            1 => matches[0],
+            > 1 => throw new ArgumentException(
+                $"The bare item name '{trimmed}' exists in more than one approved root ({string.Join(", ", matches.Select(match => match.Mount.Name))}). Use a virtual root to disambiguate it.",
                 nameof(path)),
             _ => Resolve(trimmed, allowMountRoot: false)
         };

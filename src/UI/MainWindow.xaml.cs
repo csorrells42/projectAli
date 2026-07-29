@@ -43,11 +43,13 @@ public partial class MainWindow : Window
             var visionStartup = viewModel.InitializeVisionAsync();
             var mcpServerStartup = viewModel.InitializeMcpServerAsync();
             var conversationBridgeStartup = viewModel.InitializeConversationBridgeAsync();
+            var stackHealthStartup = viewModel.InitializeStackHealthAsync();
             await Task.WhenAll(
                 _startupTask,
                 visionStartup,
                 mcpServerStartup,
-                conversationBridgeStartup).ConfigureAwait(true);
+                conversationBridgeStartup,
+                stackHealthStartup).ConfigureAwait(true);
         }
     }
 

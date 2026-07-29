@@ -33,7 +33,7 @@ Magentic is never used for greetings, ordinary factual answers, a single file ed
 
 Framework middleware, Ali's permission policy, and activity events surround every agent and workflow. Activity exposes role, step, tool choice, result, elapsed time, approval, and failure state. Hidden reasoning is never quoted, spoken, stored in conversation history, or shown as activity.
 
-Agent Skills are loaded only from Ali's shipped, reviewed skill directory. Skill scripts are not enabled in the initial framework checkpoint.
+Agent Skills are loaded only from Ali's shipped, reviewed skill directory. The provider exposes its standard resource and script operations, but the current reviewed skills are instruction-only and ship no executable scripts.
 
 ## Implemented workflows
 
@@ -52,7 +52,13 @@ The **Settings > Agents** tab provides three activation policies:
 - **Ask first:** keeps it available but requires explicit activation approval.
 - **Automatic for complex work:** permits model selection only under the eligibility boundary above.
 
-Workflow state uses the Agent Framework JSON checkpoint manager and a file-backed checkpoint store under Ali's local data directory. The Settings tab reports the stored checkpoint count and can archive checkpoints recoverably into a timestamped sibling folder. Checkpointing does not introduce concurrent or background execution.
+Workflow state uses the Agent Framework JSON checkpoint manager and a file-backed checkpoint store under Ali's local data directory. Every private agent and manager has a stable executor identity so a compatible graph can be reconstructed after the application or computer restarts.
+
+At startup and before each new turn, Ali inspects the latest checkpoint for every session. Only interrupted checkpoints that still contain queued work or an outstanding request and whose executor identities match the current workflow graph are offered. Completed sessions, malformed files, and checkpoints from an incompatible build are not presented as resumable work. The activity panel announces recoverable sessions without running them.
+
+`list_recoverable_workflows` returns the exact local session identifiers and preserved objectives. `resume_workflow_checkpoint` calls Agent Framework's `ResumeAsync` with the saved `CheckpointInfo`; it runs only after the user explicitly asks to resume that exact session. Ali never auto-resumes work at startup, never guesses a session identifier, and never restarts the objective from the beginning. A failed resume leaves the checkpoint intact for inspection or another deliberate attempt.
+
+The Settings tab reports the stored checkpoint count and can archive checkpoints recoverably into a timestamped sibling folder. Checkpointing and recovery do not introduce concurrent or background execution.
 
 ## Live conversation debugging bridge
 

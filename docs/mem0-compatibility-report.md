@@ -51,12 +51,13 @@ LLM and embedding calls may target only loopback. Qdrant is a local child
 service. Camera and voice observations are not authentication and do not select
 or merge profiles automatically.
 
-## Optional feature limitation
+## Hybrid retrieval helpers
 
-The portable installation intentionally omits spaCy and fastembed. Semantic
-memory retrieval through Lemonade embeddings is verified; optional Mem0
-BM25/lemmatization helpers are unavailable. This keeps the shipped runtime
-smaller and avoids a second embedding implementation.
+The portable installation now includes spaCy, `en_core_web_sm`, FastEmbed, and
+the offline Qdrant/BM25 model data. These CPU-side helpers provide
+lemmatization and sparse lexical retrieval alongside semantic embeddings; they
+do not consume Ali's limited GPU memory. The publish-folder smoke test imports
+the packages, loads the English model, and produces an offline sparse vector.
 
 ## Reproduction
 
