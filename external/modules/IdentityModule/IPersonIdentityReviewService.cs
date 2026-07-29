@@ -66,6 +66,9 @@ public interface IPersonIdentityReviewService
 	IdentityReviewUpdateResult BeginEnrollment(
 		IdentityEnrollmentRequest request);
 
+	IdentityReviewUpdateResult CreateUserProfile(
+		IdentityEnrollmentRequest request);
+
 	IdentityReviewUpdateResult RequestEnrollmentCapture();
 
 	IdentityEnrollmentState GetEnrollmentState();

@@ -12,7 +12,10 @@ public sealed record DotNetBuildResult(
     string Summary,
     string Output,
     string? ArtifactPath,
-    long DurationMilliseconds);
+    long DurationMilliseconds,
+    string? DiagnosticLogPath = null,
+    int WarningCount = 0,
+    int ErrorCount = 0);
 
 public sealed record DotNetRunResult(
     bool Success,
@@ -27,7 +30,11 @@ public sealed record DotNetRunResult(
 /// </summary>
 internal sealed class AliRoslynCodingTools
 {
-    private const int MaximumOutputCharacters = 24_000;
+    // Tool results are fed back into the local model. A raw MSBuild transcript can
+    // be tens of thousands of characters and crowd the next agent decision out of
+    // a 16K context window, so return only actionable diagnostics to the model.
+    // The complete transcript is retained separately for human troubleshooting.
+    private const int MaximumOutputCharacters = 4_000;
     private static readonly JsonSerializerOptions AuditJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AliCodingProjectResolver _resolver;
     private readonly AliCodingProjectTracker _projectTracker;
@@ -231,9 +238,16 @@ internal sealed class AliRoslynCodingTools
         }
 
         started.Stop();
+        var diagnosticLogPath = await WriteBuildLogAsync(
+                target.PhysicalPath,
+                normalizedConfiguration,
+                execution,
+                cancellationToken)
+            .ConfigureAwait(false);
         var artifact = execution.Success && !target.IsSolution
             ? FindBuiltArtifact(target.PhysicalPath, normalizedConfiguration)
             : null;
+        var diagnosticCounts = CountBuildDiagnostics(execution.Output);
         await WriteAuditAsync(
                 "build",
                 projectPath,
@@ -250,14 +264,17 @@ internal sealed class AliRoslynCodingTools
             execution.ExitCode,
             execution.Success
                 ? target.IsSolution
-                    ? "Roslyn/MSBuild successfully restored and compiled the approved solution."
+                    ? $"Roslyn/MSBuild successfully restored and compiled the approved solution with {diagnosticCounts.WarningCount} warning(s)."
                     : artifact is null
-                    ? "Roslyn/MSBuild succeeded, but no launchable artifact was found under the project's bin folder."
-                    : "Roslyn/MSBuild succeeded and produced a launchable artifact."
-                : "Roslyn/MSBuild failed. Review the diagnostics, correct the files, and build again.",
-            CompactOutput($"MSBuild toolset: {execution.ToolsetPath}{Environment.NewLine}{execution.Output}"),
+                    ? $"Roslyn/MSBuild succeeded with {diagnosticCounts.WarningCount} warning(s), but no launchable artifact was found under the project's bin folder."
+                    : $"Roslyn/MSBuild succeeded with {diagnosticCounts.WarningCount} warning(s) and produced a launchable artifact."
+                : $"Roslyn/MSBuild failed with {diagnosticCounts.ErrorCount} error(s) and {diagnosticCounts.WarningCount} warning(s). Review the diagnostics, correct the files, and build again.",
+            BuildModelOutput(execution.Success, execution.ToolsetPath, execution.Output),
             artifact,
-            started.ElapsedMilliseconds);
+            started.ElapsedMilliseconds,
+            diagnosticLogPath,
+            diagnosticCounts.WarningCount,
+            diagnosticCounts.ErrorCount);
     }
 
     public async Task<DotNetRunResult> RunAsync(
@@ -290,16 +307,38 @@ internal sealed class AliRoslynCodingTools
         }
 
         AliCodingProjectResolver.RejectReparsePoints(project.MountRoot, artifact);
+        var runtimeFailure = ValidateRequiredRuntime(artifact);
+        if (runtimeFailure is not null)
+        {
+            await WriteAuditAsync("run", projectPath, false, null, 0, runtimeFailure, cancellationToken)
+                .ConfigureAwait(false);
+            return new DotNetRunResult(false, projectPath, runtimeFailure, artifact, null);
+        }
+
         try
         {
+            var started = Stopwatch.StartNew();
             var startInfo = CreateLaunchStartInfo(artifact);
-            var process = Process.Start(startInfo)
+            using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Windows did not start the compiled application.");
             var processId = process.Id;
-            process.Dispose();
-            await WriteAuditAsync("run", projectPath, true, 0, 0, $"Started process {processId}.", cancellationToken)
+            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken).ConfigureAwait(false);
+            var exited = process.HasExited;
+            var exitCode = exited ? process.ExitCode : (int?)null;
+            if (exited && exitCode != 0)
+            {
+                var failure = $"The compiled application exited during startup with code {exitCode}.";
+                await WriteAuditAsync("run", projectPath, false, exitCode, started.ElapsedMilliseconds, failure, cancellationToken)
+                    .ConfigureAwait(false);
+                return new DotNetRunResult(false, projectPath, failure, artifact, processId);
+            }
+
+            var summary = exited
+                ? "The compiled application ran and exited successfully during the startup check."
+                : "The compiled application was launched and remained running through the startup check.";
+            await WriteAuditAsync("run", projectPath, true, exitCode, started.ElapsedMilliseconds, $"{summary} Process {processId}.", cancellationToken)
                 .ConfigureAwait(false);
-            return new DotNetRunResult(true, projectPath, "The compiled application was launched.", artifact, processId);
+            return new DotNetRunResult(true, projectPath, summary, artifact, processId);
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
@@ -327,7 +366,7 @@ internal sealed class AliRoslynCodingTools
     internal static string? FindBuiltArtifact(string projectPath, string configuration)
     {
         var projectDirectory = Path.GetDirectoryName(projectPath)!;
-        var outputRoot = Path.Combine(projectDirectory, "bin", configuration);
+        var outputRoot = Path.Combine(projectDirectory, "bin");
         if (!Directory.Exists(outputRoot))
         {
             return null;
@@ -335,14 +374,21 @@ internal sealed class AliRoslynCodingTools
 
         var assemblyName = ReadAssemblyName(projectPath) ?? Path.GetFileNameWithoutExtension(projectPath);
         var executable = Directory.EnumerateFiles(outputRoot, assemblyName + ".exe", SearchOption.AllDirectories)
+            .Where(path => HasConfigurationSegment(outputRoot, path, configuration))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
         return executable ?? Directory.EnumerateFiles(outputRoot, assemblyName + ".dll", SearchOption.AllDirectories)
+            .Where(path => HasConfigurationSegment(outputRoot, path, configuration))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
     }
+
+    private static bool HasConfigurationSegment(string outputRoot, string path, string configuration) =>
+        Path.GetRelativePath(outputRoot, path)
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.Equals(configuration, StringComparison.OrdinalIgnoreCase));
 
     private static string? ReadAssemblyName(string projectPath)
     {
@@ -380,6 +426,126 @@ internal sealed class AliRoslynCodingTools
         }
 
         return startInfo;
+    }
+
+    private static string? ValidateRequiredRuntime(string artifact)
+    {
+        var runtimeConfigPath = Path.ChangeExtension(artifact, ".runtimeconfig.json");
+        if (!File.Exists(runtimeConfigPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(runtimeConfigPath));
+            if (!document.RootElement.TryGetProperty("runtimeOptions", out var runtimeOptions))
+            {
+                return null;
+            }
+
+            var requirements = new List<(string Name, string Version)>();
+            if (runtimeOptions.TryGetProperty("framework", out var framework))
+            {
+                AddRuntimeRequirement(framework, requirements);
+            }
+            if (runtimeOptions.TryGetProperty("frameworks", out var frameworks)
+                && frameworks.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in frameworks.EnumerateArray())
+                {
+                    AddRuntimeRequirement(item, requirements);
+                }
+            }
+
+            var dotnetRoots = ResolveDotNetRoots();
+            foreach (var requirement in requirements.Distinct())
+            {
+                if (!TryParseRuntimeVersion(requirement.Version, out var requiredVersion))
+                {
+                    continue;
+                }
+                var required = requiredVersion!;
+
+                var installed = dotnetRoots
+                    .Select(root => Path.Combine(root, "shared", requirement.Name))
+                    .Where(Directory.Exists)
+                    .SelectMany(Directory.EnumerateDirectories)
+                        .Select(Path.GetFileName)
+                        .Where(version => !string.IsNullOrWhiteSpace(version))
+                        .Select(version => new
+                        {
+                            Label = version!,
+                            Parsed = TryParseRuntimeVersion(version!, out var parsed) ? parsed : null
+                        })
+                        .Where(item => item.Parsed is not null)
+                        .DistinctBy(item => item.Label, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                if (installed.Any(item =>
+                        item.Parsed is { } installedVersion
+                        && installedVersion.Major == required.Major
+                        && installedVersion >= required))
+                {
+                    continue;
+                }
+
+                var available = installed.Length == 0
+                    ? "none"
+                    : string.Join(", ", installed.Select(item => item.Label));
+                return $"The compiled application requires {requirement.Name} {requirement.Version}, but compatible installed versions are: {available}. Rebuild for an installed target framework before running; the process was not started.";
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return $"Ali could not validate the application's runtime requirements before launch: {ex.Message}";
+        }
+    }
+
+    private static void AddRuntimeRequirement(
+        JsonElement framework,
+        ICollection<(string Name, string Version)> requirements)
+    {
+        if (framework.ValueKind != JsonValueKind.Object
+            || !framework.TryGetProperty("name", out var nameElement)
+            || !framework.TryGetProperty("version", out var versionElement))
+        {
+            return;
+        }
+
+        var name = nameElement.GetString();
+        var version = versionElement.GetString();
+        if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(version))
+        {
+            requirements.Add((name, version));
+        }
+    }
+
+    private static IReadOnlyList<string> ResolveDotNetRoots()
+    {
+        var runtimeDirectory = new DirectoryInfo(
+            System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        var candidates = new[]
+        {
+            Environment.GetEnvironmentVariable("DOTNET_ROOT"),
+            Environment.GetEnvironmentVariable("DOTNET_ROOT_X64"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "dotnet"),
+            runtimeDirectory.Parent?.Parent?.Parent?.FullName
+        };
+        return candidates
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => Path.GetFullPath(path!))
+            .Where(path => Directory.Exists(Path.Combine(path, "shared")))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool TryParseRuntimeVersion(string value, out Version? version)
+    {
+        var stablePrefix = value.Split('-', 2)[0];
+        return Version.TryParse(stablePrefix, out version);
     }
 
     private static string ResolveDotNetHost()
@@ -423,6 +589,99 @@ internal sealed class AliRoslynCodingTools
         finally
         {
             _auditLock.Release();
+        }
+    }
+
+    internal static string BuildModelOutput(bool success, string toolsetPath, string output)
+    {
+        var normalized = output.ReplaceLineEndings(Environment.NewLine).Trim();
+        var diagnosticCounts = CountBuildDiagnostics(normalized);
+        var diagnosticLines = normalized
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line =>
+                line.Contains(": error ", StringComparison.OrdinalIgnoreCase)
+                || line.Contains(": warning ", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("error CS", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("warning CS", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("error MSB", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("warning MSB", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Build succeeded", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Build FAILED", StringComparison.OrdinalIgnoreCase)
+                || line.EndsWith("Warning(s)", StringComparison.OrdinalIgnoreCase)
+                || line.EndsWith("Error(s)", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var summary = new List<string>
+        {
+            success
+                ? $"Build succeeded with {diagnosticCounts.WarningCount} warning(s)."
+                : $"Build failed with {diagnosticCounts.ErrorCount} error(s) and {diagnosticCounts.WarningCount} warning(s).",
+            $"MSBuild toolset: {toolsetPath}"
+        };
+        summary.AddRange(diagnosticLines);
+        if (diagnosticLines.Count == 0 && !success && normalized.Length > 0)
+        {
+            summary.Add("MSBuild output tail:");
+            summary.Add(normalized.Length <= 2_500 ? normalized : normalized[^2_500..]);
+        }
+        else if (diagnosticLines.Count == 0)
+        {
+            summary.Add(success
+                ? "No compiler warnings or errors were reported."
+                : "No structured compiler diagnostic was captured; inspect the retained full build log.");
+        }
+        summary.Add("The complete MSBuild transcript was retained in Ali's local coding audit folder.");
+        return CompactOutput(string.Join(Environment.NewLine, summary));
+    }
+
+    private static (int WarningCount, int ErrorCount) CountBuildDiagnostics(string output)
+    {
+        var lines = output.ReplaceLineEndings(Environment.NewLine)
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var warningCount = lines.Count(line =>
+            line.Contains(": warning ", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("warning CS", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("warning MSB", StringComparison.OrdinalIgnoreCase));
+        var errorCount = lines.Count(line =>
+            line.Contains(": error ", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("error CS", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("error MSB", StringComparison.OrdinalIgnoreCase));
+        return (warningCount, errorCount);
+    }
+
+    private async Task<string?> WriteBuildLogAsync(
+        string targetPath,
+        string configuration,
+        MsBuildExecutionResult execution,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var directory = Path.Combine(Path.GetDirectoryName(_auditPath)!, "BuildLogs");
+            Directory.CreateDirectory(directory);
+            var projectName = Path.GetFileNameWithoutExtension(targetPath);
+            var safeName = string.Concat(projectName.Select(character =>
+                Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+            var path = Path.Combine(
+                directory,
+                $"{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{safeName}-{configuration}.log");
+            var transcript = string.Join(
+                Environment.NewLine,
+                $"Target: {targetPath}",
+                $"Configuration: {configuration}",
+                $"MSBuild toolset: {execution.ToolsetPath}",
+                $"Exit code: {execution.ExitCode}",
+                string.Empty,
+                execution.Output);
+            await File.WriteAllTextAsync(path, transcript, cancellationToken).ConfigureAwait(false);
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

@@ -57,6 +57,9 @@ public sealed class AgentWorkflowTests
 
         Assert.Contains("workflow response", result?.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(AliAgentWorkflowFactory.ProgrammingMaximumTurns, client.CallCount);
+        Assert.Contains("complete objective", groupChat.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("advisory only", groupChat.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("direct edit, build, test, run", groupChat.Description, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

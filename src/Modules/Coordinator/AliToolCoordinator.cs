@@ -223,7 +223,7 @@ public sealed class AliToolCoordinator
             try
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-                await _userMemories.RememberAsync(user, conversation, "conversation", timeout.Token).ConfigureAwait(false);
+                await _userMemories.RememberAsync(user, conversation, "conversation", null, timeout.Token).ConfigureAwait(false);
             }
             catch
             {

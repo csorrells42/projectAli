@@ -213,6 +213,63 @@ public sealed class StoredPersonIdentityReviewService :
 			"Turn the camera on to enroll a user.");
 	}
 
+	public IdentityReviewUpdateResult CreateUserProfile(
+		IdentityEnrollmentRequest request)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		string firstName = request.FirstName.Trim();
+		string lastName = request.LastName.Trim();
+		string username = request.Username.Trim();
+		if (string.IsNullOrWhiteSpace(firstName)
+			|| string.IsNullOrWhiteSpace(lastName)
+			|| string.IsNullOrWhiteSpace(username))
+		{
+			return new IdentityReviewUpdateResult(
+				false,
+				"User profiles require first name, last name, and username.");
+		}
+
+		lock (_sync)
+		{
+			List<PersonIdentityRecord> people = _store.Load(_outputFolder);
+			if (people.Any(person => person.IsRegisteredUser
+				&& string.Equals(person.Username, username, StringComparison.OrdinalIgnoreCase)))
+			{
+				return new IdentityReviewUpdateResult(false, $"Username '{username}' is already assigned.");
+			}
+
+			DateTime now = DateTime.UtcNow;
+			var person = new PersonIdentityRecord
+			{
+				Id = "person-" + Guid.NewGuid().ToString("N"),
+				DisplayName = (firstName + " " + lastName).Trim(),
+				FirstName = firstName,
+				LastName = lastName,
+				Username = username,
+				Email = request.Email.Trim(),
+				PhoneNumber = request.PhoneNumber.Trim(),
+				Address = request.Address.Trim(),
+				IsRegisteredUser = true,
+				PermissionLevel = NormalizePermission(request.PermissionLevel),
+				FirstSeenAtUtc = now,
+				LastSeenAtUtc = now,
+				ObservationCount = 0,
+				EncounterCount = 0,
+				Prototypes = []
+			};
+			try
+			{
+				_store.Upsert(_outputFolder, [person]);
+				Status = $"{person.DisplayName} was created without camera enrollment";
+				return new IdentityReviewUpdateResult(true, Status + ".");
+			}
+			catch (Exception exception)
+			{
+				return new IdentityReviewUpdateResult(false, "User profile could not be saved: " + exception.Message);
+			}
+		}
+	}
+
 	public IdentityReviewUpdateResult RequestEnrollmentCapture()
 	{
 		return new IdentityReviewUpdateResult(

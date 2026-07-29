@@ -35,9 +35,11 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
     public async Task<Mem0Response> SendAsync(object request, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        Process? process = null;
+        var requestWasWritten = false;
         try
         {
-            var process = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+            process = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
             var id = Guid.NewGuid().ToString("N");
             var requestProperties = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase)
             {
@@ -50,6 +52,7 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             var requestJson = JsonSerializer.Serialize(requestProperties, JsonOptions);
             await process.StandardInput.WriteLineAsync(requestJson.AsMemory(), cancellationToken).ConfigureAwait(false);
             await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+            requestWasWritten = true;
             var line = await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -66,10 +69,30 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             }
             return response;
         }
+        catch
+        {
+            // Once a request is on the stdio pipe, abandoning its response would
+            // leave that response queued for the next caller. Restart the private
+            // worker so a timed-out recall can never corrupt a later request.
+            if (requestWasWritten && process is not null)
+            {
+                ResetProcess(process);
+            }
+            throw;
+        }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private void ResetProcess(Process process)
+    {
+        if (!ReferenceEquals(_process, process)) return;
+        try { process.StandardInput.Close(); } catch { }
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+        try { process.Dispose(); } catch { }
+        _process = null;
     }
 
     private async Task<Process> EnsureStartedAsync(CancellationToken cancellationToken)
@@ -117,6 +140,9 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         Add("--qdrant-port", qdrantSettings.QdrantHttpPort.ToString());
         start.Environment["MEM0_TELEMETRY"] = "false";
         start.Environment["POSTHOG_DISABLED"] = "true";
+        start.Environment["FASTEMBED_CACHE_PATH"] = Path.Combine(AppContext.BaseDirectory, "runtime", "fastembed-cache");
+        start.Environment["HF_HUB_OFFLINE"] = "1";
+        start.Environment["HF_HUB_DISABLE_TELEMETRY"] = "1";
         start.Environment["NO_PROXY"] = "127.0.0.1,localhost";
         start.Environment["HTTP_PROXY"] = "http://127.0.0.1:1";
         start.Environment["HTTPS_PROXY"] = "http://127.0.0.1:1";

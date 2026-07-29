@@ -1065,7 +1065,7 @@
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
                                 <CheckBox Content="Enabled" IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,14,0" />
-                                <CheckBox Content="Learn after replies" IsChecked="{Binding AutomaticBackgroundLearning}" VerticalAlignment="Center" />
+                                <CheckBox Content="Learn after replies (experimental)" ToolTip="Explicit remember requests always work. Automatic extraction is optional because ordinary task output may not be a durable personal fact." IsChecked="{Binding AutomaticBackgroundLearning}" VerticalAlignment="Center" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -2555,6 +2555,125 @@
                                       AutomationProperties.AutomationId="SettingsInternetBackendEnabledCheckBox"
                                       IsChecked="{Binding InternetBackendEnabled}"
                                       Margin="0,0,0,12" />
+
+                            <Border Background="#101D18"
+                                    BorderBrush="#2E8B57"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="12"
+                                    Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="Google Grounded Search"
+                                               FontSize="15"
+                                               FontWeight="SemiBold"
+                                               Foreground="#78E0A3" />
+                                    <TextBlock Text="Primary live-search provider. Ali always uses the pinned gemini-3.5-flash-lite model and accepts source URLs only from Google's grounding metadata."
+                                               TextWrapping="Wrap"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11"
+                                               Margin="0,3,0,8" />
+                                    <Border Background="#171B20"
+                                            BorderBrush="#C4932F"
+                                            BorderThickness="1"
+                                            CornerRadius="3"
+                                            Padding="10"
+                                            Margin="0,0,0,10">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                                <TextBlock Text="Owner-protected billing controls"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#FFD27A" />
+                                                <TextBlock Text="{Binding GoogleBillingProtectionStatusText}"
+                                                           AutomationProperties.AutomationId="SettingsGoogleBillingProtectionStatus"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           FontSize="11"
+                                                           Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Content="Change password"
+                                                        AutomationProperties.AutomationId="SettingsChangeGoogleBillingPasswordButton"
+                                                        Click="ChangeGoogleBillingPasswordClicked"
+                                                        IsEnabled="{Binding CanChangeGoogleBillingPassword}"
+                                                        Margin="0,0,8,0" />
+                                                <Button Content="{Binding GoogleBillingProtectionActionText}"
+                                                        AutomationProperties.AutomationId="SettingsGoogleBillingProtectionButton"
+                                                        Click="GoogleBillingProtectionClicked"
+                                                        MinWidth="150"
+                                                        Margin="0" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                    <CheckBox Content="Enable Google grounded search"
+                                              IsChecked="{Binding InternetGeminiGroundedSearchEnabled}"
+                                              IsEnabled="{Binding CanEditGoogleBillingSettings}"
+                                              AutomationProperties.AutomationId="SettingsInternetGeminiEnabledCheckBox"
+                                              Margin="0,0,0,8" />
+                                    <TextBlock Text="Gemini API key" Style="{StaticResource FieldLabel}" />
+                                    <PasswordBox x:Name="GeminiApiKeyPasswordBox"
+                                                 PasswordChanged="GeminiApiKeyPasswordChanged"
+                                                 IsEnabled="{Binding CanEditGoogleBillingSettings}"
+                                                 AutomationProperties.AutomationId="SettingsInternetGeminiApiKeyPasswordBox"
+                                                 Margin="0,2,0,2" />
+                                    <TextBlock Text="Leave blank to use GEMINI_API_KEY. The key selects the project; Ali's pinned request selects the inexpensive grounded model. Never paste this key into a chat."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}" />
+                                    <Grid Margin="0,9,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="10" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="10" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Requests/hour" Style="{StaticResource FieldLabel}" />
+                                            <TextBox Text="{Binding InternetGeminiHourlyLimitText, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanEditGoogleBillingSettings}"
+                                                     AutomationProperties.AutomationId="SettingsInternetGeminiHourlyLimitTextBox" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Requests/day" Style="{StaticResource FieldLabel}" />
+                                            <TextBox Text="{Binding InternetGeminiDailyLimitText, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanEditGoogleBillingSettings}"
+                                                     AutomationProperties.AutomationId="SettingsInternetGeminiDailyLimitTextBox" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4">
+                                            <TextBlock Text="Monthly breaker ($)" Style="{StaticResource FieldLabel}" />
+                                            <TextBox Text="{Binding InternetGeminiMonthlySpendLimitText, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanEditGoogleBillingSettings}"
+                                                     AutomationProperties.AutomationId="SettingsInternetGeminiMonthlySpendLimitTextBox" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="Defaults: 30/hour, 40/day, and a $5 local estimated-spend breaker. Keep Google's project spend cap enabled as the independent second safety layer."
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource SubtleTextBrush}"
+                                               Margin="0,5,0,0" />
+                                    <TextBlock Text="{Binding InternetGeminiUsageText}"
+                                               AutomationProperties.AutomationId="SettingsInternetGeminiUsageText"
+                                               TextWrapping="Wrap"
+                                               FontSize="11"
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               Margin="0,5,0,0" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                        <Button Content="Test Google Grounding"
+                                                AutomationProperties.AutomationId="SettingsInternetTestGeminiButton"
+                                                Command="{Binding TestGeminiInternetBackendCommand}"
+                                                MinWidth="158"
+                                                Margin="0,0,8,0" />
+                                        <Button Content="Refresh usage"
+                                                AutomationProperties.AutomationId="SettingsInternetRefreshGeminiUsageButton"
+                                                Click="RefreshGeminiUsageClicked"
+                                                MinWidth="110" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
 
                             <TextBlock Text="Tavily API key" Style="{StaticResource FieldLabel}" />
                             <TextBox Text="{Binding InternetTavilyApiKeyText, UpdateSourceTrigger=PropertyChanged}"

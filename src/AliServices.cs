@@ -75,6 +75,7 @@ public sealed class AliServices
         FileAccess = fileAccess;
         AgentWorkMemory = agentWorkMemory;
         CodingModule = codingModule;
+        GoogleBillingGuard = new GoogleBillingSettingsGuard(DataRoot);
     }
 
     public string DataRoot { get; }
@@ -145,6 +146,8 @@ public sealed class AliServices
 
     public AliAgentWorkMemory AgentWorkMemory { get; }
 
+    public GoogleBillingSettingsGuard GoogleBillingGuard { get; }
+
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
         RuntimeSettingsStore.LoadOrDefault(DataRoot);
 
@@ -178,8 +181,11 @@ public sealed class AliServices
     public void SaveWebSourceBackendSettings(WebSourceBackendSettings settings) =>
         WebSourceBackendSettingsStore.Save(DataRoot, settings);
 
+    public string GetGeminiGroundingUsageStatus(WebSourceBackendSettings settings) =>
+        new GeminiGroundingUsageLedger(DataRoot).GetStatus(settings, DateTimeOffset.UtcNow);
+
     public TavilyFirecrawlSourceRetriever CreateWebSourceRetriever() =>
-        new(_internetHttpClient, LoadWebSourceBackendSettings);
+        new(_internetHttpClient, LoadWebSourceBackendSettings, dataRoot: DataRoot);
 
     public UserDataBackupService CreateUserDataBackupService() =>
         new(DataRoot, UserDataRoot);
@@ -299,6 +305,7 @@ public sealed class AliServices
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
+        userMemories.BeginWarmup(activeUsers.Current);
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
         var fileAccess = AliWorkstationFileAccess.CreateDefault(
             userDataRoot,
@@ -316,7 +323,8 @@ public sealed class AliServices
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
         var webSources = new TavilyFirecrawlSourceRetriever(
             internetHttpClient,
-            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot),
+            dataRoot: dataRoot);
         var webResearch = new McpWebResearchClient(
             () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
         var mcpClients = new McpClientManager(dataRoot);

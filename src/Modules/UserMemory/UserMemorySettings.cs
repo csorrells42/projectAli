@@ -6,11 +6,23 @@ public sealed record UserMemorySettings
 {
     public bool Enabled { get; init; } = true;
 
-    public bool AutomaticBackgroundLearning { get; init; } = true;
+    // Explicit "remember this" requests remain available. Broad extraction after
+    // every reply is opt-in because tool output and transient task state are not
+    // reliable personal facts and can also contend with foreground recall.
+    public bool AutomaticBackgroundLearning { get; init; } = false;
 
     public int RecallMaximumResults { get; init; } = 5;
 
-    public int RecallTimeoutMilliseconds { get; init; } = 1500;
+    public int RecallTimeoutMilliseconds { get; init; } = 2500;
+
+    // Mem0 v1.1 returns a normalized hybrid score. When BM25 is available it
+    // averages semantic and keyword evidence, so a strong 0.60 dense match plus
+    // a useful keyword match commonly lands around 0.35. A 0.30 second-stage
+    // floor rejects dense-only noise while preserving those supported matches;
+    // Mem0's own semantic threshold has already gated the candidate set.
+    public double RecallMinimumScore { get; init; } = 0.30;
+
+    public double RecallScoreWindow { get; init; } = 0.05;
 
     public string CollectionName { get; init; } = "ali_user_memories";
 
@@ -32,6 +44,8 @@ public sealed record UserMemorySettings
     {
         RecallMaximumResults = Math.Clamp(RecallMaximumResults, 1, 8),
         RecallTimeoutMilliseconds = Math.Clamp(RecallTimeoutMilliseconds, 250, 5000),
+        RecallMinimumScore = Math.Clamp(RecallMinimumScore, 0, 1),
+        RecallScoreWindow = Math.Clamp(RecallScoreWindow, 0, 0.25),
         CollectionName = string.IsNullOrWhiteSpace(CollectionName) ? "ali_user_memories" : CollectionName.Trim(),
         LemonadeEndpoint = RequireLoopback(LemonadeEndpoint, nameof(LemonadeEndpoint)),
         EmbeddingEndpoint = RequireLoopback(EmbeddingEndpoint, nameof(EmbeddingEndpoint)),

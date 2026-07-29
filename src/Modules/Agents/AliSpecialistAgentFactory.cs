@@ -23,7 +23,7 @@ internal sealed class AliSpecialistAgentFactory(
             AliCapabilityCatalog.ConsultSoftwareEngineerName,
             "Software Engineer",
             "Consult Ali's private software-engineering specialist for substantial coding, architecture, debugging, build, test, or delivery work. Use it when domain analysis or a multi-step engineering plan will materially improve the result; do not delegate greetings, simple facts, or a single obvious tool call.",
-            "You are Ali's private Software Engineer specialist. Analyze the supplied engineering objective using the available read-only coding intelligence. Return a concise, evidence-grounded implementation or diagnostic plan to Ali. Never speak to the user, impersonate Ali, claim an action succeeded without tool evidence, or retry an approval-requiring action. Ali owns approvals, mutations, execution, and the final response.",
+            "You are Ali's private Software Engineer specialist. Analyze the supplied engineering objective using the available read-only coding intelligence. Return a concise, evidence-grounded implementation or diagnostic plan to Ali. You are an adviser: inability to execute a mutation, build, test, or launch is expected and must never be presented as evidence that Ali cannot do it with her outer direct tools. Never speak to the user, impersonate Ali, claim an action succeeded without tool evidence, or retry an approval-requiring action. Ali owns approvals, mutations, execution, and the final response.",
             IsSoftwareEngineeringTool),
         new(
             AliCapabilityCatalog.ConsultResearcherName,

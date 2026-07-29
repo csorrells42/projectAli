@@ -279,6 +279,37 @@ public partial class IdentityReviewWindow : Window
 		UpdateEnrollmentUi(_service.GetEnrollmentState());
 	}
 
+	private void CreateUserWithoutCameraClicked(
+		object sender,
+		RoutedEventArgs e)
+	{
+		if (Selected is not null)
+		{
+			StatusText.Text = "Click New user before creating a separate profile.";
+			return;
+		}
+		string firstName = FirstNameTextBox.Text.Trim();
+		string lastName = LastNameTextBox.Text.Trim();
+		string username = UsernameTextBox.Text.Trim();
+		string permission =
+			(PermissionLevelComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString()
+			?? "Default User";
+		var request = new IdentityEnrollmentRequest(
+			firstName,
+			lastName,
+			username,
+			EmailTextBox.Text.Trim(),
+			PhoneNumberTextBox.Text.Trim(),
+			AddressTextBox.Text.Trim(),
+			permission);
+		IdentityReviewUpdateResult result = _service.CreateUserProfile(request);
+		StatusText.Text = result.Status;
+		if (result.Success)
+		{
+			RefreshItems();
+		}
+	}
+
 	private void EnrollmentTimerTick(object? sender, EventArgs e)
 	{
 		UpdateMicrophoneLevel();

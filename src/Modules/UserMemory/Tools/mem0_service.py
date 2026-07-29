@@ -117,6 +117,7 @@ class Worker:
                 },
             }
         )
+        self.hybrid_backfill_count = self.memory.vector_store.ensure_hybrid_indexed()
 
     @staticmethod
     def user(request):
@@ -140,7 +141,11 @@ class Worker:
         stable_id, user = self.user(request)
         if operation == "health":
             memories = self.list_for(stable_id, 500)
-            return self.ok("Mem0 and Qdrant are ready.", memories=[], count=len(memories))
+            return self.ok(
+                f"Mem0 and Qdrant are ready with hybrid retrieval; backfilled {self.hybrid_backfill_count} memory item(s).",
+                memories=[],
+                count=len(memories),
+            )
         if operation == "recall":
             query = str(request.get("query", "")).strip()
             maximum = max(1, min(int(request.get("maximumResults", 5)), 8))
@@ -160,14 +165,22 @@ class Worker:
             explicit = source == "explicit_user_request"
             metadata = {
                 "display_name_snapshot": str(user.get("displayName", "")),
-                "category": str(request.get("category", "general")),
+                "category": str(request.get("category") or "general"),
                 "source": source,
                 "explicitly_taught": explicit,
                 "confidence": 1.0 if explicit else 0.8,
                 "identity_resolution_method": str(user.get("resolutionMethod", "explicit-selection")),
                 "updated_utc": datetime.now(timezone.utc).isoformat(),
             }
-            result = self.memory.add(conversation, user_id=stable_id, metadata=metadata)
+            # Explicitly approved teaching already contains the exact durable fact.
+            # Store it verbatim instead of paying for another LLM extraction pass
+            # that can discard the label the user will naturally recall it by.
+            result = self.memory.add(
+                conversation,
+                user_id=stable_id,
+                metadata=metadata,
+                infer=not explicit,
+            )
             values = result.get("results", [])
             message = "I'll remember that for this user." if values else "No durable personal memory was found in that turn."
             return self.ok(message, values)

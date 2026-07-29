@@ -97,8 +97,12 @@ internal sealed class PersonIdentityMemoryStore
 					}
 				}
 			}
+			// Registered users are durable identities even before a camera is
+			// available. Face prototypes are optional recognition evidence, not
+			// the existence or ownership key for the user profile.
 			return people
-				.Where(person => person.Prototypes.Count > 0)
+				.Where(person => person.IsRegisteredUser
+					|| person.Prototypes.Count > 0)
 				.ToList();
 		}
 		catch

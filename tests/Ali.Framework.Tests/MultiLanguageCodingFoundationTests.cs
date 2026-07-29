@@ -37,6 +37,29 @@ public sealed class MultiLanguageCodingFoundationTests
     }
 
     [Fact]
+    public async Task ResolverAcceptsAProjectFolderWhenItContainsOneUnambiguousManifest()
+    {
+        await WithAccessAsync(async (_, access) =>
+        {
+            await access.Store.WriteAsync(
+                "Workspace/Game/Game.csproj",
+                "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+                TestContext.Current.CancellationToken);
+
+            var resolved = new AliLanguageProjectResolver(access).Resolve("Workspace/Game");
+            var dotnetProject = new AliCodingProjectResolver(access).ResolveExistingProject("Workspace/Game");
+            var roslynTarget = new AliCodingProjectResolver(access).ResolveExistingTarget("Workspace/Game");
+
+            Assert.Equal(AliProgrammingLanguage.CSharp, resolved.Language);
+            Assert.Equal("Game.csproj", resolved.ManifestName);
+            Assert.EndsWith("Game.csproj", resolved.PhysicalPath, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith(Path.Combine("workspace", "Game"), resolved.ProjectDirectory, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith("Game.csproj", dotnetProject.PhysicalPath, StringComparison.OrdinalIgnoreCase);
+            Assert.EndsWith("Game.csproj", roslynTarget.PhysicalPath, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
     public async Task StructuralIndexFindsSymbolsAcrossAllRequestedLanguagesAndSkipsBuildTrees()
     {
         await WithAccessAsync(async (_, access) =>

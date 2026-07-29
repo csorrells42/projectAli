@@ -69,7 +69,8 @@ foreach ($entry in @($manifest.requiredFiles)) {
 }
 
 $python = Join-Path $root 'runtime\python\python.exe'
-& $python -c "import mediapipe, faster_whisper, kittentts, piper, mem0, qdrant_client; print('Published Python imports verified')"
+$fastEmbedModel = Join-Path $root 'runtime\fastembed-cache\models--Qdrant--bm25\snapshots\e499a1f8d6bec960aab5533a0941bf914e70faf9'
+& $python -c "import os,sys; os.environ['HF_HUB_OFFLINE']='1'; import mediapipe,faster_whisper,kittentts,piper,mem0,qdrant_client,spacy,en_core_web_sm; from fastembed import SparseTextEmbedding; nlp=spacy.load('en_core_web_sm'); assert nlp('machines running reliably')[1].lemma_ == 'run'; vectors=list(SparseTextEmbedding(model_name='Qdrant/bm25',specific_model_path=sys.argv[1],local_files_only=True).embed(['hydraulic pressure alarm 4177'])); assert vectors and len(vectors[0].indices)>0; print('Published Python and offline hybrid retrieval verified')" $fastEmbedModel
 if ($LASTEXITCODE -ne 0) { throw "Published Python runtime smoke test failed (exit $LASTEXITCODE)." }
 
 $ffmpeg = Join-Path $root 'dependencies\ffmpeg\win-x64\ffmpeg.exe'

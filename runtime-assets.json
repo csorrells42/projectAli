@@ -34,6 +34,41 @@
       "kind": "pipWheel"
     },
     {
+      "id": "spacy-en-core-web-sm-wheel",
+      "version": "3.8.0",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/explosion/spacy-models/releases/tag/en_core_web_sm-3.8.0",
+      "url": "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+      "fileName": "en_core_web_sm-3.8.0-py3-none-any.whl",
+      "size": 12806118,
+      "sha256": "1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+      "kind": "pipWheel"
+    },
+    {
+      "id": "fastembed-qdrant-bm25-config",
+      "version": "e499a1f8d6bec960aab5533a0941bf914e70faf9",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Qdrant/bm25",
+      "url": "https://huggingface.co/Qdrant/bm25/resolve/e499a1f8d6bec960aab5533a0941bf914e70faf9/config.json?download=true",
+      "fileName": "qdrant-bm25-config.json",
+      "size": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "kind": "file",
+      "destination": "runtime/fastembed-cache/models--Qdrant--bm25/snapshots/e499a1f8d6bec960aab5533a0941bf914e70faf9/config.json"
+    },
+    {
+      "id": "fastembed-qdrant-bm25-english",
+      "version": "e499a1f8d6bec960aab5533a0941bf914e70faf9",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Qdrant/bm25",
+      "url": "https://huggingface.co/Qdrant/bm25/resolve/e499a1f8d6bec960aab5533a0941bf914e70faf9/english.txt?download=true",
+      "fileName": "qdrant-bm25-english.txt",
+      "size": 936,
+      "sha256": "019f104ba2ed07436d05f9cdd3383034ad66014edc27fc651f837e1a038b6451",
+      "kind": "file",
+      "destination": "runtime/fastembed-cache/models--Qdrant--bm25/snapshots/e499a1f8d6bec960aab5533a0941bf914e70faf9/english.txt"
+    },
+    {
       "id": "parakeet-tdt-0.6b-v2-int8",
       "version": "0.6b-v2-int8",
       "license": "CC-BY-4.0",
@@ -293,6 +328,9 @@
     { "id": "whisper", "requirements": "tools/runtime-assets/requirements-whisper.txt", "destination": "runtime/whisper-packages" },
     { "id": "mem0", "requirements": "tools/runtime-assets/requirements-mem0.txt", "destination": "runtime/mem0-packages" }
   ],
+  "wheelInstalls": [
+    { "assetId": "spacy-en-core-web-sm-wheel", "destination": "runtime/mem0-packages" }
+  ],
   "repositoryFiles": [
     { "source": "LICENSE", "destination": "LICENSE" },
     { "source": "THIRD-PARTY-NOTICES.md", "destination": "THIRD-PARTY-NOTICES.md" },
@@ -301,6 +339,8 @@
     { "source": "src/Modules/UserMemory/Tools/mem0_service.py", "destination": "lib/memory/mem0_service.py" },
     { "source": "src/Modules/UserMemory/Tools/lemonade_llm.py", "destination": "lib/memory/lemonade_llm.py" },
     { "source": "src/Modules/UserMemory/Tools/local_qdrant.py", "destination": "lib/memory/local_qdrant.py" },
+    { "source": "tools/runtime-assets/fastembed-bm25-ref-main.txt", "destination": "runtime/fastembed-cache/models--Qdrant--bm25/refs/main" },
+    { "source": "tools/runtime-assets/fastembed-bm25-files-metadata.json", "destination": "runtime/fastembed-cache/models--Qdrant--bm25/files_metadata.json" },
     { "source": "external/modules/ParakeetSpeechToTextModule/faster_whisper_worker.py", "destination": "dependencies/audio/whisper/faster_whisper_worker.py", "optional": true }
   ],
   "packageMarkers": [
@@ -308,10 +348,15 @@
     "runtime/tts-packages/kittentts/__init__.py",
     "runtime/tts-packages/piper/__init__.py",
     "runtime/whisper-packages/faster_whisper/__init__.py",
-    "runtime/mem0-packages/mem0/__init__.py"
+    "runtime/mem0-packages/mem0/__init__.py",
+    "runtime/mem0-packages/fastembed/__init__.py",
+    "runtime/mem0-packages/spacy/__init__.py",
+    "runtime/mem0-packages/en_core_web_sm/__init__.py"
   ],
   "requiredFiles": [
     { "path": "runtime/python/python.exe", "size": 104952, "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a" },
+    { "path": "runtime/fastembed-cache/models--Qdrant--bm25/snapshots/e499a1f8d6bec960aab5533a0941bf914e70faf9/config.json", "size": 2, "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" },
+    { "path": "runtime/fastembed-cache/models--Qdrant--bm25/snapshots/e499a1f8d6bec960aab5533a0941bf914e70faf9/english.txt", "size": 936, "sha256": "019f104ba2ed07436d05f9cdd3383034ad66014edc27fc651f837e1a038b6451" },
     { "path": "dependencies/coding/node/node.exe", "size": 92534088, "sha256": "9a4eb5f1c29c6a2e93852ead46b999e284a6a5ca8bab4d4e241d587d025a52de" },
     { "path": "dependencies/coding/java/bin/java.exe", "size": 50344, "sha256": "5e0fab9f07952ceb6e71eb9fd33e1ed69959904ca00cf70869b7baf516a98016" },
     { "path": "dependencies/coding/java/bin/javac.exe", "size": 24744, "sha256": "2df52e1bcb1256e09734c12939eec114997082ea4c3e7898d19c7a35fea34281" },

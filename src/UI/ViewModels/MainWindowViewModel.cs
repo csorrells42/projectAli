@@ -125,11 +125,19 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _modelConnectionStatusText = "model offline";
     private System.Windows.Media.Brush _modelConnectionStatusBrush = MediaBrushes.Red;
     private bool _internetBackendEnabled = true;
+    private bool _internetGeminiGroundedSearchEnabled = true;
+    private string _internetGeminiApiKeyText = string.Empty;
+    private string _internetGeminiHourlyLimitText = "30";
+    private string _internetGeminiDailyLimitText = "40";
+    private string _internetGeminiMonthlySpendLimitText = "5.00";
+    private bool _isGoogleBillingSettingsUnlocked;
+    private string _googleBillingProtectionStatusText = "Google billing protection has not been configured yet.";
     private string _internetTavilyApiKeyText = string.Empty;
     private string _internetFirecrawlApiKeyText = string.Empty;
     private string _internetBraveSearchApiKeyText = string.Empty;
     private string _internetSerperApiKeyText = string.Empty;
     private string _internetBackendStatusText = "Internet backend settings not loaded yet.";
+    private string _internetGeminiUsageText = "Google grounding usage not checked yet.";
     private string _internetTavilyUsageText = "Tavily usage not checked yet.";
     private string _internetFirecrawlUsageText = "Firecrawl usage not checked yet.";
     private string _internetBraveSearchUsageText = "Brave Search usage not checked yet.";
@@ -238,6 +246,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SaveAssistantNameCommand = CreateCommand(_ => SaveAssistantName());
         SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
         SaveInternetBackendSettingsCommand = CreateCommand(_ => SaveInternetBackendSettings());
+        TestGeminiInternetBackendCommand = CreateAsyncCommand(() => TestInternetProviderAsync(InternetSearchProvider.GoogleGroundedSearch), () => !IsBusy);
         TestTavilyInternetBackendCommand = CreateAsyncCommand(() => TestInternetProviderAsync(InternetSearchProvider.Tavily), () => !IsBusy);
         TestFirecrawlInternetBackendCommand = CreateAsyncCommand(() => TestInternetProviderAsync(InternetSearchProvider.Firecrawl), () => !IsBusy);
         TestBraveSearchInternetBackendCommand = CreateAsyncCommand(() => TestInternetProviderAsync(InternetSearchProvider.BraveSearch), () => !IsBusy);
@@ -604,6 +613,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand SaveInternetBackendSettingsCommand { get; }
 
+    public ICommand TestGeminiInternetBackendCommand { get; }
+
     public ICommand TestTavilyInternetBackendCommand { get; }
 
     public ICommand TestFirecrawlInternetBackendCommand { get; }
@@ -823,6 +834,150 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _runtimeDisplay;
         private set => SetProperty(ref _runtimeDisplay, value);
+    }
+
+    public bool InternetGeminiGroundedSearchEnabled
+    {
+        get => _internetGeminiGroundedSearchEnabled;
+        set => SetProperty(ref _internetGeminiGroundedSearchEnabled, value);
+    }
+
+    public string InternetGeminiApiKeyText
+    {
+        get => _internetGeminiApiKeyText;
+        set => SetProperty(ref _internetGeminiApiKeyText, value);
+    }
+
+    public string InternetGeminiHourlyLimitText
+    {
+        get => _internetGeminiHourlyLimitText;
+        set => SetProperty(ref _internetGeminiHourlyLimitText, value);
+    }
+
+    public string InternetGeminiDailyLimitText
+    {
+        get => _internetGeminiDailyLimitText;
+        set => SetProperty(ref _internetGeminiDailyLimitText, value);
+    }
+
+    public string InternetGeminiMonthlySpendLimitText
+    {
+        get => _internetGeminiMonthlySpendLimitText;
+        set => SetProperty(ref _internetGeminiMonthlySpendLimitText, value);
+    }
+
+    public string InternetGeminiUsageText
+    {
+        get => _internetGeminiUsageText;
+        private set => SetProperty(ref _internetGeminiUsageText, value);
+    }
+
+    public bool IsGoogleBillingProtectionConfigured => _services.GoogleBillingGuard.IsConfigured;
+
+    public bool IsGoogleBillingSettingsUnlocked
+    {
+        get => _isGoogleBillingSettingsUnlocked;
+        private set
+        {
+            if (SetProperty(ref _isGoogleBillingSettingsUnlocked, value))
+            {
+                OnPropertyChanged(nameof(CanEditGoogleBillingSettings));
+                OnPropertyChanged(nameof(GoogleBillingProtectionActionText));
+                OnPropertyChanged(nameof(CanChangeGoogleBillingPassword));
+            }
+        }
+    }
+
+    public bool CanEditGoogleBillingSettings =>
+        !IsGoogleBillingProtectionConfigured || IsGoogleBillingSettingsUnlocked;
+
+    public bool CanChangeGoogleBillingPassword =>
+        IsGoogleBillingProtectionConfigured && IsGoogleBillingSettingsUnlocked;
+
+    public string GoogleBillingProtectionActionText =>
+        !IsGoogleBillingProtectionConfigured
+            ? "Set owner password"
+            : IsGoogleBillingSettingsUnlocked
+                ? "Lock Google controls"
+                : "Unlock Google controls";
+
+    public string GoogleBillingProtectionStatusText
+    {
+        get => _googleBillingProtectionStatusText;
+        private set => SetProperty(ref _googleBillingProtectionStatusText, value);
+    }
+
+    public void RefreshGeminiUsageStatus()
+    {
+        var settings = _services.LoadWebSourceBackendSettings();
+        InternetGeminiUsageText = BuildGeminiUsageText(settings);
+    }
+
+    public void SetGoogleBillingOwnerPassword(string password)
+    {
+        if (IsGoogleBillingProtectionConfigured)
+        {
+            throw new InvalidOperationException("Google billing protection is already configured.");
+        }
+
+        // Persist the owner's current key and limits before the newly-created
+        // guard changes the controls to read-only.
+        SaveInternetBackendSettings();
+        _services.GoogleBillingGuard.SetPassword(password);
+        IsGoogleBillingSettingsUnlocked = false;
+        GoogleBillingProtectionStatusText = "Protected and locked. Only the owner password can change Google API access or spending limits.";
+        NotifyGoogleBillingProtectionChanged();
+        StatusText = "Google billing controls are protected and locked.";
+    }
+
+    public bool TryUnlockGoogleBillingSettings(string password)
+    {
+        if (!_services.GoogleBillingGuard.Verify(password))
+        {
+            GoogleBillingProtectionStatusText = "Incorrect owner password. Google billing controls remain locked.";
+            return false;
+        }
+
+        IsGoogleBillingSettingsUnlocked = true;
+        GoogleBillingProtectionStatusText = "Owner session unlocked. Google billing controls can be edited until you press Lock Google controls, close Settings, or exit Ali.";
+        StatusText = "Google billing controls unlocked for this Settings session.";
+        return true;
+    }
+
+    public void LockGoogleBillingSettings()
+    {
+        if (IsGoogleBillingSettingsUnlocked)
+        {
+            SaveInternetBackendSettings();
+        }
+
+        IsGoogleBillingSettingsUnlocked = false;
+        GoogleBillingProtectionStatusText = "Protected and locked. Only the owner password can change Google API access or spending limits.";
+        StatusText = "Google billing controls locked.";
+    }
+
+    public void ChangeGoogleBillingOwnerPassword(string currentPassword, string newPassword)
+    {
+        _services.GoogleBillingGuard.ChangePassword(currentPassword, newPassword);
+        IsGoogleBillingSettingsUnlocked = false;
+        GoogleBillingProtectionStatusText = "Owner password changed. Google billing controls are locked again.";
+        NotifyGoogleBillingProtectionChanged();
+        StatusText = "Google billing owner password changed and controls locked.";
+    }
+
+    public void EndGoogleBillingSettingsSession()
+    {
+        if (!IsGoogleBillingProtectionConfigured) return;
+        IsGoogleBillingSettingsUnlocked = false;
+        GoogleBillingProtectionStatusText = "Protected and locked. Only the owner password can change Google API access or spending limits.";
+    }
+
+    private void NotifyGoogleBillingProtectionChanged()
+    {
+        OnPropertyChanged(nameof(IsGoogleBillingProtectionConfigured));
+        OnPropertyChanged(nameof(CanEditGoogleBillingSettings));
+        OnPropertyChanged(nameof(CanChangeGoogleBillingPassword));
+        OnPropertyChanged(nameof(GoogleBillingProtectionActionText));
     }
 
     public IReadOnlyList<string> RuntimeEngineChoices => LocalRuntimeEngines.Choices;
@@ -1449,7 +1604,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public bool WhisperSpeechToTextSelected => !ParakeetSpeechToTextSelected;
 
     public string ConfiguredSourcesText =>
-        "Local vector library, Tavily, Firecrawl, Brave Search, and Serper. Provider availability follows the Internet settings below.";
+        "Local vector library, Google-grounded Gemini Flash-Lite, Tavily, Firecrawl, Brave Search, and Serper. Provider availability follows the Internet settings below.";
 
     public string ConfiguredTopicsText =>
         "Current events, news, weather, general web research, approved local documents, conversation memory, and reminders.";
@@ -3999,23 +4154,52 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var settings = _services.LoadWebSourceBackendSettings();
         InternetBackendEnabled = settings.Enabled;
+        InternetGeminiGroundedSearchEnabled = settings.GeminiGroundedSearchEnabled;
+        InternetGeminiApiKeyText = settings.GeminiApiKey ?? string.Empty;
+        InternetGeminiHourlyLimitText = settings.GeminiMaxRequestsPerHour.ToString(CultureInfo.InvariantCulture);
+        InternetGeminiDailyLimitText = settings.GeminiMaxRequestsPerDay.ToString(CultureInfo.InvariantCulture);
+        InternetGeminiMonthlySpendLimitText = settings.GeminiMonthlySpendLimitUsd.ToString("0.00", CultureInfo.InvariantCulture);
         InternetTavilyApiKeyText = settings.TavilyApiKey ?? string.Empty;
         InternetFirecrawlApiKeyText = settings.FirecrawlApiKey ?? string.Empty;
         InternetBraveSearchApiKeyText = settings.BraveSearchApiKey ?? string.Empty;
         InternetSerperApiKeyText = settings.SerperApiKey ?? string.Empty;
         InternetBackendStatusText = DescribeInternetBackendSettings(settings);
+        InternetGeminiUsageText = BuildGeminiUsageText(settings);
         InternetTavilyUsageText = BuildProviderUsagePrompt("Tavily", settings.TavilyApiKeyEnvironmentVariable, settings.ResolveTavilyApiKey());
         InternetFirecrawlUsageText = BuildProviderUsagePrompt("Firecrawl", settings.FirecrawlApiKeyEnvironmentVariable, settings.ResolveFirecrawlApiKey());
         InternetBraveSearchUsageText = BuildProviderUsagePrompt("Brave Search", settings.BraveSearchApiKeyEnvironmentVariable, settings.ResolveBraveSearchApiKey());
         InternetSerperUsageText = BuildProviderUsagePrompt("Serper", settings.SerperApiKeyEnvironmentVariable, settings.ResolveSerperApiKey());
+        IsGoogleBillingSettingsUnlocked = !IsGoogleBillingProtectionConfigured;
+        GoogleBillingProtectionStatusText = IsGoogleBillingProtectionConfigured
+            ? "Protected and locked. Only the owner password can change Google API access or spending limits."
+            : "Not protected yet. Set an owner password after entering the Google key and safety limits.";
+        NotifyGoogleBillingProtectionChanged();
     }
 
     private void SaveInternetBackendSettings()
     {
         var existing = _services.LoadWebSourceBackendSettings();
+        var canEditGoogleBilling = CanEditGoogleBillingSettings;
+        var geminiHourlyLimit = int.TryParse(InternetGeminiHourlyLimitText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedHourlyLimit)
+            ? Math.Clamp(parsedHourlyLimit, 1, 1000)
+            : existing.GeminiMaxRequestsPerHour;
+        var geminiDailyLimit = int.TryParse(InternetGeminiDailyLimitText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDailyLimit)
+            ? Math.Clamp(parsedDailyLimit, 1, 5000)
+            : existing.GeminiMaxRequestsPerDay;
+        var geminiSpendLimit = decimal.TryParse(InternetGeminiMonthlySpendLimitText.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsedSpendLimit)
+            ? Math.Clamp(parsedSpendLimit, 0.10m, 1000m)
+            : existing.GeminiMonthlySpendLimitUsd;
         var settings = new WebSourceBackendSettings
         {
             Enabled = InternetBackendEnabled,
+            GeminiGroundedSearchEnabled = canEditGoogleBilling ? InternetGeminiGroundedSearchEnabled : existing.GeminiGroundedSearchEnabled,
+            GeminiApiKeyEnvironmentVariable = existing.GeminiApiKeyEnvironmentVariable,
+            GeminiApiKey = canEditGoogleBilling ? NullIfWhiteSpace(InternetGeminiApiKeyText) : existing.GeminiApiKey,
+            GeminiGroundedSearchModel = GeminiGroundedSearchProvider.PinnedModel,
+            GeminiMaxOutputTokens = existing.GeminiMaxOutputTokens,
+            GeminiMaxRequestsPerHour = canEditGoogleBilling ? geminiHourlyLimit : existing.GeminiMaxRequestsPerHour,
+            GeminiMaxRequestsPerDay = canEditGoogleBilling ? geminiDailyLimit : existing.GeminiMaxRequestsPerDay,
+            GeminiMonthlySpendLimitUsd = canEditGoogleBilling ? geminiSpendLimit : existing.GeminiMonthlySpendLimitUsd,
             TavilyBaseUrl = existing.TavilyBaseUrl,
             TavilyApiKeyEnvironmentVariable = existing.TavilyApiKeyEnvironmentVariable,
             TavilyApiKey = NullIfWhiteSpace(InternetTavilyApiKeyText),
@@ -4040,6 +4224,7 @@ public sealed class MainWindowViewModel : ObservableObject
         };
         _services.SaveWebSourceBackendSettings(settings);
         InternetBackendStatusText = DescribeInternetBackendSettings(settings);
+        InternetGeminiUsageText = BuildGeminiUsageText(settings);
         InternetTavilyUsageText = BuildProviderUsagePrompt("Tavily", settings.TavilyApiKeyEnvironmentVariable, settings.ResolveTavilyApiKey());
         InternetFirecrawlUsageText = BuildProviderUsagePrompt("Firecrawl", settings.FirecrawlApiKeyEnvironmentVariable, settings.ResolveFirecrawlApiKey());
         InternetBraveSearchUsageText = BuildProviderUsagePrompt("Brave Search", settings.BraveSearchApiKeyEnvironmentVariable, settings.ResolveBraveSearchApiKey());
@@ -4055,18 +4240,21 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         var tavilyConfigured = !string.IsNullOrWhiteSpace(settings.ResolveTavilyApiKey());
+        var geminiConfigured = settings.GeminiGroundedSearchEnabled
+            && !string.IsNullOrWhiteSpace(settings.ResolveGeminiApiKey());
         var firecrawlConfigured = !string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey());
         var braveConfigured = !string.IsNullOrWhiteSpace(settings.ResolveBraveSearchApiKey());
         var serperConfigured = !string.IsNullOrWhiteSpace(settings.ResolveSerperApiKey());
         var configured = new List<string>();
         var missing = new List<string>();
 
+        AddProviderConfigurationSummary(configured, missing, "Google Grounding", settings.GeminiApiKeyEnvironmentVariable, geminiConfigured);
         AddProviderConfigurationSummary(configured, missing, "Tavily", settings.TavilyApiKeyEnvironmentVariable, tavilyConfigured);
         AddProviderConfigurationSummary(configured, missing, "Firecrawl", settings.FirecrawlApiKeyEnvironmentVariable, firecrawlConfigured);
         AddProviderConfigurationSummary(configured, missing, "Brave Search", settings.BraveSearchApiKeyEnvironmentVariable, braveConfigured);
         AddProviderConfigurationSummary(configured, missing, "Serper", settings.SerperApiKeyEnvironmentVariable, serperConfigured);
 
-        var chain = "Fallback chain: Tavily -> Firecrawl -> Brave Search -> Serper.";
+        var chain = "Search chain: Google Grounding -> Tavily -> Firecrawl -> Brave Search -> Serper.";
         if (configured.Count == 0)
         {
             return $"{chain} No provider keys are configured yet.";
@@ -4098,6 +4286,11 @@ public sealed class MainWindowViewModel : ObservableObject
         string.IsNullOrWhiteSpace(apiKey)
             ? $"Not configured. Save a key here or set {environmentVariable}."
             : $"{provider} configured. Use Test to check connectivity and any quota estimate Ali can read.";
+
+    private string BuildGeminiUsageText(WebSourceBackendSettings settings) =>
+        BuildProviderUsagePrompt("Google Grounding", settings.GeminiApiKeyEnvironmentVariable, settings.ResolveGeminiApiKey())
+        + Environment.NewLine
+        + _services.GetGeminiGroundingUsageStatus(settings);
 
     private async Task TestInternetProviderAsync(InternetSearchProvider provider)
     {
@@ -4167,6 +4360,9 @@ public sealed class MainWindowViewModel : ObservableObject
         var status = $"{(result.Succeeded ? "OK" : "Needs attention")}: {result.Status} Usage: {result.RemainingEstimate}";
         switch (provider)
         {
+            case InternetSearchProvider.GoogleGroundedSearch:
+                InternetGeminiUsageText = status;
+                break;
             case InternetSearchProvider.Tavily:
                 InternetTavilyUsageText = status;
                 break;
@@ -4185,6 +4381,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private static string InternetProviderDisplayName(InternetSearchProvider provider) =>
         provider switch
         {
+            InternetSearchProvider.GoogleGroundedSearch => "Google Grounding",
             InternetSearchProvider.Tavily => "Tavily",
             InternetSearchProvider.Firecrawl => "Firecrawl",
             InternetSearchProvider.BraveSearch => "Brave Search",
@@ -4195,11 +4392,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private static InternetSearchProvider InternetProviderFromDisplayName(string provider) =>
         provider switch
         {
+            "Google Grounding" => InternetSearchProvider.GoogleGroundedSearch,
             "Tavily" => InternetSearchProvider.Tavily,
             "Firecrawl" => InternetSearchProvider.Firecrawl,
             "Brave Search" => InternetSearchProvider.BraveSearch,
             "Serper" => InternetSearchProvider.Serper,
-            _ => InternetSearchProvider.Tavily
+            _ => InternetSearchProvider.GoogleGroundedSearch
         };
 
     private void SaveAssistantName()
@@ -5508,6 +5706,7 @@ public sealed class MainWindowViewModel : ObservableObject
         };
         _settingsWindow.Closed += (_, _) =>
         {
+            EndGoogleBillingSettingsSession();
             _settingsWindow = null;
             StopInputLevelMonitor();
             VoiceInputLevelPercent = 0;
@@ -6702,6 +6901,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (runtime is null)
         {
             return;
+        }
+
+        if (TestGeminiInternetBackendCommand is AsyncRelayCommand testGemini)
+        {
+            testGemini.RaiseCanExecuteChanged();
         }
         VisionStatus = "Looking for cameras...";
         try

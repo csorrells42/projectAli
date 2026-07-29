@@ -7,8 +7,6 @@ namespace Ali.Modules.Coordinator;
 public static class AliCapabilityCatalog
 {
     public const string ListAvailableToolsName = "list_available_tools";
-    public const string SearchMemoryName = "search_memory";
-    public const string RememberFactName = "remember_fact";
     public const string RecallUserMemoryName = "recall_user_memory";
     public const string RememberCurrentUserName = "remember_for_current_user";
     public const string CorrectCurrentUserMemoryName = "correct_current_user_memory";
@@ -118,8 +116,6 @@ public static class AliCapabilityCatalog
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
         new(ListAvailableToolsName, "Return Ali's exact currently registered model-callable tool catalog."),
-        new(SearchMemoryName, "Search Ali's saved local memories for personal facts, preferences, prior instructions, relationships, and remembered details."),
-        new(RememberFactName, "Save a fact in Ali's local memory after an explicit user request."),
         new(RecallUserMemoryName, "Recall relevant long-term memories for the active identity profile. The active user is resolved internally."),
         new(RememberCurrentUserName, "Teach Ali a durable fact for the active identity profile after an explicit user request."),
         new(CorrectCurrentUserMemoryName, "Correct a durable memory belonging to the active identity profile."),

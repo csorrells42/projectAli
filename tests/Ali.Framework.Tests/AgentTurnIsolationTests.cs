@@ -47,6 +47,22 @@ public sealed class AgentTurnIsolationTests
     }
 
     [Fact]
+    public void CompatibilityToolResults_AreBoundedBeforeTheNextModelDecision()
+    {
+        var hugeBuildTranscript = new string('x', 50_000) + "\nerror CS1002: ; expected";
+
+        var compacted = LemonadeToolCallingChatClient.SerializeToolResultForModel(new
+        {
+            success = false,
+            output = hugeBuildTranscript
+        });
+
+        Assert.True(compacted.Length <= 6_000);
+        Assert.Contains("compacted for the model", compacted, StringComparison.Ordinal);
+        Assert.Contains("error CS1002", compacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CurrentWebSearch_StopsAfterTwoEmptyAttemptsWithinOneTurn()
     {
         var retriever = new EmptySourceRetriever();

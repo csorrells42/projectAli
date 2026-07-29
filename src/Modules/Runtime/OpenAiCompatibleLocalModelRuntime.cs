@@ -484,8 +484,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private async Task EnsureLemonadeModelLoadedAsync(CancellationToken cancellationToken)
     {
-        if (LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) != LocalRuntimeEngines.Lemonade
-            || Volatile.Read(ref _lemonadeModelPrepared) != 0)
+        if (LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) != LocalRuntimeEngines.Lemonade)
         {
             return;
         }
@@ -493,23 +492,32 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         await _lemonadeLoadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (Volatile.Read(ref _lemonadeModelPrepared) != 0)
-            {
-                return;
-            }
-
             var healthUri = BuildServerRootUri("api/v1/health");
+            string? healthBody = null;
             using (var healthRequest = new HttpRequestMessage(HttpMethod.Get, healthUri))
             using (var healthResponse = await _httpClient.SendAsync(healthRequest, cancellationToken).ConfigureAwait(false))
             {
                 if (healthResponse.IsSuccessStatusCode)
                 {
-                    var healthBody = await healthResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                    if (LemonadeListsModelAsLoaded(healthBody, _options.Model))
+                    healthBody = await healthResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    if (LemonadeListsModelAsReady(
+                            healthBody,
+                            _options.Model,
+                            OllamaRuntimeSafetyPolicy.ClampContextTokens(_options.ContextTokens)))
                     {
-                        await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
+                        Volatile.Write(ref _lemonadeModelPrepared, 1);
+                        return;
                     }
                 }
+            }
+
+            Volatile.Write(ref _lemonadeModelPrepared, 0);
+            if (!string.IsNullOrWhiteSpace(healthBody)
+                && LemonadeListsModelAsLoaded(healthBody, _options.Model))
+            {
+                // A stale, wrong-context, or half-loaded instance is not safe for
+                // generation. Replace it with the configured context explicitly.
+                await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
             }
 
             using var loadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -523,6 +531,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                     save_options = false
                 },
                 $"Lemonade model load with {_options.ContextTokens:N0}-token context",
+                 loadCancellation.Token).ConfigureAwait(false);
+
+            await WaitForLemonadeReadyAsync(
+                OllamaRuntimeSafetyPolicy.ClampContextTokens(_options.ContextTokens),
                 loadCancellation.Token).ConfigureAwait(false);
 
             Volatile.Write(ref _lemonadeModelPrepared, 1);
@@ -530,6 +542,27 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         finally
         {
             _lemonadeLoadGate.Release();
+        }
+    }
+
+    private async Task WaitForLemonadeReadyAsync(int requiredContextTokens, CancellationToken cancellationToken)
+    {
+        var uri = BuildServerRootUri("api/v1/health");
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                if (LemonadeListsModelAsReady(body, _options.Model, requiredContextTokens))
+                {
+                    return;
+                }
+            }
+
+            await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -644,6 +677,57 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 item.ValueKind == JsonValueKind.String
                     ? string.Equals(item.GetString(), model, StringComparison.OrdinalIgnoreCase)
                     : MatchesModelProperty(item, "model_name", model));
+    }
+
+    internal static bool LemonadeListsModelAsReady(string json, string model, int requiredContextTokens)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("all_models_loaded", out var models)
+            || models.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var item in models.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                if (string.Equals(item.GetString(), model, StringComparison.OrdinalIgnoreCase)) return true;
+                continue;
+            }
+            if (!MatchesModelProperty(item, "model_name", model)) continue;
+
+            if (item.TryGetProperty("status", out var status)
+                && status.ValueKind == JsonValueKind.String
+                && !string.Equals(status.GetString(), "ready", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            if (item.TryGetProperty("backend_health", out var backendHealth)
+                && backendHealth.ValueKind == JsonValueKind.String
+                && !string.Equals(backendHealth.GetString(), "ready", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            if (item.TryGetProperty("loaded", out var loaded)
+                && loaded.ValueKind is JsonValueKind.True or JsonValueKind.False
+                && !loaded.GetBoolean())
+            {
+                return false;
+            }
+            if (item.TryGetProperty("recipe_options", out var options)
+                && options.ValueKind == JsonValueKind.Object
+                && options.TryGetProperty("ctx_size", out var context)
+                && context.TryGetInt32(out var actualContext)
+                && actualContext < requiredContextTokens)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private static bool MatchesModelProperty(JsonElement element, string propertyName, string model) =>

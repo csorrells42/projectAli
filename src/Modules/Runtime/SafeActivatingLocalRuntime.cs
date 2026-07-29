@@ -93,18 +93,20 @@ public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IRe
         await UnloadActiveModelBeforeSwitchAsync(_candidateRuntime, cancellationToken).ConfigureAwait(false);
 
         LastHealthCheck = await _candidateRuntime.CheckHealthAsync(cancellationToken).ConfigureAwait(false);
-        try
+        if (!LastHealthCheck.Succeeded)
         {
-            await _candidateRuntime.ShutdownAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or TimeoutException)
-        {
-            LastHealthCheck = LastHealthCheck with
+            try
             {
-                Succeeded = false,
-                Summary = $"{LastHealthCheck.Summary} Candidate release verification failed: {ex.Message}",
-                ErrorText = ex.Message
-            };
+                await _candidateRuntime.ShutdownAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or TimeoutException)
+            {
+                LastHealthCheck = LastHealthCheck with
+                {
+                    Summary = $"{LastHealthCheck.Summary} Failed candidate cleanup also failed: {ex.Message}",
+                    ErrorText = ex.Message
+                };
+            }
         }
 
         _lastHealthCheckedRuntime = LastHealthCheck.Succeeded ? _candidateRuntime : null;

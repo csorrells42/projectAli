@@ -1,10 +1,28 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Ali.Modules.Internet;
 
 public sealed class WebSourceBackendSettings
 {
     public bool Enabled { get; set; } = true;
+
+    public bool GeminiGroundedSearchEnabled { get; set; } = true;
+
+    public string GeminiApiKeyEnvironmentVariable { get; set; } = "GEMINI_API_KEY";
+
+    public string? GeminiApiKey { get; set; }
+
+    public string GeminiGroundedSearchModel { get; set; } = "gemini-3.5-flash-lite";
+
+    public int GeminiMaxOutputTokens { get; set; } = 1024;
+
+    public int GeminiMaxRequestsPerHour { get; set; } = 30;
+
+    public int GeminiMaxRequestsPerDay { get; set; } = 40;
+
+    public decimal GeminiMonthlySpendLimitUsd { get; set; } = 5m;
 
     public string TavilyBaseUrl { get; set; } = "https://api.tavily.com";
 
@@ -55,6 +73,9 @@ public sealed class WebSourceBackendSettings
     public string? ResolveTavilyApiKey() =>
         ResolveApiKey(TavilyApiKey, TavilyApiKeyEnvironmentVariable);
 
+    public string? ResolveGeminiApiKey() =>
+        ResolveApiKey(GeminiApiKey, GeminiApiKeyEnvironmentVariable);
+
     public string? ResolveFirecrawlApiKey() =>
         ResolveApiKey(FirecrawlApiKey, FirecrawlApiKeyEnvironmentVariable);
 
@@ -79,6 +100,8 @@ public sealed class WebSourceBackendSettings
 
 public static class WebSourceBackendSettingsStore
 {
+    private const string ProtectedPrefix = "dpapi:v1:";
+    private static readonly byte[] DpapiEntropy = Encoding.UTF8.GetBytes("Ali.GoogleGrounding.ApiKey.v1");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -100,9 +123,23 @@ public static class WebSourceBackendSettingsStore
 
         try
         {
-            using var stream = File.OpenRead(path);
-            return JsonSerializer.Deserialize<WebSourceBackendSettings>(stream, JsonOptions)
-                   ?? new WebSourceBackendSettings();
+            WebSourceBackendSettings settings;
+            using (var stream = File.OpenRead(path))
+            {
+                settings = JsonSerializer.Deserialize<WebSourceBackendSettings>(stream, JsonOptions)
+                           ?? new WebSourceBackendSettings();
+            }
+
+            var storedKey = settings.GeminiApiKey;
+            settings.GeminiApiKey = UnprotectSecret(storedKey);
+            if (!string.IsNullOrWhiteSpace(storedKey)
+                && !storedKey.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
+            {
+                // Transparently migrate an older plain-text key the first time
+                // this version reads the settings file.
+                Save(dataRoot, settings);
+            }
+            return settings;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -114,8 +151,21 @@ public static class WebSourceBackendSettingsStore
     {
         var path = GetSettingsPath(dataRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var stream = File.Create(path);
-        JsonSerializer.Serialize(stream, settings, JsonOptions);
+        var plainTextKey = settings.GeminiApiKey;
+        try
+        {
+            settings.GeminiApiKey = ProtectSecret(plainTextKey);
+            var temporary = path + ".tmp";
+            using (var stream = File.Create(temporary))
+            {
+                JsonSerializer.Serialize(stream, settings, JsonOptions);
+            }
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            settings.GeminiApiKey = plainTextKey;
+        }
     }
 
     public static void WriteDefaultIfMissing(string dataRoot)
@@ -140,5 +190,69 @@ public static class WebSourceBackendSettingsStore
 
         using var stream = File.Create(path);
         JsonSerializer.Serialize(stream, new WebSourceBackendSettings(), JsonOptions);
+    }
+
+    internal static string? ProtectSecret(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (value.StartsWith(ProtectedPrefix, StringComparison.Ordinal)) return value;
+        var plain = Encoding.UTF8.GetBytes(value.Trim());
+        try
+        {
+            var protectedBytes = ProtectedData.Protect(plain, DpapiEntropy, DataProtectionScope.CurrentUser);
+            try
+            {
+                return ProtectedPrefix + Convert.ToBase64String(protectedBytes);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(protectedBytes);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plain);
+        }
+    }
+
+    internal static string? UnprotectSecret(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (!value.StartsWith(ProtectedPrefix, StringComparison.Ordinal)) return value.Trim();
+        byte[] protectedBytes;
+        try
+        {
+            protectedBytes = Convert.FromBase64String(value[ProtectedPrefix.Length..]);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+        try
+        {
+            byte[] plain;
+            try
+            {
+                plain = ProtectedData.Unprotect(protectedBytes, DpapiEntropy, DataProtectionScope.CurrentUser);
+            }
+            catch (CryptographicException)
+            {
+                // A settings folder copied to a different Windows account must
+                // not reveal or crash on the original account's protected key.
+                return null;
+            }
+            try
+            {
+                return Encoding.UTF8.GetString(plain);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(plain);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
+        }
     }
 }

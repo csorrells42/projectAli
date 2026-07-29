@@ -407,6 +407,11 @@
                     Name="StartEnrollmentButton"
                     Click="StartEnrollmentClicked"
                     Margin="0,0,8,0" />
+            <Button Content="Create without camera"
+                    Name="CreateWithoutCameraButton"
+                    Click="CreateUserWithoutCameraClicked"
+                    ToolTip="Create a permanent identity profile now. Face enrollment can be added later."
+                    Margin="0,0,8,0" />
             <Button Content="Refresh"
                     Click="RefreshClicked"
                     Margin="0,0,8,0" />

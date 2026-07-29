@@ -10,7 +10,7 @@ public sealed class AgentToolPermissionStoreTests
     [Fact]
     public void NativeRiskClassification_KeepsWritesAndPaidResearchApprovalGated()
     {
-        Assert.True(AliToolPermissionPolicy.RequiresApproval("remember_fact"));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval("remember_for_current_user"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("forget_current_user_memory"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("create_reminder"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("research_web"));
@@ -146,14 +146,14 @@ public sealed class AgentToolPermissionStoreTests
         WithStore((root, store) =>
         {
             var user = User("alice", "Alice");
-            var saved = store.Save(user, "remember_fact", AgentToolPermissionScope.Tool, null);
+            var saved = store.Save(user, "remember_for_current_user", AgentToolPermissionScope.Tool, null);
 
             var restored = new AgentToolPermissionStore(root);
-            Assert.True(restored.TryMatch(user, "remember_fact", null, out _));
+            Assert.True(restored.TryMatch(user, "remember_for_current_user", null, out _));
             Assert.True(restored.Revoke(user.StableId, saved.Id));
 
             var afterRevoke = new AgentToolPermissionStore(root);
-            Assert.False(afterRevoke.TryMatch(user, "remember_fact", null, out _));
+            Assert.False(afterRevoke.TryMatch(user, "remember_for_current_user", null, out _));
             Assert.Empty(afterRevoke.ListForUser(user.StableId));
         });
     }

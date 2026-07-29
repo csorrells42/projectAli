@@ -58,6 +58,7 @@ public interface IUserMemoryService
         ActiveUser user,
         string conversation,
         string source,
+        string? category,
         CancellationToken cancellationToken);
 
     Task<MemoryOperationResult> CorrectAsync(

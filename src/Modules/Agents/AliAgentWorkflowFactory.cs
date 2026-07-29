@@ -37,7 +37,7 @@ internal sealed class AliAgentWorkflowFactory(
                 programmingReview,
                 AliCapabilityCatalog.RunProgrammingGroupChatName,
                 "Programming Maker Checker Workflow",
-                "Run a bounded synchronous programming maker/checker conversation for substantial software creation, repair, architecture, or delivery work. It uses at most four agent turns and returns reviewed guidance to Ali, who performs approvals and final actions.")
+                "Run a bounded synchronous programming maker/checker conversation for substantial software creation, repair, architecture, or delivery work. Pass the complete objective, exact project path, constraints, and evidence already gathered. This workflow is advisory only: it cannot replace Ali's direct edit, build, test, run, or delivery tools. It uses at most four agent turns and returns reviewed guidance to Ali, who must perform approvals and every requested action afterward.")
         ];
     }
 

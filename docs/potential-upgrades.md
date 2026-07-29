@@ -35,3 +35,11 @@ Validate these against the live registry before implementation; they came from a
 - **Resource policy:** CPU and system RAM only; do not consume additional GPU VRAM.
 - **Candidate implementations:** FastEmbed `TextCrossEncoder`, FlashRank, or a Lemonade reranker explicitly configured with the CPU llama.cpp backend.
 - **Safety requirements:** Optional setting, short timeout, bounded candidate count, fail-safe fallback to the original Qdrant/ripgrep ordering, and an Ali-specific benchmark before adoption.
+
+## External Agent Skills registry
+
+- **Status:** Investigate later; Google documentation recommends the open Agent Skills ecosystem, but it is not part of the current build.
+- **Candidate:** [skills.sh](https://www.skills.sh/) and its open-source Vercel skills CLI.
+- **Purpose:** Let Ali discover reusable, cross-agent procedures for coding, testing, research, office artifacts, and other specialist work without hard-coding every workflow.
+- **Trust policy:** Prefer official or independently audited skills, preview contents and requested capabilities, require approval before installation, pin the source commit and content hash, and review updates rather than silently replacing instructions.
+- **Permission boundary:** Skills may describe a procedure but never bypass Ali's existing tool registry, user identity, activity log, or Trusted Workstation approval policy.

@@ -13,7 +13,6 @@ internal sealed class AliToolPermissionPolicy(
 {
     private static IReadOnlyList<AgentToolPermissionDefinition> TrustedWorkstationTools { get; } =
     [
-        new(AliCapabilityCatalog.RememberFactName, "Writes shared local memory"),
         new(AliCapabilityCatalog.RememberCurrentUserName, "Writes personal long-term memory"),
         new(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Changes personal long-term memory"),
         new(AliCapabilityCatalog.ForgetCurrentUserMemoryName, "Deletes personal long-term memory"),
@@ -74,7 +73,6 @@ internal sealed class AliToolPermissionPolicy(
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =
     [
-        new(AliCapabilityCatalog.SearchMemoryName, "Reads shared local memory"),
         new(AliCapabilityCatalog.RecallUserMemoryName, "Reads private personal memory"),
         new(AliCapabilityCatalog.SearchCurrentWebName, "Transmits a query to configured web sources"),
         new(AliCapabilityCatalog.SearchLocalLibraryName, "Reads indexed local documents"),

@@ -369,12 +369,15 @@ public sealed class PersonIdentityMemory :
 					false,
 					"Identity storage is not configured.");
 			}
-			if (_rememberedPeople.Any(person =>
-				person.IsRegisteredUser
-				&& string.Equals(
-					person.Username,
-					username,
-					StringComparison.OrdinalIgnoreCase)))
+			PersonIdentityRecord? existingProfile = _rememberedPeople
+				.FirstOrDefault(person =>
+					person.IsRegisteredUser
+					&& string.Equals(
+						person.Username,
+						username,
+						StringComparison.OrdinalIgnoreCase));
+			if (existingProfile is not null
+				&& existingProfile.Prototypes.Count > 0)
 			{
 				return new IdentityReviewUpdateResult(
 					false,
@@ -391,13 +394,78 @@ public sealed class PersonIdentityMemory :
 				PermissionLevel = NormalizePermission(
 					request.PermissionLevel)
 			};
-			_enrollment = new EnrollmentSession(normalizedRequest);
+			_enrollment = new EnrollmentSession(
+				normalizedRequest,
+				existingProfile?.Id);
 			_enrollmentState = CreateEnrollmentState(
 				_enrollment,
-				"Enrollment ready. " + EnrollmentPrompts[0]);
+				existingProfile is null
+					? "Enrollment ready. " + EnrollmentPrompts[0]
+					: "Camera enrollment will be added to the existing profile. "
+						+ EnrollmentPrompts[0]);
 			return new IdentityReviewUpdateResult(
 				true,
 				_enrollmentState.Status);
+		}
+	}
+
+	public IdentityReviewUpdateResult CreateUserProfile(
+		IdentityEnrollmentRequest request)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		string firstName = request.FirstName.Trim();
+		string lastName = request.LastName.Trim();
+		string username = request.Username.Trim();
+		if (string.IsNullOrWhiteSpace(firstName)
+			|| string.IsNullOrWhiteSpace(lastName)
+			|| string.IsNullOrWhiteSpace(username))
+		{
+			return new IdentityReviewUpdateResult(
+				false,
+				"User profiles require first name, last name, and username.");
+		}
+		lock (_stateLock)
+		{
+			if (string.IsNullOrWhiteSpace(_outputFolder))
+			{
+				return new IdentityReviewUpdateResult(false, "Identity storage is not configured.");
+			}
+			if (_rememberedPeople.Any(person => person.IsRegisteredUser
+				&& string.Equals(person.Username, username, StringComparison.OrdinalIgnoreCase)))
+			{
+				return new IdentityReviewUpdateResult(false, $"Username '{username}' is already assigned.");
+			}
+			DateTime now = DateTime.UtcNow;
+			var person = new PersonIdentityRecord
+			{
+				Id = "person-" + Guid.NewGuid().ToString("N"),
+				DisplayName = (firstName + " " + lastName).Trim(),
+				FirstName = firstName,
+				LastName = lastName,
+				Username = username,
+				Email = request.Email.Trim(),
+				PhoneNumber = request.PhoneNumber.Trim(),
+				Address = request.Address.Trim(),
+				IsRegisteredUser = true,
+				PermissionLevel = NormalizePermission(request.PermissionLevel),
+				FirstSeenAtUtc = now,
+				LastSeenAtUtc = now,
+				ObservationCount = 0,
+				EncounterCount = 0,
+				Prototypes = []
+			};
+			try
+			{
+				_store.Upsert(_outputFolder, [person]);
+				_rememberedPeople.Add(person);
+				return new IdentityReviewUpdateResult(
+					true,
+					$"{person.DisplayName} was created without camera enrollment.");
+			}
+			catch (Exception exception)
+			{
+				return new IdentityReviewUpdateResult(false, "User profile could not be saved: " + exception.Message);
+			}
 		}
 	}
 
@@ -1015,7 +1083,11 @@ public sealed class PersonIdentityMemory :
 		DateTime capturedAtUtc)
 	{
 		PersonIdentityRecord? duplicate = _rememberedPeople
-			.Where(person => person.IsRegisteredUser)
+			.Where(person => person.IsRegisteredUser
+				&& !string.Equals(
+					person.Id,
+					enrollment.ExistingIdentityId,
+					StringComparison.OrdinalIgnoreCase))
 			.Select(person => new
 			{
 				Person = person,
@@ -1045,6 +1117,10 @@ public sealed class PersonIdentityMemory :
 		}
 		if (_rememberedPeople.Any(person =>
 			person.IsRegisteredUser
+			&& !string.Equals(
+				person.Id,
+				enrollment.ExistingIdentityId,
+				StringComparison.OrdinalIgnoreCase)
 			&& string.Equals(
 				person.Username,
 				enrollment.Request.Username,
@@ -1064,31 +1140,40 @@ public sealed class PersonIdentityMemory :
 				"");
 			return;
 		}
-		var person = new PersonIdentityRecord
+		PersonIdentityRecord? existing = string.IsNullOrWhiteSpace(
+				enrollment.ExistingIdentityId)
+			? null
+			: _rememberedPeople.FirstOrDefault(person => string.Equals(
+				person.Id,
+				enrollment.ExistingIdentityId,
+				StringComparison.OrdinalIgnoreCase));
+		var person = existing ?? new PersonIdentityRecord
 		{
 			Id = "person-" + Guid.NewGuid().ToString("N"),
-			DisplayName =
-				$"{enrollment.Request.FirstName} "
-				+ enrollment.Request.LastName,
-			FirstName = enrollment.Request.FirstName,
-			LastName = enrollment.Request.LastName,
-			Username = enrollment.Request.Username,
-			Email = enrollment.Request.Email,
-			PhoneNumber = enrollment.Request.PhoneNumber,
-			Address = enrollment.Request.Address,
-			IsRegisteredUser = true,
-			PermissionLevel = NormalizePermission(
-				enrollment.Request.PermissionLevel),
-			FirstSeenAtUtc = capturedAtUtc,
-			LastSeenAtUtc = capturedAtUtc,
-			ObservationCount = enrollment.Embeddings.Count,
-			EncounterCount = 1,
-			Prototypes = enrollment.Embeddings
-				.Select(embedding => embedding.ToArray())
-				.Take(MaximumPrototypesPerIdentity)
-				.ToList()
+			FirstSeenAtUtc = capturedAtUtc
 		};
-		_rememberedPeople.Add(person);
+		person.DisplayName =
+			$"{enrollment.Request.FirstName} {enrollment.Request.LastName}";
+		person.FirstName = enrollment.Request.FirstName;
+		person.LastName = enrollment.Request.LastName;
+		person.Username = enrollment.Request.Username;
+		person.Email = enrollment.Request.Email;
+		person.PhoneNumber = enrollment.Request.PhoneNumber;
+		person.Address = enrollment.Request.Address;
+		person.IsRegisteredUser = true;
+		person.PermissionLevel = NormalizePermission(
+			enrollment.Request.PermissionLevel);
+		person.LastSeenAtUtc = capturedAtUtc;
+		person.ObservationCount += enrollment.Embeddings.Count;
+		person.EncounterCount = Math.Max(1, person.EncounterCount + 1);
+		person.Prototypes = enrollment.Embeddings
+			.Select(embedding => embedding.ToArray())
+			.Take(MaximumPrototypesPerIdentity)
+			.ToList();
+		if (existing is null)
+		{
+			_rememberedPeople.Add(person);
+		}
 		_activeTracks.Clear();
 		_store.SaveContextPhoto(
 			_outputFolder,
@@ -1104,7 +1189,9 @@ public sealed class PersonIdentityMemory :
 			enrollment.Embeddings.Count,
 			EnrollmentPrompts.Length,
 			"",
-			$"{person.DisplayName} was enrolled as a registered user.",
+			existing is null
+				? $"{person.DisplayName} was enrolled as a registered user."
+				: $"Camera enrollment was added to {person.DisplayName}.",
 			person.Id);
 	}
 
@@ -1271,7 +1358,8 @@ public sealed class PersonIdentityMemory :
 		foreach (PersonIdentityRecord person in _rememberedPeople)
 		{
 			if (excludedIdentityIds.Contains(person.Id)
-				|| (registeredUsersOnly && !person.IsRegisteredUser))
+				|| (registeredUsersOnly && !person.IsRegisteredUser)
+				|| person.Prototypes.Count == 0)
 			{
 				continue;
 			}
@@ -1601,9 +1689,12 @@ public sealed class PersonIdentityMemory :
 		PersonFaceBox FaceBox);
 
 	private sealed class EnrollmentSession(
-		IdentityEnrollmentRequest request)
+		IdentityEnrollmentRequest request,
+		string? existingIdentityId = null)
 	{
 		public IdentityEnrollmentRequest Request { get; } = request;
+
+		public string? ExistingIdentityId { get; } = existingIdentityId;
 
 		public bool CapturePending { get; set; }
 

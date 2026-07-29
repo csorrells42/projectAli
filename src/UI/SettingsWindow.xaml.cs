@@ -7,6 +7,8 @@ namespace Ali.UI;
 
 public partial class SettingsWindow : Window
 {
+    private bool syncingGeminiApiKey;
+
     public SettingsWindow()
     {
         NativeTitleBarTheme.ApplyDarkTitleBar(this);
@@ -14,6 +16,7 @@ public partial class SettingsWindow : Window
         MoveRuntimeTabToEnd();
         MoveInternetTabToEnd();
         PreviewKeyDown += SettingsWindow_OnPreviewKeyDown;
+        Loaded += SettingsWindowLoaded;
     }
 
     private void MoveRuntimeTabToEnd()
@@ -347,5 +350,119 @@ public partial class SettingsWindow : Window
 
         e.Handled = true;
         viewModel.AssignPushToTalkKey(e.Key);
+    }
+
+    private void SettingsWindowLoaded(object sender, RoutedEventArgs e)
+    {
+        SyncGeminiApiKeyFromViewModel();
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.RefreshGeminiUsageStatus();
+        }
+    }
+
+    private void RefreshGeminiUsageClicked(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.RefreshGeminiUsageStatus();
+        }
+    }
+
+    private void GeminiApiKeyPasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (syncingGeminiApiKey || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.InternetGeminiApiKeyText = GeminiApiKeyPasswordBox.Password;
+    }
+
+    private void GoogleBillingProtectionClicked(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        if (!viewModel.IsGoogleBillingProtectionConfigured)
+        {
+            var password = OwnerPasswordDialog.Prompt(
+                this,
+                "Protect Google billing",
+                "Create an owner password. It stays on this computer and is never stored in plain text or copied into the release folder.",
+                confirm: true);
+            if (password is not null)
+            {
+                try
+                {
+                    viewModel.SetGoogleBillingOwnerPassword(password);
+                    SyncGeminiApiKeyFromViewModel();
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show(this, ex.Message, "Google billing protection", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            return;
+        }
+
+        if (viewModel.IsGoogleBillingSettingsUnlocked)
+        {
+            viewModel.LockGoogleBillingSettings();
+            SyncGeminiApiKeyFromViewModel();
+            return;
+        }
+
+        var entered = OwnerPasswordDialog.Prompt(
+            this,
+            "Unlock Google billing",
+            "Enter the owner password to edit the API key or spending limits.");
+        if (entered is not null && viewModel.TryUnlockGoogleBillingSettings(entered))
+        {
+            SyncGeminiApiKeyFromViewModel();
+        }
+    }
+
+    private void ChangeGoogleBillingPasswordClicked(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel
+            || !viewModel.IsGoogleBillingProtectionConfigured
+            || !viewModel.IsGoogleBillingSettingsUnlocked)
+        {
+            return;
+        }
+
+        var current = OwnerPasswordDialog.Prompt(
+            this,
+            "Verify owner password",
+            "Enter the current owner password.");
+        if (current is null) return;
+        var replacement = OwnerPasswordDialog.Prompt(
+            this,
+            "Change owner password",
+            "Enter the new owner password (at least eight characters).",
+            confirm: true);
+        if (replacement is null) return;
+        try
+        {
+            viewModel.ChangeGoogleBillingOwnerPassword(current, replacement);
+            SyncGeminiApiKeyFromViewModel();
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(this, ex.Message, "Google billing protection", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void SyncGeminiApiKeyFromViewModel()
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        syncingGeminiApiKey = true;
+        try
+        {
+            GeminiApiKeyPasswordBox.Password = viewModel.InternetGeminiApiKeyText;
+        }
+        finally
+        {
+            syncingGeminiApiKey = false;
+        }
     }
 }

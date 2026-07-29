@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $publishRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'bin\Release\Ali')).TrimEnd('\')
 $publishExecutable = Join-Path $publishRoot 'Ali.exe'
+$runtimeManifestPath = Join-Path $repoRoot 'runtime-assets.json'
 
 function Assert-ChildPath {
     param(
@@ -30,6 +31,32 @@ function Assert-ChildPath {
 }
 
 if (-not $VerifyOnly) {
+    # Repository-owned runtime helpers change with the source tree and must not
+    # remain stale merely because the large downloaded assets are already
+    # staged. Sync these small files on every publish before MSBuild copies the
+    # canonical staging directory into the Release bundle.
+    $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
+    $stageRoot = Assert-ChildPath `
+        -Path (Join-Path $repoRoot ($runtimeManifest.stageRoot -replace '/', '\')) `
+        -Parent $repoRoot
+    foreach ($entry in @($runtimeManifest.repositoryFiles)) {
+        $source = Assert-ChildPath `
+            -Path (Join-Path $repoRoot (([string]$entry.source) -replace '/', '\')) `
+            -Parent $repoRoot
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            if ($entry.PSObject.Properties['optional'] -and $entry.optional -eq $true) {
+                continue
+            }
+            throw "Repository runtime helper is missing: $source"
+        }
+
+        $destination = Assert-ChildPath `
+            -Path (Join-Path $stageRoot (([string]$entry.destination) -replace '/', '\')) `
+            -Parent $stageRoot
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+    }
+
     $safePublishRoot = Assert-ChildPath -Path $publishRoot -Parent $repoRoot
     if (Test-Path -LiteralPath $safePublishRoot) {
         Remove-Item -LiteralPath $safePublishRoot -Recurse -Force

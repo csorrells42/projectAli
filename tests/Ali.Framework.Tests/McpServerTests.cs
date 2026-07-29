@@ -60,7 +60,7 @@ public sealed class McpServerTests
                 tool => tool.Name == AliCapabilityCatalog.GetCurrentLocalTimeName).Enabled);
             Assert.False(Assert.Single(
                 restored.Tools,
-                tool => tool.Name == AliCapabilityCatalog.SearchMemoryName).Enabled);
+                tool => tool.Name == AliCapabilityCatalog.RecallUserMemoryName).Enabled);
         }
         finally
         {
@@ -232,12 +232,12 @@ public sealed class McpServerTests
             Assert.DoesNotContain(actual, name => name.Contains("vision", StringComparison.OrdinalIgnoreCase));
 
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.ListAvailableToolsName, []);
-            await CallSuccessfullyAsync(client, AliCapabilityCatalog.RememberFactName, new()
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.RememberCurrentUserName, new()
             {
                 ["fact"] = "The integration-test name is Morgan.",
                 ["category"] = "person"
             });
-            await CallSuccessfullyAsync(client, AliCapabilityCatalog.SearchMemoryName, new()
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.RecallUserMemoryName, new()
             {
                 ["query"] = "Morgan"
             });

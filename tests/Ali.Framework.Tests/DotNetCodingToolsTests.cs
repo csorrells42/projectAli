@@ -489,8 +489,13 @@ public sealed class DotNetCodingToolsTests
 
             Assert.True(build.Success, build.Output);
             Assert.Equal(0, build.ExitCode);
+            Assert.Equal(0, build.WarningCount);
+            Assert.Equal(0, build.ErrorCount);
             Assert.NotNull(build.ArtifactPath);
             Assert.True(File.Exists(build.ArtifactPath));
+            Assert.True(build.Output.Length <= 4_000);
+            Assert.NotNull(build.DiagnosticLogPath);
+            Assert.True(File.Exists(build.DiagnosticLogPath));
 
             var run = await tools.RunAsync(
                 "Workspace/TinyGame/TinyGame.csproj",
@@ -516,6 +521,74 @@ public sealed class DotNetCodingToolsTests
     }
 
     [Fact]
+    public async Task Run_RejectsArtifactWhenItsRequiredRuntimeIsNotInstalled()
+    {
+        await WithCodingToolsAsync(async (root, access, tools, auditPath) =>
+        {
+            await access.Store.WriteAsync(
+                "Workspace/RuntimeMismatch/RuntimeMismatch.csproj",
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <OutputType>Exe</OutputType>
+                    <TargetFramework>net10.0</TargetFramework>
+                  </PropertyGroup>
+                </Project>
+                """,
+                TestContext.Current.CancellationToken);
+            await access.Store.WriteAsync(
+                "Workspace/RuntimeMismatch/Program.cs",
+                "System.Console.WriteLine(\"should not launch\");",
+                TestContext.Current.CancellationToken);
+
+            var build = await tools.BuildAsync(
+                "Workspace/RuntimeMismatch/RuntimeMismatch.csproj",
+                "Release",
+                TestContext.Current.CancellationToken);
+            Assert.True(build.Success, build.Output);
+            var runtimeConfig = Path.ChangeExtension(build.ArtifactPath!, ".runtimeconfig.json");
+            await File.WriteAllTextAsync(
+                runtimeConfig,
+                """
+                {"runtimeOptions":{"framework":{"name":"Microsoft.NETCore.App","version":"99.0.0"}}}
+                """,
+                TestContext.Current.CancellationToken);
+
+            var run = await tools.RunAsync(
+                "Workspace/RuntimeMismatch/RuntimeMismatch.csproj",
+                "Release",
+                TestContext.Current.CancellationToken);
+
+            Assert.False(run.Success);
+            Assert.Null(run.ProcessId);
+            Assert.Contains("requires Microsoft.NETCore.App 99.0.0", run.Summary, StringComparison.Ordinal);
+            Assert.Contains("process was not started", run.Summary, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public void ArtifactDiscovery_UnderstandsVisualStudioPlatformConfigurationFolders()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ali-artifact-layout-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var projectPath = Path.Combine(root, "PolishedGame.csproj");
+            var artifactPath = Path.Combine(root, "bin", "Any CPU", "Debug", "net10.0-windows", "PolishedGame.exe");
+            Directory.CreateDirectory(Path.GetDirectoryName(artifactPath)!);
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            File.WriteAllText(artifactPath, "proof");
+
+            var found = AliRoslynCodingTools.FindBuiltArtifact(projectPath, "Debug");
+
+            Assert.Equal(artifactPath, found, ignoreCase: true);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Build_ReturnsCompilerDiagnosticsWithoutClaimingSuccess()
     {
         await WithCodingToolsAsync(async (root, access, tools, auditPath) =>
@@ -536,6 +609,7 @@ public sealed class DotNetCodingToolsTests
 
             Assert.False(result.Success);
             Assert.NotEqual(0, result.ExitCode);
+            Assert.True(result.ErrorCount > 0, result.Output);
             Assert.Contains("error CS", result.Output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("correct", result.Summary, StringComparison.OrdinalIgnoreCase);
         });

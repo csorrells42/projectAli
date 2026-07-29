@@ -10,6 +10,7 @@ namespace Ali.Modules.Internet;
 
 public enum InternetSearchProvider
 {
+    GoogleGroundedSearch,
     Tavily,
     Firecrawl,
     BraveSearch,
@@ -28,6 +29,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     private readonly HttpClient httpClient;
     private readonly Func<WebSourceBackendSettings> settingsProvider;
     private readonly IWebContentExtractor contentExtractor;
+    private readonly GeminiGroundedSearchProvider geminiGroundedSearch;
     private WebSourceBackendSettings settings;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -43,12 +45,27 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     public TavilyFirecrawlSourceRetriever(
         HttpClient httpClient,
         Func<WebSourceBackendSettings> settingsProvider,
-        IWebContentExtractor? contentExtractor = null)
+        IWebContentExtractor? contentExtractor = null,
+        string? dataRoot = null)
+        : this(
+            httpClient,
+            settingsProvider,
+            contentExtractor,
+            new GeminiGroundedSearchProvider(settingsProvider, dataRoot))
+    {
+    }
+
+    internal TavilyFirecrawlSourceRetriever(
+        HttpClient httpClient,
+        Func<WebSourceBackendSettings> settingsProvider,
+        IWebContentExtractor? contentExtractor,
+        GeminiGroundedSearchProvider geminiGroundedSearch)
     {
         this.httpClient = httpClient;
         this.settingsProvider = settingsProvider;
         this.contentExtractor = contentExtractor ?? new WebContentExtractor();
         this.settings = settingsProvider() ?? new WebSourceBackendSettings();
+        this.geminiGroundedSearch = geminiGroundedSearch;
     }
 
     public Task<SourceRetrievalResult> RetrieveAsync(string userText, CancellationToken cancellationToken) =>
@@ -94,6 +111,11 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         var results = await ScrapeDirectUrlsAsync(plan, warnings, cancellationToken).ConfigureAwait(false);
         if (results.Count == 0)
         {
+            results = await SearchWithGeminiAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (results.Count == 0)
+        {
             results = await SearchWithTavilyAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
         }
 
@@ -116,7 +138,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         {
             if (warnings.Count == 0)
             {
-                warnings.Add("No internet search results were returned by Tavily, Firecrawl, Brave Search, or Serper.");
+                warnings.Add("No internet search results were returned by Google grounding, Tavily, Firecrawl, Brave Search, or Serper.");
             }
 
             return new SourceRetrievalResult(Array.Empty<SourceExcerpt>(), warnings, plan.RequiresSourceGrounding);
@@ -135,6 +157,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
             if (settings.UseFirecrawlForPageExtraction
                 && excerpts.Count < maxExtractedPages
                 && !result.Provider.Equals("Firecrawl", StringComparison.OrdinalIgnoreCase)
+                && !result.Provider.Equals("Google Grounding", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(result.Url))
             {
                 var scraped = await TryScrapeWithFirecrawlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);
@@ -200,6 +223,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 
         var results = provider switch
         {
+            InternetSearchProvider.GoogleGroundedSearch => await SearchWithGeminiAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
             InternetSearchProvider.Tavily => await SearchWithTavilyAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
             InternetSearchProvider.Firecrawl => await SearchWithFirecrawlAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
             InternetSearchProvider.BraveSearch => await SearchWithBraveAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
@@ -207,7 +231,8 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
             _ => Array.Empty<WebSearchResult>()
         };
 
-        var remaining = (provider is InternetSearchProvider.Tavily ? TryReadTavilyUsageWarning(warnings) : null)
+        var remaining = (provider is InternetSearchProvider.GoogleGroundedSearch ? geminiGroundedSearch.UsageStatus() : null)
+                        ?? (provider is InternetSearchProvider.Tavily ? TryReadTavilyUsageWarning(warnings) : null)
                         ?? TryReadProviderRemainingWarning(ProviderDisplayName(provider), warnings)
                         ?? await EstimateRemainingAsync(provider, warnings, cancellationToken).ConfigureAwait(false);
         if (results.Count > 0)
@@ -235,6 +260,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     {
         foreach (var provider in new[]
                  {
+                     InternetSearchProvider.GoogleGroundedSearch,
                      InternetSearchProvider.Tavily,
                      InternetSearchProvider.Firecrawl,
                      InternetSearchProvider.BraveSearch,
@@ -287,6 +313,26 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         }
 
         return results;
+    }
+
+    private async Task<IReadOnlyList<WebSearchResult>> SearchWithGeminiAsync(
+        string query,
+        SourceQueryPlan plan,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var hits = await geminiGroundedSearch
+            .SearchAsync(query, plan, warnings, cancellationToken)
+            .ConfigureAwait(false);
+        return hits
+            .Select(hit => new WebSearchResult(
+                hit.Title,
+                hit.Url,
+                hit.Content,
+                hit.Content,
+                null,
+                "Google Grounding"))
+            .ToArray();
     }
 
     private async Task<IReadOnlyList<WebSearchResult>> SearchWithTavilyAsync(
@@ -1076,6 +1122,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     private bool IsProviderConfigured(InternetSearchProvider provider) =>
         provider switch
         {
+            InternetSearchProvider.GoogleGroundedSearch => geminiGroundedSearch.IsConfigured(),
             InternetSearchProvider.Tavily => !string.IsNullOrWhiteSpace(settings.ResolveTavilyApiKey()),
             InternetSearchProvider.Firecrawl => !string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey()) || !IsOfficialFirecrawlEndpoint(settings.FirecrawlBaseUrl),
             InternetSearchProvider.BraveSearch => !string.IsNullOrWhiteSpace(settings.ResolveBraveSearchApiKey()),
@@ -1086,6 +1133,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     private string MissingProviderConfigurationMessage(InternetSearchProvider provider) =>
         provider switch
         {
+            InternetSearchProvider.GoogleGroundedSearch => $"Missing {settings.GeminiApiKeyEnvironmentVariable} or saved Gemini API key.",
             InternetSearchProvider.Tavily => $"Missing {settings.TavilyApiKeyEnvironmentVariable} or saved Tavily API key.",
             InternetSearchProvider.Firecrawl => $"Missing {settings.FirecrawlApiKeyEnvironmentVariable} or saved Firecrawl API key.",
             InternetSearchProvider.BraveSearch => $"Missing {settings.BraveSearchApiKeyEnvironmentVariable} or saved Brave Search API key.",
@@ -1096,6 +1144,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     private static string ProviderDisplayName(InternetSearchProvider provider) =>
         provider switch
         {
+            InternetSearchProvider.GoogleGroundedSearch => "Google Grounding",
             InternetSearchProvider.Tavily => "Tavily",
             InternetSearchProvider.Firecrawl => "Firecrawl",
             InternetSearchProvider.BraveSearch => "Brave Search",
@@ -1104,7 +1153,9 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         };
 
     private string ProviderRemainingUnavailable(InternetSearchProvider provider) =>
-        provider is InternetSearchProvider.Serper && settings.SerperFreeQueryAllowance > 0
+        provider is InternetSearchProvider.GoogleGroundedSearch
+            ? geminiGroundedSearch.UsageStatus()
+            : provider is InternetSearchProvider.Serper && settings.SerperFreeQueryAllowance > 0
             ? $"Remaining unknown. Serper advertises {settings.SerperFreeQueryAllowance:N0} free starter queries, but the API response did not report remaining quota."
             : "Remaining unknown until a provider response reports quota headers or account usage.";
 
@@ -1113,6 +1164,11 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         List<string> warnings,
         CancellationToken cancellationToken)
     {
+        if (provider is InternetSearchProvider.GoogleGroundedSearch)
+        {
+            return geminiGroundedSearch.UsageStatus();
+        }
+
         if (provider is InternetSearchProvider.Firecrawl)
         {
             return await EstimateFirecrawlRemainingAsync(warnings, cancellationToken).ConfigureAwait(false);

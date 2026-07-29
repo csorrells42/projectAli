@@ -181,10 +181,17 @@ internal sealed class AliMemoryTools
         {
             return new(false, "Select the active user profile before saving personal memory.");
         }
+        var normalizedFact = fact.Trim();
+        var normalizedCategory = string.IsNullOrWhiteSpace(category) ? "general" : category.Trim();
+        var storedFact = string.Equals(normalizedCategory, "general", StringComparison.OrdinalIgnoreCase)
+            || normalizedFact.Contains(normalizedCategory, StringComparison.OrdinalIgnoreCase)
+                ? normalizedFact
+                : $"{normalizedCategory}: {normalizedFact}";
         var result = await _userMemories!.RememberAsync(
             _activeUsers!.Current,
-            fact.Trim(),
+            storedFact,
             "explicit_user_request",
+            normalizedCategory,
             cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
     }

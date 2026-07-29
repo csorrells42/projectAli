@@ -245,6 +245,18 @@ $sitePackages = Join-Path $pythonRoot 'Lib\site-packages'
         if ($LASTEXITCODE -ne 0) { throw "pip install failed for $($group.id) (exit $LASTEXITCODE)" }
     }
 
+    foreach ($install in @($manifest.wheelInstalls)) {
+        $assetId = [string]$install.assetId
+        if (-not $resolvedAssets.ContainsKey($assetId)) {
+            throw "Pinned wheel install references an unknown runtime asset: $assetId"
+        }
+        $destination = Get-StagePath $workingStage ([string]$install.destination)
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        Write-Host "Installing pinned runtime wheel $assetId..."
+        & $pythonExe -m pip install --disable-pip-version-check --no-index --no-deps --no-compile $resolvedAssets[$assetId] --target $destination
+        if ($LASTEXITCODE -ne 0) { throw "pip install failed for $assetId (exit $LASTEXITCODE)" }
+    }
+
     foreach ($entry in @($manifest.repositoryFiles)) {
         $source = Get-RepoPath ([string]$entry.source)
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -267,7 +279,8 @@ $sitePackages = Join-Path $pythonRoot 'Lib\site-packages'
     Normalize-StagePermissions $workingStage
     Assert-RuntimeAssets $workingStage $false
 
-    & $pythonExe -c "import mediapipe, faster_whisper, kittentts, piper; print('Portable Python imports verified')"
+    $fastEmbedModel = Get-StagePath $workingStage 'runtime/fastembed-cache/models--Qdrant--bm25/snapshots/e499a1f8d6bec960aab5533a0941bf914e70faf9'
+    & $pythonExe -c "import os,sys; os.environ['HF_HUB_OFFLINE']='1'; import mediapipe,faster_whisper,kittentts,piper,mem0,qdrant_client,spacy,en_core_web_sm; from fastembed import SparseTextEmbedding; nlp=spacy.load('en_core_web_sm'); assert nlp('machines running reliably')[1].lemma_ == 'run'; vectors=list(SparseTextEmbedding(model_name='Qdrant/bm25',specific_model_path=sys.argv[1],local_files_only=True).embed(['hydraulic pressure alarm 4177'])); assert vectors and len(vectors[0].indices)>0; print('Portable Python and offline hybrid retrieval imports verified')" $fastEmbedModel
     if ($LASTEXITCODE -ne 0) { throw "Portable Python import smoke test failed (exit $LASTEXITCODE)" }
 
     $backup = "$stageRoot.previous"

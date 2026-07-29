@@ -4,6 +4,9 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
 {
     private readonly Mem0ProcessClient _client;
     private readonly Func<UserMemorySettings> _settings;
+    private readonly object _warmupSync = new();
+    private readonly CancellationTokenSource _lifetime = new();
+    private Task? _warmupTask;
 
     internal Mem0UserMemoryService(Mem0ProcessClient client, Func<UserMemorySettings> settings)
     {
@@ -11,13 +14,18 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
         _settings = settings;
     }
 
+    internal void BeginWarmup(ActiveUser user) =>
+        _ = EnsureWarmupStarted(user);
+
     public async Task<IReadOnlyList<UserMemory>> RecallAsync(
         ActiveUser user,
         string query,
         int maximumResults,
         CancellationToken cancellationToken)
     {
-        if (!_settings().Enabled || string.IsNullOrWhiteSpace(query)) return [];
+        var settings = _settings().Normalize();
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(query)) return [];
+        await EnsureWarmupStarted(user).WaitAsync(cancellationToken).ConfigureAwait(false);
         var response = await SendAsync(new
         {
             operation = "recall",
@@ -25,11 +33,20 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
             query = query.Trim(),
             maximumResults = Math.Clamp(maximumResults, 1, 8)
         }, cancellationToken).ConfigureAwait(false);
-        return response.Success ? response.Memories ?? [] : [];
+        if (!response.Success)
+        {
+            throw new InvalidOperationException(response.Message);
+        }
+        return FilterRecallMatches(response.Memories ?? [], settings, maximumResults);
     }
 
-    public Task<MemoryOperationResult> RememberAsync(ActiveUser user, string conversation, string source, CancellationToken cancellationToken) =>
-        OperateAsync(new { operation = "remember", user = ToUser(user), conversation, source }, cancellationToken);
+    public Task<MemoryOperationResult> RememberAsync(
+        ActiveUser user,
+        string conversation,
+        string source,
+        string? category,
+        CancellationToken cancellationToken) =>
+        OperateAsync(new { operation = "remember", user = ToUser(user), conversation, source, category }, cancellationToken);
 
     public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string correction, CancellationToken cancellationToken) =>
         OperateAsync(new { operation = "correct", user = ToUser(user), correction }, cancellationToken);
@@ -40,8 +57,13 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
     public async Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken)
     {
         if (!_settings().Enabled) return [];
+        await EnsureWarmupStarted(user).WaitAsync(cancellationToken).ConfigureAwait(false);
         var response = await SendAsync(new { operation = "list", user = ToUser(user), category }, cancellationToken).ConfigureAwait(false);
-        return response.Success ? response.Memories ?? [] : [];
+        if (!response.Success)
+        {
+            throw new InvalidOperationException(response.Message);
+        }
+        return response.Memories ?? [];
     }
 
     public Task<MemoryOperationResult> DeleteAsync(ActiveUser user, string memoryId, CancellationToken cancellationToken) =>
@@ -81,6 +103,93 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
         return response;
     }
 
+    private Task EnsureWarmupStarted(ActiveUser user)
+    {
+        lock (_warmupSync)
+        {
+            return _warmupTask ??= WarmupAsync(user.Normalize());
+        }
+    }
+
+    private async Task WarmupAsync(ActiveUser user)
+    {
+        if (!_settings().Normalize().Enabled) return;
+        using var overallTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        overallTimeout.CancelAfter(TimeSpan.FromSeconds(45));
+        for (var attempt = 1; attempt <= 5 && !overallTimeout.IsCancellationRequested; attempt++)
+        {
+            using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(overallTimeout.Token);
+            attemptTimeout.CancelAfter(TimeSpan.FromSeconds(8));
+            try
+            {
+                // Exercise the same embedding and Qdrant path used by foreground recall.
+                // A health-only probe leaves the CPU embedding model cold and merely moves
+                // the first-turn stall from process startup to the first actual question.
+                var response = await SendAsync(new
+                {
+                    operation = "recall",
+                    user = ToUser(user),
+                    query = "personal memory retrieval readiness check",
+                    maximumResults = 1
+                }, attemptTimeout.Token).ConfigureAwait(false);
+                if (!response.Success)
+                {
+                    throw new InvalidOperationException(response.Message);
+                }
+                return;
+            }
+            catch (Exception ex) when (ex is OperationCanceledException
+                or IOException
+                or InvalidOperationException
+                or TimeoutException)
+            {
+                if (_lifetime.IsCancellationRequested || overallTimeout.IsCancellationRequested || attempt == 5)
+                {
+                    return;
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), overallTimeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    internal static IReadOnlyList<UserMemory> FilterRecallMatches(
+        IReadOnlyList<UserMemory> memories,
+        UserMemorySettings settings,
+        int maximumResults)
+    {
+        var normalized = settings.Normalize();
+        var scored = memories
+            .Where(memory => memory.Score.HasValue)
+            .OrderByDescending(memory => memory.Score)
+            .ToList();
+        if (scored.Count == 0)
+        {
+            return memories.Take(Math.Clamp(maximumResults, 1, 8)).ToList();
+        }
+
+        var topScore = scored[0].Score!.Value;
+        if (topScore < normalized.RecallMinimumScore)
+        {
+            return [];
+        }
+
+        var threshold = Math.Max(
+            normalized.RecallMinimumScore,
+            topScore - normalized.RecallScoreWindow);
+        return scored
+            .Where(memory => memory.Score!.Value >= threshold)
+            .Take(Math.Clamp(maximumResults, 1, 8))
+            .ToList();
+    }
+
     private static object ToUser(ActiveUser user)
     {
         var normalized = user.Normalize();
@@ -93,5 +202,17 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
         };
     }
 
-    public ValueTask DisposeAsync() => _client.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        _lifetime.Cancel();
+        Task? warmup;
+        lock (_warmupSync) warmup = _warmupTask;
+        if (warmup is not null)
+        {
+            try { await warmup.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+        _lifetime.Dispose();
+        await _client.DisposeAsync().ConfigureAwait(false);
+    }
 }

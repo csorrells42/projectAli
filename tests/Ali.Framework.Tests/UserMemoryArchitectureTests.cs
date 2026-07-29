@@ -26,7 +26,126 @@ public sealed class UserMemoryArchitectureTests
             Assert.Equal(first.Current.StableId, restarted.Current.StableId);
             Assert.True(restarted.Current.IsTestProfile);
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CameraIndependentIdentityProfilePersistsAndOwnsTheActiveUserSession()
+    {
+        var root = TemporaryRoot();
+        var identityRoot = Path.Combine(root, "Vision");
+        var settingsRoot = Path.Combine(root, "Settings");
+        try
+        {
+            var writer = new StoredPersonIdentityReviewService(identityRoot);
+            var created = writer.CreateUserProfile(new IdentityEnrollmentRequest(
+                "Bill",
+                "Engineer",
+                "bill",
+                "",
+                "",
+                "",
+                "Default User"));
+
+            Assert.True(created.Success, created.Status);
+            var reloaded = new StoredPersonIdentityReviewService(identityRoot);
+            var profile = Assert.Single(reloaded.GetIdentityReviewItems());
+            Assert.True(profile.IsRegisteredUser);
+            Assert.Equal("Bill Engineer", profile.DisplayName);
+            Assert.Equal("bill", profile.Username);
+            Assert.True(string.IsNullOrWhiteSpace(profile.ContextPhotoPath)
+                || !File.Exists(profile.ContextPhotoPath));
+
+            var session = new ActiveUserSession(settingsRoot, reloaded);
+            Assert.False(session.RequiresSelection);
+            Assert.Equal(profile.IdentityId, session.Current.StableId);
+            Assert.Equal("Bill Engineer", session.Current.DisplayName);
+            Assert.False(session.Current.IsTestProfile);
+
+            var duplicate = writer.CreateUserProfile(new IdentityEnrollmentRequest(
+                "Other",
+                "Bill",
+                "BILL",
+                "",
+                "",
+                "",
+                "Default User"));
+            Assert.False(duplicate.Success);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CameraEnrollmentEnrichesExistingCameraIndependentProfileWithoutChangingItsId()
+    {
+        var root = TemporaryRoot();
+        try
+        {
+            using var memory = new PersonIdentityMemory("test identity backend");
+            memory.ConfigureOutputFolder(root);
+            var created = memory.CreateUserProfile(new IdentityEnrollmentRequest(
+                "Bill",
+                "Engineer",
+                "bill",
+                "bill@example.test",
+                "",
+                "",
+                "Default User"));
+            Assert.True(created.Success, created.Status);
+            var original = Assert.Single(memory.GetIdentityReviewItems());
+
+            var begin = memory.BeginEnrollment(new IdentityEnrollmentRequest(
+                "Bill",
+                "Engineer",
+                "BILL",
+                "bill@example.test",
+                "",
+                "",
+                "Default User"));
+            Assert.True(begin.Success, begin.Status);
+
+            var embedding = Enumerable.Repeat(0f, 128).ToArray();
+            embedding[0] = 1f;
+            for (var index = 0; index < 5; index++)
+            {
+                Assert.True(memory.RequestEnrollmentCapture().Success);
+                memory.ObserveEmbeddingFrame(
+                    [new PersonIdentityEmbeddingObservation(
+                        embedding,
+                        0.99d,
+                        new PersonFaceBox(0.1d, 0.1d, 0.9d, 0.9d))],
+                    DateTime.UtcNow.AddMilliseconds(index),
+                    static () => [0xff, 0xd8, 0xff, 0xd9]);
+            }
+
+            var completed = memory.GetEnrollmentState();
+            Assert.Equal(original.IdentityId, completed.CompletedIdentityId);
+            Assert.Contains("added", completed.Status, StringComparison.OrdinalIgnoreCase);
+            Assert.Single(memory.GetIdentityReviewItems());
+
+            var duplicate = memory.BeginEnrollment(new IdentityEnrollmentRequest(
+                "Bill",
+                "Engineer",
+                "bill",
+                "",
+                "",
+                "",
+                "Default User"));
+            Assert.False(duplicate.Success);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -73,6 +192,70 @@ public sealed class UserMemoryArchitectureTests
         var failed = await tools.SearchAsync("still answer", CancellationToken.None);
         Assert.Empty(failed.Memories);
         Assert.Single(failed.Warnings);
+    }
+
+    [Fact]
+    public void RecallFiltering_RejectsWeakMatchesAndKeepsOnlyTheConfidentSemanticCluster()
+    {
+        var settings = new UserMemorySettings
+        {
+            RecallMinimumScore = 0.65,
+            RecallScoreWindow = 0.05
+        };
+        var values = new UserMemory[]
+        {
+            new("name", "The user's name is Chris.", "people", null, null, .693, true, "explicit_user_request"),
+            new("touch", "Assistant created touch.txt.", "general", null, null, .636, false, "conversation"),
+            new("catalog", "The tool catalog contains 108 tools.", "general", null, null, .605, false, "conversation")
+        };
+
+        var relevant = Mem0UserMemoryService.FilterRecallMatches(values, settings, 5);
+
+        Assert.Collection(relevant, memory => Assert.Equal("name", memory.MemoryId));
+        var weakOnly = Mem0UserMemoryService.FilterRecallMatches(values[1..], settings, 5);
+        Assert.Empty(weakOnly);
+    }
+
+    [Fact]
+    public void RecallFiltering_DefaultHybridFloorKeepsKeywordSupportedMatchAndRejectsDenseOnlyNoise()
+    {
+        var values = new UserMemory[]
+        {
+            new("supported", "token: amber compass 9462", "token", null, null, .358, true, "explicit_user_request"),
+            new("noise", "Unrelated recent task state.", "general", null, null, .274, false, "conversation")
+        };
+
+        var relevant = Mem0UserMemoryService.FilterRecallMatches(values, new UserMemorySettings(), 5);
+
+        Assert.Collection(relevant, memory => Assert.Equal("supported", memory.MemoryId));
+    }
+
+    [Fact]
+    public void BackgroundLearning_IsOptInWhileExplicitMemoryRemainsEnabled()
+    {
+        var settings = new UserMemorySettings();
+
+        Assert.True(settings.Enabled);
+        Assert.False(settings.AutomaticBackgroundLearning);
+    }
+
+    [Fact]
+    public void FailedRecallContext_DoesNotMasqueradeAsAnEmptySuccessfulLookup()
+    {
+        var context = new CoordinatorMemoryResult(
+            "Memory recall timed out; Ali continued safely.",
+            [],
+            ["Per-user memory recall exceeded its short timeout."]);
+
+        var messages = AliAgentHarnessRunner.BuildInitialInput(
+            [],
+            "What is my name?",
+            context,
+            []);
+
+        var systemText = Assert.IsType<TextContent>(messages[0].Contents.Single()).Text;
+        Assert.Contains("does NOT mean that no memories exist", systemText, StringComparison.Ordinal);
+        Assert.Contains("retry recall_user_memory once", systemText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -153,9 +336,9 @@ public sealed class UserMemoryArchitectureTests
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("saved", second.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("My shop foreman is Bill", service.StoredFact);
+        Assert.Equal("people: My shop foreman is Bill", service.StoredFact);
         var recalled = await memoryTools.SearchAsync("Who is my shop foreman?", TestContext.Current.CancellationToken);
-        Assert.Contains(recalled.Memories, memory => memory.Text == "My shop foreman is Bill");
+        Assert.Contains(recalled.Memories, memory => memory.Text == "people: My shop foreman is Bill");
     }
 
     [Fact]
@@ -198,6 +381,7 @@ public sealed class UserMemoryArchitectureTests
         public IdentityReviewUpdateResult ReplaceContextPhoto(string identityId, ReadOnlyMemory<byte> jpegBytes) => new(false, "unused");
         public IdentityReviewUpdateResult DeleteIdentity(string identityId) => new(false, "unused");
         public IdentityReviewUpdateResult BeginEnrollment(IdentityEnrollmentRequest request) => new(false, "unused");
+        public IdentityReviewUpdateResult CreateUserProfile(IdentityEnrollmentRequest request) => new(false, "unused");
         public IdentityReviewUpdateResult RequestEnrollmentCapture() => new(false, "unused");
         public IdentityEnrollmentState GetEnrollmentState() => IdentityEnrollmentState.Unavailable("unused");
         public void CancelEnrollment() { }
@@ -230,7 +414,7 @@ public sealed class UserMemoryArchitectureTests
             return Task.FromResult(values);
         }
 
-        public Task<MemoryOperationResult> RememberAsync(ActiveUser user, string conversation, string source, CancellationToken cancellationToken) => Operation(user);
+        public Task<MemoryOperationResult> RememberAsync(ActiveUser user, string conversation, string source, string? category, CancellationToken cancellationToken) => Operation(user);
         public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string correction, CancellationToken cancellationToken) => Operation(user);
         public Task<MemoryOperationResult> ForgetAsync(ActiveUser user, string request, CancellationToken cancellationToken) => Operation(user);
         public Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken)
@@ -267,6 +451,7 @@ public sealed class UserMemoryArchitectureTests
             ActiveUser user,
             string conversation,
             string source,
+            string? category,
             CancellationToken cancellationToken)
         {
             StoredFact = conversation;

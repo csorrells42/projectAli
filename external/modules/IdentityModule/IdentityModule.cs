@@ -92,6 +92,15 @@ public sealed class IdentityModule :
 				"Identity module is disabled.");
 	}
 
+	public IdentityReviewUpdateResult CreateUserProfile(
+		IdentityEnrollmentRequest request)
+	{
+		return _memory?.CreateUserProfile(request)
+			?? new IdentityReviewUpdateResult(
+				false,
+				"Identity module is disabled.");
+	}
+
 	public IdentityReviewUpdateResult RequestEnrollmentCapture()
 	{
 		return _memory?.RequestEnrollmentCapture()

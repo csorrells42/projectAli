@@ -37,13 +37,20 @@ internal sealed class AliLanguageProjectResolver(AliWorkstationFileAccess fileAc
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
         var resolved = fileAccess.ResolvePhysicalFilePath(targetPath);
-        if (!File.Exists(resolved.PhysicalPath))
+        var physicalTarget = resolved.PhysicalPath;
+        if (Directory.Exists(physicalTarget))
         {
-            throw new FileNotFoundException("The requested coding target does not exist.", resolved.PhysicalPath);
+            AliCodingProjectResolver.RejectReparsePoints(resolved.MountRoot, physicalTarget);
+            physicalTarget = ResolveDirectoryManifest(physicalTarget);
         }
 
-        AliCodingProjectResolver.RejectReparsePoints(resolved.MountRoot, resolved.PhysicalPath);
-        var language = DetectLanguage(resolved.PhysicalPath);
+        if (!File.Exists(physicalTarget))
+        {
+            throw new FileNotFoundException("The requested coding target does not exist.", physicalTarget);
+        }
+
+        AliCodingProjectResolver.RejectReparsePoints(resolved.MountRoot, physicalTarget);
+        var language = DetectLanguage(physicalTarget);
         if (language == AliProgrammingLanguage.Unknown)
         {
             throw new ArgumentException(
@@ -51,7 +58,7 @@ internal sealed class AliLanguageProjectResolver(AliWorkstationFileAccess fileAc
                 nameof(targetPath));
         }
 
-        var projectDirectory = Path.GetDirectoryName(resolved.PhysicalPath)!;
+        var projectDirectory = Path.GetDirectoryName(physicalTarget)!;
         var manifest = FindContainingManifest(resolved.MountRoot, projectDirectory, language);
         if (manifest is not null)
         {
@@ -59,16 +66,50 @@ internal sealed class AliLanguageProjectResolver(AliWorkstationFileAccess fileAc
         }
         else
         {
-            manifest = resolved.PhysicalPath;
+            manifest = physicalTarget;
         }
 
         return new AliResolvedLanguageProject(
             targetPath,
-            resolved.PhysicalPath,
+            physicalTarget,
             resolved.MountRoot,
             projectDirectory,
             Path.GetFileName(manifest),
             language);
+    }
+
+    private static string ResolveDirectoryManifest(string directory)
+    {
+        var files = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly).ToArray();
+        var priorityGroups = new[]
+        {
+            files.Where(path => Path.GetExtension(path) is ".sln" or ".slnx"),
+            files.Where(path => Path.GetExtension(path) is ".csproj" or ".vcxproj"),
+            files.Where(path => ManifestLanguages.ContainsKey(Path.GetFileName(path))),
+            files.Where(path => Path.GetExtension(path).Equals(".ino", StringComparison.OrdinalIgnoreCase))
+        };
+
+        foreach (var group in priorityGroups)
+        {
+            var candidates = group
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (candidates.Length == 1)
+            {
+                return candidates[0];
+            }
+            if (candidates.Length > 1)
+            {
+                throw new ArgumentException(
+                    $"The coding folder contains multiple project targets ({string.Join(", ", candidates.Select(Path.GetFileName))}). Supply the desired manifest path.",
+                    nameof(directory));
+            }
+        }
+
+        throw new FileNotFoundException(
+            "The coding folder does not contain a recognized project manifest.",
+            directory);
     }
 
     public string ResolveDocument(AliResolvedLanguageProject project, string documentPath)
