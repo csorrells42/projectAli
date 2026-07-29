@@ -111,6 +111,8 @@ public static class AliCapabilityCatalog
     public const string ConsultSoftwareEngineerName = "consult_software_engineer";
     public const string ConsultResearcherName = "consult_researcher";
     public const string ConsultOfficeSpecialistName = "consult_office_artifact_specialist";
+    public const string RunResearchArtifactWorkflowName = "run_research_artifact_workflow";
+    public const string RunProgrammingGroupChatName = "run_programming_group_chat";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -218,7 +220,9 @@ public static class AliCapabilityCatalog
         new(DotNetDeliveryVerifyName, "Run final architecture, quality, build, test, application, and release evidence gates.", "Ali autonomous delivery"),
         new(ConsultSoftwareEngineerName, "Consult Ali's private synchronous software-engineering specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
         new(ConsultResearcherName, "Consult Ali's private synchronous evidence-research specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
-        new(ConsultOfficeSpecialistName, "Consult Ali's private synchronous office-artifact specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool")
+        new(ConsultOfficeSpecialistName, "Consult Ali's private synchronous office-artifact specialist; Ali remains the only user-facing personality.", "Microsoft Agent Framework agent as tool"),
+        new(RunResearchArtifactWorkflowName, "Run Ali's synchronous Researcher-to-Office sequential workflow for evidence-backed artifact drafting.", "Microsoft Agent Framework workflow"),
+        new(RunProgrammingGroupChatName, "Run Ali's bounded four-turn programming maker/checker group chat; Ali remains the final actor and voice.", "Microsoft Agent Framework workflow")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>

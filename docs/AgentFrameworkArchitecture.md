@@ -34,3 +34,10 @@ Magentic is never used for greetings, ordinary factual answers, a single file ed
 Framework middleware, Ali's permission policy, and activity events surround every agent and workflow. Activity exposes role, step, tool choice, result, elapsed time, approval, and failure state. Hidden reasoning is never quoted, spoken, stored in conversation history, or shown as activity.
 
 Agent Skills are loaded only from Ali's shipped, reviewed skill directory. Skill scripts are not enabled in the initial framework checkpoint.
+
+## Implemented workflows
+
+- `run_research_artifact_workflow` is an official sequential workflow: Researcher then Office/Artifact specialist.
+- `run_programming_group_chat` is an official round-robin group chat: Software Engineer and a workflow-only Programming Reviewer, capped at four participant turns.
+
+Both workflows are hosted as Agent Framework agents and then exposed as model-callable functions. They use the lockstep in-process execution environment. Ali inspects their result, performs approval-requiring actions, and gives the only user-facing final response.

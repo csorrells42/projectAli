@@ -64,7 +64,13 @@ internal sealed class AliAgentHarnessRunner
             _compatibilityClient,
             runtime,
             turnAccessor);
-        _tools = catalog.Tools.Concat(specialistFactory.CreateTools(catalog.Tools)).ToArray();
+        var specialistTeam = specialistFactory.CreateTeam(catalog.Tools);
+        var workflowTools = new AliAgentWorkflowFactory(_compatibilityClient, runtime, turnAccessor)
+            .CreateTools(specialistTeam);
+        _tools = catalog.Tools
+            .Concat(specialistTeam.Tools)
+            .Concat(workflowTools)
+            .ToArray();
         _memoryTools = catalog.MemoryTools;
         _instructions = catalog.Instructions;
         _mcpClients = mcpClients;

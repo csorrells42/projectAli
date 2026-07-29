@@ -41,10 +41,24 @@ internal sealed class AliSpecialistAgentFactory(
 
     public IReadOnlyList<AITool> CreateTools(IReadOnlyList<AITool> nativeTools)
     {
+        return CreateTeam(nativeTools).Tools;
+    }
+
+    public AliSpecialistTeam CreateTeam(IReadOnlyList<AITool> nativeTools)
+    {
         ArgumentNullException.ThrowIfNull(nativeTools);
-        return Definitions
-            .Select(definition => (AITool)CreateTool(definition, nativeTools))
+        var agents = Definitions.ToDictionary(
+            definition => definition.ToolName,
+            definition => CreateAgent(definition, nativeTools),
+            StringComparer.Ordinal);
+        var tools = Definitions
+            .Select(definition => (AITool)agents[definition.ToolName].AsAIFunction(new AIFunctionFactoryOptions
+            {
+                Name = definition.ToolName,
+                Description = definition.Description
+            }))
             .ToArray();
+        return new AliSpecialistTeam(agents, tools);
     }
 
     internal static IReadOnlyDictionary<string, IReadOnlyList<string>> DescribeToolAssignments(
@@ -58,7 +72,7 @@ internal sealed class AliSpecialistAgentFactory(
                 .ToArray(),
             StringComparer.Ordinal);
 
-    private AIFunction CreateTool(
+    private AIAgent CreateAgent(
         SpecialistDefinition definition,
         IReadOnlyList<AITool> nativeTools)
     {
@@ -88,12 +102,7 @@ internal sealed class AliSpecialistAgentFactory(
                 MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096)
             }
         });
-        agent = AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, turnAccessor, definition.Role);
-        return agent.AsAIFunction(new AIFunctionFactoryOptions
-        {
-            Name = definition.ToolName,
-            Description = definition.Description
-        });
+        return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, turnAccessor, definition.Role);
     }
 
     private static IReadOnlyList<AITool> SelectTools(
@@ -134,4 +143,14 @@ internal sealed class AliSpecialistAgentFactory(
         string Description,
         string Instructions,
         Func<string, bool> ToolSelector);
+}
+
+internal sealed record AliSpecialistTeam(
+    IReadOnlyDictionary<string, AIAgent> Agents,
+    IReadOnlyList<AITool> Tools)
+{
+    public AIAgent Get(string toolName) =>
+        Agents.TryGetValue(toolName, out var agent)
+            ? agent
+            : throw new InvalidOperationException($"Specialist '{toolName}' is not registered.");
 }
