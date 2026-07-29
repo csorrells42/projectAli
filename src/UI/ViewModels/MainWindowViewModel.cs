@@ -22,6 +22,7 @@ using Ali.Modules.Runtime;
 using Ali.Modules.Voice;
 using Ali.Modules.Internet;
 using Ali.Modules.Permissions;
+using Ali.Modules.About;
 using Ali.Modules.RAG;
 using Ali.Modules.Storage;
 using Ali.Modules.Interaction;
@@ -177,6 +178,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private ReminderEntryViewModel? _selectedReminderEntry;
     private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
     private string _maintenanceStatusText = "Backups include conversations, memories, reminders, settings, sources, local indexes, voice settings, runtime settings, and generated documents. Temporary session audio/images are skipped.";
+    private string _technologyAcknowledgementsText = "Technology inventory is loading.";
+    private string _technologyAcknowledgementsSummary = "Loading Ali's technology inventory.";
     private CameraDevice? _selectedVisionCamera;
     private CameraVideoMode? _selectedVisionCameraMode;
     private FrameworkElement? _visionViewport;
@@ -241,6 +244,8 @@ public sealed class MainWindowViewModel : ObservableObject
         SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
+        RefreshTechnologyAcknowledgementsCommand = CreateCommand(_ => RefreshTechnologyAcknowledgements());
+        SoftwareEngineeringRadarCommand = CreateAsyncCommand(StartSoftwareEngineeringRadarAsync);
         OpenMaintenanceDashboardCommand = CreateCommand(_ => OpenMaintenanceDashboard());
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
@@ -322,6 +327,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
         LoadInternetBackendSettings();
+        RefreshTechnologyAcknowledgements();
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
@@ -613,6 +619,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand StopSpeakingCommand { get; }
 
     public ICommand OpenSettingsCommand { get; }
+
+    public ICommand RefreshTechnologyAcknowledgementsCommand { get; }
+
+    public ICommand SoftwareEngineeringRadarCommand { get; }
 
     public ICommand OpenMaintenanceDashboardCommand { get; }
 
@@ -2353,6 +2363,18 @@ public sealed class MainWindowViewModel : ObservableObject
             UpdateRuntimeStatus();
             RefreshMemoryReminders();
         }
+    }
+
+    public string TechnologyAcknowledgementsText
+    {
+        get => _technologyAcknowledgementsText;
+        private set => SetProperty(ref _technologyAcknowledgementsText, value);
+    }
+
+    public string TechnologyAcknowledgementsSummary
+    {
+        get => _technologyAcknowledgementsSummary;
+        private set => SetProperty(ref _technologyAcknowledgementsSummary, value);
     }
 
     private void AddAgentActivity(AssistantStreamChunk chunk)
@@ -5241,6 +5263,25 @@ public sealed class MainWindowViewModel : ObservableObject
             StopInputLevelMonitor();
             HandleCommandException(ex);
         }
+    }
+
+    private void RefreshTechnologyAcknowledgements()
+    {
+        var report = AliTechnologyAcknowledgements.Load();
+        TechnologyAcknowledgementsText = report.FormattedText;
+        TechnologyAcknowledgementsSummary =
+            $"Thank you to the people behind {report.Items.Count:N0} detected modules, libraries, runtimes, models, standards, and toolchains in this Ali build.";
+    }
+
+    private async Task StartSoftwareEngineeringRadarAsync()
+    {
+        _settingsWindow?.Close();
+        ComposerText =
+            "Give me a current software engineering and libraries radar briefing. Use live internet research and primary sources. " +
+            "Cover important new or recently changed libraries, frameworks, language releases, developer tools, design patterns, security changes, and engineering practices that are relevant to the languages and systems I use. " +
+            "Explain what changed, why it matters, maturity and licensing concerns, and which developments may genuinely help our current projects. " +
+            "Prefer a concise ranked table with source links, separate stable recommendations from experiments, and do not install or upgrade anything.";
+        await SendAsync().ConfigureAwait(true);
     }
 
     private bool OpenSettingsWindow()
