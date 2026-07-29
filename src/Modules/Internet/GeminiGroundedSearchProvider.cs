@@ -226,8 +226,10 @@ internal sealed class GeminiGroundedSearchProvider
             ? "none"
             : plan.TemporalSelection;
         return $"Research this request using current Google Search results: {query.Trim()}\n"
-            + $"Current UTC date: {DateTimeOffset.UtcNow:yyyy-MM-dd}. Temporal requirement: {temporal}.\n"
-            + "Prioritize primary and authoritative sources. Distinguish confirmed facts from forecasts or interpretation.";
+            + $"Current UTC timestamp: {DateTimeOffset.UtcNow:O}. Temporal requirement: {temporal}.\n"
+            + "Prioritize primary and authoritative sources. Distinguish confirmed facts from forecasts or interpretation.\n"
+            + "For present conditions, current events, latest values, or today-specific claims, establish the source observation/publication date in the grounded text. "
+            + "Do not describe an older dated observation as current. If Google grounding cannot establish freshness for a requested current claim, say that the current value was not verified instead of substituting an older observation.";
     }
 
     private static int ResolveOutputTokens(GeminiUsageMetadata? usage)

@@ -29,6 +29,8 @@ internal sealed class AliSourceTools(
                 CanRetry: false);
         }
 
+        var freshnessCheckedAt = DateTimeOffset.Now;
+        var datedQuery = $"{query.Trim()} as of {freshnessCheckedAt:yyyy-MM-dd}";
         var normalizedTopic = string.IsNullOrWhiteSpace(topic) ? "general" : topic.Trim().ToLowerInvariant();
         var intent = normalizedTopic.Equals("news", StringComparison.OrdinalIgnoreCase)
             ? "current_news"
@@ -38,8 +40,8 @@ internal sealed class AliSourceTools(
                 true,
                 true,
                 intent,
-                query,
-                [query],
+                datedQuery,
+                [datedQuery],
                 [normalizedTopic]),
             cancellationToken).ConfigureAwait(false);
         var coordinatorResult = ToCoordinatorSourceResult(
@@ -47,9 +49,18 @@ internal sealed class AliSourceTools(
             "live internet",
             canRetry: turn is not null
                 && turn.WebSearchAttempts < MaximumWebSearchAttemptsPerTurn);
+        coordinatorResult = coordinatorResult with
+        {
+            Status = coordinatorResult.Status + " "
+                + $"Freshness checkpoint: {freshnessCheckedAt:yyyy-MM-ddTHH:mm:sszzz}. "
+                + "RetrievedAt records when Ali fetched an excerpt, not when the underlying event or observation occurred. "
+                + "For current, live, latest, or today requests, verify the source's stated observation/publication time against the requested period. "
+                + "If freshness is absent or older than requested, retry with the remaining search attempt or report that current status could not be verified."
+        };
         if (turn is not null)
         {
             turn.UsedEvidenceTool = true;
+            turn.UsedCurrentWebSearch = true;
             turn.WebSources.AddRange(coordinatorResult.Sources);
         }
 

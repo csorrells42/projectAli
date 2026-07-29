@@ -41,6 +41,9 @@ public sealed class GeminiGroundedSearchProviderTests
         Assert.Equal(apiKey, handler.LastApiKey);
         Assert.Contains("\"google_search\":{}", handler.LastBody);
         Assert.Contains("\"thinkingLevel\":\"minimal\"", handler.LastBody);
+        Assert.Contains("Current UTC timestamp", handler.LastBody, StringComparison.Ordinal);
+        Assert.Contains("Do not describe an older dated observation as current", handler.LastBody, StringComparison.Ordinal);
+        Assert.Contains("current value was not verified", handler.LastBody, StringComparison.Ordinal);
         Assert.DoesNotContain("temperature", handler.LastBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(apiKey, handler.LastBody, StringComparison.Ordinal);
         Assert.Contains("Grounded requests - hour 1/30", provider.UsageStatus());

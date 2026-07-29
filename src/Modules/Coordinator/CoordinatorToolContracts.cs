@@ -79,6 +79,8 @@ internal sealed class CoordinatorTurnContext(
 
     public int WebSearchAttempts { get; set; }
 
+    public bool UsedCurrentWebSearch { get; set; }
+
     public List<CoordinatorSourceItem> WebSources { get; } = [];
 
     public void RecordPermissionDecision(AgentToolApprovalChoice choice)

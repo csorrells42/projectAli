@@ -117,9 +117,14 @@ public sealed class AgentTurnIsolationTests
 
         Assert.NotEmpty(first.Sources);
         Assert.True(first.CanRetry);
+        Assert.True(turn.UsedCurrentWebSearch);
         Assert.NotEmpty(second.Sources);
         Assert.False(second.CanRetry);
         Assert.Equal(2, retriever.CallCount);
+        Assert.All(retriever.Plans, plan =>
+            Assert.Contains(DateTimeOffset.Now.ToString("yyyy-MM-dd"), plan.SearchText, StringComparison.Ordinal));
+        Assert.Contains("RetrievedAt records when Ali fetched", first.Status, StringComparison.Ordinal);
+        Assert.Contains("current status could not be verified", first.Status, StringComparison.Ordinal);
     }
 
     private sealed class EmptySourceRetriever : ISourceRetriever
@@ -143,6 +148,8 @@ public sealed class AgentTurnIsolationTests
     {
         public int CallCount { get; private set; }
 
+        public List<SourceQueryPlan> Plans { get; } = [];
+
         public Task<SourceRetrievalResult> RetrieveAsync(string userText, CancellationToken cancellationToken) =>
             RetrieveAsync(
                 new SourceQueryPlan(true, true, "current_web", userText, [userText], ["general"]),
@@ -151,6 +158,7 @@ public sealed class AgentTurnIsolationTests
         public Task<SourceRetrievalResult> RetrieveAsync(SourceQueryPlan plan, CancellationToken cancellationToken)
         {
             CallCount++;
+            Plans.Add(plan);
             return Task.FromResult(new SourceRetrievalResult(
                 [new SourceExcerpt(
                     1,

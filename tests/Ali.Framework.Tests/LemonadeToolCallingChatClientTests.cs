@@ -576,6 +576,68 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("does not itself prove that ranking", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("Do not claim the search was exhaustive", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("copy them verbatim", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("Current UTC timestamp for freshness comparison", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("RetrievedAt proves only when Ali fetched", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("does not establish freshness", auditPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CurrentWebFreshnessGate_RejectsFetchTimeAsObservationTimeAndCanRefineSearch()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "What is the current weather, and is it suitable for outdoor painting?",
+            _ => { })
+        {
+            UsedEvidenceTool = true,
+            UsedCurrentWebSearch = true,
+            WebSearchAttempts = 1
+        };
+        turn.WebSources.Add(new CoordinatorSourceItem(
+            "Old weather page",
+            "weather",
+            "https://example.com/weather",
+            new DateTimeOffset(2026, 7, 29, 20, 0, 0, TimeSpan.Zero),
+            "Observed conditions on July 20, 2026: clear and 88 F. Humidity was not reported."));
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"As of July 29 it is clear and humidity is probably low, so paint now.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"Retrieved July 29: conditions are clear, so paint now.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"weather observation July 29 2026\",\"topic\":\"weather\"},\"summary\":\"Verify a same-day observation before recommending\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        using var activeTurn = client.BeginTurn(turn);
+        var search = AIFunctionFactory.Create(() => "ok", "search_current_web", "Search current web sources.");
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(
+            "call-search",
+            new { status = "Fetched July 29", sources = turn.WebSources }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), result],
+            new ChatOptions { Tools = [search] },
+            TestContext.Current.CancellationToken);
+
+        var retry = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("search_current_web", retry.Name);
+        Assert.Equal(3, inner.CallCount);
+        var freshnessPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
+        Assert.Contains("Freshness checkpoint", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Contains("pipeline fetch times only", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Contains("missing measurement remains unknown", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Contains("July 20, 2026", freshnessPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
