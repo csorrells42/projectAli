@@ -71,6 +71,13 @@ public static class AliCapabilityCatalog
     public const string ArchitectureInspectName = "architecture_inspect";
     public const string ArchitectureCheckName = "architecture_check_boundaries";
     public const string DotNetQualityScanName = "dotnet_quality_scan";
+    public const string DotNetPerformanceMeasureName = "dotnet_performance_measure";
+    public const string DotNetPerformanceCompareName = "dotnet_performance_compare";
+    public const string DotNetPerformanceTraceName = "dotnet_performance_trace";
+    public const string DotNetApplicationVerifyName = "dotnet_application_verify";
+    public const string DotNetReleasePublishName = "dotnet_release_publish";
+    public const string DotNetArchitectureReportName = "dotnet_architecture_report";
+    public const string DotNetDeliveryVerifyName = "dotnet_delivery_verify";
 
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
@@ -138,7 +145,14 @@ public static class AliCapabilityCatalog
         new(GitPushName, "Push a validated branch and remote after approval.", "Ali source-control engineering"),
         new(ArchitectureInspectName, "Build semantic project/call graphs and identify project cycles.", "Ali architecture engineering"),
         new(ArchitectureCheckName, "Check explicit namespace dependency boundaries semantically.", "Ali architecture engineering"),
-        new(DotNetQualityScanName, "Run Roslyn/secret quality checks and produce SARIF evidence.", "Ali quality engineering")
+        new(DotNetQualityScanName, "Run Roslyn/secret quality checks and produce SARIF evidence.", "Ali quality engineering"),
+        new(DotNetPerformanceMeasureName, "Measure application wall time, CPU time, and peak memory over bounded iterations.", "Ali performance engineering"),
+        new(DotNetPerformanceCompareName, "Compare two saved performance evidence artifacts for regressions.", "Ali performance engineering"),
+        new(DotNetPerformanceTraceName, "Capture a bounded EventPipe CPU/allocation trace from an approved project process.", "Ali performance engineering"),
+        new(DotNetApplicationVerifyName, "Smoke-test the actual console, desktop, service, or loopback-web application and capture visible evidence.", "Ali application verification"),
+        new(DotNetReleasePublishName, "Create a .NET publish folder with a cryptographic file manifest after approval.", "Ali release engineering"),
+        new(DotNetArchitectureReportName, "Generate a source-backed Markdown architecture report.", "Ali release engineering"),
+        new(DotNetDeliveryVerifyName, "Run final architecture, quality, build, test, application, and release evidence gates.", "Ali autonomous delivery")
     ];
 
     public static CoordinatorCapabilityResult ListAvailableTools() =>

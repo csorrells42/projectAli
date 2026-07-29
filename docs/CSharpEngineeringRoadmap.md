@@ -34,6 +34,17 @@ locals, watches, stepping, termination, and a process handoff for diagnostics co
 14. **Documentation and release** — XML/API documentation, architecture reports, changelogs, publish profiles, installers/portable bundles, checksums, licenses, and release validation.
 15. **Autonomous delivery loop** — turn a user request into a visible plan, implement in bounded changes, inspect diffs, build, test, debug, verify the actual application, package it, and report evidence without claiming unfinished work is complete.
 
+Implemented checkpoint: dependency engineering provides exact package inventory,
+NuGet audit evidence, and preview/apply edits; source control provides bounded status,
+diff, history, blame, branch, commit, and push operations; architecture engineering
+provides semantic project/call graphs, cycle detection, and explicit boundary rules;
+quality engineering produces Roslyn/secret findings and SARIF. Performance engineering
+produces repeatable process measurements, comparisons, and managed EventPipe traces.
+Application verification exercises console/service, WPF/WinForms (with screenshots),
+and loopback web applications. Release engineering creates architecture reports,
+publish folders, and SHA-256 manifests. The final delivery gate composes these results
+without taking planning or language interpretation away from the model.
+
 Each layer remains useful independently and is committed only after its module, Agent Framework surface, MCP exposure, permissions, and tests agree.
 
 The orchestration contracts are intentionally language-neutral. Roslyn and netcoredbg

@@ -45,7 +45,11 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.GitCreateBranchName, "Changes the repository branch"),
         new(AliCapabilityCatalog.GitCommitName, "Creates a durable source-control commit"),
         new(AliCapabilityCatalog.GitPushName, "Transmits commits to a remote repository"),
-        new(AliCapabilityCatalog.DotNetQualityScanName, "Reads project source and writes a SARIF result artifact")
+        new(AliCapabilityCatalog.DotNetPerformanceMeasureName, "Executes compiled project code for measurement"),
+        new(AliCapabilityCatalog.DotNetPerformanceTraceName, "Captures private CPU and allocation trace data from a running process"),
+        new(AliCapabilityCatalog.DotNetApplicationVerifyName, "Launches compiled project code for actual-application verification"),
+        new(AliCapabilityCatalog.DotNetReleasePublishName, "Builds a distributable release and may restore packages"),
+        new(AliCapabilityCatalog.DotNetDeliveryVerifyName, "Executes build, tests, application checks, and optional publish gates")
     ];
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =

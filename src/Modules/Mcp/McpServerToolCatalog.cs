@@ -63,7 +63,14 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.GitPushName, "Push a Git branch.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.ArchitectureInspectName, "Inspect semantic project and call graphs.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.ArchitectureCheckName, "Check semantic architecture boundaries.", readsPrivateData: true),
-        Policy(AliCapabilityCatalog.DotNetQualityScanName, "Run quality checks and write SARIF evidence.", writesLocalData: true, readsPrivateData: true)
+        Policy(AliCapabilityCatalog.DotNetQualityScanName, "Run quality checks and write SARIF evidence.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetPerformanceMeasureName, "Execute and measure a built application.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetPerformanceCompareName, "Compare performance evidence.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetPerformanceTraceName, "Capture a managed EventPipe trace.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetApplicationVerifyName, "Launch and smoke-test a built application.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetReleasePublishName, "Publish a distributable .NET application.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetArchitectureReportName, "Generate an architecture report.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.DotNetDeliveryVerifyName, "Run final delivery evidence gates.", writesLocalData: true, usesNetwork: true, readsPrivateData: true)
     ];
 
     public static IReadOnlyList<McpServerToolPolicy> CreateDefaultPolicies() =>

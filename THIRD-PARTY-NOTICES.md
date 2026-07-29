@@ -30,6 +30,8 @@ Notable runtime boundaries:
 - Microsoft Roslyn 5.6.0, MSBuild API packages 18.3.3, and MSBuild Locator
   1.11.2 retain their upstream MIT licenses. MSBuild itself is resolved from
   the locally installed .NET SDK and is not redistributed by Project Ali.
+- Microsoft.Diagnostics.NETCore.Client 0.2.661903 is MIT licensed and provides
+  Ali's managed EventPipe trace capture boundary.
 - The bundled Samsung netcoredbg 3.2.0-1092 CLR debugger is licensed under
   MIT and is controlled through its standard Debug Adapter Protocol endpoint.
 - The bundled ripgrep 15.2.0 Windows executable is offered under MIT or the

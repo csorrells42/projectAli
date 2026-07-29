@@ -112,6 +112,16 @@ public sealed class DotNetEngineeringAndDebuggerTests
             Assert.True(next.Success);
             var stopped = await module.Debugger.StopAsync(started.SessionId, TestContext.Current.CancellationToken);
             Assert.Equal("terminated", stopped.State);
+
+            var running = await module.Tools.RunAsync("Workspace/DebugApp/DebugApp.csproj", "Debug", TestContext.Current.CancellationToken);
+            Assert.True(running.Success);
+            var attached = await module.Debugger.AttachAsync("Workspace/DebugApp/DebugApp.csproj", running.ProcessId!.Value, TestContext.Current.CancellationToken);
+            Assert.True(attached.Success);
+            Assert.Equal(running.ProcessId, attached.ProcessId);
+            var attachHandoff = module.Debugger.GetDiagnosticsHandoff(attached.SessionId!);
+            Assert.Equal(running.ProcessId, attachHandoff.ProcessId);
+            var attachStopped = await module.Debugger.StopAsync(attached.SessionId!, TestContext.Current.CancellationToken);
+            Assert.Equal("terminated", attachStopped.State);
         });
     }
 

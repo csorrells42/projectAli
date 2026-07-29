@@ -5,6 +5,10 @@ using Ali.Modules.Coding.Dependencies;
 using Ali.Modules.Coding.SourceControl;
 using Ali.Modules.Coding.Architecture;
 using Ali.Modules.Coding.Quality;
+using Ali.Modules.Coding.Performance;
+using Ali.Modules.Coding.Verification;
+using Ali.Modules.Coding.Release;
+using Ali.Modules.Coding.Delivery;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -31,6 +35,10 @@ public sealed class AliCodingModule : IAsyncDisposable
         var workspaceLoader = new AliRoslynWorkspaceLoader(resolver);
         Architecture = new AliArchitectureEngineering(workspaceLoader);
         Quality = new AliQualityEngineering(resolver, Tools);
+        Performance = new AliPerformanceEngineering(resolver);
+        Verification = new AliApplicationVerification(resolver);
+        Release = new AliReleaseEngineering(resolver, Architecture);
+        Delivery = new AliAutonomousDelivery(Architecture, Quality, EngineeringLoop, Tools, Verification, Release);
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
@@ -41,6 +49,10 @@ public sealed class AliCodingModule : IAsyncDisposable
     internal AliSourceControlEngineering SourceControl { get; }
     internal AliArchitectureEngineering Architecture { get; }
     internal AliQualityEngineering Quality { get; }
+    internal AliPerformanceEngineering Performance { get; }
+    internal AliApplicationVerification Verification { get; }
+    internal AliReleaseEngineering Release { get; }
+    internal AliAutonomousDelivery Delivery { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
@@ -161,7 +173,21 @@ public sealed class AliCodingModule : IAsyncDisposable
         AIFunctionFactory.Create((Func<string, ArchitectureBoundaryRule[], CancellationToken, Task<ArchitectureBoundaryResult>>)Architecture.CheckBoundariesAsync,
             AliCapabilityCatalog.ArchitectureCheckName, "Evaluate explicit namespace dependency boundary rules against Roslyn semantic call edges."),
         AIFunctionFactory.Create((Func<string, CancellationToken, Task<QualityScanResult>>)Quality.ScanAsync,
-            AliCapabilityCatalog.DotNetQualityScanName, "Run Roslyn diagnostics and bounded secret checks and write a stable SARIF quality artifact.")
+            AliCapabilityCatalog.DotNetQualityScanName, "Run Roslyn diagnostics and bounded secret checks and write a stable SARIF quality artifact."),
+        AIFunctionFactory.Create((Func<string, string?, int, CancellationToken, Task<PerformanceRunResult>>)Performance.MeasureAsync,
+            AliCapabilityCatalog.DotNetPerformanceMeasureName, "Measure a built application over bounded iterations and write repeatable wall-time, CPU, and memory evidence."),
+        AIFunctionFactory.Create((Func<string, string, string, CancellationToken, Task<PerformanceComparisonResult>>)Performance.CompareAsync,
+            AliCapabilityCatalog.DotNetPerformanceCompareName, "Compare two saved performance evidence artifacts and report the measured regression or improvement."),
+        AIFunctionFactory.Create((Func<string, int, int, CancellationToken, Task<PerformanceTraceResult>>)Performance.CaptureTraceAsync,
+            AliCapabilityCatalog.DotNetPerformanceTraceName, "Capture a bounded managed EventPipe CPU/allocation trace from an approved project process."),
+        AIFunctionFactory.Create((Func<string, string?, string?, CancellationToken, Task<ApplicationVerificationResult>>)Verification.SmokeTestAsync,
+            AliCapabilityCatalog.DotNetApplicationVerifyName, "Run an actual console, desktop, service, or loopback-web smoke test and capture visible desktop evidence when applicable."),
+        AIFunctionFactory.Create((Func<string, string?, bool, CancellationToken, Task<DotNetReleaseResult>>)Release.PublishAsync,
+            AliCapabilityCatalog.DotNetReleasePublishName, "Create a bounded .NET publish folder and a cryptographic file manifest after approval."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<EngineeringReportResult>>)Release.GenerateArchitectureReportAsync,
+            AliCapabilityCatalog.DotNetArchitectureReportName, "Generate a source-backed Markdown architecture report from semantic project and call graphs."),
+        AIFunctionFactory.Create((Func<string, string?, string?, bool, bool, CancellationToken, Task<AutonomousDeliveryResult>>)Delivery.VerifyDeliveryAsync,
+            AliCapabilityCatalog.DotNetDeliveryVerifyName, "Run the final architecture, quality, build, test, optional app, and optional release evidence gates before claiming delivery complete. Supply testTargetPath when tests live in a separate project.")
     ];
 
     private Task<DotNetVerificationResult> VerifyAsync(string targetPath, string? configuration, CancellationToken cancellationToken) =>
