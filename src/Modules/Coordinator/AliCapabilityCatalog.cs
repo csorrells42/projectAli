@@ -13,6 +13,7 @@ public static class AliCapabilityCatalog
     public const string ForgetCurrentUserMemoryName = "forget_current_user_memory";
     public const string ListCurrentUserMemoriesName = "list_current_user_memories";
     public const string SearchCurrentWebName = "search_current_web";
+    public const string CreateGoogleMapsDirectionsLinkName = "maps_create_directions_link";
     public const string ResearchWebName = "research_web";
     public const string SearchLocalLibraryName = "search_local_library";
     public const string CreateCalendarEventName = "create_calendar_event";
@@ -136,6 +137,7 @@ public static class AliCapabilityCatalog
         new(ForgetCurrentUserMemoryName, "Forget exactly one durable memory belonging to the active identity profile by its exact memory ID after confirmation."),
         new(ListCurrentUserMemoriesName, "List memories belonging only to the active identity profile after confirmation."),
         new(SearchCurrentWebName, "Search the configured live internet backends for current or source-dependent information."),
+        new(CreateGoogleMapsDirectionsLinkName, "Create a Google Maps directions handoff from explicit origin, destination, and ordered waypoint queries without inventing route details.", "Ali navigation tools"),
         new(ResearchWebName, "Run provider-managed, multi-source web research for complex nested or comparative questions."),
         new(SearchLocalLibraryName, "Search the user's indexed local RAG library and reference documents."),
         new(CreateCalendarEventName, "Create a persistent local calendar event with a portable iCalendar file and an operating-system notification that survives Ali closing."),

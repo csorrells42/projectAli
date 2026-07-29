@@ -679,6 +679,58 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task FailedRouteSearch_CriticCallsMapHandoffInsteadOfAllowingInventedPaperDirections()
+    {
+        const string request = "Give me directions from home to a Publix, then Waffle House, then a gym, and back home.";
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            request,
+            _ => { })
+        {
+            UsedEvidenceTool = true,
+            UsedCurrentWebSearch = true,
+            WebSearchAttempts = 2
+        };
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"Turn right, drive 1.5 miles to an invented Publix, then continue for 15 minutes.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"maps_create_directions_link\",\"arguments\":{\"origin\":\"home\",\"destination\":\"home\",\"waypoints\":[\"Publix near Stuart, FL\",\"Waffle House near Stuart, FL\",\"gym near Stuart, FL\"],\"travelMode\":\"driving\"},\"summary\":\"Create a live map route without inventing directions\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var search = AIFunctionFactory.Create(() => "no reliable route", "search_current_web", "Search web sources.");
+        var maps = AIFunctionFactory.Create(
+            () => "map",
+            AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName,
+            "Create a map handoff.");
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(
+            "call-search",
+            new { status = "No reliable route evidence", sources = Array.Empty<string>(), canRetry = false }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, request), result],
+            new ChatOptions { Tools = [search, maps] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal(AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, call.Name);
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("never manufacture turn-by-turn steps", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("Ordinary web snippets and model knowledge are not route evidence", auditPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CurrentWebFreshnessGate_RejectsFetchTimeAsObservationTimeAndCanRefineSearch()
     {
         var turn = new CoordinatorTurnContext(

@@ -48,5 +48,8 @@ public sealed class AliToolCatalogTests
         Assert.Contains("Never invent a skill name or script name", instructions, StringComparison.Ordinal);
         Assert.Contains("distinguish what the retrieved material directly reports", instructions, StringComparison.Ordinal);
         Assert.Contains("unsupported superlative", instructions, StringComparison.Ordinal);
+        Assert.Contains(AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, instructions, StringComparison.Ordinal);
+        Assert.Contains("Never invent or reconstruct turn-by-turn steps", instructions, StringComparison.Ordinal);
+        Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName);
     }
 }

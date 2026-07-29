@@ -246,6 +246,13 @@ public sealed class McpServerTests
                 ["query"] = "current integration test news",
                 ["topic"] = "news"
             });
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, new()
+            {
+                ["origin"] = "Home",
+                ["destination"] = "Home",
+                ["waypoints"] = new[] { "Publix near Stuart, FL", "Waffle House near Stuart, FL" },
+                ["travelMode"] = "driving"
+            });
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.ResearchWebName, new()
             {
                 ["question"] = "Compare two test sources."
