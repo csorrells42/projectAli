@@ -36,6 +36,7 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.CodingFormatProjectName, "Format a project through its registered provider.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingBuildProjectName, "Build a project through its registered provider.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingTestProjectName, "Run a project's native tests.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.CodingInspectArchitectureName, "Map cross-language dependencies, cycles, and hotspots.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.DotNetCreateProjectName, "Create a bounded C# project scaffold.", writesLocalData: true),
         Policy(AliCapabilityCatalog.RoslynAnalyzeProjectName, "Analyze C# compiler diagnostics with Roslyn.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.RoslynFormatProjectName, "Format C# source with Roslyn.", writesLocalData: true, readsPrivateData: true),

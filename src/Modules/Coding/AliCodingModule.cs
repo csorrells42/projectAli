@@ -54,10 +54,12 @@ public sealed class AliCodingModule : IAsyncDisposable
         LanguageProviders.Register(new AliWebLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliJavaLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliCppLanguageProvider(toolchainLocator));
+        var sourceIndex = new AliSourceIndexService(languageResolver);
         MultiLanguage = new AliMultiLanguageCodingTools(
             languageResolver,
             LanguageProviders,
-            new AliSourceIndexService(languageResolver));
+            sourceIndex);
+        CrossLanguageArchitecture = new AliCrossLanguageArchitecture(languageResolver, sourceIndex);
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
@@ -74,6 +76,7 @@ public sealed class AliCodingModule : IAsyncDisposable
     internal AliAutonomousDelivery Delivery { get; }
     internal AliLanguageProviderRegistry LanguageProviders { get; }
     internal AliMultiLanguageCodingTools MultiLanguage { get; }
+    internal AliCrossLanguageArchitecture CrossLanguageArchitecture { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
@@ -109,6 +112,10 @@ public sealed class AliCodingModule : IAsyncDisposable
             (Func<string, string?, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.TestAsync,
             AliCapabilityCatalog.CodingTestProjectName,
             "Run an approved project's native test system through its registered language provider."),
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<AliCrossLanguageArchitectureReport>>)CrossLanguageArchitecture.InspectAsync,
+            AliCapabilityCatalog.CodingInspectArchitectureName,
+            "Build a bounded evidence-backed dependency graph, cycle list, hotspot ranking, and Mermaid view across C#, Python, web, Java, and C/C++ source."),
         AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)ProjectScaffolder.CreateAsync,
             AliCapabilityCatalog.DotNetCreateProjectName,

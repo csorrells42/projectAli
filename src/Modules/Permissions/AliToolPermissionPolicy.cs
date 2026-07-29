@@ -67,7 +67,8 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CodingInspectProjectName, "Reads private project structure and toolchain state"),
         new(AliCapabilityCatalog.CodingIndexProjectName, "Reads and indexes private project source"),
         new(AliCapabilityCatalog.CodingSearchSymbolsName, "Searches a private project source index"),
-        new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer")
+        new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer"),
+        new(AliCapabilityCatalog.CodingInspectArchitectureName, "Reads private source to build a cross-language dependency graph")
     ];
 
     internal static IReadOnlyList<AgentToolPermissionDefinition> ProtectedTools => TrustedWorkstationTools;
