@@ -16,6 +16,11 @@ using Ali.Modules.Coding.Web;
 using Ali.Modules.Coding.Java;
 using Ali.Modules.Coding.Cpp;
 using Ali.Modules.Coding.Operations;
+using Ali.Modules.Coding.Toolchains;
+using Ali.Modules.Coding.VisualStudio;
+using Ali.Modules.Coding.Native;
+using Ali.Modules.Coding.Embedded.Arduino;
+using Ali.Modules.Coding.Embedded.RaspberryPi;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -50,11 +55,16 @@ public sealed class AliCodingModule : IAsyncDisposable
         LanguageProviders = new AliLanguageProviderRegistry();
         var languageResolver = new AliLanguageProjectResolver(fileAccess);
         var toolchainLocator = new AliToolchainLocator();
+        VisualStudio = new AliVisualStudioIntegration(languageResolver);
+        GnuNative = new AliGnuNativeTools(languageResolver, toolchainLocator);
+        Arduino = new AliArduinoTools(languageResolver);
+        RaspberryPi = new AliRaspberryPiTools(languageResolver);
         LanguageProviders.Register(new AliDotNetLanguageProvider(Tools, EngineeringLoop, toolchainLocator));
         LanguageProviders.Register(new AliPythonLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliWebLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliJavaLanguageProvider(toolchainLocator));
         LanguageProviders.Register(new AliCppLanguageProvider(toolchainLocator));
+        LanguageProviders.Register(new AliArduinoLanguageProvider(Arduino));
         var sourceIndex = new AliSourceIndexService(languageResolver);
         MultiLanguage = new AliMultiLanguageCodingTools(
             languageResolver,
@@ -80,9 +90,64 @@ public sealed class AliCodingModule : IAsyncDisposable
     internal AliMultiLanguageCodingTools MultiLanguage { get; }
     internal AliCrossLanguageArchitecture CrossLanguageArchitecture { get; }
     internal AliCodingOperations Operations { get; }
+    internal AliVisualStudioIntegration VisualStudio { get; }
+    internal AliGnuNativeTools GnuNative { get; }
+    internal AliArduinoTools Arduino { get; }
+    internal AliRaspberryPiTools RaspberryPi { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
+        AIFunctionFactory.Create((Func<AliVisualStudioReport>)VisualStudio.Inspect,
+            AliCapabilityCatalog.VisualStudioInspectName,
+            "Inspect installed Visual Studio instances and report MSBuild, MSVC, CMake, Ninja, test, formatting, language-server, and debugger features truthfully."),
+        AIFunctionFactory.Create((Func<string, string?, string?, CancellationToken, Task<AliVisualStudioActionResult>>)VisualStudio.BuildAsync,
+            AliCapabilityCatalog.VisualStudioBuildName,
+            "Build an approved solution or project with the installed Visual Studio MSBuild engine and preserve a binary log."),
+        AIFunctionFactory.Create((Func<string, string?, AliVisualStudioActionResult>)VisualStudio.Open,
+            AliCapabilityCatalog.VisualStudioOpenName,
+            "Open an approved solution, project, or document in the installed Visual Studio IDE."),
+        AIFunctionFactory.Create((Func<AliGnuNativeToolchainReport>)GnuNative.Inspect,
+            AliCapabilityCatalog.GnuNativeInspectName,
+            "Inspect Ali's MSYS2 UCRT64 GCC, G++, GDB, Make, CMake, and Ninja native toolchain."),
+        AIFunctionFactory.Create((Func<string, string, string?, CancellationToken, Task<AliLanguageOperationResult>>)GnuNative.ExecuteAsync,
+            AliCapabilityCatalog.GnuNativeExecuteName,
+            "Analyze, build, test, or run an approved C/C++ project with GCC UCRT64 instead of MSVC."),
+        AIFunctionFactory.Create((Func<CancellationToken, Task<AliArduinoReport>>)Arduino.InspectAsync,
+            AliCapabilityCatalog.ArduinoInspectName,
+            "Inspect the installed Arduino CLI, IDE, board cores, connected boards, and embedded-development capabilities."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.SearchLibrariesAsync,
+            AliCapabilityCatalog.ArduinoSearchLibrariesName,
+            "Search the official Arduino Library Manager catalog for an explicit library identifier."),
+        AIFunctionFactory.Create((Func<string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.InstallCoreAsync,
+            AliCapabilityCatalog.ArduinoInstallCoreName,
+            "Install an explicit Arduino board core after approval."),
+        AIFunctionFactory.Create((Func<string, string?, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.InstallLibraryAsync,
+            AliCapabilityCatalog.ArduinoInstallLibraryName,
+            "Install an explicit Arduino library and optional version after approval."),
+        AIFunctionFactory.Create((Func<string, string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.CompileAsync,
+            AliCapabilityCatalog.ArduinoCompileName,
+            "Compile an approved Arduino sketch for an explicit fully-qualified board name."),
+        AIFunctionFactory.Create((Func<string, string, string, CancellationToken, Task<AliArduinoOperationResult>>)Arduino.UploadAsync,
+            AliCapabilityCatalog.ArduinoUploadName,
+            "Upload already-selected Arduino firmware to an explicit board and port after approval; never guesses hardware."),
+        AIFunctionFactory.Create((Func<string, AliArduinoOperationResult>)Arduino.OpenIde,
+            AliCapabilityCatalog.ArduinoOpenIdeName,
+            "Open an approved sketch in the installed Arduino IDE."),
+        AIFunctionFactory.Create((Func<IReadOnlyList<AliRaspberryPiLibrary>>)RaspberryPi.GetLibraryCatalog,
+            AliCapabilityCatalog.RaspberryPiLibrariesName,
+            "Return Ali's Raspberry Pi Python, C/C++, GPIO, bus, camera, and Pico library catalog."),
+        AIFunctionFactory.Create((Func<string, string, int, CancellationToken, Task<AliRaspberryPiOperationResult>>)RaspberryPi.ProbeAsync,
+            AliCapabilityCatalog.RaspberryPiProbeName,
+            "Probe an explicit Raspberry Pi/Linux host through bounded non-interactive SSH."),
+        AIFunctionFactory.Create((Func<string, string, int, CancellationToken, Task<AliRaspberryPiOperationResult>>)RaspberryPi.InspectLibrariesAsync,
+            AliCapabilityCatalog.RaspberryPiInspectLibrariesName,
+            "Inspect installed GPIO, SPI, I2C, and camera libraries on an explicit Raspberry Pi through SSH."),
+        AIFunctionFactory.Create((Func<string, string, int, string, CancellationToken, Task<AliRaspberryPiOperationResult>>)RaspberryPi.SearchPackagesAsync,
+            AliCapabilityCatalog.RaspberryPiSearchPackagesName,
+            "Search Raspberry Pi OS development packages on an explicit host without installing anything."),
+        AIFunctionFactory.Create((Func<string, string, string, int, string, CancellationToken, Task<AliRaspberryPiOperationResult>>)RaspberryPi.DeployAsync,
+            AliCapabilityCatalog.RaspberryPiDeployName,
+            "Copy an approved project to an explicit Raspberry Pi path and run its bounded build check after approval."),
         AIFunctionFactory.Create(
             (Func<AliLanguageCapabilityReport>)MultiLanguage.GetCapabilities,
             AliCapabilityCatalog.CodingListCapabilitiesName,

@@ -10,7 +10,8 @@ public enum AliProgrammingLanguage
     Html,
     Css,
     Java,
-    Cpp
+    Cpp,
+    Arduino
 }
 
 [Flags]

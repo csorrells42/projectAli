@@ -10,11 +10,16 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath($PublishRoot)
 $manifestPath = Join-Path $root 'runtime-assets.json'
 
-foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'runtime-assets.json', 'THIRD-PARTY-RUNTIME-ASSETS.json')) {
+foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'runtime-assets.json', 'THIRD-PARTY-RUNTIME-ASSETS.json', 'coding-toolchains.json', 'tools\RestoreCodingToolchains.ps1')) {
     $path = Join-Path $root $required
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Published Ali bundle is missing: $path"
     }
+}
+
+$codingManifest = Get-Content -LiteralPath (Join-Path $root 'coding-toolchains.json') -Raw | ConvertFrom-Json
+if (@($codingManifest.assets).Count -lt 3) {
+    throw 'Published coding toolchain manifest is incomplete.'
 }
 
 foreach ($roslynFile in @(

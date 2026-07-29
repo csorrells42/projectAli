@@ -31,6 +31,19 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CodingRunProjectName, "Executes project code through the detected language provider"),
         new(AliCapabilityCatalog.CodingProbeServiceName, "Transmits an explicit request to an external HTTP service"),
         new(AliCapabilityCatalog.CodingInspectProcessName, "Reads live process resource and thread state"),
+        new(AliCapabilityCatalog.VisualStudioBuildName, "Executes Visual Studio MSBuild and writes build evidence"),
+        new(AliCapabilityCatalog.VisualStudioOpenName, "Launches Visual Studio with an approved local project"),
+        new(AliCapabilityCatalog.GnuNativeExecuteName, "Executes GCC build, test, or application code"),
+        new(AliCapabilityCatalog.ArduinoSearchLibrariesName, "Transmits a query to the Arduino library catalog"),
+        new(AliCapabilityCatalog.ArduinoInstallCoreName, "Downloads and installs an Arduino board core"),
+        new(AliCapabilityCatalog.ArduinoInstallLibraryName, "Downloads and installs an Arduino library"),
+        new(AliCapabilityCatalog.ArduinoCompileName, "Executes an Arduino board compiler and writes firmware"),
+        new(AliCapabilityCatalog.ArduinoUploadName, "Writes firmware to an explicitly selected hardware port"),
+        new(AliCapabilityCatalog.ArduinoOpenIdeName, "Launches Arduino IDE with an approved sketch"),
+        new(AliCapabilityCatalog.RaspberryPiProbeName, "Connects to an explicit Raspberry Pi over SSH"),
+        new(AliCapabilityCatalog.RaspberryPiInspectLibrariesName, "Reads private package state from a Raspberry Pi"),
+        new(AliCapabilityCatalog.RaspberryPiSearchPackagesName, "Queries package metadata on a Raspberry Pi"),
+        new(AliCapabilityCatalog.RaspberryPiDeployName, "Transfers private project files to and builds on a Raspberry Pi"),
         new(AliCapabilityCatalog.DotNetCreateProjectName, "Executes the local .NET SDK to create a new project scaffold"),
         new(AliCapabilityCatalog.RoslynFormatProjectName, "Reformats existing C# source files with Roslyn"),
         new(AliCapabilityCatalog.RoslynApplyRenameName, "Renames a C# symbol and every semantic reference with Roslyn"),
@@ -72,7 +85,11 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CodingSearchSymbolsName, "Searches a private project source index"),
         new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer"),
         new(AliCapabilityCatalog.CodingInspectArchitectureName, "Reads private source to build a cross-language dependency graph"),
-        new(AliCapabilityCatalog.CodingBuildContextName, "Reads private source to select relevant large-project context")
+        new(AliCapabilityCatalog.CodingBuildContextName, "Reads private source to select relevant large-project context"),
+        new(AliCapabilityCatalog.VisualStudioInspectName, "Reads installed Visual Studio feature state"),
+        new(AliCapabilityCatalog.GnuNativeInspectName, "Reads installed GNU toolchain state"),
+        new(AliCapabilityCatalog.ArduinoInspectName, "Reads attached board and installed core state"),
+        new(AliCapabilityCatalog.RaspberryPiLibrariesName, "Reads embedded-development library guidance")
     ];
 
     internal static IReadOnlyList<AgentToolPermissionDefinition> ProtectedTools => TrustedWorkstationTools;

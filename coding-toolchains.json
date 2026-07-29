@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "defaultRoot": "%LOCALAPPDATA%/Ali/Toolchains",
+  "arduinoConfiguration": "%LOCALAPPDATA%/Arduino15/arduino-cli.yaml",
+  "assets": [
+    {
+      "id": "arduino-cli",
+      "version": "1.5.1",
+      "license": "GPL-3.0-only",
+      "source": "https://github.com/arduino/arduino-cli",
+      "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_64bit.zip",
+      "fileName": "arduino-cli_1.5.1_Windows_64bit.zip",
+      "size": 17965819,
+      "sha256": "fabe42e0eb04d00e776a66178299ff95a46c623dbc260f997e58fd514853dd40",
+      "kind": "zip",
+      "destination": "arduino-cli"
+    },
+    {
+      "id": "arduino-ide",
+      "version": "2.3.6",
+      "license": "AGPL-3.0-only",
+      "source": "https://github.com/arduino/arduino-ide",
+      "url": "https://github.com/arduino/arduino-ide/releases/download/2.3.6/arduino-ide_2.3.6_Windows_64bit.zip",
+      "fileName": "arduino-ide_2.3.6_Windows_64bit.zip",
+      "size": 204864086,
+      "sha256": "66a151a851d0188ba7f7bc6e93c1aaa9db0de506d43e8a76183171718af0225e",
+      "kind": "zip",
+      "destination": "arduino-ide"
+    },
+    {
+      "id": "msys2-ucrt64",
+      "version": "2026-03-22",
+      "license": "Mixed open-source distribution",
+      "source": "https://github.com/msys2/msys2-installer",
+      "url": "https://github.com/msys2/msys2-installer/releases/download/2026-03-22/msys2-base-x86_64-20260322.sfx.exe",
+      "fileName": "msys2-base-x86_64-20260322.sfx.exe",
+      "size": 52820994,
+      "sha256": "6fe0cc8154132040e034ff4daface2a4163a9d1f6ebaaa1133394bff460bd5cf",
+      "kind": "sfx",
+      "destination": "msys64"
+    }
+  ],
+  "msys2Packages": [
+    "mingw-w64-ucrt-x86_64-gcc",
+    "mingw-w64-ucrt-x86_64-gdb",
+    "mingw-w64-ucrt-x86_64-make",
+    "mingw-w64-ucrt-x86_64-pkgconf"
+  ],
+  "arduinoCores": [
+    "arduino:avr",
+    "arduino:mbed_rp2040"
+  ]
+}

@@ -29,7 +29,8 @@ internal sealed class AliLanguageProjectResolver(AliWorkstationFileAccess fileAc
         ["cmakelists.txt"] = AliProgrammingLanguage.Cpp,
         ["conanfile.py"] = AliProgrammingLanguage.Cpp,
         ["conanfile.txt"] = AliProgrammingLanguage.Cpp,
-        ["vcpkg.json"] = AliProgrammingLanguage.Cpp
+        ["vcpkg.json"] = AliProgrammingLanguage.Cpp,
+        ["sketch.yaml"] = AliProgrammingLanguage.Arduino
     };
 
     public AliResolvedLanguageProject Resolve(string targetPath)
@@ -108,6 +109,7 @@ internal sealed class AliLanguageProjectResolver(AliWorkstationFileAccess fileAc
             ".css" or ".scss" or ".sass" or ".less" => AliProgrammingLanguage.Css,
             ".java" => AliProgrammingLanguage.Java,
             ".c" or ".cc" or ".cpp" or ".cxx" or ".h" or ".hh" or ".hpp" or ".hxx" or ".ixx" or ".cppm" or ".vcxproj" => AliProgrammingLanguage.Cpp,
+            ".ino" => AliProgrammingLanguage.Arduino,
             _ => AliProgrammingLanguage.Unknown
         };
     }

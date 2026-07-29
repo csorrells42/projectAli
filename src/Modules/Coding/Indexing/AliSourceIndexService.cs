@@ -275,7 +275,7 @@ internal sealed partial class AliSourceIndexService
             ("type", JavaTypeRegex()),
             ("method", JavaMethodRegex())
         ],
-        AliProgrammingLanguage.Cpp =>
+        AliProgrammingLanguage.Cpp or AliProgrammingLanguage.Arduino =>
         [
             ("type", CppTypeRegex()),
             ("function", CppFunctionRegex())

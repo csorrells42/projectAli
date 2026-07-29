@@ -89,7 +89,7 @@ internal sealed partial class AliCrossLanguageArchitecture(
             AliProgrammingLanguage.CSharp => CSharpReferenceRegex(),
             AliProgrammingLanguage.JavaScript or AliProgrammingLanguage.TypeScript => WebReferenceRegex(),
             AliProgrammingLanguage.Java => JavaReferenceRegex(),
-            AliProgrammingLanguage.Cpp => CppReferenceRegex(),
+            AliProgrammingLanguage.Cpp or AliProgrammingLanguage.Arduino => CppReferenceRegex(),
             AliProgrammingLanguage.Html => HtmlReferenceRegex(),
             AliProgrammingLanguage.Css => CssReferenceRegex(),
             _ => null
@@ -116,7 +116,7 @@ internal sealed partial class AliCrossLanguageArchitecture(
         {
             candidates.Add(reference.Replace('.', '/'));
         }
-        else if (language == AliProgrammingLanguage.Cpp)
+        else if (language is AliProgrammingLanguage.Cpp or AliProgrammingLanguage.Arduino)
         {
             candidates.Add(Normalize(Path.Combine(sourceDirectory, reference)));
             candidates.Add(Normalize(reference));
@@ -127,7 +127,7 @@ internal sealed partial class AliCrossLanguageArchitecture(
         }
         else return null;
 
-        var extensions = new[] { "", ".cs", ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".html", ".css", ".java", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp" };
+        var extensions = new[] { "", ".cs", ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".html", ".css", ".java", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".ino" };
         foreach (var candidate in candidates)
         foreach (var extension in extensions)
         {

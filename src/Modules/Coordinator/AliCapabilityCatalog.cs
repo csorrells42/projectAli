@@ -48,6 +48,23 @@ public static class AliCapabilityCatalog
     public const string CodingBuildContextName = "coding_build_context";
     public const string CodingProbeServiceName = "coding_probe_http_service";
     public const string CodingInspectProcessName = "coding_inspect_process";
+    public const string VisualStudioInspectName = "visual_studio_inspect";
+    public const string VisualStudioBuildName = "visual_studio_build";
+    public const string VisualStudioOpenName = "visual_studio_open";
+    public const string GnuNativeInspectName = "native_gnu_inspect";
+    public const string GnuNativeExecuteName = "native_gnu_execute";
+    public const string ArduinoInspectName = "arduino_inspect";
+    public const string ArduinoSearchLibrariesName = "arduino_search_libraries";
+    public const string ArduinoInstallCoreName = "arduino_install_core";
+    public const string ArduinoInstallLibraryName = "arduino_install_library";
+    public const string ArduinoCompileName = "arduino_compile";
+    public const string ArduinoUploadName = "arduino_upload";
+    public const string ArduinoOpenIdeName = "arduino_open_ide";
+    public const string RaspberryPiLibrariesName = "raspberry_pi_library_catalog";
+    public const string RaspberryPiProbeName = "raspberry_pi_probe";
+    public const string RaspberryPiInspectLibrariesName = "raspberry_pi_inspect_libraries";
+    public const string RaspberryPiSearchPackagesName = "raspberry_pi_search_packages";
+    public const string RaspberryPiDeployName = "raspberry_pi_deploy";
     public const string DotNetCreateProjectName = "dotnet_create_project";
     public const string RoslynAnalyzeProjectName = "roslyn_analyze_project";
     public const string RoslynFormatProjectName = "roslyn_format_project";
@@ -136,6 +153,23 @@ public static class AliCapabilityCatalog
         new(CodingBuildContextName, "Select bounded, query-relevant source snippets from a large local project.", "Ali shared coding operations"),
         new(CodingProbeServiceName, "Probe an explicit external HTTP service after approval and return a bounded response preview.", "Ali shared coding operations"),
         new(CodingInspectProcessName, "Capture a live process CPU, memory, thread, and responsiveness snapshot after approval.", "Ali shared coding operations"),
+        new(VisualStudioInspectName, "Inspect installed Visual Studio IDE and workload features.", "Visual Studio integration"),
+        new(VisualStudioBuildName, "Build an approved solution or project with Visual Studio MSBuild and a binary log.", "Visual Studio integration"),
+        new(VisualStudioOpenName, "Open an approved solution, project, or document in Visual Studio.", "Visual Studio integration"),
+        new(GnuNativeInspectName, "Inspect GCC UCRT64, G++, GDB, Make, CMake, and Ninja.", "Ali GNU native tools"),
+        new(GnuNativeExecuteName, "Analyze, build, test, or run an approved C/C++ project with GCC UCRT64.", "Ali GNU native tools"),
+        new(ArduinoInspectName, "Inspect Arduino CLI, IDE, cores, boards, and embedded capabilities.", "Ali Arduino integration"),
+        new(ArduinoSearchLibrariesName, "Search the Arduino Library Manager catalog.", "Ali Arduino integration"),
+        new(ArduinoInstallCoreName, "Install an explicit Arduino board core.", "Ali Arduino integration"),
+        new(ArduinoInstallLibraryName, "Install an explicit Arduino library and version.", "Ali Arduino integration"),
+        new(ArduinoCompileName, "Compile an approved Arduino sketch for an explicit board.", "Ali Arduino integration"),
+        new(ArduinoUploadName, "Upload firmware to an explicit Arduino board and port.", "Ali Arduino integration"),
+        new(ArduinoOpenIdeName, "Open an approved sketch in Arduino IDE.", "Ali Arduino integration"),
+        new(RaspberryPiLibrariesName, "Return Raspberry Pi GPIO, bus, camera, Python, C/C++, and Pico library guidance.", "Ali Raspberry Pi integration"),
+        new(RaspberryPiProbeName, "Probe an explicit Raspberry Pi host through bounded SSH.", "Ali Raspberry Pi integration"),
+        new(RaspberryPiInspectLibrariesName, "Inspect installed development libraries on an explicit Raspberry Pi.", "Ali Raspberry Pi integration"),
+        new(RaspberryPiSearchPackagesName, "Search Raspberry Pi OS development packages on an explicit host.", "Ali Raspberry Pi integration"),
+        new(RaspberryPiDeployName, "Transfer and build-check an approved project on an explicit Raspberry Pi.", "Ali Raspberry Pi integration"),
         new(DotNetCreateProjectName, "Create a new WPF or console C# project in an empty approved folder after user approval.", "Ali .NET coding tools"),
         new(RoslynAnalyzeProjectName, "Load a C# project with Roslyn and return semantic compiler diagnostics.", "Microsoft Roslyn coding intelligence"),
         new(RoslynFormatProjectName, "Format every C# document in an approved project with Roslyn after user approval.", "Microsoft Roslyn coding intelligence"),

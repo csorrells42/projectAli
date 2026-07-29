@@ -11,6 +11,17 @@
              CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Ali'">
+    <Content Include="$(MSBuildThisFileDirectory)coding-toolchains.json"
+             Link="coding-toolchains.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)tools\RestoreCodingToolchains.ps1"
+             Link="tools\RestoreCodingToolchains.ps1"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <Target Name="ValidateAliRuntimeAssetsForBuild"
           BeforeTargets="PrepareForBuild"
           Condition="'$(MSBuildProjectName)' == 'Ali'">

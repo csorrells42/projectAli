@@ -51,7 +51,7 @@ internal sealed class AliCodingOperations : IDisposable
         ".cs", ".csproj", ".sln", ".slnx", ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs",
         ".ts", ".tsx", ".mts", ".cts", ".html", ".htm", ".css", ".scss", ".java", ".c",
         ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".ixx", ".cppm", ".json",
-        ".xml", ".toml", ".gradle", ".kts"
+        ".xml", ".toml", ".gradle", ".kts", ".ino", ".yaml", ".yml"
     };
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
