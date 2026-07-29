@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath($PublishRoot)
 $manifestPath = Join-Path $root 'runtime-assets.json'
 
-foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'runtime-assets.json', 'THIRD-PARTY-RUNTIME-ASSETS.json', 'coding-toolchains.json', 'tools\RestoreCodingToolchains.ps1')) {
+foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'runtime-assets.json', 'THIRD-PARTY-RUNTIME-ASSETS.json', 'coding-toolchains.json', 'tools\RestoreCodingToolchains.ps1', 'editor-integrations.json', 'tools\ConfigureEditorIntegrations.ps1', 'docs\EDITOR-INTEGRATIONS.md')) {
     $path = Join-Path $root $required
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Published Ali bundle is missing: $path"

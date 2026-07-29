@@ -32,6 +32,7 @@ public static class AliTechnologyAcknowledgements
         AddManifest(root, "runtime-assets.json", "Runtime, model, and developer asset", items);
         AddManifest(root, "THIRD-PARTY-RUNTIME-ASSETS.json", "Runtime, model, and developer asset", items);
         AddManifest(root, "coding-toolchains.json", "Coding toolchain", items);
+        AddEditorIntegrations(root, items);
 
         var distinct = items
             .Where(item => !string.IsNullOrWhiteSpace(item.Name))
@@ -108,6 +109,30 @@ public static class AliTechnologyAcknowledgements
 
     private static string Text(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value) ? value.ToString().Trim() : string.Empty;
+
+    private static void AddEditorIntegrations(string root, List<AliTechnologyAcknowledgement> items)
+    {
+        var path = Path.Combine(root, "editor-integrations.json");
+        if (!File.Exists(path)) return;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            if (!document.RootElement.TryGetProperty("notepadPlusPlus", out var notepad)
+                || !notepad.TryGetProperty("plugins", out var plugins)
+                || plugins.ValueKind != JsonValueKind.Array) return;
+            foreach (var plugin in plugins.EnumerateArray())
+            {
+                items.Add(new(
+                    "Editor integration",
+                    Text(plugin, "displayName"),
+                    Text(plugin, "fallbackVersion"),
+                    Text(plugin, "purpose"),
+                    "See upstream package metadata",
+                    Text(plugin, "fallbackUrl")));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+    }
 
     private static string Format(IReadOnlyList<AliTechnologyAcknowledgement> items)
     {

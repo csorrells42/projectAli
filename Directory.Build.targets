@@ -20,6 +20,18 @@
              Link="tools\RestoreCodingToolchains.ps1"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)editor-integrations.json"
+             Link="editor-integrations.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)tools\ConfigureEditorIntegrations.ps1"
+             Link="tools\ConfigureEditorIntegrations.ps1"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)docs\EDITOR-INTEGRATIONS.md"
+             Link="docs\EDITOR-INTEGRATIONS.md"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="ValidateAliRuntimeAssetsForBuild"

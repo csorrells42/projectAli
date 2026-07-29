@@ -2499,6 +2499,98 @@
                 </ScrollViewer>
             </TabItem>
 
+            <TabItem Header="Integrations"
+                     AutomationProperties.AutomationId="SettingsIntegrationsTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="12">
+                        <Border Background="#111D22"
+                                BorderBrush="#246477"
+                                BorderThickness="1"
+                                Padding="16"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Editor docking bay"
+                                           FontSize="20"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="Ali detects editors instead of binding herself to a specific release. Refresh after a Notepad++ or Visual Studio update, then repair only the integration layer that needs it."
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,7,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="14"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Notepad++"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="Trusted lightweight editor toolkit: comparisons, JSON, XML, Markdown, CSV, spelling, folder navigation, and command hooks. Official catalog packages are SHA-256 verified before installation."
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,5,0,10" />
+                                <WrapPanel>
+                                    <Button Content="Install / repair Notepad++ toolkit"
+                                            Command="{Binding InstallNotepadPlusPlusToolkitCommand}"
+                                            AutomationProperties.AutomationId="SettingsInstallNotepadPlusPlusToolkitButton"
+                                            Background="#006C83"
+                                            BorderBrush="#00BEE6"
+                                            MinWidth="230"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Refresh status"
+                                            Command="{Binding RefreshEditorIntegrationsCommand}"
+                                            AutomationProperties.AutomationId="SettingsRefreshEditorIntegrationsButton"
+                                            MinWidth="120"
+                                            Margin="0,0,8,8" />
+                                    <Button Content="Open integration guide"
+                                            Command="{Binding OpenEditorIntegrationGuideCommand}"
+                                            AutomationProperties.AutomationId="SettingsOpenEditorIntegrationGuideButton"
+                                            MinWidth="150"
+                                            Margin="0,0,0,8" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border BorderBrush="{StaticResource BorderBrushDark}"
+                                BorderThickness="1"
+                                Padding="14"
+                                Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="Visual Studio"
+                                           FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="Ali discovers side-by-side Visual Studio installations through Microsoft's inventory and uses the installed IDE, MSBuild, MSVC, CMake, test, debugger, and LLVM components without patching Visual Studio. Roslyn, LSP, DAP, and Ali's other coding tools remain modular and editor-independent."
+                                           TextWrapping="Wrap"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Margin="0,5,0,0" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="{Binding EditorIntegrationSummary}"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,0,8" />
+                        <TextBox Text="{Binding EditorIntegrationDetails, Mode=OneWay}"
+                                 AutomationProperties.AutomationId="SettingsEditorIntegrationDetails"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 MinHeight="170"
+                                 Padding="10"
+                                 Margin="0" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="About"
                      AutomationProperties.AutomationId="SettingsAboutTab">
                 <Grid Margin="12">

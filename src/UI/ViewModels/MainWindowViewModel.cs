@@ -23,6 +23,7 @@ using Ali.Modules.Voice;
 using Ali.Modules.Internet;
 using Ali.Modules.Permissions;
 using Ali.Modules.About;
+using Ali.Modules.Integrations;
 using Ali.Modules.RAG;
 using Ali.Modules.Storage;
 using Ali.Modules.Interaction;
@@ -180,6 +181,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _maintenanceStatusText = "Backups include conversations, memories, reminders, settings, sources, local indexes, voice settings, runtime settings, and generated documents. Temporary session audio/images are skipped.";
     private string _technologyAcknowledgementsText = "Technology inventory is loading.";
     private string _technologyAcknowledgementsSummary = "Loading Ali's technology inventory.";
+    private string _editorIntegrationSummary = "Editor integrations are loading.";
+    private string _editorIntegrationDetails = "Detecting Notepad++ and Visual Studio.";
     private CameraDevice? _selectedVisionCamera;
     private CameraVideoMode? _selectedVisionCameraMode;
     private FrameworkElement? _visionViewport;
@@ -246,6 +249,9 @@ public sealed class MainWindowViewModel : ObservableObject
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         RefreshTechnologyAcknowledgementsCommand = CreateCommand(_ => RefreshTechnologyAcknowledgements());
         SoftwareEngineeringRadarCommand = CreateAsyncCommand(StartSoftwareEngineeringRadarAsync);
+        RefreshEditorIntegrationsCommand = CreateCommand(_ => RefreshEditorIntegrations());
+        InstallNotepadPlusPlusToolkitCommand = CreateAsyncCommand(InstallNotepadPlusPlusToolkitAsync, () => !IsBusy);
+        OpenEditorIntegrationGuideCommand = CreateCommand(_ => OpenEditorIntegrationGuide());
         OpenMaintenanceDashboardCommand = CreateCommand(_ => OpenMaintenanceDashboard());
         OpenLocalLibraryCommand = CreateCommand(_ => OpenLocalLibrary());
         ToggleCommandExplorerCommand = CreateCommand(_ => IsCommandExplorerOpen = !IsCommandExplorerOpen);
@@ -328,6 +334,7 @@ public sealed class MainWindowViewModel : ObservableObject
         LoadRuntimeSettings();
         LoadInternetBackendSettings();
         RefreshTechnologyAcknowledgements();
+        RefreshEditorIntegrations();
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
@@ -623,6 +630,12 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand RefreshTechnologyAcknowledgementsCommand { get; }
 
     public ICommand SoftwareEngineeringRadarCommand { get; }
+
+    public ICommand RefreshEditorIntegrationsCommand { get; }
+
+    public ICommand InstallNotepadPlusPlusToolkitCommand { get; }
+
+    public ICommand OpenEditorIntegrationGuideCommand { get; }
 
     public ICommand OpenMaintenanceDashboardCommand { get; }
 
@@ -2375,6 +2388,18 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _technologyAcknowledgementsSummary;
         private set => SetProperty(ref _technologyAcknowledgementsSummary, value);
+    }
+
+    public string EditorIntegrationSummary
+    {
+        get => _editorIntegrationSummary;
+        private set => SetProperty(ref _editorIntegrationSummary, value);
+    }
+
+    public string EditorIntegrationDetails
+    {
+        get => _editorIntegrationDetails;
+        private set => SetProperty(ref _editorIntegrationDetails, value);
     }
 
     private void AddAgentActivity(AssistantStreamChunk chunk)
@@ -5254,6 +5279,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             RefreshVoiceSettingsChoices();
             AgentToolPermissions.Reload();
+            RefreshEditorIntegrations();
             await RefreshCorrectionsAsync().ConfigureAwait(true);
             RefreshMemoryReminders();
             await RefreshRuntimeModelChoicesForSettingsAsync().ConfigureAwait(true);
@@ -5282,6 +5308,80 @@ public sealed class MainWindowViewModel : ObservableObject
             "Explain what changed, why it matters, maturity and licensing concerns, and which developments may genuinely help our current projects. " +
             "Prefer a concise ranked table with source links, separate stable recommendations from experiments, and do not install or upgrade anything.";
         await SendAsync().ConfigureAwait(true);
+    }
+
+    private void RefreshEditorIntegrations()
+    {
+        try
+        {
+            var report = AliEditorIntegrationManager.Inspect();
+            EditorIntegrationSummary = report.Summary;
+            EditorIntegrationDetails = report.Details;
+        }
+        catch (Exception ex)
+        {
+            EditorIntegrationSummary = "Editor integration status could not be refreshed.";
+            EditorIntegrationDetails = ex.Message;
+        }
+    }
+
+    private async Task InstallNotepadPlusPlusToolkitAsync()
+    {
+        var report = AliEditorIntegrationManager.Inspect();
+        if (!report.NotepadPlusPlusInstalled)
+        {
+            System.Windows.MessageBox.Show(
+                "Notepad++ is not installed in a supported per-machine or per-user location.",
+                "Notepad++ Toolkit",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+        if (report.NotepadPlusPlusRunning)
+        {
+            System.Windows.MessageBox.Show(
+                "Save your work and close Notepad++ first. Ali will not modify its plugin folders while an editing session is open.",
+                "Close Notepad++ Safely",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+        var confirmation = System.Windows.MessageBox.Show(
+            "Install or repair Ali's Notepad++ toolkit now?\n\nAli will back up your user configuration, use the official x64 plugin catalog, verify package checksums, and preserve your themes, shortcuts, sessions, and editing preferences. Windows will request administrator approval for the Notepad++ program folder.",
+            "Install Notepad++ Toolkit",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes) return;
+
+        StatusText = "Installing the Notepad++ toolkit...";
+        try
+        {
+            var exitCode = await AliEditorIntegrationManager.InstallOrRepairNotepadPlusPlusAsync().ConfigureAwait(true);
+            RefreshEditorIntegrations();
+            StatusText = exitCode == 0
+                ? "Notepad++ toolkit installed. Start Notepad++ to load it."
+                : $"Notepad++ toolkit installer exited with code {exitCode}.";
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            StatusText = "Notepad++ toolkit installation was cancelled before changes.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Notepad++ toolkit installation failed safely: {ex.Message}";
+        }
+    }
+
+    private void OpenEditorIntegrationGuide()
+    {
+        try
+        {
+            AliEditorIntegrationManager.OpenGuide();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Could not open the editor integration guide: {ex.Message}";
+        }
     }
 
     private bool OpenSettingsWindow()

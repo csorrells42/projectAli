@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "notepadPlusPlus": {
+    "catalogUrl": "https://raw.githubusercontent.com/notepad-plus-plus/nppPluginList/master/src/pl.x64.json",
+    "plugins": [
+      {
+        "folder": "ComparePlus",
+        "displayName": "ComparePlus",
+        "purpose": "Side-by-side file and Git-aware comparisons",
+        "fallbackVersion": "3.0.0",
+        "fallbackUrl": "https://github.com/pnedev/comparePlus/releases/download/cp_3.0.0/ComparePlus_cp_3.0.0_x64.zip",
+        "fallbackSha256": "ed6256afcddca5715d81c48d3d1d2f35f4533cfa238320cb21d9d69ce86b5572"
+      },
+      {
+        "folder": "JsonTools",
+        "displayName": "JSON Tools",
+        "purpose": "Parse, query, validate, and format JSON",
+        "fallbackVersion": "8.5",
+        "fallbackUrl": "https://github.com/molsonkiko/JsonToolsNppPlugin/releases/download/v8.5/Release_x64.zip",
+        "fallbackSha256": "2b430c399e3624ba02d4d9634cd4c307535cb10eafd5b478f630de866414e32a"
+      },
+      {
+        "folder": "XMLTools",
+        "displayName": "XML Tools",
+        "purpose": "Validate, navigate, and format XML",
+        "fallbackVersion": "3.1.1.13",
+        "fallbackUrl": "https://github.com/morbac/xmltools/releases/download/3.1.1.13/XMLTools-3.1.1.13-x64.zip",
+        "fallbackSha256": "7631ea990e731172e28e9fe85ac4861185c0292143603b9486bc969cc8e8e046"
+      },
+      {
+        "folder": "MarkdownViewerPlusPlus",
+        "displayName": "MarkdownViewer++",
+        "purpose": "Live Markdown preview",
+        "fallbackVersion": "0.8.2",
+        "fallbackUrl": "https://github.com/nea/MarkdownViewerPlusPlus/releases/download/0.8.2/MarkdownViewerPlusPlus-0.8.2-x64.zip",
+        "fallbackSha256": "e343c52798d76ef91bba41821088cc3e199d475c7124571881b560b6a3ec4693"
+      },
+      {
+        "folder": "NppExec",
+        "displayName": "NppExec",
+        "purpose": "Bounded build and command hooks for Ali's developer toolchains",
+        "fallbackVersion": "0.8.10",
+        "fallbackUrl": "https://github.com/d0vgan/nppexec/releases/download/NppExec_v0810/NppExec_0810_dll_x64.zip",
+        "fallbackSha256": "fb1829a1003180dc760ebe8c9ae025d2e89bfe22bd5e33ed661748b747f32b5e"
+      },
+      {
+        "folder": "DSpellCheck",
+        "displayName": "DSpellCheck",
+        "purpose": "Real-time spelling assistance for notes and documentation",
+        "fallbackVersion": "1.5.0",
+        "fallbackUrl": "https://github.com/Predelnik/DSpellCheck/releases/download/v1.5.0/DSpellCheck_x64.zip",
+        "fallbackSha256": "e906fdd4758732d56e54c9e7ce56be7d9356f818fb6f1710f47fbdca6cbb9a26"
+      },
+      {
+        "folder": "CSVLint",
+        "displayName": "CSV Lint",
+        "purpose": "Inspect, validate, reformat, and summarize CSV data",
+        "fallbackVersion": "0.4.8",
+        "fallbackUrl": "https://github.com/BdR76/CSVLint/releases/download/0.4.8/CSVLint_x64.zip",
+        "fallbackSha256": "cfb8c2ad710c3b7cf5d684c7626fc740562d3bd9df054d3b886c0f197f23a9f2"
+      },
+      {
+        "folder": "Explorer",
+        "displayName": "Explorer",
+        "purpose": "Project and folder navigation inside Notepad++",
+        "fallbackVersion": "1.9.9.0",
+        "fallbackUrl": "https://github.com/oviradoi/npp-explorer-plugin/releases/download/v1.9.9/Explorer_x64.zip",
+        "fallbackSha256": "2009ae9c68ef45c691c88b9c4663030299263b4de6f6553ca7f07446f36943a6"
+      }
+    ]
+  }
+}
