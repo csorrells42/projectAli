@@ -2,6 +2,12 @@
 
 These are optional improvements to evaluate only after the current stable behavior demonstrates a concrete need. They are not committed runtime requirements.
 
+## Committed post-framework priority queue
+
+1. **Completion integrity:** Fix responses that promise to create or return something but terminate without a tool result or deliverable. Fix full authoritative inventories and other long structured answers being clipped or silently reduced (observed: 102 registered tools became a 25-row table). Add output-limit, continuation, complete-table, and promised-action regression tests.
+2. **Mem0 reliability:** Immediately harden per-user durable memory after the Agent Framework upgrade. Verify approval-to-write, persistence, identity isolation, startup recovery, recall-before-search, correction, deletion, and transfer-folder behavior.
+3. **Google-quality live search:** Immediately after Mem0, select and integrate a current supported direct Google search API/backend, expose its configuration and health in Settings, retain provider fallback, and repair the Software Engineering Radar workflow. Measure relevance, latency, quotas, and cost with Ali-specific queries before making it the default.
+
 ## Deferred Python engineering big-guns review
 
 - **Status:** Deferred by user request until after the Microsoft Agent Framework agents review.

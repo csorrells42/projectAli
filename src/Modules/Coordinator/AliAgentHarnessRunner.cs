@@ -75,7 +75,8 @@ internal sealed class AliAgentHarnessRunner
     private AIAgent CreateAgent(IReadOnlyList<AITool> tools)
     {
         var profile = _runtime.ActiveProfile;
-        return _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
+        var skillsRoot = Path.Combine(AppContext.BaseDirectory, "skills");
+        var agent = _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
@@ -86,7 +87,10 @@ internal sealed class AliAgentHarnessRunner
 #pragma warning restore MAAI001
             DisableWebSearch = true,
             DisableFileMemory = false,
-            DisableAgentSkillsProvider = true,
+            DisableAgentSkillsProvider = false,
+            AgentSkillsSource = new AgentFileSkillsSource(skillsRoot),
+            DisableOpenTelemetry = false,
+            OpenTelemetrySourceName = "ProjectAli.AgentFramework",
             // Ali already exposes live progress through CoordinatorTurnContext and keeps
             // private multi-step state in scoped file memory. Harness todo lists made the
             // model narrate an internal plan on ordinary turns and repeatedly surfaced an
@@ -114,6 +118,7 @@ internal sealed class AliAgentHarnessRunner
                 MaxOutputTokens = profile.OutputTokenLimit
             }
         });
+        return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
     }
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision) =>

@@ -1,0 +1,18 @@
+---
+name: office-artifact-delivery
+description: Turn user material into useful office artifacts such as reports, tables, charts, diagrams, documents, spreadsheets, presentations, and PDFs with an explicit quality check.
+license: MIT
+---
+
+# Office artifact delivery
+
+1. Identify the audience, decision, source material, and requested output format.
+2. Inspect the live tool inventory and use only registered artifact and file capabilities.
+3. Organize the deliverable around the answer or action, not around the creation process.
+4. Preserve source facts and label assumptions, estimates, and inferred values.
+5. Save new artifacts in the requested approved location, defaulting to Exports when none is given.
+6. Validate structure, calculations, links, file existence, and visual readability using available tools.
+7. Return the exact artifact path and a concise description of what was verified.
+
+Never claim an artifact was created or visually reviewed without tool evidence. If a required renderer is unavailable, produce the best supported intermediate format and say exactly what remains.
+
