@@ -152,7 +152,11 @@ class Worker:
             values = self.memory.search(query, top_k=maximum, filters={"user_id": stable_id})
             return self.ok("Memory recall complete.", values.get("results", []))
         if operation == "list":
-            category = str(request.get("category", "")).strip().lower()
+            # C# deliberately sends a JSON null when the caller requests the
+            # complete inventory. str(None) is "None", which previously became
+            # an accidental category filter and made existing memories appear
+            # to be missing.
+            category = str(request.get("category") or "").strip().lower()
             values = self.list_for(stable_id, 500)
             if category:
                 values = [value for value in values if item(value)["category"].lower() == category]
@@ -185,27 +189,26 @@ class Worker:
             message = "I'll remember that for this user." if values else "No durable personal memory was found in that turn."
             return self.ok(message, values)
         if operation == "correct":
+            memory_id = str(request.get("memoryId", "")).strip()
             correction = str(request.get("correction", "")).strip()
+            if not memory_id:
+                raise ValueError("An exact memory ID is required for correction")
             if not correction:
                 raise ValueError("Correction is empty")
-            matches = self.memory.search(correction, top_k=1, filters={"user_id": stable_id}).get("results", [])
-            if not matches:
-                return self.handle({**request, "operation": "remember", "conversation": correction, "source": "correction", "category": "corrections"})
-            memory_id = str(matches[0]["id"])
             if self.owns(stable_id, memory_id) is None:
-                raise PermissionError("Memory ownership validation failed")
+                raise PermissionError("That memory does not belong to the active user")
             self.memory.update(memory_id, text=correction, metadata={"source": "correction", "updated_utc": datetime.now(timezone.utc).isoformat()})
             return self.ok("The current user's memory was corrected.", [self.memory.get(memory_id)])
         if operation == "forget":
-            query = str(request.get("request", "")).strip()
-            matches = self.memory.search(query, top_k=8, filters={"user_id": stable_id}).get("results", [])
-            removed = []
-            for value in matches:
-                memory_id = str(value.get("id", ""))
-                if self.owns(stable_id, memory_id) is not None:
-                    self.memory.delete(memory_id)
-                    removed.append(value)
-            return self.ok(f"Forgot {len(removed)} matching memory item(s) for the current user.", removed)
+            # Backward-compatible operation name, but deliberately exact. Semantic
+            # similarity is suitable for recall only and must never choose mutation
+            # targets. Older clients may still send `request`; treat it as an ID.
+            memory_id = str(request.get("memoryId") or request.get("request") or "").strip()
+            owned = self.owns(stable_id, memory_id)
+            if owned is None:
+                raise PermissionError("That memory does not belong to the active user")
+            self.memory.delete(memory_id)
+            return self.ok("The selected current-user memory was deleted.", [owned])
         if operation == "delete":
             memory_id = str(request.get("memoryId", "")).strip()
             owned = self.owns(stable_id, memory_id)

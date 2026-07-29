@@ -41,6 +41,7 @@ public sealed class AgentTurnIsolationTests
         Assert.Equal(2, input.Count);
         Assert.Equal(ChatRole.System, input[0].Role);
         Assert.Contains("PER-USER MEM0 MEMORY", input[0].Text, StringComparison.Ordinal);
+        Assert.Contains("memory-1", input[0].Text, StringComparison.Ordinal);
         Assert.Contains("Stuart, Florida", input[0].Text, StringComparison.Ordinal);
         Assert.Equal(ChatRole.User, input[1].Role);
         Assert.Equal("Where does the user work?", input[1].Text);

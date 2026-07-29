@@ -55,11 +55,12 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
         CancellationToken cancellationToken) =>
         OperateAsync(new { operation = "remember", user = ToUser(user), conversation, source, category }, cancellationToken);
 
-    public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string correction, CancellationToken cancellationToken) =>
-        OperateAsync(new { operation = "correct", user = ToUser(user), correction }, cancellationToken);
-
-    public Task<MemoryOperationResult> ForgetAsync(ActiveUser user, string request, CancellationToken cancellationToken) =>
-        OperateAsync(new { operation = "forget", user = ToUser(user), request }, cancellationToken);
+    public Task<MemoryOperationResult> CorrectAsync(
+        ActiveUser user,
+        string memoryId,
+        string correction,
+        CancellationToken cancellationToken) =>
+        OperateAsync(new { operation = "correct", user = ToUser(user), memoryId, correction }, cancellationToken);
 
     public async Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken)
     {

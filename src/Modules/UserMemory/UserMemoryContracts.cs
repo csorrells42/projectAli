@@ -63,12 +63,8 @@ public interface IUserMemoryService
 
     Task<MemoryOperationResult> CorrectAsync(
         ActiveUser user,
+        string memoryId,
         string correction,
-        CancellationToken cancellationToken);
-
-    Task<MemoryOperationResult> ForgetAsync(
-        ActiveUser user,
-        string request,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<UserMemory>> ListAsync(

@@ -64,15 +64,15 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.RememberAsync,
                 AliCapabilityCatalog.RememberCurrentUserName,
-                "Save a durable fact only when the user explicitly teaches or asks Ali to remember it. Ownership is always the active identity profile.")),
+                "Save a durable fact only when the user explicitly teaches or asks Ali to remember it. Pass a complete self-contained proposition including its subject and relationship, such as 'The user's persistence marker is teal-anvil-6304'; never pass only a bare name, code, number, or value. Ownership is always the active identity profile.")),
             Protect(AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.CorrectAsync,
+                (Func<string, string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.CorrectAsync,
                 AliCapabilityCatalog.CorrectCurrentUserMemoryName,
-                "Correct a durable memory for the active identity profile. This changes private local data and requires approval.")),
+                "Correct exactly one durable memory for the active identity profile by its exact memory ID. Use the ID from relevant memory context, recall_user_memory, or list_current_user_memories; never guess an ID or pass a search query. This changes private local data and requires approval.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.ForgetAsync,
                 AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-                "Forget memories matching the current user's explicit request. This is destructive and requires approval.")),
+                "Forget exactly one durable memory for the active identity profile by its exact memory ID. Use the ID from relevant memory context, recall_user_memory, or list_current_user_memories; never guess an ID or pass descriptive text. This is destructive and requires approval.")),
             Protect(AIFunctionFactory.Create(
                 (Func<CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.ListCurrentAsync,
                 AliCapabilityCatalog.ListCurrentUserMemoriesName,
@@ -130,6 +130,8 @@ internal sealed class AliToolCatalog
             "Interpret the user's complete request yourself. No application router classifies English before you receive it.",
             "Treat the newest user message as authoritative. Never carry forward or retry an earlier failed action unless the user explicitly asks to retry it or it remains necessary for the newest request.",
             "If the user denies any permission request, stop that action plan immediately. Do not retry the denied operation, switch to an alternate tool, exploit a saved permission, or perform an equivalent mutation in the same turn. State accurately that the action was not performed.",
+            "When saving durable memory, preserve the complete meaning the user taught as a self-contained proposition, including who or what a name, code, value, preference, relationship, or location belongs to. Never reduce a taught fact to its bare value.",
+            "Semantic memory search is read-only. To correct or forget a memory, use only its exact memoryId from relevant memory context, recall_user_memory, or list_current_user_memories. If no exact target ID is available, retrieve candidates first; never ask a mutation tool to choose by similarity.",
             TypoInterpretationInstruction,
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "If the user explicitly asks you not to use tools or not to modify anything, obey that instruction and answer directly. Do not call an Agent Skill, file tool, search tool, or any other tool in that turn.",

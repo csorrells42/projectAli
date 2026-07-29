@@ -91,6 +91,13 @@ internal sealed class AliMemoryTools
             return Task.FromResult(new CoordinatorMemoryWriteResult(false, "Nothing was saved because the fact was empty."));
         }
 
+        if (!IsSelfContainedFact(fact))
+        {
+            return Task.FromResult(new CoordinatorMemoryWriteResult(
+                false,
+                "Nothing was saved because the proposed memory was only a bare value. Retry with one self-contained fact that preserves who or what the value belongs to and the relationship the user taught."));
+        }
+
         var sensitivity = MemoryRequestParser.Evaluate($"remember that {fact}").Sensitivity;
         if (sensitivity == MemorySensitivity.PotentiallySensitive)
         {
@@ -122,6 +129,7 @@ internal sealed class AliMemoryTools
     }
 
     public async Task<CoordinatorMemoryWriteResult> CorrectAsync(
+        [Description("The exact memory ID returned by relevant memory context, recall_user_memory, or list_current_user_memories.")] string memoryId,
         [Description("The corrected durable fact for the current user.")] string correction,
         CancellationToken cancellationToken)
     {
@@ -130,12 +138,12 @@ internal sealed class AliMemoryTools
             return new(false, "Per-user correction is unavailable in the legacy memory store.");
         if (_activeUsers.RequiresSelection)
             return new(false, "Select the active user profile before correcting personal memory.");
-        var result = await _userMemories.CorrectAsync(_activeUsers.Current, correction, cancellationToken).ConfigureAwait(false);
+        var result = await _userMemories.CorrectAsync(_activeUsers.Current, memoryId, correction, cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
     }
 
     public async Task<CoordinatorMemoryWriteResult> ForgetAsync(
-        [Description("What the current user explicitly asked Ali to forget.")] string request,
+        [Description("The exact memory ID returned by relevant memory context, recall_user_memory, or list_current_user_memories. Never pass descriptive text or a search query.")] string memoryId,
         CancellationToken cancellationToken)
     {
         MarkAuthoritativeToolUsed();
@@ -143,7 +151,7 @@ internal sealed class AliMemoryTools
             return new(false, "Per-user forgetting is unavailable in the legacy memory store.");
         if (_activeUsers.RequiresSelection)
             return new(false, "Select the active user profile before forgetting personal memory.");
-        var result = await _userMemories.ForgetAsync(_activeUsers.Current, request, cancellationToken).ConfigureAwait(false);
+        var result = await _userMemories.DeleteAsync(_activeUsers.Current, memoryId, cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
     }
 
@@ -192,6 +200,9 @@ internal sealed class AliMemoryTools
             turn.UsedEvidenceTool = true;
         }
     }
+
+    private static bool IsSelfContainedFact(string fact) =>
+        fact.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length >= 2;
 
     private async Task<CoordinatorMemoryWriteResult> RememberPerUserAsync(
         string fact,

@@ -371,6 +371,7 @@ internal sealed class AliAgentHarnessRunner
     {
         var payload = context.Memories.Select(memory => new
         {
+            memory.MemoryId,
             memory.Text,
             memory.Category,
             memory.UpdatedAt

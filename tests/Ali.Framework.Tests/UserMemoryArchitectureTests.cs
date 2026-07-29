@@ -296,8 +296,8 @@ public sealed class UserMemoryArchitectureTests
         var tools = new AliMemoryTools(service, new FakeActiveSession(user), () => new UserMemorySettings(), static () => null);
 
         await tools.RememberAsync("My neighbor is Bill", "people_relationships", CancellationToken.None);
-        await tools.CorrectAsync("My neighbor is William", CancellationToken.None);
-        await tools.ForgetAsync("neighbor", CancellationToken.None);
+        await tools.CorrectAsync("m1", "My neighbor is William", CancellationToken.None);
+        await tools.ForgetAsync("m1", CancellationToken.None);
         await tools.ListCurrentAsync(CancellationToken.None);
 
         Assert.All(service.SeenUsers, seen => Assert.Equal("person-a", seen.StableId));
@@ -306,6 +306,66 @@ public sealed class UserMemoryArchitectureTests
                 or nameof(AliMemoryTools.CorrectAsync) or nameof(AliMemoryTools.ForgetAsync) or nameof(AliMemoryTools.ListCurrentAsync))
             .SelectMany(method => method.GetParameters());
         Assert.DoesNotContain(exposed, parameter => parameter.Name?.Contains("userId", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Equal("m1", service.LastCorrectedMemoryId);
+        Assert.Equal("m1", service.LastDeletedMemoryId);
+    }
+
+    [Fact]
+    public void Mem0WorkerUsesSemanticSearchOnlyForReadOnlyRecall()
+    {
+        var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
+        var source = File.ReadAllText(path);
+        var correctBlock = source[source.IndexOf("if operation == \"correct\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"forget\":", StringComparison.Ordinal)];
+        var forgetBlock = source[source.IndexOf("if operation == \"forget\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"delete\":", StringComparison.Ordinal)];
+
+        Assert.DoesNotContain("self.memory.search", correctBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("self.memory.search", forgetBlock, StringComparison.Ordinal);
+        Assert.Contains("request.get(\"memoryId\"", correctBlock, StringComparison.Ordinal);
+        Assert.Contains("request.get(\"memoryId\"", forgetBlock, StringComparison.Ordinal);
+        Assert.Contains("self.owns(stable_id, memory_id)", correctBlock, StringComparison.Ordinal);
+        Assert.Contains("self.owns(stable_id, memory_id)", forgetBlock, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mem0WorkerTreatsNullListCategoryAsAnUnfilteredInventory()
+    {
+        var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
+        var source = File.ReadAllText(path);
+        var listBlock = source[source.IndexOf("if operation == \"list\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"remember\":", StringComparison.Ordinal)];
+
+        Assert.Contains("request.get(\"category\") or \"\"", listBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("str(request.get(\"category\", \"\"))", listBlock, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RememberToolRejectsBareValuesAndStoresTheCompleteRelationshipOnRetry()
+    {
+        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var service = new PersistingMemoryService();
+        var tools = new AliMemoryTools(
+            service,
+            new FakeActiveSession(user),
+            () => new UserMemorySettings(),
+            static () => null);
+
+        var rejected = await tools.RememberAsync(
+            "teal-anvil-6304",
+            "general",
+            TestContext.Current.CancellationToken);
+
+        Assert.False(rejected.Saved);
+        Assert.Contains("bare value", rejected.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(service.StoredFact);
+
+        var saved = await tools.RememberAsync(
+            "The user's persistence marker is teal-anvil-6304",
+            "general",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(saved.Saved);
+        Assert.Equal(
+            "The user's persistence marker is teal-anvil-6304",
+            service.StoredFact);
     }
 
     [Fact]
@@ -462,6 +522,17 @@ public sealed class UserMemoryArchitectureTests
         return root;
     }
 
+    private static string FindRepositoryFile(params string[] segments)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Combine([directory.FullName, .. segments]);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        throw new FileNotFoundException($"Repository file was not found: {Path.Combine(segments)}");
+    }
+
     private static PersonIdentityReviewItem Person(string id, string name) => new(
         id, name, name, "User", name.ToLowerInvariant(), "", "", "", "", true,
         "Default User", DateTime.UtcNow, DateTime.UtcNow, 1, 1);
@@ -497,6 +568,8 @@ public sealed class UserMemoryArchitectureTests
         public int LastMaximumResults { get; private set; }
         public bool ThrowOnRecall { get; set; }
         public List<ActiveUser> SeenUsers { get; } = [];
+        public string? LastCorrectedMemoryId { get; private set; }
+        public string? LastDeletedMemoryId { get; private set; }
 
         public Task<IReadOnlyList<UserMemory>> RecallAsync(ActiveUser user, string query, int maximumResults, CancellationToken cancellationToken)
         {
@@ -509,14 +582,21 @@ public sealed class UserMemoryArchitectureTests
         }
 
         public Task<MemoryOperationResult> RememberAsync(ActiveUser user, string conversation, string source, string? category, CancellationToken cancellationToken) => Operation(user);
-        public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string correction, CancellationToken cancellationToken) => Operation(user);
-        public Task<MemoryOperationResult> ForgetAsync(ActiveUser user, string request, CancellationToken cancellationToken) => Operation(user);
+        public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string memoryId, string correction, CancellationToken cancellationToken)
+        {
+            LastCorrectedMemoryId = memoryId;
+            return Operation(user);
+        }
         public Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken)
         {
             SeenUsers.Add(user);
             return Task.FromResult<IReadOnlyList<UserMemory>>([]);
         }
-        public Task<MemoryOperationResult> DeleteAsync(ActiveUser user, string memoryId, CancellationToken cancellationToken) => Operation(user);
+        public Task<MemoryOperationResult> DeleteAsync(ActiveUser user, string memoryId, CancellationToken cancellationToken)
+        {
+            LastDeletedMemoryId = memoryId;
+            return Operation(user);
+        }
         public Task<UserMemoryStatus> TestAsync(ActiveUser user, CancellationToken cancellationToken) => Task.FromResult(new UserMemoryStatus(true, true, true, "Ready", "ok"));
         private Task<MemoryOperationResult> Operation(ActiveUser user)
         {
@@ -555,10 +635,7 @@ public sealed class UserMemoryArchitectureTests
                 [new UserMemory("memory-1", conversation, "people", DateTimeOffset.UtcNow, null, 1, true, source)]));
         }
 
-        public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string correction, CancellationToken cancellationToken) =>
-            Task.FromResult(new MemoryOperationResult(false, "unused", []));
-
-        public Task<MemoryOperationResult> ForgetAsync(ActiveUser user, string request, CancellationToken cancellationToken) =>
+        public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string memoryId, string correction, CancellationToken cancellationToken) =>
             Task.FromResult(new MemoryOperationResult(false, "unused", []));
 
         public Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken) =>

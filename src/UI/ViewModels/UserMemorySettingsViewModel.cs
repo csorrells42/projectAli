@@ -153,7 +153,7 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         if (WpfMessageBox.Show("Replace the selected memory for the active user with this correction?", "Correct memory", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         await WithBusyAsync(async () =>
         {
-            var result = await _services.UserMemories.CorrectAsync(SelectedUser, CorrectionText, CancellationToken.None);
+            var result = await _services.UserMemories.CorrectAsync(SelectedUser, SelectedMemory.Id, CorrectionText, CancellationToken.None);
             StatusText = result.Message;
             await RefreshCoreAsync();
         });

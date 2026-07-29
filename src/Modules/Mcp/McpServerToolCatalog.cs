@@ -221,13 +221,13 @@ internal sealed class AliMcpServerToolFactory
                 AliCapabilityCatalog.RememberCurrentUserName,
                 "Remember an explicitly taught fact for Ali's active identity profile. No user ID argument is accepted."),
             [AliCapabilityCatalog.CorrectCurrentUserMemoryName] = AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)_memoryTools.CorrectAsync,
+                (Func<string, string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)_memoryTools.CorrectAsync,
                 AliCapabilityCatalog.CorrectCurrentUserMemoryName,
-                "Correct a memory for Ali's active identity profile. This changes private local data."),
+                "Correct exactly one memory for Ali's active identity profile using an exact memory ID returned by recall or list. This changes private local data."),
             [AliCapabilityCatalog.ForgetCurrentUserMemoryName] = AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)_memoryTools.ForgetAsync,
                 AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-                "Forget matching memories for Ali's active identity profile. This is destructive."),
+                "Forget exactly one memory for Ali's active identity profile using an exact memory ID returned by recall or list. This is destructive."),
             [AliCapabilityCatalog.ListCurrentUserMemoriesName] = AIFunctionFactory.Create(
                 (Func<CancellationToken, Task<CoordinatorMemoryResult>>)_memoryTools.ListCurrentAsync,
                 AliCapabilityCatalog.ListCurrentUserMemoriesName,
