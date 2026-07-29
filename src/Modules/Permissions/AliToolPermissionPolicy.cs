@@ -25,6 +25,9 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.FileReplaceName, "Edits matching text in an existing file"),
         new(AliCapabilityCatalog.FileReplaceLinesName, "Edits specific lines in an existing file"),
         new(AliCapabilityCatalog.FileMoveName, "Renames or moves an existing workstation file"),
+        new(AliCapabilityCatalog.CodingFormatProjectName, "Reformats existing source files through the detected language provider"),
+        new(AliCapabilityCatalog.CodingBuildProjectName, "Executes the detected local build toolchain and project targets"),
+        new(AliCapabilityCatalog.CodingTestProjectName, "Executes project test code through the detected language provider"),
         new(AliCapabilityCatalog.DotNetCreateProjectName, "Executes the local .NET SDK to create a new project scaffold"),
         new(AliCapabilityCatalog.RoslynFormatProjectName, "Reformats existing C# source files with Roslyn"),
         new(AliCapabilityCatalog.RoslynApplyRenameName, "Renames a C# symbol and every semantic reference with Roslyn"),
@@ -60,7 +63,11 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.SearchLocalLibraryName, "Reads indexed local documents"),
         new(AliCapabilityCatalog.FileReadName, "Reads a workstation file"),
         new(AliCapabilityCatalog.FileListName, "Lists approved workstation folders"),
-        new(AliCapabilityCatalog.FileSearchName, "Searches text in approved workstation folders")
+        new(AliCapabilityCatalog.FileSearchName, "Searches text in approved workstation folders"),
+        new(AliCapabilityCatalog.CodingInspectProjectName, "Reads private project structure and toolchain state"),
+        new(AliCapabilityCatalog.CodingIndexProjectName, "Reads and indexes private project source"),
+        new(AliCapabilityCatalog.CodingSearchSymbolsName, "Searches a private project source index"),
+        new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer")
     ];
 
     internal static IReadOnlyList<AgentToolPermissionDefinition> ProtectedTools => TrustedWorkstationTools;

@@ -9,6 +9,8 @@ using Ali.Modules.Coding.Performance;
 using Ali.Modules.Coding.Verification;
 using Ali.Modules.Coding.Release;
 using Ali.Modules.Coding.Delivery;
+using Ali.Modules.Coding.Indexing;
+using Ali.Modules.Coding.Languages;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -39,6 +41,15 @@ public sealed class AliCodingModule : IAsyncDisposable
         Verification = new AliApplicationVerification(resolver);
         Release = new AliReleaseEngineering(resolver, Architecture);
         Delivery = new AliAutonomousDelivery(Architecture, Quality, EngineeringLoop, Tools, Verification, Release);
+
+        LanguageProviders = new AliLanguageProviderRegistry();
+        var languageResolver = new AliLanguageProjectResolver(fileAccess);
+        var toolchainLocator = new AliToolchainLocator();
+        LanguageProviders.Register(new AliDotNetLanguageProvider(Tools, EngineeringLoop, toolchainLocator));
+        MultiLanguage = new AliMultiLanguageCodingTools(
+            languageResolver,
+            LanguageProviders,
+            new AliSourceIndexService(languageResolver));
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
@@ -53,9 +64,43 @@ public sealed class AliCodingModule : IAsyncDisposable
     internal AliApplicationVerification Verification { get; }
     internal AliReleaseEngineering Release { get; }
     internal AliAutonomousDelivery Delivery { get; }
+    internal AliLanguageProviderRegistry LanguageProviders { get; }
+    internal AliMultiLanguageCodingTools MultiLanguage { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
+        AIFunctionFactory.Create(
+            (Func<AliLanguageCapabilityReport>)MultiLanguage.GetCapabilities,
+            AliCapabilityCatalog.CodingListCapabilitiesName,
+            "Return Ali's authoritative live coding-provider, protocol, toolchain, execution, debugging, indexing, and architecture capabilities. Use this instead of guessing what Ali cannot do."),
+        AIFunctionFactory.Create(
+            (Func<string, AliCodingProjectInspection>)MultiLanguage.InspectProject,
+            AliCapabilityCatalog.CodingInspectProjectName,
+            "Detect the language and registered provider for an approved project manifest, solution, or source document."),
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<AliSourceIndexResult>>)MultiLanguage.IndexProjectAsync,
+            AliCapabilityCatalog.CodingIndexProjectName,
+            "Build a bounded local structural index for an approved C#, Python, web, Java, or C++ project."),
+        AIFunctionFactory.Create(
+            (Func<string, string, int?, CancellationToken, Task<AliSymbolSearchResult>>)SearchSymbolsAsync,
+            AliCapabilityCatalog.CodingSearchSymbolsName,
+            "Search Ali's local cross-language structural index. maximumResults defaults to 50 and cannot exceed 200."),
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.AnalyzeAsync,
+            AliCapabilityCatalog.CodingAnalyzeProjectName,
+            "Run the registered language provider's semantic and static analysis for an approved project."),
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.FormatAsync,
+            AliCapabilityCatalog.CodingFormatProjectName,
+            "Format an approved project through its registered language provider after user approval."),
+        AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.BuildAsync,
+            AliCapabilityCatalog.CodingBuildProjectName,
+            "Build an approved project through its detected C#, Python, web, Java, or C++ provider."),
+        AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.TestAsync,
+            AliCapabilityCatalog.CodingTestProjectName,
+            "Run an approved project's native test system through its registered language provider."),
         AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)ProjectScaffolder.CreateAsync,
             AliCapabilityCatalog.DotNetCreateProjectName,
@@ -193,5 +238,19 @@ public sealed class AliCodingModule : IAsyncDisposable
     private Task<DotNetVerificationResult> VerifyAsync(string targetPath, string? configuration, CancellationToken cancellationToken) =>
         EngineeringLoop.VerifyAsync(targetPath, configuration, Tools.BuildAsync, cancellationToken);
 
-    public ValueTask DisposeAsync() => Debugger.DisposeAsync();
+    private Task<AliSymbolSearchResult> SearchSymbolsAsync(
+        string targetPath,
+        string query,
+        int? maximumResults,
+        CancellationToken cancellationToken) =>
+        MultiLanguage.SearchSymbolsAsync(targetPath, query, maximumResults ?? 50, cancellationToken);
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var provider in LanguageProviders.Providers)
+        {
+            await provider.DisposeAsync().ConfigureAwait(false);
+        }
+        await Debugger.DisposeAsync().ConfigureAwait(false);
+    }
 }

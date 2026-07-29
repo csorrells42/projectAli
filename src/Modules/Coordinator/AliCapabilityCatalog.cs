@@ -35,6 +35,14 @@ public static class AliCapabilityCatalog
     public const string WorkMemorySearchName = "file_memory_grep";
     public const string WorkMemoryReplaceName = "file_memory_replace";
     public const string WorkMemoryReplaceLinesName = "file_memory_replace_lines";
+    public const string CodingListCapabilitiesName = "coding_list_capabilities";
+    public const string CodingInspectProjectName = "coding_inspect_project";
+    public const string CodingIndexProjectName = "coding_index_project";
+    public const string CodingSearchSymbolsName = "coding_search_symbols";
+    public const string CodingAnalyzeProjectName = "coding_analyze_project";
+    public const string CodingFormatProjectName = "coding_format_project";
+    public const string CodingBuildProjectName = "coding_build_project";
+    public const string CodingTestProjectName = "coding_test_project";
     public const string DotNetCreateProjectName = "dotnet_create_project";
     public const string RoslynAnalyzeProjectName = "roslyn_analyze_project";
     public const string RoslynFormatProjectName = "roslyn_format_project";
@@ -110,6 +118,14 @@ public static class AliCapabilityCatalog
         new(WorkMemorySearchName, "Search private working notes for the active user and conversation.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceName, "Replace matching text in a private working note.", "Microsoft Agent Framework file memory"),
         new(WorkMemoryReplaceLinesName, "Edit specific lines in a private working note.", "Microsoft Agent Framework file memory"),
+        new(CodingListCapabilitiesName, "Return the live registered coding providers, toolchains, and shared execution/intelligence infrastructure.", "Ali multi-language coding foundation"),
+        new(CodingInspectProjectName, "Detect an approved project's language, manifest, provider, capabilities, and toolchains.", "Ali multi-language coding foundation"),
+        new(CodingIndexProjectName, "Build a bounded cross-language structural source index.", "Ali multi-language coding foundation"),
+        new(CodingSearchSymbolsName, "Search the local cross-language source index for symbols.", "Ali multi-language coding foundation"),
+        new(CodingAnalyzeProjectName, "Run the detected provider's semantic and static analysis.", "Ali multi-language coding foundation"),
+        new(CodingFormatProjectName, "Format a project through its detected provider after approval.", "Ali multi-language coding foundation"),
+        new(CodingBuildProjectName, "Build a project through its detected language provider.", "Ali multi-language coding foundation"),
+        new(CodingTestProjectName, "Run a project's native test system through its detected provider.", "Ali multi-language coding foundation"),
         new(DotNetCreateProjectName, "Create a new WPF or console C# project in an empty approved folder after user approval.", "Ali .NET coding tools"),
         new(RoslynAnalyzeProjectName, "Load a C# project with Roslyn and return semantic compiler diagnostics.", "Microsoft Roslyn coding intelligence"),
         new(RoslynFormatProjectName, "Format every C# document in an approved project with Roslyn after user approval.", "Microsoft Roslyn coding intelligence"),
