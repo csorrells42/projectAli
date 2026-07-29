@@ -65,7 +65,8 @@ internal sealed class AliAgentHarnessRunner
             chatClient,
             runtime,
             _assistantProfile.AssistantName,
-            turnAccessor);
+            turnAccessor,
+            fileAccess.NormalizeProviderToolArguments);
         var specialistFactory = new AliSpecialistAgentFactory(
             _compatibilityClient,
             runtime,

@@ -68,6 +68,31 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             resolved.Mount.ResolvePhysicalPath(resolved.RelativePath));
     }
 
+    internal bool TryNormalizeApprovedAbsolutePath(
+        string path,
+        bool allowMountRoot,
+        out string virtualPath)
+    {
+        virtualPath = path;
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path.Trim()))
+        {
+            return false;
+        }
+
+        try
+        {
+            var resolved = ResolveApprovedAbsolutePath(path.Trim(), allowMountRoot);
+            virtualPath = string.IsNullOrWhiteSpace(resolved.RelativePath)
+                ? resolved.Mount.Name
+                : $"{resolved.Mount.Name}/{resolved.RelativePath}";
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default)
     {
         var resolved = ResolveFile(path);

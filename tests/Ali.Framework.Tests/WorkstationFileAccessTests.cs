@@ -134,6 +134,52 @@ public sealed class WorkstationFileAccessTests
     }
 
     [Fact]
+    public async Task FrameworkProvider_CanOverwriteApprovedAbsoluteExistingFile()
+    {
+        await WithAccessAsync(async (root, access, permissions) =>
+        {
+            using var provider = new FileAccessProvider(
+                access.Store,
+                new FileAccessProviderOptions
+                {
+                    DisableReadOnlyToolApproval = true,
+                    DisableWriteToolApproval = true
+            });
+            var path = Path.Combine(root, "workspace", ".existing.txt");
+            var createArguments = access.NormalizeProviderToolArguments(
+                AliCapabilityCatalog.FileWriteName,
+                new Dictionary<string, object?> { ["fileName"] = path });
+            var providerPath = Assert.IsType<string>(createArguments["fileName"]);
+
+            Assert.Equal("Workspace/.existing.txt", providerPath);
+            var outside = Path.Combine(Path.GetPathRoot(root)!, "Windows", "win.ini");
+            var rejectedArguments = access.NormalizeProviderToolArguments(
+                AliCapabilityCatalog.FileWriteName,
+                new Dictionary<string, object?> { ["fileName"] = outside });
+            Assert.Equal(outside, Assert.IsType<string>(rejectedArguments["fileName"]));
+
+            _ = await InvokeProviderAsync<string>(
+                provider,
+                "WriteAsync",
+                providerPath,
+                "original",
+                false,
+                TestContext.Current.CancellationToken);
+            _ = await InvokeProviderAsync<string>(
+                provider,
+                "WriteAsync",
+                providerPath,
+                "replacement",
+                true,
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal("replacement", await File.ReadAllTextAsync(
+                path,
+                TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
     public async Task TrustedWorkstation_AutoApprovesReadsAndOnlyNewNonOverwriteWrites()
     {
         await WithAccessAsync(async (root, access, permissions) =>

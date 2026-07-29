@@ -146,6 +146,37 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task ToolCallAdapter_NormalizesArgumentsBeforeFrameworkInvocation()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """{"action":"call","tool":"file_access_write","arguments":{"fileName":"C:\\Users\\Chris\\Documents\\report.txt","content":"updated","overwrite":true},"summary":"Update the report"}""")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null,
+            (toolName, arguments) =>
+            {
+                Assert.Equal("file_access_write", toolName);
+                arguments["fileName"] = "Documents/report.txt";
+                return arguments;
+            });
+        var tool = AIFunctionFactory.Create(() => "ok", "file_access_write", "Write a requested file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Update the existing report.")],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("Documents/report.txt", Assert.IsType<string>(call.Arguments!["fileName"]));
+    }
+
+    [Fact]
     public void MainHarness_AllowsACompleteBoundedCodingRunway()
     {
         Assert.True(AliAgentHarnessRunner.MaximumToolIterations >= 16);
@@ -751,6 +782,44 @@ public sealed class LemonadeToolCallingChatClientTests
         var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
         Assert.Contains("Denied by the user", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("final boundary", auditPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeToolCallAdapter_NormalizesArgumentsBeforeFrameworkInvocation()
+    {
+        var nativeCallMessage = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        nativeCallMessage.Contents.Add(new FunctionCallContent(
+            "call-write",
+            "file_access_write",
+            new Dictionary<string, object?>
+            {
+                ["fileName"] = @"C:\Users\Chris\Documents\report.txt",
+                ["content"] = "updated",
+                ["overwrite"] = true
+            }));
+        using var inner = new RecordingChatClient(new ChatResponse(nativeCallMessage));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null,
+            (toolName, arguments) =>
+            {
+                Assert.Equal("file_access_write", toolName);
+                arguments["fileName"] = "Documents/report.txt";
+                return arguments;
+            });
+        var tool = AIFunctionFactory.Create(() => "ok", "file_access_write", "Write a requested file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Update the report.")],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("Documents/report.txt", Assert.IsType<string>(call.Arguments!["fileName"]));
     }
 
     [Fact]

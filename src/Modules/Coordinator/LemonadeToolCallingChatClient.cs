@@ -19,7 +19,8 @@ internal sealed class LemonadeToolCallingChatClient(
     IChatClient inner,
     ILocalModelRuntime runtime,
     string assistantName,
-    Func<CoordinatorTurnContext?> turnAccessor) : IChatClient
+    Func<CoordinatorTurnContext?> turnAccessor,
+    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null) : IChatClient
 {
     private const int MaximumFinalContinuationAttempts = 6;
     private const int MaximumDecisionContinuationAttempts = 3;
@@ -30,6 +31,8 @@ internal sealed class LemonadeToolCallingChatClient(
     private const int MaximumToolCatalogDescriptionCharacters = 180;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _assistantName = AssistantProfile.NormalizeAssistantName(assistantName);
+    private readonly Func<string, Dictionary<string, object?>, Dictionary<string, object?>> _toolArgumentNormalizer =
+        toolArgumentNormalizer ?? ((_, arguments) => arguments);
     private readonly ConcurrentDictionary<string, ToolResultTracker> _toolResultsByTurn = new(StringComparer.Ordinal);
     private CoordinatorTurnContext? _activeTurn;
 
@@ -72,6 +75,7 @@ internal sealed class LemonadeToolCallingChatClient(
             var nativeResponse = await inner
                 .GetResponseAsync(materializedMessages, options, cancellationToken)
                 .ConfigureAwait(false);
+            NormalizeNativeFunctionCalls(nativeResponse);
             if (ContainsFunctionCall(nativeResponse)
                 || (turn?.UsedEvidenceTool != true && observedToolResultCount < 2))
             {
@@ -146,6 +150,21 @@ internal sealed class LemonadeToolCallingChatClient(
             _toolResultsByTurn.TryRemove(turn.AssistantMessageId, out _);
         }
         return translated;
+    }
+
+    private void NormalizeNativeFunctionCalls(ChatResponse response)
+    {
+        foreach (var call in response.Messages
+                     .SelectMany(message => message.Contents)
+                     .OfType<FunctionCallContent>()
+                     .Where(content => !content.InformationalOnly))
+        {
+            var arguments = call.Arguments is null
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                : new Dictionary<string, object?>(call.Arguments, StringComparer.Ordinal);
+            arguments = NormalizeToolArguments(call.Name, arguments);
+            call.Arguments = _toolArgumentNormalizer(call.Name, arguments);
+        }
     }
 
     private static ChatOptions CreateCompatibilityOptions(ChatOptions? options)
@@ -811,7 +830,7 @@ internal sealed class LemonadeToolCallingChatClient(
         return TryExtractIncompleteFinalAnswer(raw, out answer, out wasTruncated);
     }
 
-    private static ChatResponse TranslateDecision(
+    private ChatResponse TranslateDecision(
         ChatResponse response,
         IReadOnlyList<AIFunctionDeclaration> tools,
         CoordinatorTurnContext? turn,
@@ -866,6 +885,7 @@ internal sealed class LemonadeToolCallingChatClient(
             }
 
             var arguments = NormalizeToolArguments(toolName, ParseArguments(root));
+            arguments = _toolArgumentNormalizer(toolName, arguments);
             var summary = ReadString(root, "summary");
             var kind = toolName.Contains("todo", StringComparison.OrdinalIgnoreCase)
                 || toolName.Contains("mode", StringComparison.OrdinalIgnoreCase)

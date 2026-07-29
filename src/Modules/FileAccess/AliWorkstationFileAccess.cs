@@ -48,6 +48,33 @@ public sealed class AliWorkstationFileAccess
     internal AliResolvedWorkstationPath ResolvePhysicalFilePath(string path) =>
         _rawStore.ResolvePhysicalFilePath(path);
 
+    internal Dictionary<string, object?> NormalizeProviderToolArguments(
+        string toolName,
+        Dictionary<string, object?> arguments)
+    {
+        var (argumentName, allowMountRoot) = toolName switch
+        {
+            AliCapabilityCatalog.FileWriteName
+                or AliCapabilityCatalog.FileReadName
+                or AliCapabilityCatalog.FileDeleteName
+                or AliCapabilityCatalog.FileReplaceName
+                or AliCapabilityCatalog.FileReplaceLinesName => ("fileName", false),
+            AliCapabilityCatalog.FileListName
+                or AliCapabilityCatalog.FileSearchName => ("directory", true),
+            _ => (string.Empty, false)
+        };
+        if (argumentName.Length == 0
+            || !TryRead(arguments, argumentName, out var value)
+            || ReadText(value) is not { Length: > 0 } path
+            || !_rawStore.TryNormalizeApprovedAbsolutePath(path, allowMountRoot, out var virtualPath))
+        {
+            return arguments;
+        }
+
+        arguments[argumentName] = virtualPath;
+        return arguments;
+    }
+
     public async Task<WorkstationFileMoveResult> MoveAsync(
         string sourcePath,
         string destinationPath,
@@ -198,13 +225,16 @@ public sealed class AliWorkstationFileAccess
             return null;
         }
 
-        return value switch
-        {
-            string text => text,
-            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
-            _ => value.ToString()
-        };
+        return ReadText(value);
     }
+
+    private static string? ReadText(object? value) => value switch
+    {
+        string text => text,
+        JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+        null => null,
+        _ => value.ToString()
+    };
 
     private static bool ReadBoolean(IDictionary<string, object?>? arguments, string name)
     {
