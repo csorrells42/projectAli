@@ -7,6 +7,13 @@
 - Source: https://github.com/nodejs/node/tree/v24.18.0
 - Used as Ali's portable JavaScript and web-project runtime. The complete Node.js distribution includes its own dependency notices.
 
+## Eclipse Temurin OpenJDK
+
+- Version: 21.0.11+10
+- License: GPL-2.0 with Classpath Exception
+- Source: https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.11%2B10
+- Used as Ali's portable Java compiler, runtime, debugger, and diagnostic toolchain. The distribution includes its own legal notices.
+
 The root MIT license covers original Project Ali source code contributed to
 this repository. It does not replace or alter licenses for third-party source,
 binary packages, native libraries, or model assets.
