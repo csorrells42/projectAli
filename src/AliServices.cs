@@ -13,6 +13,7 @@ using Ali.Modules.WorkstationFiles;
 using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.UserMemory;
 using Ali.Modules.Coding;
+using Ali.Modules.Calendar;
 
 namespace Ali;
 
@@ -278,7 +279,9 @@ public sealed class AliServices
         var correctionQueue = new CorrectionQueueService(correctionStore);
         var conversations = new FileConversationStore(profileDataRoot);
         var memories = new FileMemoryStore(profileDataRoot);
-        var reminders = new FileReminderStore(profileDataRoot);
+        var reminders = new FileReminderStore(
+            profileDataRoot,
+            new WindowsCalendarEventPublisher(profileDataRoot));
         PersistentUserDataBootstrapper.EnsureCreated(
             dataRoot,
             profileDataRoot,

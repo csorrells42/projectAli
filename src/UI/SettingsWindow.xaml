@@ -1163,7 +1163,7 @@
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Memory / Reminders">
+            <TabItem Header="Memory / Calendar">
                 <Grid Background="{StaticResource AppBackgroundBrush}" Margin="0,12,0,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -1268,11 +1268,17 @@
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
-                                <TextBlock Text="Local Reminders"
+                                <StackPanel Margin="0,0,0,10">
+                                    <TextBlock Text="Calendar Events"
                                            FontSize="18"
                                            FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextBrush}"
-                                           Margin="0,0,0,10" />
+                                           Foreground="{StaticResource TextBrush}" />
+                                    <TextBlock Text="Portable .ics files plus Windows notifications that remain scheduled when Ali is closed."
+                                               Foreground="{StaticResource MutedTextBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Margin="0,3,0,0" />
+                                </StackPanel>
                                 <ListBox Grid.Row="1"
                                          ItemsSource="{Binding ReminderEntries}"
                                          SelectedItem="{Binding SelectedReminderEntry, Mode=TwoWay}"
@@ -1315,7 +1321,7 @@
                                             Command="{Binding CancelSelectedReminderCommand}"
                                             MinWidth="76"
                                             Margin="0,0,8,0" />
-                                    <Button Content="Clear Reminders"
+                                    <Button Content="Clear Events"
                                             Command="{Binding ClearRemindersCommand}"
                                             MinWidth="126"
                                             BorderBrush="#7F1D1D"

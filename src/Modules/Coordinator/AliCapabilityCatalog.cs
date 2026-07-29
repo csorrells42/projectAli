@@ -15,7 +15,7 @@ public static class AliCapabilityCatalog
     public const string SearchCurrentWebName = "search_current_web";
     public const string ResearchWebName = "research_web";
     public const string SearchLocalLibraryName = "search_local_library";
-    public const string CreateReminderName = "create_reminder";
+    public const string CreateCalendarEventName = "create_calendar_event";
     public const string GetAssistantIdentityName = "get_assistant_identity";
     public const string GetCurrentLocalTimeName = "get_current_local_time";
     public const string FileWriteName = "file_access_write";
@@ -124,7 +124,7 @@ public static class AliCapabilityCatalog
         new(SearchCurrentWebName, "Search the configured live internet backends for current or source-dependent information."),
         new(ResearchWebName, "Run provider-managed, multi-source web research for complex nested or comparative questions."),
         new(SearchLocalLibraryName, "Search the user's indexed local RAG library and reference documents."),
-        new(CreateReminderName, "Create a local reminder after an explicit user request."),
+        new(CreateCalendarEventName, "Create a persistent local calendar event with a portable iCalendar file and an operating-system notification that survives Ali closing."),
         new(GetAssistantIdentityName, "Return Ali's configured local assistant identity."),
         new(GetCurrentLocalTimeName, "Return the authoritative local computer date, time, and time zone."),
         new(FileWriteName, "Create a new text file or, after approval, overwrite an existing file in Ali's approved workstation folders.", "Microsoft Agent Framework file access"),

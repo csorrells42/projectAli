@@ -67,8 +67,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DispatcherTimer _modelStatusTimer = new() { Interval = TimeSpan.FromSeconds(30) };
-    private readonly DispatcherTimer _reminderTimer = new() { Interval = TimeSpan.FromSeconds(30) };
-    private readonly HashSet<string> _shownDueReminderIds = new(StringComparer.OrdinalIgnoreCase);
     private string _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
     private ConversationHistoryItemViewModel? _selectedConversationHistoryItem;
@@ -187,8 +185,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _correctionReviewStatusText = "Correction queue not loaded yet.";
     private MemoryEntryViewModel? _selectedMemoryEntry;
     private ReminderEntryViewModel? _selectedReminderEntry;
-    private string _memoryReminderStatusText = "Memory and reminder stores not loaded yet.";
-    private string _maintenanceStatusText = "Backups include conversations, memories, reminders, settings, sources, local indexes, voice settings, runtime settings, and generated documents. Temporary session audio/images are skipped.";
+    private string _memoryReminderStatusText = "Memory and calendar stores not loaded yet.";
+    private string _maintenanceStatusText = "Backups include conversations, memories, calendar events, settings, sources, local indexes, voice settings, runtime settings, and generated documents. Temporary session audio/images are skipped.";
     private string _technologyAcknowledgementsText = "Technology inventory is loading.";
     private string _technologyAcknowledgementsSummary = "Loading Ali's technology inventory.";
     private string _editorIntegrationSummary = "Editor integrations are loading.";
@@ -358,8 +356,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _resourceMeterTimer.Start();
         _modelStatusTimer.Tick += async (_, _) => await RefreshModelConnectionStatusAsync(showWaiting: false).ConfigureAwait(true);
         _modelStatusTimer.Start();
-        _reminderTimer.Tick += (_, _) => CheckDueReminders();
-        _reminderTimer.Start();
         RefreshConversationHistory();
         RefreshMemoryReminders();
         StatusText = "New chat ready. Saved chats are available in the sidebar.";
@@ -2904,8 +2900,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var warningCount = memoryResult.Warnings.Count + reminderResult.Warnings.Count;
         MemoryReminderStatusText = warningCount == 0
-            ? $"Loaded {MemoryEntries.Count} memory item(s) and {ReminderEntries.Count} reminder(s)."
-            : $"Loaded memory/reminders with {warningCount} warning(s).";
+            ? $"Loaded {MemoryEntries.Count} memory item(s) and {ReminderEntries.Count} calendar event(s). Windows owns scheduled notifications, so they remain active after Ali closes."
+            : $"Loaded memory/calendar data with {warningCount} warning(s).";
     }
 
     private void DeleteSelectedMemory()
@@ -2917,13 +2913,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _services.Memories.Delete(SelectedMemoryEntry.Id);
         RefreshMemoryReminders();
-        MemoryReminderStatusText = "Deleted selected memory item only. Conversations and reminders were not erased.";
+        MemoryReminderStatusText = "Deleted selected memory item only. Conversations and calendar events were not erased.";
     }
 
     private void ClearMemories()
     {
         var result = System.Windows.MessageBox.Show(
-            "Clear local memories on this computer? This removes saved memory items only. It does not remove conversations, reminders, settings, local models, voice resources, correction reports, or the app itself.",
+            "Clear local memories on this computer? This removes saved memory items only. It does not remove conversations, calendar events, settings, local models, voice resources, correction reports, or the app itself.",
             "Clear local memories",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
@@ -2935,7 +2931,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var removed = _services.Memories.Clear();
         RefreshMemoryReminders();
-        MemoryReminderStatusText = $"Cleared {removed} memory item(s). Conversations and reminders were not erased.";
+        MemoryReminderStatusText = $"Cleared {removed} memory item(s). Conversations and calendar events were not erased.";
     }
 
     private void SetSelectedReminderStatus(ReminderStatus status)
@@ -2947,14 +2943,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _services.Reminders.SetStatus(SelectedReminderEntry.Id, status);
         RefreshMemoryReminders();
-        MemoryReminderStatusText = $"Marked selected reminder {status}.";
+        MemoryReminderStatusText = $"Marked selected calendar event {status}. Its Windows notification was removed.";
     }
 
     private void ClearReminders()
     {
         var result = System.Windows.MessageBox.Show(
-            "Clear local reminders on this computer? This removes saved reminders only. It does not remove conversations, memories, settings, local models, voice resources, correction reports, or the app itself.",
-            "Clear local reminders",
+            "Clear local calendar events on this computer? This removes their iCalendar files and Windows scheduled notifications. It does not remove conversations, memories, settings, local models, voice resources, correction reports, or the app itself.",
+            "Clear local calendar events",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
             MessageBoxResult.No);
@@ -2964,9 +2960,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         var removed = _services.Reminders.Clear();
-        _shownDueReminderIds.Clear();
         RefreshMemoryReminders();
-        MemoryReminderStatusText = $"Cleared {removed} reminder(s). Conversations and memories were not erased.";
+        MemoryReminderStatusText = $"Cleared {removed} calendar event(s) and their Windows notifications. Conversations and memories were not erased.";
     }
 
     private async Task BackupUserDataAsync()
@@ -3872,24 +3867,6 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         return $"{value:0.##} {units[unitIndex]}";
-    }
-
-    private void CheckDueReminders()
-    {
-        var due = _services.Reminders
-            .ListDue(DateTimeOffset.Now)
-            .Where(reminder => _shownDueReminderIds.Add(reminder.ReminderId))
-            .ToList();
-        if (due.Count == 0)
-        {
-            return;
-        }
-
-        var first = due[0];
-        StatusText = due.Count == 1
-            ? $"Reminder due: {first.Title}"
-            : $"{due.Count} reminders are due. First: {first.Title}";
-        RefreshMemoryReminders();
     }
 
     private void ApplyFirstMessageTitleIfNeeded(string text)

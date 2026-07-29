@@ -17,7 +17,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Changes personal long-term memory"),
         new(AliCapabilityCatalog.ForgetCurrentUserMemoryName, "Deletes personal long-term memory"),
         new(AliCapabilityCatalog.ListCurrentUserMemoriesName, "Reads private personal memory"),
-        new(AliCapabilityCatalog.CreateReminderName, "Creates a persistent reminder"),
+        new(AliCapabilityCatalog.CreateCalendarEventName, "Creates a persistent calendar event and Windows notification"),
         new(AliCapabilityCatalog.ResearchWebName, "Starts metered deep web research"),
         new(AliCapabilityCatalog.RunMagenticOrchestrationName, "Starts bounded multi-agent Magentic orchestration", "Controlled by the Agents tab"),
         new(AliCapabilityCatalog.FileWriteName, "Creates or overwrites a workstation file", "New files allowed; overwrite asks"),

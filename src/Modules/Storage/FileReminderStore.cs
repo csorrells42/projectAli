@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ali.Modules.Calendar;
 using Ali.Modules.Reminders;
 
 namespace Ali.Modules.Storage;
@@ -13,11 +14,13 @@ public sealed class FileReminderStore : IReminderStore
     };
 
     private readonly string _filePath;
+    private readonly ICalendarEventPublisher _publisher;
 
-    public FileReminderStore(string localAliRoot)
+    public FileReminderStore(string localAliRoot, ICalendarEventPublisher? publisher = null)
     {
-        RootDirectory = Path.Combine(localAliRoot, "Reminders");
-        _filePath = Path.Combine(RootDirectory, "reminders.json");
+        RootDirectory = Path.Combine(localAliRoot, "Calendar");
+        _filePath = Path.Combine(RootDirectory, "events.json");
+        _publisher = publisher ?? NullCalendarEventPublisher.Instance;
     }
 
     public string RootDirectory { get; }
@@ -68,19 +71,28 @@ public sealed class FileReminderStore : IReminderStore
             Title = string.IsNullOrWhiteSpace(reminder.Title) ? "Untitled reminder" : reminder.Title.Trim(),
             Prompt = string.IsNullOrWhiteSpace(reminder.Prompt) ? reminder.Title.Trim() : reminder.Prompt.Trim()
         };
-        var reminders = File.Exists(_filePath) ? ReadAll().ToList() : [];
-        var index = reminders.FindIndex(existing => existing.ReminderId.Equals(normalized.ReminderId, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0)
+        _publisher.Publish(normalized);
+        try
         {
-            reminders[index] = normalized;
-        }
-        else
-        {
-            reminders.Add(normalized);
-        }
+            var reminders = File.Exists(_filePath) ? ReadAll().ToList() : [];
+            var index = reminders.FindIndex(existing => existing.ReminderId.Equals(normalized.ReminderId, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+            {
+                reminders[index] = normalized;
+            }
+            else
+            {
+                reminders.Add(normalized);
+            }
 
-        WriteAll(reminders);
-        return normalized;
+            WriteAll(reminders);
+            return normalized;
+        }
+        catch
+        {
+            _publisher.Cancel(normalized.ReminderId);
+            throw;
+        }
     }
 
     public ReminderEntry? SetStatus(string reminderId, ReminderStatus status)
@@ -93,6 +105,10 @@ public sealed class FileReminderStore : IReminderStore
         }
 
         var updated = reminders[index] with { Status = status };
+        if (status is ReminderStatus.Cancelled or ReminderStatus.Completed or ReminderStatus.Dismissed)
+        {
+            _publisher.Cancel(reminderId);
+        }
         reminders[index] = updated;
         WriteAll(reminders);
         return updated;
@@ -102,13 +118,22 @@ public sealed class FileReminderStore : IReminderStore
     {
         var reminders = File.Exists(_filePath) ? ReadAll().ToList() : [];
         var removed = reminders.RemoveAll(reminder => reminder.ReminderId.Equals(reminderId, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            _publisher.Cancel(reminderId);
+        }
         WriteAll(reminders);
         return removed > 0;
     }
 
     public int Clear()
     {
-        var count = File.Exists(_filePath) ? ReadAll().Count : 0;
+        var reminders = File.Exists(_filePath) ? ReadAll() : [];
+        foreach (var reminder in reminders)
+        {
+            _publisher.Cancel(reminder.ReminderId);
+        }
+        var count = reminders.Count;
         WriteAll(Array.Empty<ReminderEntry>());
         return count;
     }

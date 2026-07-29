@@ -91,8 +91,8 @@ internal sealed class AliToolCatalog
                 "Search the user's indexed local RAG library only for their documents, manuals, reference files, or stored project material. Never use it for ordinary conversation or stable general knowledge.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<CoordinatorReminderResult>>)reminderTools.CreateAsync,
-                AliCapabilityCatalog.CreateReminderName,
-                "Create a local reminder only when the user explicitly asks for one. Convert the requested due time to an ISO 8601 local date-time with offset before calling.")),
+                AliCapabilityCatalog.CreateCalendarEventName,
+                "Create a persistent calendar event only when the user explicitly asks for a reminder or calendar entry. Convert the requested due time to an ISO 8601 local date-time with offset before calling. The event is exported as iCalendar and its Windows notification survives Ali closing.")),
             Protect(AIFunctionFactory.Create(
                 (Func<CoordinatorIdentityResult>)identityTimeTools.GetAssistantIdentity,
                 AliCapabilityCatalog.GetAssistantIdentityName,
@@ -133,6 +133,7 @@ internal sealed class AliToolCatalog
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "Relevant per-user Mem0 memory is retrieved before every turn. When the retrieved set is nonempty and directly answers the user's question, answer from it immediately. Do not convert a recalled fact into a todo item, note-taking task, reminder, or web search. Call recall_user_memory only when the initial recalled set does not answer the personal question.",
             "For current events or facts that may have changed, use search_current_web promptly and answer from its evidence.",
+            "For an explicit reminder or calendar request, use create_calendar_event. Never claim a reminder is scheduled unless that tool reports success; its operating-system notification works even when Ali is closed.",
             "Ordinary harmless requests for predictions, forecasts, opinions, comparisons, and analysis are allowed. Never give a generic refusal merely because an outcome is uncertain; separate evidence from judgment and state the uncertainty.",
             "A source result's CanRetry field is authoritative for the current turn. If returned excerpts do not directly support the requested claim and CanRetry is true, run one refined search that names the missing fact and prioritizes an authoritative or primary source. If CanRetry is false, do not call that same source tool again; explain the evidence limitation and give the best cautious answer possible from available context, or ask for one necessary clarification.",
             "For complex nested or comparative research, use research_web only when one or two focused searches cannot answer reliably; it requires user approval.",

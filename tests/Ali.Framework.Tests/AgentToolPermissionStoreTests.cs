@@ -12,7 +12,7 @@ public sealed class AgentToolPermissionStoreTests
     {
         Assert.True(AliToolPermissionPolicy.RequiresApproval("remember_for_current_user"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("forget_current_user_memory"));
-        Assert.True(AliToolPermissionPolicy.RequiresApproval("create_reminder"));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval("create_calendar_event"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("research_web"));
         Assert.False(AliToolPermissionPolicy.RequiresApproval("search_current_web"));
         Assert.False(AliToolPermissionPolicy.RequiresApproval("search_local_library"));
@@ -123,14 +123,14 @@ public sealed class AgentToolPermissionStoreTests
         {
             var alice = User("alice", "Alice");
             var bob = User("bob", "Bob");
-            store.Save(alice, "create_reminder", AgentToolPermissionScope.Tool, null);
+            store.Save(alice, "create_calendar_event", AgentToolPermissionScope.Tool, null);
 
-            Assert.True(store.TryMatch(alice, "create_reminder", new Dictionary<string, object?>
+            Assert.True(store.TryMatch(alice, "create_calendar_event", new Dictionary<string, object?>
             {
                 ["title"] = "Anything"
             }, out var aliceGrant));
             Assert.NotNull(aliceGrant);
-            Assert.False(store.TryMatch(bob, "create_reminder", new Dictionary<string, object?>
+            Assert.False(store.TryMatch(bob, "create_calendar_event", new Dictionary<string, object?>
             {
                 ["title"] = "Anything"
             }, out var bobGrant));

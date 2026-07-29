@@ -42,7 +42,7 @@ public static class AliModuleCatalog
         new(AliModuleIds.Permissions, "Permissions", "Approval, safety, receipts, and action-risk policy.", ["approval", "safety", "receipts"]),
         new(AliModuleIds.Evidence, "Evidence", "Evidence status, receipts, provenance, and answer trust markers.", ["evidence", "provenance"]),
         new(AliModuleIds.Feedback, "Feedback", "Correction queue and user feedback loops.", ["corrections", "feedback"]),
-        new(AliModuleIds.Reminders, "Reminders", "Framework-approved reminder tools, reminder storage, and scheduled user follow-ups.", ["reminders", "schedule", "agent-tool"]),
+        new(AliModuleIds.Reminders, "Calendar", "Framework-approved calendar events, portable iCalendar files, and operating-system notifications that survive Ali closing.", ["calendar", "reminders", "schedule", "agent-tool"]),
         new(AliModuleIds.Storage, "Storage", "File-backed persistence for user data and module state.", ["persistence", "backup"])
     ];
 }

@@ -254,7 +254,7 @@ public sealed class McpServerTests
             {
                 ["query"] = "integration manual"
             });
-            await CallSuccessfullyAsync(client, AliCapabilityCatalog.CreateReminderName, new()
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.CreateCalendarEventName, new()
             {
                 ["title"] = "MCP integration test reminder",
                 ["dueAtLocal"] = DateTimeOffset.Now.AddHours(1).ToString("O")
