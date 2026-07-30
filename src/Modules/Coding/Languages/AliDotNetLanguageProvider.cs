@@ -76,8 +76,27 @@ internal sealed class AliDotNetLanguageProvider : IAliLanguageProvider
     public async Task<AliLanguageOperationResult> BuildAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken)
     {
         var result = await _tools.BuildAsync(project.VirtualPath, configuration, cancellationToken).ConfigureAwait(false);
+        var output = result.Output;
+        if (!string.IsNullOrWhiteSpace(result.FailureKind))
+        {
+            var evidence = new List<string>
+            {
+                output,
+                $"Failure kind: {result.FailureKind}"
+            };
+            if (result.BlockingProcessId is int processId)
+            {
+                evidence.Add($"Blocking process ID: {processId}");
+            }
+            if (!string.IsNullOrWhiteSpace(result.ArtifactPath))
+            {
+                evidence.Add($"Target artifact: {result.ArtifactPath}");
+            }
+            output = string.Join(Environment.NewLine, evidence);
+        }
+
         return new AliLanguageOperationResult(result.Success, Id, "build", result.Summary, result.ExitCode,
-            result.DurationMilliseconds, result.Output, result.ArtifactPath is null ? [] : [result.ArtifactPath]);
+            result.DurationMilliseconds, output, result.ArtifactPath is null ? [] : [result.ArtifactPath]);
     }
 
     public async Task<AliLanguageOperationResult> TestAsync(AliResolvedLanguageProject project, string? configuration, CancellationToken cancellationToken)

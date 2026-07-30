@@ -38,7 +38,7 @@ public sealed class AgentFrameworkFoundationTests
             new Ali.Modules.Coordinator.AgentOrchestrationSettings());
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(122, names.Length);
+        Assert.Equal(123, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName, names);

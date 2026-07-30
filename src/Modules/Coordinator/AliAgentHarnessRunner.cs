@@ -60,16 +60,12 @@ internal sealed class AliAgentHarnessRunner
     {
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
-        var toolLibrarian = new SemanticToolLibrarian(
-            chatClient,
-            _assistantProfile.AssistantName);
         _compatibilityClient = new LemonadeToolCallingChatClient(
             chatClient,
             runtime,
             _assistantProfile.AssistantName,
             turnAccessor,
-            fileAccess.NormalizeProviderToolArguments,
-            toolLibrarian);
+            fileAccess.NormalizeProviderToolArguments);
         var specialistFactory = new AliSpecialistAgentFactory(
             _compatibilityClient,
             runtime,

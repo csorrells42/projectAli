@@ -49,6 +49,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.RoslynApplyRenameName, "Renames a C# symbol and every semantic reference with Roslyn"),
         new(AliCapabilityCatalog.DotNetBuildName, "Executes the local .NET SDK and project build targets"),
         new(AliCapabilityCatalog.DotNetRunName, "Launches a compiled local application"),
+        new(AliCapabilityCatalog.DotNetStopProjectName, "Closes or terminates the running compiled application for an approved project"),
         new(AliCapabilityCatalog.DotNetTestName, "Executes project test code and writes a TRX result artifact"),
         new(AliCapabilityCatalog.DotNetVerifyName, "Executes approved build and test targets"),
         new(AliCapabilityCatalog.DotNetDebugLaunchName, "Launches project code under the CLR debugger"),

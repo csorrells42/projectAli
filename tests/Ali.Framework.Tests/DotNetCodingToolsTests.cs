@@ -616,6 +616,94 @@ public sealed class DotNetCodingToolsTests
     }
 
     [Fact]
+    public async Task RunningTarget_IsStoppedThroughAnExplicitToolBeforeRebuild()
+    {
+        await WithProjectToolsAsync(async (root, access, scaffolder, tools, auditPath) =>
+        {
+            var created = await scaffolder.CreateAsync(
+                "Workspace/RunningApp/RunningApp.csproj",
+                "console",
+                TestContext.Current.CancellationToken);
+            Assert.True(created.Success, created.Summary);
+            await access.Store.WriteAsync(
+                "Workspace/RunningApp/Program.cs",
+                "using System.Threading; Thread.Sleep(Timeout.Infinite);",
+                TestContext.Current.CancellationToken);
+
+            int? launchedProcessId = null;
+            try
+            {
+                var firstBuild = await tools.BuildAsync(
+                    "Workspace/RunningApp/RunningApp.csproj",
+                    "Release",
+                    TestContext.Current.CancellationToken);
+                Assert.True(firstBuild.Success, firstBuild.Output);
+
+                var run = await tools.RunAsync(
+                    "Workspace/RunningApp/RunningApp.csproj",
+                    "Release",
+                    TestContext.Current.CancellationToken);
+                Assert.True(run.Success, run.Summary);
+                launchedProcessId = Assert.IsType<int>(run.ProcessId);
+
+                var blockedBuild = await tools.BuildAsync(
+                    "Workspace/RunningApp/RunningApp.csproj",
+                    "Release",
+                    TestContext.Current.CancellationToken);
+                Assert.False(blockedBuild.Success);
+                Assert.Equal("RunningTarget", blockedBuild.FailureKind);
+                Assert.Equal(launchedProcessId, blockedBuild.BlockingProcessId);
+                Assert.Equal(run.ArtifactPath, blockedBuild.ArtifactPath);
+                Assert.Contains("MSBuild was not started", blockedBuild.Summary, StringComparison.Ordinal);
+                Assert.Contains("dotnet_stop_project", blockedBuild.Output, StringComparison.Ordinal);
+
+                var stopped = await tools.StopProjectAsync(
+                    "Workspace/RunningApp/RunningApp.csproj",
+                    "Release",
+                    TestContext.Current.CancellationToken);
+                Assert.True(stopped.Success, stopped.Summary);
+                Assert.Equal(launchedProcessId, stopped.ProcessId);
+
+                var rebuilt = await tools.BuildAsync(
+                    "Workspace/RunningApp/RunningApp.csproj",
+                    "Release",
+                    TestContext.Current.CancellationToken);
+                Assert.True(rebuilt.Success, rebuilt.Output);
+                var audit = await File.ReadAllTextAsync(auditPath, TestContext.Current.CancellationToken);
+                Assert.Contains("\"operation\":\"stop-project\"", audit, StringComparison.Ordinal);
+            }
+            finally
+            {
+                if (launchedProcessId is int processId)
+                {
+                    try
+                    {
+                        using var process = System.Diagnostics.Process.GetProcessById(processId);
+                        if (!process.HasExited)
+                        {
+                            process.Kill(entireProcessTree: true);
+                            await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                        // The tested stop tool already ended the target process.
+                    }
+                }
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData("error MSB3021: Unable to copy file because it is being used by another process.")]
+    [InlineData("error MSB3027: Exceeded retry count while copying a locked target.")]
+    public void MsBuildOutputLockDiagnostics_AreClassifiedWithoutInterpretingEnglish(string output)
+    {
+        Assert.True(AliRoslynCodingTools.IsOutputLockFailure(output));
+        Assert.False(AliRoslynCodingTools.IsOutputLockFailure("error CS1002: ; expected"));
+    }
+
+    [Fact]
     public async Task Tools_RejectOutsidePathsInvalidConfigurationsAndRequireApproval()
     {
         await WithCodingToolsAsync(async (root, access, tools, auditPath) =>
@@ -635,10 +723,18 @@ public sealed class DotNetCodingToolsTests
 
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetBuildName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetRunName));
+            Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetStopProjectName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetCreateProjectName));
             Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFormatProjectName));
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetBuildName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetRunName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetStopProjectName);
+            Assert.Contains(
+                Ali.Modules.Mcp.McpServerToolCatalog.CreateDefaultPolicies(),
+                policy => policy.Name == AliCapabilityCatalog.DotNetStopProjectName
+                    && !policy.Enabled
+                    && policy.WritesLocalData
+                    && policy.ReadsPrivateData);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.DotNetCreateProjectName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynAnalyzeProjectName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFormatProjectName);

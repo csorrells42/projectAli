@@ -276,6 +276,10 @@ public sealed class AliCodingModule : IAsyncDisposable
             AliCapabilityCatalog.DotNetRunName,
             "Launch an already-built .NET application from an approved project after user approval."),
         AIFunctionFactory.Create(
+            (Func<string, string?, CancellationToken, Task<DotNetStopProjectResult>>)Tools.StopProjectAsync,
+            AliCapabilityCatalog.DotNetStopProjectName,
+            "Close the running target application for an approved .NET project after user approval. Use when a build reports RunningTarget, OutputLocked, MSB3021, or MSB3027; then call the build tool again."),
+        AIFunctionFactory.Create(
             (Func<string, string?, CancellationToken, Task<DotNetTestResult>>)EngineeringLoop.TestAsync,
             AliCapabilityCatalog.DotNetTestName,
             "Discover and run tests for an approved .NET project or solution, returning structured failures and a stable TRX artifact."),

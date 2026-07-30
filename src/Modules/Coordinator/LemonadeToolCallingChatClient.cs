@@ -20,8 +20,7 @@ internal sealed class LemonadeToolCallingChatClient(
     ILocalModelRuntime runtime,
     string assistantName,
     Func<CoordinatorTurnContext?> turnAccessor,
-    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null,
-    SemanticToolLibrarian? toolLibrarian = null) : IChatClient
+    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null) : IChatClient
 {
     private const int MaximumContinuationContextCharacters = 6000;
     private const int MaximumLateContinuationEvidenceCharacters = 10000;
@@ -71,20 +70,13 @@ internal sealed class LemonadeToolCallingChatClient(
         }
 
         var turn = CurrentTurn();
-        var tools = toolLibrarian is null
-            ? registeredTools
-            : (await toolLibrarian.SelectAsync(
-                materializedMessages,
-                registeredTools,
-                turn?.OriginalUserText,
-                options,
-                turn,
-                cancellationToken).ConfigureAwait(false)).ToArray();
+        // The planner always receives the complete live registry. Model-driven selection still
+        // decides which tool to call, but no preliminary category/subset pass can hide a needed
+        // capability from the model.
+        var tools = registeredTools;
         var planningScope = new ToolPlanningScope(
-            materializedMessages,
             registeredTools,
             tools,
-            options?.Clone() ?? new ChatOptions(),
             BuildCompatibilityMessages(materializedMessages, tools, turn?.OriginalUserText));
         if (runtime.ActiveProfile.SupportsToolCalls)
         {
@@ -300,6 +292,8 @@ internal sealed class LemonadeToolCallingChatClient(
                 "If diagnostics, warnings, failed calls, or contradictory evidence remain unresolved, return no.",
                 "A denied or rejected permission is authoritative evidence that the requested action was not completed. Return no and identify the denial in the basis; the planner will honor that boundary.",
                 "Do not claim a test ran, runtime behavior was verified, a framework was identified, or a change occurred unless the corresponding tool/source evidence proves it.",
+                "A failed invocation of a registered tool proves that the tool exists and was invoked. Never reinterpret a concrete compiler, file-lock, process, permission, or runtime error as evidence that the capability is unavailable.",
+                "Preserve successful earlier build and launch evidence when a later rebuild fails. A later RunningTarget, OutputLocked, MSB3021, or MSB3027 result means the launched artifact must be closed with the registered approval-bearing stop-project capability before rebuilding; it does not erase the successful build or prove build tools are missing.",
                 "If the human required a fact to come from a specific file, document, service, or other evidence source, inference from a different tool result is not a substitute; call the tool that reads or inspects the specified source.",
                 "For web, document, and memory evidence, distinguish what the retrieved material directly reports from your own inference. Label consequential inference and uncertainty explicitly.",
                 "Honor explicit source-quality requirements. A third-party blog, aggregator, social post, or video is not a primary source merely because it is linked. Primary evidence must come from the organization, maintainer, author, specification, release notes, repository, filing, or first-party data responsible for the claim. If the requested source class is missing, return no.",
@@ -360,11 +354,6 @@ internal sealed class LemonadeToolCallingChatClient(
         turn?.Report(
             AgentActivityKind.Warning,
             $"Critic denied completion: {criticBasis}");
-        await RefreshToolsAfterCriticRejectionAsync(
-            planningScope,
-            criticBasis,
-            turn,
-            cancellationToken).ConfigureAwait(false);
         var replanned = await ReplanAfterCriticRejectionAsync(
             response,
             planningScope.DecisionMessages,
@@ -384,32 +373,6 @@ internal sealed class LemonadeToolCallingChatClient(
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task RefreshToolsAfterCriticRejectionAsync(
-        ToolPlanningScope planningScope,
-        string criticBasis,
-        CoordinatorTurnContext? turn,
-        CancellationToken cancellationToken)
-    {
-        if (toolLibrarian is null)
-        {
-            return;
-        }
-
-        var refreshedTools = await toolLibrarian.SelectAsync(
-            planningScope.SourceMessages,
-            planningScope.RegisteredTools,
-            turn?.OriginalUserText,
-            planningScope.SourceOptions,
-            turn,
-            criticBasis,
-            cancellationToken).ConfigureAwait(false);
-        planningScope.SelectedTools = refreshedTools.ToArray();
-        planningScope.DecisionMessages = BuildCompatibilityMessages(
-            planningScope.SourceMessages,
-            planningScope.SelectedTools,
-            turn?.OriginalUserText);
     }
 
     private async Task<ChatResponse> ReplanAfterCriticRejectionAsync(
@@ -832,21 +795,15 @@ internal sealed class LemonadeToolCallingChatClient(
         Volatile.Read(ref _activeTurn) ?? turnAccessor();
 
     private sealed class ToolPlanningScope(
-        IReadOnlyList<AIChatMessage> sourceMessages,
         IReadOnlyList<AIFunctionDeclaration> registeredTools,
         IReadOnlyList<AIFunctionDeclaration> selectedTools,
-        ChatOptions sourceOptions,
         IReadOnlyList<AIChatMessage> decisionMessages)
     {
-        public IReadOnlyList<AIChatMessage> SourceMessages { get; } = sourceMessages;
-
         public IReadOnlyList<AIFunctionDeclaration> RegisteredTools { get; } = registeredTools;
 
-        public IReadOnlyList<AIFunctionDeclaration> SelectedTools { get; set; } = selectedTools;
+        public IReadOnlyList<AIFunctionDeclaration> SelectedTools { get; } = selectedTools;
 
-        public ChatOptions SourceOptions { get; } = sourceOptions;
-
-        public IReadOnlyList<AIChatMessage> DecisionMessages { get; set; } = decisionMessages;
+        public IReadOnlyList<AIChatMessage> DecisionMessages { get; } = decisionMessages;
     }
 
     private void EndTurn(CoordinatorTurnContext turn)
@@ -1853,6 +1810,8 @@ internal sealed class LemonadeToolCallingChatClient(
             "Do not resume or retry an unrelated earlier failed action unless the newest message requests it or completing that action is still necessary to satisfy the contextually interpreted current request.",
             "Separate the requested action from its stated purpose. A reason, future plan, or explanation such as preparing for a later retry is context, not authorization to perform that later task now. If the newest request limits scope with only or just, stop after the named operation succeeds.",
             "If a tool result reports failure, do not call the same tool again with identical arguments unless external state changed or an approval just resumed that exact suspended call. Use the error to choose a meaningfully different action or answer honestly.",
+            "A failed invocation of a registered tool proves the capability exists. Preserve the exact structured failure, successful evidence from earlier steps, and any process or artifact identity instead of converting the failure into a claim that the tool is unavailable.",
+            "When a .NET build reports RunningTarget, OutputLocked, MSB3021, or MSB3027, call dotnet_stop_project for that exact approved project. Its permission mechanism will ask before closing the process. After a successful stop result, call the build tool again; do not discard the earlier successful build or launch evidence.",
             "A final answer must answer only the CURRENT HUMAN TURN. Do not prepend, repeat, summarize, or finish an answer to an earlier human turn unless the current request explicitly asks for it.",
             "Return exactly one JSON object and no Markdown or commentary.",
             "To call a tool: {\"action\":\"call\",\"assessment\":\"one concise user-visible statement of what is needed now\",\"tool\":\"exact_tool_name\",\"arguments\":{},\"summary\":\"one concise statement of what the selected tool will do\",\"next\":\"one concise statement of how the result will advance the complete request\"}",

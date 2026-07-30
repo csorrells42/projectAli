@@ -92,6 +92,7 @@ public static class AliCapabilityCatalog
     public const string RoslynApplyRenameName = "roslyn_apply_rename";
     public const string DotNetBuildName = "dotnet_build_project";
     public const string DotNetRunName = "dotnet_run_project";
+    public const string DotNetStopProjectName = "dotnet_stop_project";
     public const string DotNetTestName = "dotnet_test_project";
     public const string DotNetVerifyName = "dotnet_verify_project";
     public const string DotNetDebugLaunchName = "dotnet_debug_launch";
@@ -217,6 +218,7 @@ public static class AliCapabilityCatalog
         new(RoslynApplyRenameName, "Apply a Roslyn solution-wide semantic rename after user approval.", "Microsoft Roslyn refactoring"),
         new(DotNetBuildName, "Restore and compile an approved C# .csproj through Microsoft's MSBuild API after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
         new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
+        new(DotNetStopProjectName, "Close the running compiled application for one approved .NET project after user approval so its output can be rebuilt.", "Microsoft Roslyn/MSBuild coding tools"),
         new(DotNetTestName, "Discover and run .NET tests with structured TRX failures and bounded timeouts.", "Ali .NET engineering loop"),
         new(DotNetVerifyName, "Build and test an approved .NET project or solution and return stable verification evidence.", "Ali .NET engineering loop"),
         new(DotNetDebugLaunchName, "Launch an approved built .NET project under the CLR debugger.", "Ali netcoredbg DAP module"),

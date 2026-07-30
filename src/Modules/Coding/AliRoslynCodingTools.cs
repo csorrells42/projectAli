@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -15,7 +16,9 @@ public sealed record DotNetBuildResult(
     long DurationMilliseconds,
     string? DiagnosticLogPath = null,
     int WarningCount = 0,
-    int ErrorCount = 0);
+    int ErrorCount = 0,
+    string? FailureKind = null,
+    int? BlockingProcessId = null);
 
 public sealed record DotNetRunResult(
     bool Success,
@@ -23,6 +26,14 @@ public sealed record DotNetRunResult(
     string Summary,
     string? ArtifactPath,
     int? ProcessId);
+
+public sealed record DotNetStopProjectResult(
+    bool Success,
+    string ProjectPath,
+    string Summary,
+    string? ArtifactPath,
+    int? ProcessId,
+    bool Forced);
 
 /// <summary>
 /// Coordinates Roslyn project intelligence, Microsoft's in-process MSBuild API, and
@@ -44,6 +55,8 @@ internal sealed class AliRoslynCodingTools
     private readonly AliRoslynRefactoringService _refactoring;
     private readonly string _auditPath;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, TrackedProjectProcess> _runningProjects =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public AliRoslynCodingTools(
         AliCodingProjectResolver resolver,
@@ -211,6 +224,31 @@ internal sealed class AliRoslynCodingTools
         }
 
         var started = Stopwatch.StartNew();
+        if (!target.IsSolution)
+        {
+            var existingArtifact = FindBuiltArtifact(target.PhysicalPath, normalizedConfiguration);
+            var runningTarget = FindRunningTarget(target.PhysicalPath, existingArtifact);
+            if (runningTarget is not null)
+            {
+                var detail = $"Build not started: process {runningTarget.ProcessId} is running the target artifact '{runningTarget.ArtifactPath}' and can lock the build output. Call dotnet_stop_project after user approval, then build again.";
+                await WriteAuditAsync("build", projectPath, false, null, 0, detail, cancellationToken)
+                    .ConfigureAwait(false);
+                return new DotNetBuildResult(
+                    false,
+                    projectPath,
+                    normalizedConfiguration,
+                    null,
+                    "The project target is still running, so MSBuild was not started.",
+                    detail,
+                    runningTarget.ArtifactPath,
+                    0,
+                    WarningCount: 0,
+                    ErrorCount: 0,
+                    FailureKind: "RunningTarget",
+                    BlockingProcessId: runningTarget.ProcessId);
+            }
+        }
+
         MsBuildExecutionResult execution;
         try
         {
@@ -248,6 +286,12 @@ internal sealed class AliRoslynCodingTools
             ? FindBuiltArtifact(target.PhysicalPath, normalizedConfiguration)
             : null;
         var diagnosticCounts = CountBuildDiagnostics(execution.Output);
+        var outputLocked = IsOutputLockFailure(execution.Output);
+        var blockingTarget = outputLocked && !target.IsSolution
+            ? FindRunningTarget(
+                target.PhysicalPath,
+                FindBuiltArtifact(target.PhysicalPath, normalizedConfiguration))
+            : null;
         await WriteAuditAsync(
                 "build",
                 projectPath,
@@ -268,13 +312,17 @@ internal sealed class AliRoslynCodingTools
                     : artifact is null
                     ? $"Roslyn/MSBuild succeeded with {diagnosticCounts.WarningCount} warning(s), but no launchable artifact was found under the project's bin folder."
                     : $"Roslyn/MSBuild succeeded with {diagnosticCounts.WarningCount} warning(s) and produced a launchable artifact."
-                : $"Roslyn/MSBuild failed with {diagnosticCounts.ErrorCount} error(s) and {diagnosticCounts.WarningCount} warning(s). Review the diagnostics, correct the files, and build again.",
+                : outputLocked
+                    ? "Roslyn/MSBuild could not replace the running target artifact. The build tool is available; close the identified target application with dotnet_stop_project after approval, then build again."
+                    : $"Roslyn/MSBuild failed with {diagnosticCounts.ErrorCount} error(s) and {diagnosticCounts.WarningCount} warning(s). Review the diagnostics, correct the files, and build again.",
             BuildModelOutput(execution.Success, execution.ToolsetPath, execution.Output),
-            artifact,
+            artifact ?? blockingTarget?.ArtifactPath,
             started.ElapsedMilliseconds,
             diagnosticLogPath,
             diagnosticCounts.WarningCount,
-            diagnosticCounts.ErrorCount);
+            diagnosticCounts.ErrorCount,
+            outputLocked ? "OutputLocked" : null,
+            blockingTarget?.ProcessId);
     }
 
     public async Task<DotNetRunResult> RunAsync(
@@ -322,11 +370,16 @@ internal sealed class AliRoslynCodingTools
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Windows did not start the compiled application.");
             var processId = process.Id;
+            _runningProjects[project.PhysicalPath] = new TrackedProjectProcess(
+                processId,
+                artifact,
+                process.StartTime.ToUniversalTime().Ticks);
             await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken).ConfigureAwait(false);
             var exited = process.HasExited;
             var exitCode = exited ? process.ExitCode : (int?)null;
             if (exited && exitCode != 0)
             {
+                _runningProjects.TryRemove(project.PhysicalPath, out _);
                 var failure = $"The compiled application exited during startup with code {exitCode}.";
                 await WriteAuditAsync("run", projectPath, false, exitCode, started.ElapsedMilliseconds, failure, cancellationToken)
                     .ConfigureAwait(false);
@@ -353,6 +406,114 @@ internal sealed class AliRoslynCodingTools
         }
     }
 
+    public async Task<DotNetStopProjectResult> StopProjectAsync(
+        string projectPath,
+        string? configuration,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var project = _resolver.ResolveExistingProject(projectPath);
+        var normalizedConfiguration = NormalizeConfiguration(configuration);
+        var artifact = FindBuiltArtifact(project.PhysicalPath, normalizedConfiguration);
+        var runningTarget = FindRunningTarget(project.PhysicalPath, artifact);
+        if (runningTarget is null)
+        {
+            var summary = "No running target application was found for the approved project; it is already safe to rebuild.";
+            await WriteAuditAsync("stop-project", projectPath, true, null, 0, summary, cancellationToken)
+                .ConfigureAwait(false);
+            return new DotNetStopProjectResult(true, projectPath, summary, artifact, null, false);
+        }
+
+        var started = Stopwatch.StartNew();
+        var forced = false;
+        try
+        {
+            using var process = Process.GetProcessById(runningTarget.ProcessId);
+            if (process.StartTime.ToUniversalTime().Ticks != runningTarget.StartTimeUtcTicks)
+            {
+                _runningProjects.TryRemove(project.PhysicalPath, out _);
+                var reusedSummary = "The previously identified target process had already exited. Its old process ID now belongs to a different process, which was left untouched. The project can be rebuilt.";
+                await WriteAuditAsync("stop-project", projectPath, true, 0, started.ElapsedMilliseconds, reusedSummary, cancellationToken)
+                    .ConfigureAwait(false);
+                return new DotNetStopProjectResult(
+                    true,
+                    projectPath,
+                    reusedSummary,
+                    runningTarget.ArtifactPath,
+                    runningTarget.ProcessId,
+                    false);
+            }
+
+            if (!process.HasExited)
+            {
+                var closeRequested = process.CloseMainWindow();
+                if (closeRequested)
+                {
+                    using var gracefulClose = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    gracefulClose.CancelAfter(TimeSpan.FromSeconds(3));
+                    try
+                    {
+                        await process.WaitForExitAsync(gracefulClose.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        // The approved termination may fall back to ending the process tree.
+                    }
+                }
+
+                if (!process.HasExited)
+                {
+                    forced = true;
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            _runningProjects.TryRemove(project.PhysicalPath, out _);
+            started.Stop();
+            var summary = forced
+                ? $"Stopped running target process {runningTarget.ProcessId} after it did not close gracefully. The project can be rebuilt."
+                : $"Closed running target process {runningTarget.ProcessId}. The project can be rebuilt.";
+            await WriteAuditAsync("stop-project", projectPath, true, 0, started.ElapsedMilliseconds, summary, cancellationToken)
+                .ConfigureAwait(false);
+            return new DotNetStopProjectResult(
+                true,
+                projectPath,
+                summary,
+                runningTarget.ArtifactPath,
+                runningTarget.ProcessId,
+                forced);
+        }
+        catch (ArgumentException)
+        {
+            _runningProjects.TryRemove(project.PhysicalPath, out _);
+            var summary = "The previously identified target process had already exited. The project can be rebuilt.";
+            await WriteAuditAsync("stop-project", projectPath, true, 0, started.ElapsedMilliseconds, summary, cancellationToken)
+                .ConfigureAwait(false);
+            return new DotNetStopProjectResult(
+                true,
+                projectPath,
+                summary,
+                runningTarget.ArtifactPath,
+                runningTarget.ProcessId,
+                false);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            started.Stop();
+            var summary = $"The running target process could not be stopped: {ex.Message}";
+            await WriteAuditAsync("stop-project", projectPath, false, null, started.ElapsedMilliseconds, summary, cancellationToken)
+                .ConfigureAwait(false);
+            return new DotNetStopProjectResult(
+                false,
+                projectPath,
+                summary,
+                runningTarget.ArtifactPath,
+                runningTarget.ProcessId,
+                forced);
+        }
+    }
+
     private static string NormalizeConfiguration(string? configuration) =>
         string.IsNullOrWhiteSpace(configuration)
             ? "Debug"
@@ -362,6 +523,77 @@ internal sealed class AliRoslynCodingTools
                 var value when value.Equals("Release", StringComparison.OrdinalIgnoreCase) => "Release",
                 _ => throw new ArgumentException("Configuration must be Debug or Release.", nameof(configuration))
             };
+
+    private TrackedProjectProcess? FindRunningTarget(string physicalProjectPath, string? artifactPath)
+    {
+        if (_runningProjects.TryGetValue(physicalProjectPath, out var tracked))
+        {
+            if (IsTrackedProcessRunning(tracked))
+            {
+                return tracked;
+            }
+
+            _runningProjects.TryRemove(physicalProjectPath, out _);
+        }
+
+        if (string.IsNullOrWhiteSpace(artifactPath)
+            || !Path.GetExtension(artifactPath).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var expected = Path.GetFullPath(artifactPath);
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(expected)))
+        {
+            using (process)
+            {
+                try
+                {
+                    var executable = process.MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(executable)
+                        && Path.GetFullPath(executable).Equals(expected, StringComparison.OrdinalIgnoreCase)
+                        && !process.HasExited)
+                    {
+                        var discovered = new TrackedProjectProcess(
+                            process.Id,
+                            expected,
+                            process.StartTime.ToUniversalTime().Ticks);
+                        _runningProjects[physicalProjectPath] = discovered;
+                        return discovered;
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+                {
+                    // A process that cannot be inspected is not attributed to this approved project.
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsTrackedProcessRunning(TrackedProjectProcess tracked)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(tracked.ProcessId);
+            return !process.HasExited
+                && process.StartTime.ToUniversalTime().Ticks == tracked.StartTimeUtcTicks;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool IsOutputLockFailure(string output) =>
+        output.Contains("MSB3021", StringComparison.OrdinalIgnoreCase)
+        || output.Contains("MSB3027", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record TrackedProjectProcess(
+        int ProcessId,
+        string ArtifactPath,
+        long StartTimeUtcTicks);
 
     internal static string? FindBuiltArtifact(string projectPath, string configuration)
     {
