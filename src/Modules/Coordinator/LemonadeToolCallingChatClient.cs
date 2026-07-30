@@ -80,6 +80,12 @@ internal sealed class LemonadeToolCallingChatClient(
                 options,
                 turn,
                 cancellationToken).ConfigureAwait(false)).ToArray();
+        var planningScope = new ToolPlanningScope(
+            materializedMessages,
+            registeredTools,
+            tools,
+            options?.Clone() ?? new ChatOptions(),
+            BuildCompatibilityMessages(materializedMessages, tools, turn?.OriginalUserText));
         if (runtime.ActiveProfile.SupportsToolCalls)
         {
             var nativeMessages = BuildNativeMessages(materializedMessages);
@@ -98,10 +104,6 @@ internal sealed class LemonadeToolCallingChatClient(
                 return nativeResponse;
             }
 
-            var nativeDecisionMessages = BuildCompatibilityMessages(
-                materializedMessages,
-                tools,
-                turn?.OriginalUserText);
             var nativeAuditOptions = CreateCompatibilityOptions(options);
             var proposedFinal = CopyMetadata(
                 nativeResponse,
@@ -113,28 +115,27 @@ internal sealed class LemonadeToolCallingChatClient(
             var auditedNativeResponse = await AuditFinalDecisionAsync(
                 proposedFinal,
                 observedToolResultCount,
-                nativeDecisionMessages,
-                tools,
+                planningScope,
                 nativeAuditOptions,
                 turn,
                 cancellationToken).ConfigureAwait(false);
             auditedNativeResponse = await AuditCurrentWebFreshnessAsync(
                 auditedNativeResponse,
-                nativeDecisionMessages,
-                tools,
+                planningScope.DecisionMessages,
+                planningScope.SelectedTools,
                 nativeAuditOptions,
                 turn,
                 cancellationToken).ConfigureAwait(false);
             auditedNativeResponse = await RepairInvalidToolDecisionAsync(
                 auditedNativeResponse,
-                nativeDecisionMessages,
-                tools,
+                planningScope.DecisionMessages,
+                planningScope.SelectedTools,
                 nativeAuditOptions,
                 turn,
                 cancellationToken).ConfigureAwait(false);
             var translatedNativeResponse = TranslateDecision(
                 auditedNativeResponse,
-                tools,
+                planningScope.SelectedTools,
                 turn,
                 _assistantName);
             if (turn is not null && IsFinalDecision(auditedNativeResponse.Text))
@@ -144,66 +145,61 @@ internal sealed class LemonadeToolCallingChatClient(
             return translatedNativeResponse;
         }
 
-        var compatibilityMessages = BuildCompatibilityMessages(
-            materializedMessages,
-            tools,
-            turn?.OriginalUserText);
         var compatibilityOptions = CreateCompatibilityOptions(options);
 
         var response = await GetStructuredDecisionResponseAsync(
-            compatibilityMessages,
+            planningScope.DecisionMessages,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await CompleteTruncatedDecisionAsync(
             response,
-            compatibilityMessages,
+            planningScope.DecisionMessages,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await RepairMalformedDecisionAsync(
             response,
-            compatibilityMessages,
+            planningScope.DecisionMessages,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await RepairInvalidToolDecisionAsync(
             response,
-            compatibilityMessages,
-            tools,
+            planningScope.DecisionMessages,
+            planningScope.SelectedTools,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await RepairRepeatedCompletedToolCallAsync(
             response,
-            compatibilityMessages,
+            planningScope.DecisionMessages,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await AuditFinalDecisionAsync(
             response,
             observedToolResultCount,
-            compatibilityMessages,
-            tools,
+            planningScope,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await AuditCurrentWebFreshnessAsync(
             response,
-            compatibilityMessages,
-            tools,
+            planningScope.DecisionMessages,
+            planningScope.SelectedTools,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
         response = await RepairInvalidToolDecisionAsync(
             response,
-            compatibilityMessages,
-            tools,
+            planningScope.DecisionMessages,
+            planningScope.SelectedTools,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
 
-        var translated = TranslateDecision(response, tools, turn, _assistantName);
+        var translated = TranslateDecision(response, planningScope.SelectedTools, turn, _assistantName);
         if (turn is not null && IsFinalDecision(response.Text))
         {
             _toolResultsByTurn.TryRemove(turn.AssistantMessageId, out _);
@@ -249,8 +245,7 @@ internal sealed class LemonadeToolCallingChatClient(
     private async Task<ChatResponse> AuditFinalDecisionAsync(
         ChatResponse response,
         int toolResultCount,
-        IReadOnlyList<AIChatMessage> decisionMessages,
-        IReadOnlyList<AIFunctionDeclaration> tools,
+        ToolPlanningScope planningScope,
         ChatOptions compatibilityOptions,
         CoordinatorTurnContext? turn,
         CancellationToken cancellationToken)
@@ -273,9 +268,10 @@ internal sealed class LemonadeToolCallingChatClient(
         }
 
         var auditMessages = BuildBoundedAuditMessages(
-            decisionMessages,
-            tools,
-            turn?.OriginalUserText);
+            planningScope.DecisionMessages,
+            planningScope.SelectedTools,
+            turn?.OriginalUserText,
+            planningScope.RegisteredTools.Count);
         auditMessages.Add(new AIChatMessage(
             AIChatRole.Assistant,
             "PROPOSED FINAL ACTION (untrusted draft; do not quote blindly): " + candidate));
@@ -309,7 +305,10 @@ internal sealed class LemonadeToolCallingChatClient(
                 "Honor explicit source-quality requirements. A third-party blog, aggregator, social post, or video is not a primary source merely because it is linked. Primary evidence must come from the organization, maintainer, author, specification, release notes, repository, filing, or first-party data responsible for the claim. If the requested source class is missing, return no.",
                 "For navigation or route requests, never manufacture turn-by-turn steps or accept unsupported road geometry, mileage, travel time, traffic, nearest-place rankings, or business addresses. Ordinary web snippets and model knowledge are not route evidence. If no successful route-capable tool supplied those facts, return no.",
                 "For current, live, latest, or today requests, the tool deliberately omits its internal fetch timestamp because retrieval time is not publication evidence. Compare only source-stated observation/publication dates with the requested timeframe. Never accept the current date as a source date unless that date appears as source evidence. If freshness is older than requested or unestablished, return no.",
-            "When the user requests exact identifiers, paths, names, codes, or stored values, copy them verbatim from the authoritative tool result. Do not decorate, normalize, paraphrase, or add characters inside an exact value.",
+                "If the human asks for current or externally verifiable facts and no successful live evidence exists in this turn, a direct model answer is not authoritative evidence. Return no so the semantic librarian can reconsider the full live registry.",
+                "Preserve the named people, places, organizations, products, dates, and other entities in the human's request. If the draft, tool query, or evidence silently substitutes a different entity, return no unless authoritative evidence establishes that they are equivalent.",
+                "When a successful tool result contains evidence responsive to the human's question, a draft that claims the information or capability is unavailable contradicts the evidence. Return no and identify that conflict so the planner can synthesize the result already obtained.",
+                "When the user requests exact identifiers, paths, names, codes, or stored values, copy them verbatim from the authoritative tool result. Do not decorate, normalize, paraphrase, or add characters inside an exact value.",
                 "Do not promote a limited result set into an unsupported superlative, ranking, causal conclusion, consensus, or claim of completeness. When the human asks for the most important or best items, state the selection basis and limits unless the evidence itself establishes the ranking.",
                 "A human request for the most important, best, leading, or representative items does not itself prove that ranking. Selecting items from search results is analysis: identify it as your selection from the returned evidence and say what limited evidence the selection was based on.",
                 "Phrases such as 'stand out', 'top results', or 'no other results appeared' do not cure an unsupported ranking or completeness claim. Do not claim the search was exhaustive unless a tool result explicitly establishes that.",
@@ -361,9 +360,14 @@ internal sealed class LemonadeToolCallingChatClient(
         turn?.Report(
             AgentActivityKind.Warning,
             $"Critic denied completion: {criticBasis}");
+        await RefreshToolsAfterCriticRejectionAsync(
+            planningScope,
+            criticBasis,
+            turn,
+            cancellationToken).ConfigureAwait(false);
         var replanned = await ReplanAfterCriticRejectionAsync(
             response,
-            decisionMessages,
+            planningScope.DecisionMessages,
             compatibilityOptions,
             criticBasis,
             turn,
@@ -376,11 +380,36 @@ internal sealed class LemonadeToolCallingChatClient(
         return await AuditFinalDecisionAsync(
             replanned,
             toolResultCount,
-            decisionMessages,
-            tools,
+            planningScope,
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task RefreshToolsAfterCriticRejectionAsync(
+        ToolPlanningScope planningScope,
+        string criticBasis,
+        CoordinatorTurnContext? turn,
+        CancellationToken cancellationToken)
+    {
+        if (toolLibrarian is null)
+        {
+            return;
+        }
+
+        var refreshedTools = await toolLibrarian.SelectAsync(
+            planningScope.SourceMessages,
+            planningScope.RegisteredTools,
+            turn?.OriginalUserText,
+            planningScope.SourceOptions,
+            turn,
+            criticBasis,
+            cancellationToken).ConfigureAwait(false);
+        planningScope.SelectedTools = refreshedTools.ToArray();
+        planningScope.DecisionMessages = BuildCompatibilityMessages(
+            planningScope.SourceMessages,
+            planningScope.SelectedTools,
+            turn?.OriginalUserText);
     }
 
     private async Task<ChatResponse> ReplanAfterCriticRejectionAsync(
@@ -431,7 +460,8 @@ internal sealed class LemonadeToolCallingChatClient(
     private static List<AIChatMessage> BuildBoundedAuditMessages(
         IReadOnlyList<AIChatMessage> decisionMessages,
         IReadOnlyList<AIFunctionDeclaration> tools,
-        string? currentUserRequest)
+        string? currentUserRequest,
+        int? registeredToolCount = null)
     {
         var decisionInstructions = decisionMessages
             .FirstOrDefault(message => message.Role == AIChatRole.System)?.Text
@@ -453,7 +483,8 @@ internal sealed class LemonadeToolCallingChatClient(
                         decisionInstructions,
                         MaximumAuditFrameworkCharacters,
                         "audit framework instructions"),
-                    "AVAILABLE TOOLS AND ARGUMENT SCHEMAS (authoritative):",
+                    "AVAILABLE TOOLS AND ARGUMENT SCHEMAS FOR THIS ATTEMPT (authoritative subset):",
+                    $"FULL REGISTERED TOOL COUNT: {registeredToolCount ?? tools.Count}. The current subset is not evidence that other capabilities are unavailable; a NO verdict can trigger fresh semantic selection from the full registry.",
                     BuildCompactToolCatalog(tools))),
             new(
                 AIChatRole.User,
@@ -799,6 +830,24 @@ internal sealed class LemonadeToolCallingChatClient(
 
     private CoordinatorTurnContext? CurrentTurn() =>
         Volatile.Read(ref _activeTurn) ?? turnAccessor();
+
+    private sealed class ToolPlanningScope(
+        IReadOnlyList<AIChatMessage> sourceMessages,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools,
+        IReadOnlyList<AIFunctionDeclaration> selectedTools,
+        ChatOptions sourceOptions,
+        IReadOnlyList<AIChatMessage> decisionMessages)
+    {
+        public IReadOnlyList<AIChatMessage> SourceMessages { get; } = sourceMessages;
+
+        public IReadOnlyList<AIFunctionDeclaration> RegisteredTools { get; } = registeredTools;
+
+        public IReadOnlyList<AIFunctionDeclaration> SelectedTools { get; set; } = selectedTools;
+
+        public ChatOptions SourceOptions { get; } = sourceOptions;
+
+        public IReadOnlyList<AIChatMessage> DecisionMessages { get; set; } = decisionMessages;
+    }
 
     private void EndTurn(CoordinatorTurnContext turn)
     {

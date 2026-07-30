@@ -27,6 +27,23 @@ internal sealed class SemanticToolLibrarian(IChatClient model, string assistantN
         ChatOptions? sourceOptions,
         CoordinatorTurnContext? turn,
         CancellationToken cancellationToken)
+        => await SelectAsync(
+            messages,
+            registeredTools,
+            currentUserRequest,
+            sourceOptions,
+            turn,
+            correctiveGuidance: null,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<AIFunctionDeclaration>> SelectAsync(
+        IReadOnlyList<AIChatMessage> messages,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools,
+        string? currentUserRequest,
+        ChatOptions? sourceOptions,
+        CoordinatorTurnContext? turn,
+        string? correctiveGuidance,
+        CancellationToken cancellationToken)
     {
         if (registeredTools.Count == 0)
         {
@@ -37,7 +54,8 @@ internal sealed class SemanticToolLibrarian(IChatClient model, string assistantN
         var selectionMessages = BuildSelectionMessages(
             messages,
             registeredTools,
-            currentUserRequest);
+            currentUserRequest,
+            correctiveGuidance);
         var selectionOptions = sourceOptions?.Clone() ?? new ChatOptions();
         selectionOptions.Tools = null;
         selectionOptions.ToolMode = ChatToolMode.None;
@@ -55,8 +73,12 @@ internal sealed class SemanticToolLibrarian(IChatClient model, string assistantN
             cancellationToken.ThrowIfCancellationRequested();
             turn?.Report(
                 AgentActivityKind.Planning,
-                $"{_assistantName} is matching the objective to her live tools",
-                $"The model is reviewing {registeredTools.Count} registered capabilities by meaning before choosing the next action.",
+                string.IsNullOrWhiteSpace(correctiveGuidance)
+                    ? $"{_assistantName} is matching the objective to her live tools"
+                    : $"{_assistantName} is refreshing her tools after the critic's review",
+                string.IsNullOrWhiteSpace(correctiveGuidance)
+                    ? $"The model is reviewing {registeredTools.Count} registered capabilities by meaning before choosing the next action."
+                    : $"The model is reviewing all {registeredTools.Count} registered capabilities against the missing outcome identified by the critic.",
                 activityKey: "semantic-tool-discovery");
             var response = await model.GetResponseAsync(
                 selectionMessages,
@@ -89,7 +111,8 @@ internal sealed class SemanticToolLibrarian(IChatClient model, string assistantN
     private static List<AIChatMessage> BuildSelectionMessages(
         IReadOnlyList<AIChatMessage> messages,
         IReadOnlyList<AIFunctionDeclaration> registeredTools,
-        string? currentUserRequest)
+        string? currentUserRequest,
+        string? correctiveGuidance)
     {
         var evidence = new StringBuilder();
         foreach (var message in messages.Where(message => message.Role != AIChatRole.System).TakeLast(8))
@@ -128,13 +151,16 @@ internal sealed class SemanticToolLibrarian(IChatClient model, string assistantN
                     "Selection is semantic: use the meaning of the request and tool descriptions. Do not use keyword matching or surface-word rules.",
                     "Return DIRECT when no tool would improve correctness or perform a requested action.",
                     $"Otherwise return one exact registered tool name per line, with no explanation. Select at most {MaximumSelectedTools} tools.",
-                    "Include complementary tools when the next step may require inspection, mutation, verification, or recovery, but do not dump unrelated capabilities.",
+                    "Select for the complete outcome, not only the first step. Include complementary tools when later leaves may require inspection, mutation, repair, build, execution, verification, evidence gathering, or recovery, but do not dump unrelated capabilities.",
+                    "When a final critic identifies a missing outcome, treat that semantic feedback as a request to reconsider the full registry. Preserve successful evidence already gathered and select the capabilities that can advance the missing branch.",
                     "REGISTERED LIVE TOOL INDEX:",
                     toolInventory)),
             new AIChatMessage(
                 AIChatRole.User,
                 "CURRENT HUMAN OBJECTIVE:\n"
                 + Compact(currentUserRequest?.Trim() ?? string.Empty, MaximumRequestCharacters)
+                + "\n\nFINAL CRITIC FEEDBACK FOR TOOL RESELECTION:\n"
+                + Compact(correctiveGuidance?.Trim() ?? "No critic feedback yet.", MaximumRequestCharacters)
                 + "\n\nCURRENT TURN EVIDENCE:\n"
                 + Compact(evidence.ToString(), MaximumEvidenceCharacters))
         ];
