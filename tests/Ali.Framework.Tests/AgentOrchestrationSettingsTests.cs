@@ -18,6 +18,7 @@ public sealed class AgentOrchestrationSettingsTests
                 MagenticPolicy = policy,
                 MagenticMaximumRounds = 7,
                 ProgrammingAgentMode = ProgrammingAgentModes.Aider,
+                AlwaysUseProgrammingAgent = true,
                 OpenHandsWslDistribution = "Ubuntu-24.04"
             });
 
@@ -26,6 +27,7 @@ public sealed class AgentOrchestrationSettingsTests
             Assert.Equal(policy, loaded.MagenticPolicy);
             Assert.Equal(7, loaded.MagenticMaximumRounds);
             Assert.Equal(ProgrammingAgentModes.Aider, loaded.ProgrammingAgentMode);
+            Assert.True(loaded.AlwaysUseProgrammingAgent);
             Assert.Equal("Ubuntu-24.04", loaded.OpenHandsWslDistribution);
         }
         finally
@@ -76,9 +78,26 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.Contains("SettingsMagenticMaximumRounds", xaml, StringComparison.Ordinal);
         Assert.Contains("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsAlwaysUseProgrammingAgent", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsOpenHandsWslDistribution", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
         Assert.Contains("concurrent and background agents are disabled", xaml, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AlwaysUseProgrammingAgent_RequiresModelSelectedCodingWorkToUseConfiguredEngine()
+    {
+        var instructions = AliToolCatalog.BuildInstructions(
+            "Ali",
+            new AgentOrchestrationSettings
+            {
+                ProgrammingAgentMode = ProgrammingAgentModes.Hybrid,
+                AlwaysUseProgrammingAgent = true
+            });
+
+        Assert.Contains("you must call coding_agent_execute", instructions, StringComparison.Ordinal);
+        Assert.Contains("semantically determine", instructions, StringComparison.Ordinal);
+        Assert.Contains("selected Settings mode is hybrid", instructions, StringComparison.Ordinal);
     }
 
     [Theory]

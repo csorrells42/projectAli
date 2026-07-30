@@ -38,8 +38,10 @@ public sealed class AgentFrameworkFoundationTests
             new Ali.Modules.Coordinator.AgentOrchestrationSettings());
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(120, names.Length);
+        Assert.Equal(122, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName, names);
+        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.GetActiveUserProfileName, names);
         Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.RememberCurrentUserName, names);

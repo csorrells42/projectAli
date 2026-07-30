@@ -9,7 +9,8 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     private MagenticPolicyChoice _selectedMagenticPolicy = MagenticPolicyChoice.AskFirst;
     private int _magenticMaximumRounds = 6;
     private ProgrammingAgentModeChoice _selectedProgrammingAgentMode = ProgrammingAgentModeChoice.Hybrid;
-    private string _openHandsWslDistribution = "Ubuntu";
+    private bool _alwaysUseProgrammingAgent;
+    private string _openHandsWslDistribution = "Ubuntu-24.04";
     private string _aiderStatusText = "Aider readiness has not been checked yet.";
     private string _openHandsStatusText = "OpenHands readiness has not been checked yet.";
     private string _statusText = "Agent orchestration settings have not been loaded yet.";
@@ -57,6 +58,12 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     {
         get => _selectedProgrammingAgentMode;
         set => SetProperty(ref _selectedProgrammingAgentMode, value ?? ProgrammingAgentModeChoice.Hybrid);
+    }
+
+    public bool AlwaysUseProgrammingAgent
+    {
+        get => _alwaysUseProgrammingAgent;
+        set => SetProperty(ref _alwaysUseProgrammingAgent, value);
     }
 
     public string OpenHandsWslDistribution
@@ -109,6 +116,7 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         MagenticMaximumRounds = settings.MagenticMaximumRounds;
         SelectedProgrammingAgentMode = ProgrammingAgentModeChoices.First(choice =>
             choice.Value == settings.ProgrammingAgentMode);
+        AlwaysUseProgrammingAgent = settings.AlwaysUseProgrammingAgent;
         OpenHandsWslDistribution = settings.OpenHandsWslDistribution;
         RefreshCheckpointSummary();
         _ = RefreshProgrammingAgentsAsync();
@@ -122,11 +130,12 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
             MagenticPolicy = SelectedMagenticPolicy.Value,
             MagenticMaximumRounds = MagenticMaximumRounds,
             ProgrammingAgentMode = SelectedProgrammingAgentMode.Value,
+            AlwaysUseProgrammingAgent = AlwaysUseProgrammingAgent,
             OpenHandsWslDistribution = OpenHandsWslDistribution
         });
         RefreshCheckpointSummary();
         _ = RefreshProgrammingAgentsAsync();
-        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}; programming engine: {SelectedProgrammingAgentMode.DisplayName}. Changes apply on Ali's next turn.";
+        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}; programming engine: {SelectedProgrammingAgentMode.DisplayName}; required for programming work: {(AlwaysUseProgrammingAgent ? "yes" : "no")}. Changes apply on Ali's next turn.";
     }
 
     private void ArchiveCheckpoints()

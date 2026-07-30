@@ -1860,6 +1860,14 @@
                                            Foreground="#8DDDF0"
                                            TextWrapping="Wrap"
                                            Margin="0,5,0,0" />
+                                <CheckBox Content="Always use the selected coding agent for programming work"
+                                          IsChecked="{Binding AlwaysUseProgrammingAgent, Mode=TwoWay}"
+                                          Margin="0,10,0,0"
+                                          AutomationProperties.AutomationId="SettingsAlwaysUseProgrammingAgent" />
+                                <TextBlock Text="When enabled, Ali must hand every semantically identified code implementation, modification, debugging, build, or test request to the selected engine before using her direct tools to verify the result."
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="22,3,0,0" />
                                 <TextBlock Text="OpenHands WSL distribution"
                                            Style="{StaticResource FieldLabel}"
                                            Margin="0,12,0,0" />

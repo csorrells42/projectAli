@@ -20,7 +20,8 @@ internal sealed class LemonadeToolCallingChatClient(
     ILocalModelRuntime runtime,
     string assistantName,
     Func<CoordinatorTurnContext?> turnAccessor,
-    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null) : IChatClient
+    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null,
+    SemanticToolLibrarian? toolLibrarian = null) : IChatClient
 {
     private const int MaximumContinuationContextCharacters = 6000;
     private const int MaximumLateContinuationEvidenceCharacters = 10000;
@@ -61,20 +62,32 @@ internal sealed class LemonadeToolCallingChatClient(
         ArgumentNullException.ThrowIfNull(messages);
         var materializedMessages = messages.ToArray();
         var observedToolResultCount = ObserveToolResults(CurrentTurn(), materializedMessages);
-        var tools = options?.Tools?
+        var registeredTools = options?.Tools?
             .OfType<AIFunctionDeclaration>()
             .ToArray() ?? [];
-        if (tools.Length == 0)
+        if (registeredTools.Length == 0)
         {
             return await inner.GetResponseAsync(materializedMessages, options, cancellationToken).ConfigureAwait(false);
         }
 
         var turn = CurrentTurn();
+        var tools = toolLibrarian is null
+            ? registeredTools
+            : (await toolLibrarian.SelectAsync(
+                materializedMessages,
+                registeredTools,
+                turn?.OriginalUserText,
+                options,
+                turn,
+                cancellationToken).ConfigureAwait(false)).ToArray();
         if (runtime.ActiveProfile.SupportsToolCalls)
         {
             var nativeMessages = BuildNativeMessages(materializedMessages);
+            var nativeOptions = options?.Clone() ?? new ChatOptions();
+            nativeOptions.Tools = tools.Cast<AITool>().ToList();
+            nativeOptions.ToolMode = tools.Length == 0 ? ChatToolMode.None : ChatToolMode.Auto;
             var nativeResponse = await inner
-                .GetResponseAsync(nativeMessages, options, cancellationToken)
+                .GetResponseAsync(nativeMessages, nativeOptions, cancellationToken)
                 .ConfigureAwait(false);
             NormalizeNativeFunctionCalls(nativeResponse);
             if (ContainsFunctionCall(nativeResponse)

@@ -38,7 +38,9 @@ public sealed record AgentOrchestrationSettings
 
     public string ProgrammingAgentMode { get; init; } = ProgrammingAgentModes.Hybrid;
 
-    public string OpenHandsWslDistribution { get; init; } = "Ubuntu";
+    public bool AlwaysUseProgrammingAgent { get; init; }
+
+    public string OpenHandsWslDistribution { get; init; } = "Ubuntu-24.04";
 
     public AgentOrchestrationSettings Normalize() => this with
     {
@@ -46,7 +48,7 @@ public sealed record AgentOrchestrationSettings
         MagenticMaximumRounds = Math.Clamp(MagenticMaximumRounds, 2, 12),
         ProgrammingAgentMode = ProgrammingAgentModes.Normalize(ProgrammingAgentMode),
         OpenHandsWslDistribution = string.IsNullOrWhiteSpace(OpenHandsWslDistribution)
-            ? "Ubuntu"
+            ? "Ubuntu-24.04"
             : OpenHandsWslDistribution.Trim()
     };
 }

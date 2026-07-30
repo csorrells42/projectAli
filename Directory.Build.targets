@@ -47,13 +47,17 @@
              Link="tools\SetupOpenHands.ps1"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)tools\wslconfig.openhands"
+             Link="tools\wslconfig.openhands"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="RemoveAliNonEnglishSatelliteResources"
-          AfterTargets="Publish"
-          Condition="'$(MSBuildProjectName)' == 'Ali'">
+          AfterTargets="Build"
+          Condition="'$(MSBuildProjectName)' == 'Ali' And '$(Configuration)' == 'Release'">
     <ItemGroup>
-      <_AliNonEnglishSatelliteDirectory Include="$(PublishDir)cs;$(PublishDir)de;$(PublishDir)es;$(PublishDir)fr;$(PublishDir)it;$(PublishDir)ja;$(PublishDir)ko;$(PublishDir)pl;$(PublishDir)pt-BR;$(PublishDir)ru;$(PublishDir)tr;$(PublishDir)zh-Hans;$(PublishDir)zh-Hant" />
+      <_AliNonEnglishSatelliteDirectory Include="$(TargetDir)cs;$(TargetDir)de;$(TargetDir)es;$(TargetDir)fr;$(TargetDir)it;$(TargetDir)ja;$(TargetDir)ko;$(TargetDir)pl;$(TargetDir)pt-BR;$(TargetDir)ru;$(TargetDir)tr;$(TargetDir)zh-Hans;$(TargetDir)zh-Hant" />
     </ItemGroup>
     <RemoveDir Directories="@(_AliNonEnglishSatelliteDirectory)" />
   </Target>

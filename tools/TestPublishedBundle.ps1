@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath($PublishRoot)
 $manifestPath = Join-Path $root 'runtime-assets.json'
 
-foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'runtime-assets.json', 'THIRD-PARTY-RUNTIME-ASSETS.json', 'coding-toolchains.json', 'tools\RestoreCodingToolchains.ps1', 'editor-integrations.json', 'tools\ConfigureEditorIntegrations.ps1', 'tools\SetupOpenHands.ps1', 'docs\EDITOR-INTEGRATIONS.md', 'docs\AgentFrameworkArchitecture.md', 'docs\EXTERNAL-CODING-AGENTS.md', 'skills\software-engineering\SKILL.md', 'skills\evidence-research\SKILL.md', 'skills\office-artifacts\SKILL.md', 'skills\engineering-shop-floor\SKILL.md')) {
+foreach ($required in @('Ali.exe', 'Ali.dll', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'runtime-assets.json', 'THIRD-PARTY-RUNTIME-ASSETS.json', 'coding-toolchains.json', 'tools\RestoreCodingToolchains.ps1', 'editor-integrations.json', 'tools\ConfigureEditorIntegrations.ps1', 'tools\SetupOpenHands.ps1', 'tools\wslconfig.openhands', 'Modules\Coding\Agents\Tools\ali_openhands_launcher.py', 'Modules\Coding\Agents\Tools\ali_aider_launcher.py', 'docs\EDITOR-INTEGRATIONS.md', 'docs\AgentFrameworkArchitecture.md', 'docs\EXTERNAL-CODING-AGENTS.md', 'skills\software-engineering\SKILL.md', 'skills\evidence-research\SKILL.md', 'skills\office-artifacts\SKILL.md', 'skills\engineering-shop-floor\SKILL.md')) {
     $path = Join-Path $root $required
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Published Ali bundle is missing: $path"
