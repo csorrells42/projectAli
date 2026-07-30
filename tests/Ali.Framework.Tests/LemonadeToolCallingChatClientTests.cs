@@ -1283,6 +1283,45 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task CriticApprovesHarmlessSpellingErrorWhenSubstanceIsCorrect()
+    {
+        const string request = "Tell me about bluegill.";
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"A bluegill is a freshwater sunfih in the sunfish family.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "YES\nThe answer identifies bluegill correctly; the harmless spelling error does not change the requested fact.")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var lookup = AIFunctionFactory.Create(
+            () => "Bluegill is a freshwater fish in the sunfish family.",
+            "reference_lookup",
+            "Return reference information.");
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(
+            "call-reference",
+            new { success = true, text = "Bluegill is a freshwater fish in the sunfish family." }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, request), result],
+            new ChatOptions { Tools = [lookup] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("sunfih", response.Text, StringComparison.Ordinal);
+        Assert.Equal(2, inner.CallCount);
+        Assert.Equal(512, inner.MaxOutputTokens[1]);
+        Assert.Equal("low", inner.ReasoningEffortOverrides[1]);
+        var criticPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("Judge substance, not polish", criticPrompt, StringComparison.Ordinal);
+        Assert.Contains("harmless spelling", criticPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FailedRouteSearch_CriticCallsMapHandoffInsteadOfAllowingInventedPaperDirections()
     {
         const string request = "Give me directions from home to a Publix, then Waffle House, then a gym, and back home.";
@@ -1335,7 +1374,7 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
-    public async Task CurrentWebFreshnessGate_RejectsFetchTimeAsObservationTimeAndCanRefineSearch()
+    public async Task SingleCriticPass_RejectsStaleCurrentEvidenceAndCanRefineSearch()
     {
         var turn = new CoordinatorTurnContext(
             "conversation",
@@ -1360,7 +1399,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"As of July 29 it is clear and humidity is probably low, so paint now.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Retrieved July 29: conditions are clear, so paint now.\",\"basis\":\"The draft summarizes the returned source, subject to the dedicated freshness gate.\"}")),
+                "NO\nThe source reports July 20 conditions, not a current July 29 observation, and humidity was not reported.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"The returned weather evidence is not fresh enough.\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"weather observation July 29 2026\",\"topic\":\"weather\"},\"summary\":\"Verify a same-day observation before recommending\",\"next\":\"Base the recommendation on the fresh observation.\"}")));
@@ -1386,12 +1425,17 @@ public sealed class LemonadeToolCallingChatClientTests
             .OfType<FunctionCallContent>());
         Assert.Equal("search_current_web", retry.Name);
         Assert.Equal(3, inner.CallCount);
-        var freshnessPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
-        Assert.Contains("internal fetch timestamp", freshnessPrompt, StringComparison.Ordinal);
-        Assert.Contains("not publication evidence", freshnessPrompt, StringComparison.Ordinal);
-        Assert.Contains("Remaining live-search attempts this turn: 1", freshnessPrompt, StringComparison.Ordinal);
-        Assert.Contains("missing measurement remains unknown", freshnessPrompt, StringComparison.Ordinal);
-        Assert.Contains("July 20, 2026", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Single(inner.ObservedMessages.Where(messages =>
+            messages.Any(message => message.Text?.Contains("QUALITY CONTROL PASS", StringComparison.Ordinal) == true)));
+        Assert.DoesNotContain(inner.ObservedMessages.SelectMany(messages => messages), message =>
+            message.Text?.Contains("CURRENT-EVIDENCE GATE", StringComparison.Ordinal) == true);
+        var criticPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("internal fetch timestamp", criticPrompt, StringComparison.Ordinal);
+        Assert.Contains("not publication evidence", criticPrompt, StringComparison.Ordinal);
+        Assert.Contains("missing measurement remains unknown", criticPrompt, StringComparison.Ordinal);
+        Assert.Contains("July 20, 2026", criticPrompt, StringComparison.Ordinal);
+        var replanningPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
+        Assert.Contains("July 20 conditions", replanningPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1855,6 +1899,10 @@ public sealed class LemonadeToolCallingChatClientTests
 
         public List<ChatResponseFormat?> Formats { get; } = [];
 
+        public List<int?> MaxOutputTokens { get; } = [];
+
+        public List<string?> ReasoningEffortOverrides { get; } = [];
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<AIChatMessage> messages,
             ChatOptions? options = null,
@@ -1863,6 +1911,12 @@ public sealed class LemonadeToolCallingChatClientTests
             CallCount++;
             ObservedMessages.Add(messages.ToList());
             Formats.Add(options?.ResponseFormat);
+            MaxOutputTokens.Add(options?.MaxOutputTokens);
+            ReasoningEffortOverrides.Add(
+                options?.AdditionalProperties is { } properties
+                && properties.TryGetValue("ali.reasoningEffortOverride", out var value)
+                    ? value as string
+                    : null);
             return Task.FromResult(_responses.Count > 0
                 ? _responses.Dequeue()
                 : new ChatResponse(new AIChatMessage(AIChatRole.Assistant, "script exhausted")));

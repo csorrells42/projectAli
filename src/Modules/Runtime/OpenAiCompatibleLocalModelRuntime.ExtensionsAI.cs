@@ -217,6 +217,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         var suppressPersona = options?.AdditionalProperties is { } properties
             && properties.TryGetValue("ali.internalRouting", out var internalRouting)
             && internalRouting is true;
+        var reasoningEffortOverride = ResolveReasoningEffortOverride(options);
         var serializedMessages = BuildExtensionsAiMessages(messages, suppressPersona, useNativeOllama);
         var tools = BuildExtensionsAiTools(options).ToArray();
         var requestedMaxTokens = options?.MaxOutputTokens ?? _options.OutputTokenLimit;
@@ -236,7 +237,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 messages = serializedMessages,
                 tools = tools.Length == 0 ? null : tools,
                 stream = false,
-                think = ResolveNativeThinkingValue(),
+                think = ResolveNativeThinkingValue(reasoningEffortOverride),
                 keep_alive = OllamaRuntimeSafetyPolicy.KeepAlive,
                 options = new
                 {
@@ -260,21 +261,34 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 max_tokens = maxTokens,
                 temperature = _options.Temperature,
                 top_p = _options.TopP,
-                chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(),
+                chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(reasoningEffortOverride),
                 think = ShouldDisableThinking() ? false : (bool?)null
             };
 
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         if (useNativeOllama)
         {
-            ValidateNativeOllamaPayload(json);
+            ValidateNativeOllamaPayload(json, reasoningEffortOverride);
         }
         else
         {
-            ValidateOpenAiCompatiblePayload(json);
+            ValidateOpenAiCompatiblePayload(json, reasoningEffortOverride);
         }
 
         return json;
+    }
+
+    private static string? ResolveReasoningEffortOverride(ChatOptions? options)
+    {
+        if (options?.AdditionalProperties is not { } properties
+            || !properties.TryGetValue("ali.reasoningEffortOverride", out var value)
+            || value is not string effort
+            || string.IsNullOrWhiteSpace(effort))
+        {
+            return null;
+        }
+
+        return OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(effort);
     }
 
     private ModelRequestTokenBudget CalculateExtensionsAiTokenBudget(

@@ -1126,18 +1126,20 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     private bool IsNativeOllamaEndpoint() =>
         LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.Ollama;
 
-    private object ResolveNativeThinkingValue() =>
+    private object ResolveNativeThinkingValue(string? reasoningEffortOverride = null) =>
         IsGptOssRuntime()
-            ? ReasoningEffort
+            ? OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(
+                reasoningEffortOverride ?? ReasoningEffort)
             : false;
 
-    private object? ResolveOpenAiChatTemplateKwargs()
+    private object? ResolveOpenAiChatTemplateKwargs(string? reasoningEffortOverride = null)
     {
         if (IsGptOssRuntime())
         {
             return new Dictionary<string, object>
             {
-                ["reasoning_effort"] = ReasoningEffort
+                ["reasoning_effort"] = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(
+                    reasoningEffortOverride ?? ReasoningEffort)
             };
         }
 
@@ -1159,12 +1161,12 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 ? "chat_template_kwargs.enable_thinking=false"
                 : "provider-managed";
 
-    private string ResolveNativeThinkingDescription() =>
-        ResolveNativeThinkingValue() is string effort ? effort : "false";
+    private string ResolveNativeThinkingDescription(string? reasoningEffortOverride = null) =>
+        ResolveNativeThinkingValue(reasoningEffortOverride) is string effort ? effort : "false";
 
-    private bool IsExpectedNativeThinkingValue(JsonElement value)
+    private bool IsExpectedNativeThinkingValue(JsonElement value, string? reasoningEffortOverride = null)
     {
-        var expected = ResolveNativeThinkingValue();
+        var expected = ResolveNativeThinkingValue(reasoningEffortOverride);
         return expected switch
         {
             string effort => value.ValueKind == JsonValueKind.String
@@ -1375,15 +1377,15 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         return OllamaRuntimeSafetyPolicy.ClampContextTokens(_options.ContextTokens);
     }
 
-    private void ValidateNativeOllamaPayload(string payload)
+    private void ValidateNativeOllamaPayload(string payload, string? reasoningEffortOverride = null)
     {
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         if (!root.TryGetProperty("think", out var think)
-            || !IsExpectedNativeThinkingValue(think))
+            || !IsExpectedNativeThinkingValue(think, reasoningEffortOverride))
         {
             throw new InvalidOperationException(
-                $"Refusing to send Ollama request without the required thinking mode ({ResolveNativeThinkingDescription()}).");
+                $"Refusing to send Ollama request without the required thinking mode ({ResolveNativeThinkingDescription(reasoningEffortOverride)}).");
         }
 
         if (!root.TryGetProperty("keep_alive", out var keepAlive)
@@ -1403,7 +1405,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         }
     }
 
-    private void ValidateOpenAiCompatiblePayload(string payload)
+    private void ValidateOpenAiCompatiblePayload(string payload, string? reasoningEffortOverride = null)
     {
         if (!IsGptOssRuntime() && !ShouldDisableThinking())
         {
@@ -1421,12 +1423,14 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
         if (IsGptOssRuntime())
         {
+            var expectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(
+                reasoningEffortOverride ?? ReasoningEffort);
             if (!templateArguments.TryGetProperty("reasoning_effort", out var reasoningEffort)
                 || reasoningEffort.ValueKind != JsonValueKind.String
-                || !string.Equals(reasoningEffort.GetString(), ReasoningEffort, StringComparison.OrdinalIgnoreCase))
+                || !string.Equals(reasoningEffort.GetString(), expectedReasoningEffort, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    $"Refusing to send a GPT-OSS request without reasoning effort {ReasoningEffort}.");
+                    $"Refusing to send a GPT-OSS request without reasoning effort {expectedReasoningEffort}.");
             }
 
             return;

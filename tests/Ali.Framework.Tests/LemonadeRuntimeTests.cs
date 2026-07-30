@@ -48,6 +48,55 @@ public sealed class LemonadeRuntimeTests
     }
 
     [Fact]
+    public async Task PerCallReasoningOverride_UsesLowWithoutChangingSelectedMainEffort()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = new OpenAiCompatibleLocalModelRuntime(
+            client,
+            new OpenAiCompatibleRuntimeOptions(
+                true,
+                new Uri("http://127.0.0.1:13305/api/v1/"),
+                "gpt-oss-20b-mxfp4-GGUF",
+                "GPT-OSS 20B",
+                "gpt-oss",
+                "20B",
+                "MXFP4",
+                8192,
+                2048,
+                0.2,
+                0.9,
+                true,
+                false,
+                false,
+                false)
+            { Engine = LocalRuntimeEngines.Lemonade, ReasoningEffort = "high" });
+        var options = new ChatOptions
+        {
+            MaxOutputTokens = 64,
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["ali.reasoningEffortOverride"] = "low"
+            }
+        };
+
+        _ = await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Return OK")],
+            options,
+            TestContext.Current.CancellationToken);
+
+        var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        using var payload = JsonDocument.Parse(chat.Body);
+        Assert.Equal(
+            "low",
+            payload.RootElement
+                .GetProperty("chat_template_kwargs")
+                .GetProperty("reasoning_effort")
+                .GetString());
+        Assert.Equal("high", runtime.ReasoningEffort);
+    }
+
+    [Fact]
     public async Task LaterChat_ReloadsWhenLemonadeEvictsThePreviouslyPreparedModel()
     {
         var handler = new RecordingHandler();

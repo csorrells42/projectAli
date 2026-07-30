@@ -107,8 +107,7 @@ public sealed class FullToolRegistryPlanningTests
             "{\"action\":\"final\",\"answer\":\"I do not have real-time weather information.\"}",
             "NO\nThe successful National Weather Service result contains a current Tullahoma observation, so the draft contradicts available evidence.",
             "{\"action\":\"final\",\"answer\":\"The National Weather Service reports 78 F with light wind in Tullahoma at 10:55 AM CDT.\"}",
-            "YES\nThe answer preserves Tullahoma and accurately synthesizes the successful current weather evidence.",
-            "{\"action\":\"final\",\"answer\":\"The National Weather Service reports 78 F with light wind in Tullahoma at 10:55 AM CDT.\"}");
+            "YES\nThe answer preserves Tullahoma and accurately synthesizes the successful current weather evidence.");
         using var client = new LemonadeToolCallingChatClient(
             model,
             new DevelopmentLocalModelRuntime(),
@@ -134,6 +133,11 @@ public sealed class FullToolRegistryPlanningTests
         Assert.Contains("78 F", response.Text, StringComparison.Ordinal);
         Assert.Contains("Tullahoma", response.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("do not have real-time", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(4, model.CallCount);
+        Assert.Equal(2, model.ObservedMessages.Count(messages =>
+            messages.Any(message => message.Text?.Contains("QUALITY CONTROL PASS", StringComparison.Ordinal) == true)));
+        Assert.DoesNotContain(model.ObservedMessages.SelectMany(messages => messages), message =>
+            message.Text?.Contains("CURRENT-EVIDENCE GATE", StringComparison.Ordinal) == true);
         var criticPrompt = string.Join("\n", model.ObservedMessages[1].Select(message => message.Text));
         Assert.Contains("claims the information or capability is unavailable", criticPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("78 F", criticPrompt, StringComparison.Ordinal);
