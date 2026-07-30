@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Ali.Modules.Identity;
@@ -20,7 +21,8 @@ internal sealed class LemonadeToolCallingChatClient(
     ILocalModelRuntime runtime,
     string assistantName,
     Func<CoordinatorTurnContext?> turnAccessor,
-    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null) : IChatClient
+    Func<string, Dictionary<string, object?>, Dictionary<string, object?>>? toolArgumentNormalizer = null,
+    TimeSpan? modelPassHeartbeatInterval = null) : IChatClient
 {
     private const int MaximumContinuationContextCharacters = 6000;
     private const int MaximumLateContinuationEvidenceCharacters = 10000;
@@ -38,6 +40,8 @@ internal sealed class LemonadeToolCallingChatClient(
     private readonly string _assistantName = AssistantProfile.NormalizeAssistantName(assistantName);
     private readonly Func<string, Dictionary<string, object?>, Dictionary<string, object?>> _toolArgumentNormalizer =
         toolArgumentNormalizer ?? ((_, arguments) => arguments);
+    private readonly TimeSpan _modelPassHeartbeatInterval =
+        modelPassHeartbeatInterval ?? TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<string, ToolResultTracker> _toolResultsByTurn = new(StringComparer.Ordinal);
     private CoordinatorTurnContext? _activeTurn;
 
@@ -96,7 +100,7 @@ internal sealed class LemonadeToolCallingChatClient(
                 return nativeResponse;
             }
 
-            var nativeAuditOptions = CreateCompatibilityOptions(options);
+            var nativeAuditOptions = CreateCompatibilityOptions(options, tools);
             var proposedFinal = CopyMetadata(
                 nativeResponse,
                 new TextContent(JsonSerializer.Serialize(new
@@ -137,7 +141,7 @@ internal sealed class LemonadeToolCallingChatClient(
             return translatedNativeResponse;
         }
 
-        var compatibilityOptions = CreateCompatibilityOptions(options);
+        var compatibilityOptions = CreateCompatibilityOptions(options, tools);
 
         var response = await GetStructuredDecisionResponseAsync(
             planningScope.DecisionMessages,
@@ -214,18 +218,65 @@ internal sealed class LemonadeToolCallingChatClient(
         }
     }
 
-    private static ChatOptions CreateCompatibilityOptions(ChatOptions? options)
+    private static ChatOptions CreateCompatibilityOptions(
+        ChatOptions? options,
+        IReadOnlyList<AIFunctionDeclaration> tools)
     {
         var compatibilityOptions = options?.Clone() ?? new ChatOptions();
         compatibilityOptions.Tools = null;
         compatibilityOptions.ToolMode = ChatToolMode.None;
         compatibilityOptions.AllowMultipleToolCalls = false;
-        compatibilityOptions.ResponseFormat = ChatResponseFormat.Json;
+        compatibilityOptions.ResponseFormat = ChatResponseFormat.ForJsonSchema(
+            BuildDecisionSchema(tools),
+            "ali_tool_decision");
         compatibilityOptions.AdditionalProperties = new AdditionalPropertiesDictionary
         {
             ["ali.internalRouting"] = true
         };
         return compatibilityOptions;
+    }
+
+    private static JsonElement BuildDecisionSchema(IReadOnlyList<AIFunctionDeclaration> tools)
+    {
+        var toolNames = tools
+            .Select(tool => tool.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        return JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            oneOf = new object[]
+            {
+                new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    required = new[] { "action", "answer" },
+                    properties = new
+                    {
+                        action = new { type = "string", @enum = new[] { "final" } },
+                        answer = new { type = "string", minLength = 1 }
+                    }
+                },
+                new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    required = new[] { "action", "assessment", "tool", "arguments", "summary", "next" },
+                    properties = new
+                    {
+                        action = new { type = "string", @enum = new[] { "call" } },
+                        assessment = new { type = "string", minLength = 1 },
+                        tool = new { type = "string", @enum = toolNames },
+                        arguments = new { type = "object" },
+                        summary = new { type = "string", minLength = 1 },
+                        next = new { type = "string", minLength = 1 }
+                    }
+                }
+            }
+        }, JsonOptions);
     }
 
     private static bool ContainsFunctionCall(ChatResponse response) =>
@@ -299,7 +350,7 @@ internal sealed class LemonadeToolCallingChatClient(
                 "Honor explicit source-quality requirements. A third-party blog, aggregator, social post, or video is not a primary source merely because it is linked. Primary evidence must come from the organization, maintainer, author, specification, release notes, repository, filing, or first-party data responsible for the claim. If the requested source class is missing, return no.",
                 "For navigation or route requests, never manufacture turn-by-turn steps or accept unsupported road geometry, mileage, travel time, traffic, nearest-place rankings, or business addresses. Ordinary web snippets and model knowledge are not route evidence. If no successful route-capable tool supplied those facts, return no.",
                 "For current, live, latest, or today requests, the tool deliberately omits its internal fetch timestamp because retrieval time is not publication evidence. Compare only source-stated observation/publication dates with the requested timeframe. Never accept the current date as a source date unless that date appears as source evidence. If freshness is older than requested or unestablished, return no.",
-                "If the human asks for current or externally verifiable facts and no successful live evidence exists in this turn, a direct model answer is not authoritative evidence. Return no so the semantic librarian can reconsider the full live registry.",
+                "If the human asks for current or externally verifiable facts and no successful live evidence exists in this turn, a direct model answer is not authoritative evidence. Return no so the planner can reconsider the complete live registry.",
                 "Preserve the named people, places, organizations, products, dates, and other entities in the human's request. If the draft, tool query, or evidence silently substitutes a different entity, return no unless authoritative evidence establishes that they are equivalent.",
                 "When a successful tool result contains evidence responsive to the human's question, a draft that claims the information or capability is unavailable contradicts the evidence. Return no and identify that conflict so the planner can synthesize the result already obtained.",
                 "When the user requests exact identifiers, paths, names, codes, or stored values, copy them verbatim from the authoritative tool result. Do not decorate, normalize, paraphrase, or add characters inside an exact value.",
@@ -446,8 +497,8 @@ internal sealed class LemonadeToolCallingChatClient(
                         decisionInstructions,
                         MaximumAuditFrameworkCharacters,
                         "audit framework instructions"),
-                    "AVAILABLE TOOLS AND ARGUMENT SCHEMAS FOR THIS ATTEMPT (authoritative subset):",
-                    $"FULL REGISTERED TOOL COUNT: {registeredToolCount ?? tools.Count}. The current subset is not evidence that other capabilities are unavailable; a NO verdict can trigger fresh semantic selection from the full registry.",
+                    "AVAILABLE TOOLS AND ARGUMENT SCHEMAS (complete live registry):",
+                    $"FULL REGISTERED TOOL COUNT: {registeredToolCount ?? tools.Count}. Every currently registered capability is included below.",
                     BuildCompactToolCatalog(tools))),
             new(
                 AIChatRole.User,
@@ -1141,7 +1192,10 @@ internal sealed class LemonadeToolCallingChatClient(
                 repairMessages,
                 compatibilityOptions,
                 turn,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                heartbeatTitle: $"{_assistantName} is correcting the invalid action",
+                heartbeatDetail: latestValidationError,
+                heartbeatActivityKey: "repair-invalid-tool-action").ConfigureAwait(false);
             latestResponse = await CompleteTruncatedDecisionAsync(
                 latestResponse,
                 repairMessages,
@@ -1437,7 +1491,10 @@ internal sealed class LemonadeToolCallingChatClient(
         IEnumerable<AIChatMessage> messages,
         ChatOptions options,
         CoordinatorTurnContext? turn,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? heartbeatTitle = null,
+        string? heartbeatDetail = null,
+        string heartbeatActivityKey = "model-decision-heartbeat")
     {
         var requestOptions = options;
         while (true)
@@ -1445,7 +1502,28 @@ internal sealed class LemonadeToolCallingChatClient(
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                return await inner.GetResponseAsync(messages, requestOptions, cancellationToken).ConfigureAwait(false);
+                using var heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var heartbeat = ReportModelPassHeartbeatAsync(
+                    turn,
+                    heartbeatTitle ?? $"{_assistantName} is still choosing the next action",
+                    heartbeatDetail ?? "The local model is still generating the next completion or registered-tool action.",
+                    heartbeatActivityKey,
+                    heartbeatCancellation.Token);
+                try
+                {
+                    return await inner.GetResponseAsync(messages, requestOptions, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await heartbeatCancellation.CancelAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await heartbeat.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (heartbeatCancellation.IsCancellationRequested)
+                    {
+                    }
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && IsPegNativeFormatFailure(ex))
             {
@@ -1456,6 +1534,31 @@ internal sealed class LemonadeToolCallingChatClient(
                 requestOptions = options.Clone();
                 requestOptions.ResponseFormat = null;
             }
+        }
+    }
+
+    private async Task ReportModelPassHeartbeatAsync(
+        CoordinatorTurnContext? turn,
+        string title,
+        string detail,
+        string activityKey,
+        CancellationToken cancellationToken)
+    {
+        if (turn is null || _modelPassHeartbeatInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        using var timer = new PeriodicTimer(_modelPassHeartbeatInterval);
+        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            turn.Report(
+                AgentActivityKind.Planning,
+                $"{title} ({elapsed.TotalSeconds:N0}s)",
+                detail,
+                activityKey: activityKey);
         }
     }
 
@@ -1557,7 +1660,7 @@ internal sealed class LemonadeToolCallingChatClient(
         var decisionMessages = tools.Length == 0
             ? originalMessages
             : BuildCompatibilityMessages(originalMessages, tools, turn?.OriginalUserText);
-        var continuationOptions = CreateCompatibilityOptions(options);
+        var continuationOptions = CreateCompatibilityOptions(options, tools);
         // The visible response has already been translated out of Ali's internal
         // action envelope. Requiring another constrained JSON envelope here can
         // make llama-server return an empty/ordinary fragment that cannot be

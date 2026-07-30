@@ -569,6 +569,71 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task CompatibilityDecisionSchema_AllowsOnlyCompletionOrAnExactRegisteredTool()
+    {
+        using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
+            AIChatRole.Assistant,
+            "{\"action\":\"call\",\"assessment\":\"Read the requested state.\",\"tool\":\"read_current_state\",\"arguments\":{},\"summary\":\"Read current state\",\"next\":\"Use the result to answer.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var read = AIFunctionFactory.Create(() => "ok", "read_current_state", "Read state.");
+        var write = AIFunctionFactory.Create(() => "ok", "write_current_state", "Write state.");
+
+        await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Inspect the state.")],
+            new ChatOptions { Tools = [read, write] },
+            TestContext.Current.CancellationToken);
+
+        var format = Assert.IsType<ChatResponseFormatJson>(Assert.Single(inner.Formats));
+        Assert.True(format.Schema.HasValue);
+        var branches = format.Schema.Value.GetProperty("oneOf");
+        var finalBranch = branches[0];
+        var callBranch = branches[1];
+        Assert.Equal("final", Assert.Single(finalBranch.GetProperty("properties").GetProperty("action").GetProperty("enum").EnumerateArray()).GetString());
+        Assert.Equal("call", Assert.Single(callBranch.GetProperty("properties").GetProperty("action").GetProperty("enum").EnumerateArray()).GetString());
+        Assert.Equal(
+            ["read_current_state", "write_current_state"],
+            callBranch.GetProperty("properties").GetProperty("tool").GetProperty("enum")
+                .EnumerateArray().Select(item => item.GetString()!).ToArray());
+    }
+
+    [Fact]
+    public async Task LongModelPass_ReportsLiveElapsedHeartbeatToTheActivityWidget()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Inspect the state.",
+            activity.Add);
+        using var inner = new DelayedChatClient(
+            TimeSpan.FromMilliseconds(45),
+            "{\"action\":\"call\",\"assessment\":\"Read the requested state.\",\"tool\":\"read_current_state\",\"arguments\":{},\"summary\":\"Read current state\",\"next\":\"Use the result to answer.\"}");
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null,
+            modelPassHeartbeatInterval: TimeSpan.FromMilliseconds(10));
+        using var activeTurn = client.BeginTurn(turn);
+        var read = AIFunctionFactory.Create(() => "ok", "read_current_state", "Read state.");
+
+        await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Inspect the state.")],
+            new ChatOptions { Tools = [read] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(activity, item =>
+            item.ActivityKey == "model-decision-heartbeat"
+            && item.Text.Contains("still choosing the next action", StringComparison.OrdinalIgnoreCase)
+            && item.Text.Contains('s'));
+    }
+
+    [Fact]
     public async Task PegNativeStructuredDecoderFailure_RetriesWithoutServerGrammarAndValidatesLocally()
     {
         var activity = new List<AssistantStreamChunk>();
@@ -1855,6 +1920,36 @@ public sealed class LemonadeToolCallingChatClientTests
         {
             var response = await GetResponseAsync(messages, options, cancellationToken);
             foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class DelayedChatClient(TimeSpan delay, string response) : IChatClient
+    {
+        public async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<AIChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return new ChatResponse(new AIChatMessage(AIChatRole.Assistant, response));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<AIChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var result = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in result.ToChatResponseUpdates())
             {
                 yield return update;
             }
