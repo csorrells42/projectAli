@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -24,18 +23,9 @@ internal static class AliAgentFrameworkMiddleware
             CancellationToken cancellationToken) =>
         {
             var turn = turnAccessor();
-            var timer = Stopwatch.StartNew();
-            turn?.Report(
-                AgentActivityKind.Status,
-                $"{role} agent started",
-                "Agent Framework middleware accepted the task.");
             try
             {
                 await next(messages, session, options, cancellationToken).ConfigureAwait(false);
-                turn?.Report(
-                    AgentActivityKind.Status,
-                    $"{role} agent finished",
-                    $"Framework run completed in {timer.Elapsed.TotalSeconds:0.00} s.");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

@@ -45,7 +45,14 @@ public sealed class ActiveUserSession : IActiveUserSession
         {
             var configured = _identityProfiles.GetIdentityReviewItems()
                 .Where(item => item.IsRegisteredUser && !string.IsNullOrWhiteSpace(item.IdentityId))
-                .Select(item => new ActiveUser(item.IdentityId, item.DisplayName, false, "identity-profile-selection").Normalize())
+                .Select(item => new ActiveUser(
+                    item.IdentityId,
+                    item.DisplayName,
+                    false,
+                    "identity-profile-selection",
+                    item.Address,
+                    item.Email,
+                    item.PhoneNumber).Normalize())
                 .DistinctBy(item => item.StableId, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 

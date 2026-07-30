@@ -206,18 +206,7 @@ public sealed class WindowsCalendarEventPublisher : ICalendarEventPublisher
         using var process = _startProcess(startInfo);
         var standardOutput = process.StandardOutput.ReadToEnd();
         var standardError = process.StandardError.ReadToEnd();
-        if (!process.WaitForExit(15_000))
-        {
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-            }
-
-            throw new TimeoutException("Windows Task Scheduler did not respond within 15 seconds.");
-        }
+        process.WaitForExit();
 
         if (process.ExitCode != 0
             && !(ignoreMissingTask && (standardError.Contains("cannot find", StringComparison.OrdinalIgnoreCase)

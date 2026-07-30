@@ -6,9 +6,6 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
     // seconds on a cold machine. Killing and restarting the private worker at
     // that point discards all loading work and can turn one cold start into a
     // series of guaranteed foreground recall misses.
-    internal static readonly TimeSpan WarmupAttemptTimeout = TimeSpan.FromSeconds(30);
-    internal static readonly TimeSpan WarmupOverallTimeout = TimeSpan.FromSeconds(75);
-
     private readonly Mem0ProcessClient _client;
     private readonly Func<UserMemorySettings> _settings;
     private readonly object _warmupSync = new();
@@ -122,12 +119,8 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
     private async Task WarmupAsync(ActiveUser user)
     {
         if (!_settings().Normalize().Enabled) return;
-        using var overallTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        overallTimeout.CancelAfter(WarmupOverallTimeout);
-        for (var attempt = 1; attempt <= 3 && !overallTimeout.IsCancellationRequested; attempt++)
+        while (!_lifetime.IsCancellationRequested)
         {
-            using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(overallTimeout.Token);
-            attemptTimeout.CancelAfter(WarmupAttemptTimeout);
             try
             {
                 // Exercise the same embedding and Qdrant path used by foreground recall.
@@ -139,7 +132,7 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
                     user = ToUser(user),
                     query = "personal memory retrieval readiness check",
                     maximumResults = 1
-                }, attemptTimeout.Token).ConfigureAwait(false);
+                }, _lifetime.Token).ConfigureAwait(false);
                 if (!response.Success)
                 {
                     throw new InvalidOperationException(response.Message);
@@ -151,14 +144,14 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
                 or InvalidOperationException
                 or TimeoutException)
             {
-                if (_lifetime.IsCancellationRequested || overallTimeout.IsCancellationRequested || attempt == 3)
+                if (_lifetime.IsCancellationRequested)
                 {
                     return;
                 }
 
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(2), overallTimeout.Token).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromSeconds(2), _lifetime.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {

@@ -12,6 +12,7 @@ internal sealed class AliSourceTools(
     private const int MaximumResults = 5;
     private const int MaximumExcerptCharacters = 800;
     private const int MaximumWebSearchAttemptsPerTurn = 2;
+    private const int MaximumGoogleSearchAttemptsPerTurn = 2;
 
     public async Task<CoordinatorSourceResult> SearchCurrentWebAsync(
         [Description("A focused search query containing the people, topic, place, and timeframe needed.")] string query,
@@ -30,20 +31,46 @@ internal sealed class AliSourceTools(
         }
 
         var freshnessCheckedAt = DateTimeOffset.Now;
-        var datedQuery = $"{query.Trim()} as of {freshnessCheckedAt:yyyy-MM-dd}";
+        var modelSelectedQuery = query.Trim();
+        var exactSearchKey = NormalizeExactSearchKey(modelSelectedQuery);
         var normalizedTopic = string.IsNullOrWhiteSpace(topic) ? "general" : topic.Trim().ToLowerInvariant();
-        var intent = normalizedTopic.Equals("news", StringComparison.OrdinalIgnoreCase)
-            ? "current_news"
-            : "current_web";
+        var excludedProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (turn is not null
+            && (turn.GoogleSearchAttempts >= MaximumGoogleSearchAttemptsPerTurn
+                || turn.FailedGoogleQueryKeys.Contains(exactSearchKey)))
+        {
+            excludedProviders.Add(SourceProviderNames.GoogleGrounding);
+        }
+
         var result = await webSources.RetrieveAsync(
             new SourceQueryPlan(
                 true,
                 true,
-                intent,
-                datedQuery,
-                [datedQuery],
-                [normalizedTopic]),
+                "current_web",
+                modelSelectedQuery,
+                [modelSelectedQuery],
+                [normalizedTopic])
+            {
+                TemporalSelection = "model-selected-query",
+                ExcludedProviders = excludedProviders
+            },
             cancellationToken).ConfigureAwait(false);
+        if (turn is not null)
+        {
+            foreach (var googleAttempt in result.Attempts.Where(attempt =>
+                         string.Equals(
+                             attempt.Provider,
+                             SourceProviderNames.GoogleGrounding,
+                             StringComparison.OrdinalIgnoreCase)))
+            {
+                turn.GoogleSearchAttempts++;
+                if (!googleAttempt.ProducedResults)
+                {
+                    turn.FailedGoogleQueryKeys.Add(NormalizeExactSearchKey(googleAttempt.Query));
+                }
+            }
+        }
+
         var coordinatorResult = ToCoordinatorSourceResult(
             result,
             "live internet",
@@ -52,8 +79,7 @@ internal sealed class AliSourceTools(
         coordinatorResult = coordinatorResult with
         {
             Status = coordinatorResult.Status + " "
-                + $"Freshness checkpoint: {freshnessCheckedAt:yyyy-MM-ddTHH:mm:sszzz}. "
-                + "RetrievedAt records when Ali fetched an excerpt, not when the underlying event or observation occurred. "
+                + "Freshness checkpoint active. Ali's internal fetch time is deliberately not exposed as source publication evidence. "
                 + "For current, live, latest, or today requests, verify the source's stated observation/publication time against the requested period. "
                 + "If freshness is absent or older than requested, retry with the remaining search attempt or report that current status could not be verified."
         };
@@ -129,4 +155,10 @@ internal sealed class AliSourceTools(
             ? normalized
             : normalized[..MaximumExcerptCharacters] + "...";
     }
+
+    private static string NormalizeExactSearchKey(string query) =>
+        string.Join(
+                ' ',
+                query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            .ToLowerInvariant();
 }

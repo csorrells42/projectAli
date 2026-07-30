@@ -195,7 +195,7 @@ internal sealed class AliLanguageServerClient : IAsyncDisposable
         };
         await _process.Transport.WriteAsync(message, cancellationToken).ConfigureAwait(false);
         using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
-        var response = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        var response = await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (response["error"] is JsonNode error)
         {
             throw new InvalidOperationException($"Language server method '{method}' failed: {error.ToJsonString()}.");

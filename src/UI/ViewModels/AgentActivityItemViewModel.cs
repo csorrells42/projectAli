@@ -1,4 +1,5 @@
 using Ali.Modules.Coordinator;
+using System.Text.Json;
 
 namespace Ali.UI.ViewModels;
 
@@ -7,8 +8,10 @@ public sealed class AgentActivityItemViewModel
     public AgentActivityItemViewModel(AssistantStreamChunk chunk)
     {
         Kind = chunk.ActivityKind ?? AgentActivityKind.Status;
-        Title = chunk.Text;
-        Detail = chunk.ActivityDetail ?? string.Empty;
+        Title = NormalizeHumanText(chunk.Text, 320);
+        Detail = NormalizeHumanDetail(chunk.ActivityDetail);
+        ActivityKey = chunk.ActivityKey;
+        AssistantMessageId = chunk.AssistantMessageId;
         ElapsedMilliseconds = chunk.ElapsedMilliseconds;
         CreatedAt = DateTimeOffset.Now;
     }
@@ -18,6 +21,14 @@ public sealed class AgentActivityItemViewModel
     public string Title { get; }
 
     public string Detail { get; }
+
+    public string DisplayText => string.IsNullOrWhiteSpace(Detail)
+        ? Title
+        : $"{Title} — {Detail}";
+
+    public string? ActivityKey { get; }
+
+    public string AssistantMessageId { get; }
 
     public DateTimeOffset CreatedAt { get; }
 
@@ -54,4 +65,43 @@ public sealed class AgentActivityItemViewModel
             : $"{elapsed / 1000:0.00} s";
 
     public bool HasDetail => !string.IsNullOrWhiteSpace(Detail);
+
+    private static string NormalizeHumanDetail(string? value)
+    {
+        var normalized = NormalizeHumanText(value, 320);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(normalized);
+            if (document.RootElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            {
+                return "Technical payload omitted from the human activity view.";
+            }
+        }
+        catch (JsonException)
+        {
+            // Ordinary human-readable detail is kept.
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeHumanText(string? value, int maximumCharacters)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = string.Join(
+            " ",
+            value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return normalized.Length <= maximumCharacters
+            ? normalized
+            : normalized[..maximumCharacters] + "...";
+    }
 }

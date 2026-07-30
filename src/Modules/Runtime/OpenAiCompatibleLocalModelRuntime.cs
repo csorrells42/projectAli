@@ -32,8 +32,6 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         "Response reached the configured output limit before the model finished. Ask me to continue or increase the Runtime output limit.";
     private static readonly TimeSpan HealthProbeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan UnloadVerificationInterval = TimeSpan.FromMilliseconds(250);
-    private static readonly TimeSpan UnloadVerificationTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan LemonadeLoadTimeout = TimeSpan.FromMinutes(5);
     private static readonly Regex ThinkBlockRegex = new(
         @"<think>.*?</think>",
         RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -378,7 +376,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
             ActiveProfile = _options.ToModelProfile(isLastKnownGood: true) with
             {
-                SupportsToolCalls = _options.SupportsToolCalls || _nativeToolCallingAdvertised
+                // Server metadata is advisory. Native tool calling is enabled only
+                // when the saved runtime configuration explicitly opts into it.
+                // Otherwise Ali's compatibility connector owns validation, repair,
+                // continuation, and tool execution end to end.
+                SupportsToolCalls = _options.SupportsToolCalls
             };
             var reasoningVerification = IsGptOssRuntime()
                 ? $" GPT-OSS reasoning effort '{ReasoningEffort}' was sent explicitly"
@@ -520,8 +522,6 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            using var loadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            loadCancellation.CancelAfter(LemonadeLoadTimeout);
             await PostJsonAndRequireSuccessAsync(
                 BuildServerRootUri("api/v1/load"),
                 new
@@ -531,11 +531,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                     save_options = false
                 },
                 $"Lemonade model load with {_options.ContextTokens:N0}-token context",
-                 loadCancellation.Token).ConfigureAwait(false);
+                 cancellationToken).ConfigureAwait(false);
 
             await WaitForLemonadeReadyAsync(
                 OllamaRuntimeSafetyPolicy.ClampContextTokens(_options.ContextTokens),
-                loadCancellation.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             Volatile.Write(ref _lemonadeModelPrepared, 1);
         }
@@ -596,8 +596,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         Func<string, bool> released,
         CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow + UnloadVerificationTimeout;
-        while (DateTimeOffset.UtcNow < deadline)
+        while (true)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, statusUri);
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -625,8 +624,6 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             await Task.Delay(UnloadVerificationInterval, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new TimeoutException(
-            $"Runtime '{RuntimeIdentity}' accepted unload but did not verify model release within {UnloadVerificationTimeout.TotalSeconds:N0} seconds.");
     }
 
     private static bool OllamaListsModelAsLoaded(string json, string model)
@@ -1047,10 +1044,83 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 || body.Contains("exceeds the available context", StringComparison.OrdinalIgnoreCase)
                 || body.Contains("exceed context", StringComparison.OrdinalIgnoreCase)))
         {
-            return $"The conversation exceeded Lemonade's active context window. Ali requested {_options.ContextTokens:N0} context tokens and reserves {_options.OutputTokenLimit:N0} for the answer. Start a fresh conversation if compaction cannot reduce this unusually large turn. Runtime detail: {TrimForUser(body)}";
+            return $"The conversation exceeded Lemonade's active context window. Ali requested {_options.ContextTokens:N0} context tokens and reserves up to {_options.OutputTokenLimit:N0} for the answer. Select a larger context, start a fresh conversation, or reduce the attached material.";
         }
 
-        return $"Local model runtime returned HTTP {(int)statusCode}. {TrimForUser(body)}";
+        var detail = ExtractRuntimeErrorMessage(body);
+        return string.IsNullOrWhiteSpace(detail)
+            ? $"Local model runtime returned HTTP {(int)statusCode} without a readable error message."
+            : $"Local model runtime returned HTTP {(int)statusCode}: {detail}";
+    }
+
+    private static string ExtractRuntimeErrorMessage(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var message = FindErrorMessage(document.RootElement);
+            return TrimForUser(message ?? string.Empty);
+        }
+        catch (JsonException)
+        {
+            return TrimForUser(body);
+        }
+    }
+
+    private static string? FindErrorMessage(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var propertyName in new[] { "message", "detail", "error_description" })
+            {
+                if (element.TryGetProperty(propertyName, out var candidate)
+                    && candidate.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(candidate.GetString()))
+                {
+                    return candidate.GetString();
+                }
+            }
+
+            foreach (var propertyName in new[] { "error", "details", "response" })
+            {
+                if (element.TryGetProperty(propertyName, out var nested)
+                    && FindErrorMessage(nested) is { Length: > 0 } nestedMessage)
+                {
+                    return nestedMessage;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (FindErrorMessage(item) is { Length: > 0 } nestedMessage)
+                {
+                    return nestedMessage;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.String
+                 && element.GetString() is { } nestedText
+                 && nestedText.TrimStart() is ['{' or '[', ..])
+        {
+            try
+            {
+                using var nestedDocument = JsonDocument.Parse(nestedText);
+                return FindErrorMessage(nestedDocument.RootElement);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     private bool IsNativeOllamaEndpoint() =>
@@ -1172,10 +1242,12 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         var context = nativeOllama
             ? ResolveSafeOllamaContextTokens().ToString(System.Globalization.CultureInfo.InvariantCulture)
             : "provider-managed";
+        var requestedOutputTokens = ResolveMaxTokens(request, requestedMaxTokens);
+        var budget = CalculateLegacyTokenBudget(request, messageCount, requestedOutputTokens);
         WriteHealthLog(
             $"request POST {uri} model={_options.Model} stream={stream} "
             + $"think={(nativeOllama ? ResolveNativeThinkingDescription() : ResolveOpenAiThinkingDescription())} keep_alive={(nativeOllama ? OllamaRuntimeSafetyPolicy.KeepAlive : "provider-managed")} "
-            + $"num_ctx={context} num_predict={ResolveMaxTokens(request, requestedMaxTokens)} messages={messageCount} "
+            + $"num_ctx={context} num_predict={budget.EffectiveOutputTokens} requested_num_predict={requestedOutputTokens} messages={messageCount} "
             + $"estimated_prompt_tokens={estimatedPromptTokens} health={isHealthCheck}");
     }
 
@@ -1213,12 +1285,15 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         };
 
         var plannerRequest = IsPlannerRequest(request);
+        var requestedMaxTokens = ResolveMaxTokens(request, maxTokens);
+        var budget = CalculateLegacyTokenBudget(request, messages.Count, requestedMaxTokens);
+        ReportTokenBudget(budget);
         return new
         {
             model = _options.Model,
             messages = messages.ToArray(),
             stream = stream ?? _options.StreamingEnabled,
-            max_tokens = ResolveMaxTokens(request, maxTokens),
+            max_tokens = budget.EffectiveOutputTokens,
             temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
             top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP,
             chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(),
@@ -1243,6 +1318,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         }
 
         var plannerRequest = IsPlannerRequest(request);
+        var requestedMaxTokens = ResolveMaxTokens(request, maxTokens);
+        var budget = CalculateLegacyTokenBudget(request, messages.Count, requestedMaxTokens);
+        ReportTokenBudget(budget);
         return new
         {
             model = _options.Model,
@@ -1253,7 +1331,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             options = new
             {
                 num_ctx = ResolveSafeOllamaContextTokens(),
-                num_predict = ResolveMaxTokens(request, maxTokens),
+                num_predict = budget.EffectiveOutputTokens,
                 temperature = maxTokens.HasValue || plannerRequest ? 0 : _options.Temperature,
                 top_p = maxTokens.HasValue || plannerRequest ? 0.1 : _options.TopP
             }
@@ -1373,6 +1451,43 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             ? Math.Max(_options.OutputTokenLimit, QwenVisibleOutputTokenFloor)
             : _options.OutputTokenLimit;
         return configuredLimit;
+    }
+
+    private ModelRequestTokenBudget CalculateLegacyTokenBudget(
+        ChatRequest request,
+        int messageCount,
+        int requestedMaxTokens)
+    {
+        var textSegments = new List<string?>();
+        if (!IsHealthCheckRequest(request) && !IsPlannerRequest(request))
+        {
+            textSegments.Add(BuildAssistantPersonaInstruction());
+            textSegments.Add(BuildCurrentDateInstruction());
+        }
+
+        textSegments.AddRange(request.History.Select(message => message.Text));
+        textSegments.Add(request.UserText);
+        return ModelRequestTokenBudgetCalculator.Calculate(
+            ResolveSafeOllamaContextTokens(),
+            requestedMaxTokens,
+            textSegments,
+            [],
+            messageCount,
+            0,
+            request.Attachments.Count(item => item.Kind == AttachmentKind.Image));
+    }
+
+    private void ReportTokenBudget(ModelRequestTokenBudget budget)
+    {
+        if (!budget.WasClamped)
+        {
+            return;
+        }
+
+        WriteHealthLog(
+            $"request output budget clamped requested={budget.RequestedOutputTokens} "
+            + $"effective={budget.EffectiveOutputTokens} context={budget.ContextTokens} "
+            + $"estimated_input={budget.EstimatedInputTokens} reserve={budget.SafetyReserveTokens}");
     }
 
     private string BuildAssistantPersonaInstruction()

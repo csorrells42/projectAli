@@ -167,7 +167,7 @@ internal sealed record RuntimeModelChoice(
     {
         var lower = model.ToLowerInvariant();
         var values = lower.Contains("gpt-oss", StringComparison.Ordinal)
-            ? new[] { 4096, 8192, 16384, 32768 }
+            ? new[] { 4096, 8192, 16384, 32768, 65536, 131072 }
             : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("26b", StringComparison.Ordinal)
             ? new[] { 4096, 8192, 16384 }
             : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("12b", StringComparison.Ordinal)
@@ -184,7 +184,7 @@ internal sealed record RuntimeModelChoice(
     private static IReadOnlyList<int> BuildOutputChoices(string model, int? preferred) =>
         AddPreferred(
             model.Contains("gpt-oss", StringComparison.OrdinalIgnoreCase)
-                ? [512, 1024, 2048, 3072, 4096, 8192]
+                ? [512, 1024, 2048, 3072, 4096, 8192, 16384]
                 : [128, 256, 512],
             preferred,
             minimum: 1);

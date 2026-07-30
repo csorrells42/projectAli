@@ -35,8 +35,7 @@ public sealed class QdrantServiceManager : IAsyncDisposable
             settings.QdrantHost.Trim(),
             settings.QdrantGrpcPort,
             settings.QdrantUseTls,
-            apiKey,
-            TimeSpan.FromSeconds(Math.Clamp(settings.QdrantRequestTimeoutSeconds, 2, 120)));
+            apiKey);
     }
 
     public async Task<QdrantRuntimeStatus> EnsureAvailableAsync(
@@ -166,8 +165,7 @@ public sealed class QdrantServiceManager : IAsyncDisposable
 
     private async Task<QdrantRuntimeStatus> WaitForReadyAsync(LocalVectorLibrarySettings settings, CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
-        while (DateTimeOffset.UtcNow < deadline)
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_ownedProcess?.HasExited == true)
@@ -185,7 +183,6 @@ public sealed class QdrantServiceManager : IAsyncDisposable
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new TimeoutException("Managed Qdrant did not become ready within 20 seconds.");
     }
 
     private async Task<QdrantRuntimeStatus> ProbeCoreAsync(LocalVectorLibrarySettings settings, CancellationToken cancellationToken)

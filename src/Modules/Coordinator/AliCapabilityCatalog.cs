@@ -7,6 +7,7 @@ namespace Ali.Modules.Coordinator;
 public static class AliCapabilityCatalog
 {
     public const string ListAvailableToolsName = "list_available_tools";
+    public const string GetActiveUserProfileName = "get_active_user_profile";
     public const string RecallUserMemoryName = "recall_user_memory";
     public const string RememberCurrentUserName = "remember_for_current_user";
     public const string CorrectCurrentUserMemoryName = "correct_current_user_memory";
@@ -46,6 +47,8 @@ public static class AliCapabilityCatalog
     public const string ReadAgentSkillResourceName = "read_skill_resource";
     public const string RunAgentSkillScriptName = "run_skill_script";
     public const string CodingListCapabilitiesName = "coding_list_capabilities";
+    public const string CodingAgentStatusName = "coding_agent_status";
+    public const string CodingAgentExecuteName = "coding_agent_execute";
     public const string CodingInspectProjectName = "coding_inspect_project";
     public const string CodingIndexProjectName = "coding_index_project";
     public const string CodingSearchSymbolsName = "coding_search_symbols";
@@ -131,9 +134,8 @@ public static class AliCapabilityCatalog
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
         new(ListAvailableToolsName, "Return Ali's exact currently registered model-callable tool catalog."),
+        new(GetActiveUserProfileName, "Return the explicitly selected local user's identity profile as authoritative data."),
         new(RecallUserMemoryName, "Recall relevant long-term memories for the active identity profile. The active user is resolved internally."),
-        new(RememberCurrentUserName, "Teach Ali a durable fact for the active identity profile after an explicit user request."),
-        new(CorrectCurrentUserMemoryName, "Correct exactly one durable memory belonging to the active identity profile by its exact memory ID."),
         new(ForgetCurrentUserMemoryName, "Forget exactly one durable memory belonging to the active identity profile by its exact memory ID after confirmation."),
         new(ListCurrentUserMemoriesName, "List memories belonging only to the active identity profile after confirmation."),
         new(SearchCurrentWebName, "Search the configured live internet backends for current or source-dependent information."),
@@ -170,6 +172,8 @@ public static class AliCapabilityCatalog
         new(ReadAgentSkillResourceName, "Read one exact resource referenced by a loaded Agent Skill.", "Microsoft Agent Framework Agent Skills"),
         new(RunAgentSkillScriptName, "Run one exact script referenced by a loaded Agent Skill, subject to approval.", "Microsoft Agent Framework Agent Skills"),
         new(CodingListCapabilitiesName, "Return the live registered coding providers, toolchains, and shared execution/intelligence infrastructure.", "Ali multi-language coding foundation"),
+        new(CodingAgentStatusName, "Report the selected Aider, OpenHands, or Hybrid programming engine and readiness of both providers.", "Ali external coding agents"),
+        new(CodingAgentExecuteName, "Execute a substantial approved programming objective through Aider, OpenHands, or their Hybrid collaboration.", "Ali external coding agents"),
         new(CodingInspectProjectName, "Detect an approved project's language, manifest, provider, capabilities, and toolchains.", "Ali multi-language coding foundation"),
         new(CodingIndexProjectName, "Build a bounded cross-language structural source index.", "Ali multi-language coding foundation"),
         new(CodingSearchSymbolsName, "Search the local cross-language source index for symbols.", "Ali multi-language coding foundation"),
@@ -297,7 +301,7 @@ public static class AliCapabilityCatalog
         var allTools = nativeTools.Concat(additionalTools).ToList();
         return
         new(
-            $"Ali has {allTools.Count} configured model-callable tools. This complete structured inventory is authoritative. Magentic policy: {policy}. Preserve every returned row and its Source when the user requests the full inventory; filtering and alternate formatting are allowed only when the user asks for them. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
+            $"Ali has {allTools.Count} configured model-callable tools. This structured inventory is authoritative. Magentic policy: {policy}. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
             allTools);
     }
 

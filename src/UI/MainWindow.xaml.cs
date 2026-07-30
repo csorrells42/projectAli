@@ -314,7 +314,8 @@ public partial class MainWindow : Window
                 session.LiveViewport,
                 session.Guidance,
                 session.SpeakerEnrollment,
-                session.MicrophoneInput)
+                session.MicrophoneInput,
+                viewModel.ActiveUsers)
             {
                 Owner = this
             };

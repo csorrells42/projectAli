@@ -8,6 +8,10 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     private readonly AliServices _services;
     private MagenticPolicyChoice _selectedMagenticPolicy = MagenticPolicyChoice.AskFirst;
     private int _magenticMaximumRounds = 6;
+    private ProgrammingAgentModeChoice _selectedProgrammingAgentMode = ProgrammingAgentModeChoice.Hybrid;
+    private string _openHandsWslDistribution = "Ubuntu";
+    private string _aiderStatusText = "Aider readiness has not been checked yet.";
+    private string _openHandsStatusText = "OpenHands readiness has not been checked yet.";
     private string _statusText = "Agent orchestration settings have not been loaded yet.";
     private string _checkpointSummary = "Checking workflow checkpoints...";
 
@@ -17,6 +21,7 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         SaveCommand = new RelayCommand(_ => Save(), onException: HandleError);
         ReloadCommand = new RelayCommand(_ => Reload(), onException: HandleError);
         ArchiveCheckpointsCommand = new RelayCommand(_ => ArchiveCheckpoints(), onException: HandleError);
+        RefreshProgrammingAgentsCommand = new RelayCommand(_ => _ = RefreshProgrammingAgentsAsync(), onException: HandleError);
         Reload();
     }
 
@@ -29,6 +34,13 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
 
     public IReadOnlyList<int> MaximumRoundChoices { get; } = Enumerable.Range(2, 11).ToArray();
 
+    public IReadOnlyList<ProgrammingAgentModeChoice> ProgrammingAgentModeChoices { get; } =
+    [
+        ProgrammingAgentModeChoice.Aider,
+        ProgrammingAgentModeChoice.OpenHands,
+        ProgrammingAgentModeChoice.Hybrid
+    ];
+
     public MagenticPolicyChoice SelectedMagenticPolicy
     {
         get => _selectedMagenticPolicy;
@@ -39,6 +51,30 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     {
         get => _magenticMaximumRounds;
         set => SetProperty(ref _magenticMaximumRounds, Math.Clamp(value, 2, 12));
+    }
+
+    public ProgrammingAgentModeChoice SelectedProgrammingAgentMode
+    {
+        get => _selectedProgrammingAgentMode;
+        set => SetProperty(ref _selectedProgrammingAgentMode, value ?? ProgrammingAgentModeChoice.Hybrid);
+    }
+
+    public string OpenHandsWslDistribution
+    {
+        get => _openHandsWslDistribution;
+        set => SetProperty(ref _openHandsWslDistribution, value);
+    }
+
+    public string AiderStatusText
+    {
+        get => _aiderStatusText;
+        private set => SetProperty(ref _aiderStatusText, value);
+    }
+
+    public string OpenHandsStatusText
+    {
+        get => _openHandsStatusText;
+        private set => SetProperty(ref _openHandsStatusText, value);
     }
 
     public string SettingsPath => _services.AgentOrchestrationSettingsPath;
@@ -63,13 +99,19 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
 
     public ICommand ArchiveCheckpointsCommand { get; }
 
+    public ICommand RefreshProgrammingAgentsCommand { get; }
+
     public void Reload()
     {
         var settings = _services.LoadAgentOrchestrationSettings();
         SelectedMagenticPolicy = MagenticPolicyChoices.First(choice =>
             choice.Value == settings.MagenticPolicy);
         MagenticMaximumRounds = settings.MagenticMaximumRounds;
+        SelectedProgrammingAgentMode = ProgrammingAgentModeChoices.First(choice =>
+            choice.Value == settings.ProgrammingAgentMode);
+        OpenHandsWslDistribution = settings.OpenHandsWslDistribution;
         RefreshCheckpointSummary();
+        _ = RefreshProgrammingAgentsAsync();
         StatusText = "Loaded Agent Framework orchestration policy. Changes apply on Ali's next turn.";
     }
 
@@ -78,10 +120,13 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         _services.SaveAgentOrchestrationSettings(new AgentOrchestrationSettings
         {
             MagenticPolicy = SelectedMagenticPolicy.Value,
-            MagenticMaximumRounds = MagenticMaximumRounds
+            MagenticMaximumRounds = MagenticMaximumRounds,
+            ProgrammingAgentMode = SelectedProgrammingAgentMode.Value,
+            OpenHandsWslDistribution = OpenHandsWslDistribution
         });
         RefreshCheckpointSummary();
-        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}. Changes apply on Ali's next turn.";
+        _ = RefreshProgrammingAgentsAsync();
+        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}; programming engine: {SelectedProgrammingAgentMode.DisplayName}. Changes apply on Ali's next turn.";
     }
 
     private void ArchiveCheckpoints()
@@ -117,6 +162,41 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
 
     private void HandleError(Exception ex) =>
         StatusText = $"Agent orchestration settings failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}";
+
+    private async Task RefreshProgrammingAgentsAsync()
+    {
+        try
+        {
+            AiderStatusText = "Checking Aider...";
+            OpenHandsStatusText = "Checking OpenHands...";
+            var status = await _services.CodingModule.ExternalAgents.GetStatusAsync(CancellationToken.None);
+            AiderStatusText = $"{(status.Aider.Ready ? "Ready" : "Unavailable")}: {status.Aider.Summary}";
+            OpenHandsStatusText = $"{(status.OpenHands.Ready ? "Ready" : "Unavailable")}: {status.OpenHands.Summary}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            AiderStatusText = "Aider readiness check failed safely.";
+            OpenHandsStatusText = $"Provider readiness check failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}";
+        }
+    }
+}
+
+public sealed record ProgrammingAgentModeChoice(string Value, string DisplayName, string Summary)
+{
+    public static ProgrammingAgentModeChoice Aider { get; } = new(
+        ProgrammingAgentModes.Aider,
+        "Aider",
+        "Architect and refinement first. Best when design quality, repo-map context, and precise edits matter most.");
+
+    public static ProgrammingAgentModeChoice OpenHands { get; } = new(
+        ProgrammingAgentModes.OpenHands,
+        "OpenHands",
+        "Autonomous implementation first. Best for grinding through complete multi-step coding work.");
+
+    public static ProgrammingAgentModeChoice Hybrid { get; } = new(
+        ProgrammingAgentModes.Hybrid,
+        "Hybrid",
+        "OpenHands implements, Aider reviews and refines, then Ali checks direct evidence before claiming completion.");
 }
 
 public sealed record MagenticPolicyChoice(string Value, string DisplayName, string Summary)

@@ -87,6 +87,118 @@ public sealed class LemonadeRuntimeTests
     }
 
     [Fact]
+    public async Task LargeTurn_ClampsOutputInsideSelectedContextBeforeGeneration()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = new OpenAiCompatibleLocalModelRuntime(
+            client,
+            new OpenAiCompatibleRuntimeOptions(
+                true,
+                new Uri("http://127.0.0.1:13305/api/v1/"),
+                "gpt-oss-20b-mxfp4-GGUF",
+                "GPT-OSS 20B",
+                "gpt-oss",
+                "20B",
+                "MXFP4",
+                4096,
+                2048,
+                0.2,
+                0.9,
+                true,
+                false,
+                false,
+                false)
+            { Engine = LocalRuntimeEngines.Lemonade, ReasoningEffort = "low" });
+
+        await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(
+                Microsoft.Extensions.AI.ChatRole.User,
+                new string('x', 6_000))],
+            new ChatOptions { MaxOutputTokens = 2048 },
+            TestContext.Current.CancellationToken);
+
+        var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        using var payload = JsonDocument.Parse(chat.Body);
+        Assert.InRange(payload.RootElement.GetProperty("max_tokens").GetInt32(), 128, 2047);
+    }
+
+    [Fact]
+    public async Task OversizedTurn_IsRejectedBeforeGenerationWithReadableCapacityError()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = new OpenAiCompatibleLocalModelRuntime(
+            client,
+            new OpenAiCompatibleRuntimeOptions(
+                true,
+                new Uri("http://127.0.0.1:13305/api/v1/"),
+                "gpt-oss-20b-mxfp4-GGUF",
+                "GPT-OSS 20B",
+                "gpt-oss",
+                "20B",
+                "MXFP4",
+                4096,
+                2048,
+                0.2,
+                0.9,
+                true,
+                false,
+                false,
+                false)
+            { Engine = LocalRuntimeEngines.Lemonade, ReasoningEffort = "low" });
+
+        var error = await Assert.ThrowsAsync<ModelContextCapacityException>(() =>
+            runtime.GetResponseAsync(
+                [new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.User,
+                    new string('x', 20_000))],
+                new ChatOptions { MaxOutputTokens = 2048 },
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("No request was sent to the model", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+    }
+
+    [Fact]
+    public async Task RuntimeJsonError_IsReducedToItsHumanReadableMessage()
+    {
+        var handler = new RecordingHandler(
+            HttpStatusCode.BadRequest,
+            "{\"error\":{\"code\":\"bad_request\",\"message\":\"The selected model rejected this request.\"}}");
+        using var client = new HttpClient(handler);
+        var runtime = new OpenAiCompatibleLocalModelRuntime(
+            client,
+            new OpenAiCompatibleRuntimeOptions(
+                true,
+                new Uri("http://127.0.0.1:13305/api/v1/"),
+                "gpt-oss-20b-mxfp4-GGUF",
+                "GPT-OSS 20B",
+                "gpt-oss",
+                "20B",
+                "MXFP4",
+                8192,
+                2048,
+                0.2,
+                0.9,
+                true,
+                false,
+                false,
+                false)
+            { Engine = LocalRuntimeEngines.Lemonade, ReasoningEffort = "low" });
+
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            runtime.GetResponseAsync(
+                [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Return OK")],
+                new ChatOptions { MaxOutputTokens = 32 },
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("The selected model rejected this request.", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("{", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("bad_request", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LemonadeReadiness_RequiresReadyBackendAndSufficientContext()
     {
         const string ready = """
@@ -136,7 +248,9 @@ public sealed class LemonadeRuntimeTests
         Assert.Equal(candidate.ActiveProfile, controller.ActiveProfile);
     }
 
-    private sealed class RecordingHandler : HttpMessageHandler
+    private sealed class RecordingHandler(
+        HttpStatusCode chatStatus = HttpStatusCode.OK,
+        string? chatResponseBody = null) : HttpMessageHandler
     {
         private bool _loaded;
 
@@ -163,10 +277,14 @@ public sealed class LemonadeRuntimeTests
                 "/api/v1/health" when _loaded => "{\"status\":\"ok\",\"all_models_loaded\":[{\"model_name\":\"gpt-oss-20b-mxfp4-GGUF\",\"loaded\":true,\"status\":\"ready\",\"backend_health\":\"ready\",\"recipe_options\":{\"ctx_size\":8192}}]}",
                 "/api/v1/health" => "{\"status\":\"ok\",\"all_models_loaded\":[]}",
                 "/api/v1/load" => "{\"status\":\"ok\"}",
-                "/api/v1/chat/completions" => "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"OK\"},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":1}}",
+                "/api/v1/chat/completions" => chatResponseBody
+                    ?? "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"OK\"},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":1}}",
                 _ => "{}"
             };
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            var status = request.RequestUri.AbsolutePath == "/api/v1/chat/completions"
+                ? chatStatus
+                : HttpStatusCode.OK;
+            return new HttpResponseMessage(status)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };

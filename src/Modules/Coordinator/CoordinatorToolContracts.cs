@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Ali.Modules.Coordinator;
 
 public sealed record CoordinatorMemoryResult(
@@ -16,6 +18,15 @@ public sealed record CoordinatorMemoryWriteResult(
     string Message,
     string? MemoryId = null);
 
+public sealed record CoordinatorActiveUserResult(
+    bool Selected,
+    string Status,
+    string? StableId,
+    string? DisplayName,
+    string? Address,
+    string? Email,
+    string? PhoneNumber);
+
 public sealed record CoordinatorSourceResult(
     string Status,
     IReadOnlyList<CoordinatorSourceItem> Sources,
@@ -26,6 +37,7 @@ public sealed record CoordinatorSourceItem(
     string Name,
     string Topic,
     string Url,
+    [property: JsonIgnore]
     DateTimeOffset RetrievedAt,
     string Excerpt);
 
@@ -56,6 +68,19 @@ public sealed record CoordinatorCapabilityResult(
     string Status,
     IReadOnlyList<CoordinatorCapability> Tools);
 
+public enum AgentToolExecutionOutcome
+{
+    Completed,
+    Failed,
+    Cancelled
+}
+
+public sealed record AgentToolExecutionReceipt(
+    string ToolName,
+    AgentToolExecutionOutcome Outcome,
+    string Summary,
+    DateTimeOffset RecordedAt);
+
 internal sealed class CoordinatorTurnContext(
     string conversationId,
     string userMessageId,
@@ -64,6 +89,8 @@ internal sealed class CoordinatorTurnContext(
     Action<AssistantStreamChunk> publish)
 {
     private readonly long _startedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+    private readonly Dictionary<string, CoordinatorToolPlan> _toolPlans = new(StringComparer.Ordinal);
+    private readonly object _toolPlanSync = new();
 
     public string ConversationId { get; } = conversationId;
 
@@ -79,11 +106,35 @@ internal sealed class CoordinatorTurnContext(
 
     public int WebSearchAttempts { get; set; }
 
+    public int GoogleSearchAttempts { get; set; }
+
+    public HashSet<string> FailedGoogleQueryKeys { get; } = new(StringComparer.Ordinal);
+
     public bool UsedCurrentWebSearch { get; set; }
 
     public bool UsedNavigationTool { get; set; }
 
     public List<CoordinatorSourceItem> WebSources { get; } = [];
+
+    public CoordinatorToolPlan? CurrentToolPlan { get; private set; }
+
+    public void RegisterToolPlan(CoordinatorToolPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        lock (_toolPlanSync)
+        {
+            _toolPlans[plan.CallId] = plan;
+            CurrentToolPlan = plan;
+        }
+    }
+
+    public bool TryGetToolPlan(string callId, out CoordinatorToolPlan? plan)
+    {
+        lock (_toolPlanSync)
+        {
+            return _toolPlans.TryGetValue(callId, out plan);
+        }
+    }
 
     public void RecordPermissionDecision(AgentToolApprovalChoice choice)
     {
@@ -102,7 +153,9 @@ internal sealed class CoordinatorTurnContext(
         string title,
         string? detail = null,
         double? elapsedMilliseconds = null,
-        AgentToolApprovalPrompt? approvalPrompt = null) =>
+        AgentToolApprovalPrompt? approvalPrompt = null,
+        string? activityKey = null,
+        AgentToolExecutionReceipt? executionReceipt = null) =>
         publish(new AssistantStreamChunk(
             ConversationId,
             UserMessageId,
@@ -114,5 +167,17 @@ internal sealed class CoordinatorTurnContext(
             ActivityDetail: detail,
             ElapsedMilliseconds: elapsedMilliseconds ??
                 System.Diagnostics.Stopwatch.GetElapsedTime(_startedTimestamp).TotalMilliseconds,
-            ApprovalPrompt: approvalPrompt));
+            ApprovalPrompt: approvalPrompt,
+            ActivityKey: activityKey,
+            ExecutionReceipt: executionReceipt));
 }
+
+internal sealed record CoordinatorToolPlan(
+    string CallId,
+    string ToolName,
+    string Assessment,
+    string ActionPlan,
+    string NextStep,
+    string SelectionHeadline,
+    string ResultHeadline,
+    string TechnicalArguments);

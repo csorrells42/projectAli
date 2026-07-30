@@ -16,13 +16,17 @@ public sealed class AgentOrchestrationSettingsTests
             AgentOrchestrationSettingsStore.Save(root, new AgentOrchestrationSettings
             {
                 MagenticPolicy = policy,
-                MagenticMaximumRounds = 7
+                MagenticMaximumRounds = 7,
+                ProgrammingAgentMode = ProgrammingAgentModes.Aider,
+                OpenHandsWslDistribution = "Ubuntu-24.04"
             });
 
             var loaded = AgentOrchestrationSettingsStore.LoadOrDefault(root);
 
             Assert.Equal(policy, loaded.MagenticPolicy);
             Assert.Equal(7, loaded.MagenticMaximumRounds);
+            Assert.Equal(ProgrammingAgentModes.Aider, loaded.ProgrammingAgentMode);
+            Assert.Equal("Ubuntu-24.04", loaded.OpenHandsWslDistribution);
         }
         finally
         {
@@ -71,7 +75,21 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.Contains("SettingsMagenticPolicy", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsMagenticMaximumRounds", xaml, StringComparison.Ordinal);
         Assert.Contains("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsOpenHandsWslDistribution", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
         Assert.Contains("concurrent and background agents are disabled", xaml, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(ProgrammingAgentModes.Aider)]
+    [InlineData(ProgrammingAgentModes.OpenHands)]
+    [InlineData(ProgrammingAgentModes.Hybrid)]
+    public void ProgrammingAgentMode_NormalizesSupportedSelections(string mode)
+    {
+        Assert.Equal(mode, new AgentOrchestrationSettings { ProgrammingAgentMode = mode }.Normalize().ProgrammingAgentMode);
+        Assert.Equal(ProgrammingAgentModes.Hybrid,
+            new AgentOrchestrationSettings { ProgrammingAgentMode = "retired-provider" }.Normalize().ProgrammingAgentMode);
     }
 
     private static string FindArchitectureDocument()

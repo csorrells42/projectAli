@@ -269,11 +269,10 @@ internal sealed class AliCodingOperations : IDisposable
     private static HttpClient CreateHttpClient() => new(new SocketsHttpHandler
     {
         AllowAutoRedirect = false,
-        AutomaticDecompression = DecompressionMethods.All,
-        ConnectTimeout = TimeSpan.FromSeconds(10)
+        AutomaticDecompression = DecompressionMethods.All
     })
     {
-        Timeout = TimeSpan.FromSeconds(30)
+        Timeout = Timeout.InfiniteTimeSpan
     };
 
     public void Dispose()

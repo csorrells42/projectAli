@@ -12,10 +12,14 @@ namespace Ali.Framework.Tests;
 public sealed class UserMemoryArchitectureTests
 {
     [Fact]
-    public void Mem0Warmup_DoesNotThrashAColdCpuEmbeddingWorker()
+    public void Mem0Warmup_HasNoArtificialDeadlineThatCanKillAColdCpuEmbeddingWorker()
     {
-        Assert.True(Mem0UserMemoryService.WarmupAttemptTimeout >= TimeSpan.FromSeconds(20));
-        Assert.True(Mem0UserMemoryService.WarmupOverallTimeout > Mem0UserMemoryService.WarmupAttemptTimeout);
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Static;
+
+        Assert.Null(typeof(Mem0UserMemoryService).GetField("WarmupAttemptTimeout", flags));
+        Assert.Null(typeof(Mem0UserMemoryService).GetField("WarmupOverallTimeout", flags));
     }
 
     [Fact]
@@ -53,9 +57,9 @@ public sealed class UserMemoryArchitectureTests
                 "Bill",
                 "Engineer",
                 "bill",
-                "",
-                "",
-                "",
+                "bill@example.test",
+                "931-555-0100",
+                "3075 SE St Lucie Blvd, Stuart, FL",
                 "Default User"));
 
             Assert.True(created.Success, created.Status);
@@ -71,6 +75,9 @@ public sealed class UserMemoryArchitectureTests
             Assert.False(session.RequiresSelection);
             Assert.Equal(profile.IdentityId, session.Current.StableId);
             Assert.Equal("Bill Engineer", session.Current.DisplayName);
+            Assert.Equal("3075 SE St Lucie Blvd, Stuart, FL", session.Current.Address);
+            Assert.Equal("bill@example.test", session.Current.Email);
+            Assert.Equal("931-555-0100", session.Current.PhoneNumber);
             Assert.False(session.Current.IsTestProfile);
 
             var duplicate = writer.CreateUserProfile(new IdentityEnrollmentRequest(
@@ -302,31 +309,49 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
-    public void BackgroundLearning_IsOptInWhileExplicitMemoryRemainsEnabled()
+    public void PersonalMemoryIsEnabledWithoutAnAutomaticPostReplyStorageSwitch()
     {
         var settings = new UserMemorySettings();
 
         Assert.True(settings.Enabled);
-        Assert.False(settings.AutomaticBackgroundLearning);
+        Assert.Null(typeof(UserMemorySettings).GetProperty("AutomaticBackgroundLearning"));
     }
 
     [Fact]
-    public void FailedRecallContext_DoesNotMasqueradeAsAnEmptySuccessfulLookup()
+    public void InitialInput_DoesNotPreQueryOrInjectFailedMemoryState()
     {
-        var context = new CoordinatorMemoryResult(
-            "Memory recall timed out; Ali continued safely.",
-            [],
-            ["Per-user memory recall exceeded its short timeout."]);
-
         var messages = AliAgentHarnessRunner.BuildInitialInput(
             [],
             "What is my name?",
-            context,
             []);
 
-        var systemText = Assert.IsType<TextContent>(messages[0].Contents.Single()).Text;
-        Assert.Contains("does NOT mean that no memories exist", systemText, StringComparison.Ordinal);
-        Assert.Contains("retry recall_user_memory once", systemText, StringComparison.Ordinal);
+        var userText = Assert.IsType<TextContent>(messages.Single().Contents.Single()).Text;
+        Assert.Equal("What is my name?", userText);
+    }
+
+    [Fact]
+    public void ActiveIdentityProfile_IsReturnedOnlyWhenTheModelCallsItsTool()
+    {
+        var user = new ActiveUser(
+            "person-bill",
+            "Bill Engineer",
+            false,
+            "identity-profile-selection",
+            "3075 SE St Lucie Blvd, Stuart, FL",
+            "bill@example.com",
+            "555-0100");
+        var turn = new CoordinatorTurnContext("conversation", "user", "assistant", "Where is home?", _ => { });
+        var tool = new AliActiveUserTools(new FakeActiveSession(user), () => turn);
+
+        var result = tool.GetActiveProfile();
+
+        Assert.True(result.Selected);
+        Assert.Equal("person-bill", result.StableId);
+        Assert.Equal("Bill Engineer", result.DisplayName);
+        Assert.Equal("3075 SE St Lucie Blvd, Stuart, FL", result.Address);
+        Assert.Equal("bill@example.com", result.Email);
+        Assert.Equal("555-0100", result.PhoneNumber);
+        Assert.True(turn.UsedEvidenceTool);
     }
 
     [Fact]
@@ -391,7 +416,7 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
-    public async Task RememberToolRejectsBareValuesAndStoresTheCompleteRelationshipOnRetry()
+    public async Task RememberToolPreservesTheExactModelSelectedFact()
     {
         var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
         var service = new PersistingMemoryService();
@@ -401,28 +426,67 @@ public sealed class UserMemoryArchitectureTests
             () => new UserMemorySettings(),
             static () => null);
 
-        var rejected = await tools.RememberAsync(
+        var saved = await tools.RememberAsync(
             "teal-anvil-6304",
             "general",
             TestContext.Current.CancellationToken);
 
-        Assert.False(rejected.Saved);
-        Assert.Contains("bare value", rejected.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(service.StoredFact);
-
-        var saved = await tools.RememberAsync(
-            "The user's persistence marker is teal-anvil-6304",
-            "general",
-            TestContext.Current.CancellationToken);
-
         Assert.True(saved.Saved);
-        Assert.Equal(
-            "The user's persistence marker is teal-anvil-6304",
-            service.StoredFact);
+        Assert.Equal("teal-anvil-6304", service.StoredFact);
+        Assert.Equal("model_selected_user_fact", service.StoredSource);
     }
 
     [Fact]
-    public async Task ApprovedNativeMemoryTool_ResumesSavesAndCanBeRecalled()
+    public async Task BackgroundReview_DoesNotBlockEnqueueAndRecallWaitsForEarlierReview()
+    {
+        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var service = new ReviewOrderingMemoryService();
+        var queue = new AliUserMemoryReviewQueue(service, TimeSpan.Zero);
+        var review = queue.Enqueue(user, "My calibration color is cobalt.");
+        await service.ReviewStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(review.IsCompleted);
+
+        var tools = new AliMemoryTools(
+            service,
+            new FakeActiveSession(user),
+            () => new UserMemorySettings(),
+            static () => null,
+            queue.DrainAsync);
+        var recall = tools.SearchAsync("What is my calibration color?", TestContext.Current.CancellationToken);
+
+        Assert.False(recall.IsCompleted);
+        Assert.Equal(0, service.RecallCount);
+
+        service.ReleaseReview();
+        await review.WaitAsync(TestContext.Current.CancellationToken);
+        await recall.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, service.RecallCount);
+        Assert.Equal("conversation", service.StoredSource);
+    }
+
+    [Fact]
+    public async Task BackgroundReview_WaitsUntilForegroundTurnEnds()
+    {
+        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var service = new ReviewOrderingMemoryService();
+        var queue = new AliUserMemoryReviewQueue(service, TimeSpan.Zero);
+
+        queue.BeginForegroundTurn();
+        var review = queue.Enqueue(user, "My calibration color is cobalt.");
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.False(service.ReviewStarted.Task.IsCompleted);
+        Assert.False(review.IsCompleted);
+
+        queue.EndForegroundTurn();
+        await service.ReviewStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+        service.ReleaseReview();
+        await review.WaitAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task TrustedWorkstationMemoryTool_SavesWithoutApprovalAndCanBeRecalled()
     {
         var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
         var service = new PersistingMemoryService();
@@ -461,27 +525,19 @@ public sealed class UserMemoryArchitectureTests
         });
         var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
 
-        var first = await agent.RunAsync(
+        var result = await agent.RunAsync(
             "Remember that my shop foreman is Bill.",
             session,
             cancellationToken: TestContext.Current.CancellationToken);
-        var request = Assert.Single(first.Messages
+
+        Assert.Contains("saved", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Messages
             .SelectMany(message => message.Contents)
             .OfType<ToolApprovalRequestContent>());
-        Assert.Null(service.StoredFact);
-
-        var second = await agent.RunAsync(
-            new ChatMessage(ChatRole.User,
-            [
-                request.CreateResponse(true, "Approved once by the user.")
-            ]),
-            session,
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Contains("saved", second.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("people: My shop foreman is Bill", service.StoredFact);
+        Assert.Equal("My shop foreman is Bill", service.StoredFact);
+        Assert.Equal("model_selected_user_fact", service.StoredSource);
         var recalled = await memoryTools.SearchAsync("Who is my shop foreman?", TestContext.Current.CancellationToken);
-        Assert.Contains(recalled.Memories, memory => memory.Text == "people: My shop foreman is Bill");
+        Assert.Contains(recalled.Memories, memory => memory.Text == "My shop foreman is Bill");
     }
 
     [Fact]
@@ -494,7 +550,9 @@ public sealed class UserMemoryArchitectureTests
             new FakeActiveSession(user),
             () => new UserMemorySettings(),
             static () => null);
-        var policy = new AliToolPermissionPolicy(static () => null);
+        var policy = new AliToolPermissionPolicy(
+            static () => null,
+            static () => AgentPermissionProfile.LockedDown);
         var rememberFunction = policy.Apply(AIFunctionFactory.Create(
             (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)memoryTools.RememberAsync,
             AliCapabilityCatalog.RememberCurrentUserName,
@@ -661,6 +719,7 @@ public sealed class UserMemoryArchitectureTests
     private sealed class PersistingMemoryService : IUserMemoryService
     {
         public string? StoredFact { get; private set; }
+        public string? StoredSource { get; private set; }
 
         public Task<IReadOnlyList<UserMemory>> RecallAsync(
             ActiveUser user,
@@ -682,6 +741,7 @@ public sealed class UserMemoryArchitectureTests
             CancellationToken cancellationToken)
         {
             StoredFact = conversation;
+            StoredSource = source;
             return Task.FromResult(new MemoryOperationResult(
                 true,
                 "Memory saved locally.",
@@ -699,6 +759,53 @@ public sealed class UserMemoryArchitectureTests
 
         public Task<UserMemoryStatus> TestAsync(ActiveUser user, CancellationToken cancellationToken) =>
             Task.FromResult(new UserMemoryStatus(true, true, true, "Ready", "ok"));
+    }
+
+    private sealed class ReviewOrderingMemoryService : IUserMemoryService
+    {
+        private readonly TaskCompletionSource _releaseReview = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource ReviewStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int RecallCount { get; private set; }
+        public string? StoredSource { get; private set; }
+
+        public void ReleaseReview() => _releaseReview.TrySetResult();
+
+        public async Task<IReadOnlyList<UserMemory>> RecallAsync(
+            ActiveUser user,
+            string query,
+            int maximumResults,
+            CancellationToken cancellationToken)
+        {
+            RecallCount++;
+            await Task.Yield();
+            return [];
+        }
+
+        public async Task<MemoryOperationResult> RememberAsync(
+            ActiveUser user,
+            string conversation,
+            string source,
+            string? category,
+            CancellationToken cancellationToken)
+        {
+            StoredSource = source;
+            ReviewStarted.TrySetResult();
+            await _releaseReview.Task.ConfigureAwait(false);
+            return new MemoryOperationResult(true, "Reviewed.", []);
+        }
+
+        public Task<MemoryOperationResult> CorrectAsync(ActiveUser user, string memoryId, string correction, CancellationToken cancellationToken) =>
+            Task.FromResult(new MemoryOperationResult(true, "Corrected.", []));
+
+        public Task<IReadOnlyList<UserMemory>> ListAsync(ActiveUser user, string? category, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<UserMemory>>([]);
+
+        public Task<MemoryOperationResult> DeleteAsync(ActiveUser user, string memoryId, CancellationToken cancellationToken) =>
+            Task.FromResult(new MemoryOperationResult(true, "Deleted.", []));
+
+        public Task<UserMemoryStatus> TestAsync(ActiveUser user, CancellationToken cancellationToken) =>
+            Task.FromResult(new UserMemoryStatus(true, true, true, "ready", "Ready."));
     }
 
     private static ChatResponse ToolCall(string name, IDictionary<string, object?> arguments)

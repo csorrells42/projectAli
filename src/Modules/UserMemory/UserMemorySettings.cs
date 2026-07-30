@@ -6,11 +6,6 @@ public sealed record UserMemorySettings
 {
     public bool Enabled { get; init; } = true;
 
-    // Explicit "remember this" requests remain available. Broad extraction after
-    // every reply is opt-in because tool output and transient task state are not
-    // reliable personal facts and can also contend with foreground recall.
-    public bool AutomaticBackgroundLearning { get; init; } = false;
-
     public int RecallMaximumResults { get; init; } = 5;
 
     public int RecallTimeoutMilliseconds { get; init; } = 2500;

@@ -4,7 +4,10 @@ public sealed record ActiveUser(
     string StableId,
     string DisplayName,
     bool IsTestProfile,
-    string ResolutionMethod)
+    string ResolutionMethod,
+    string? Address = null,
+    string? Email = null,
+    string? PhoneNumber = null)
 {
     public ActiveUser Normalize()
     {
@@ -13,9 +16,15 @@ public sealed record ActiveUser(
         {
             StableId = StableId.Trim(),
             DisplayName = string.IsNullOrWhiteSpace(DisplayName) ? "Current user" : DisplayName.Trim(),
-            ResolutionMethod = string.IsNullOrWhiteSpace(ResolutionMethod) ? "explicit-selection" : ResolutionMethod.Trim()
+            ResolutionMethod = string.IsNullOrWhiteSpace(ResolutionMethod) ? "explicit-selection" : ResolutionMethod.Trim(),
+            Address = NormalizeOptional(Address),
+            Email = NormalizeOptional(Email),
+            PhoneNumber = NormalizeOptional(PhoneNumber)
         };
     }
+
+    private static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 public sealed record UserMemory(

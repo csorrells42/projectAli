@@ -415,6 +415,11 @@
             <Button Content="Refresh"
                     Click="RefreshClicked"
                     Margin="0,0,8,0" />
+            <Button Name="UseAsActiveUserButton"
+                    Content="Use as active user"
+                    Click="UseAsActiveUserClicked"
+                    ToolTip="Use this single identity for personal memory, permissions, and conversation context."
+                    Margin="0,0,8,0" />
             <Button Content="Save identity"
                     Click="SaveIdentityClicked"
                     Margin="0,0,8,0" />

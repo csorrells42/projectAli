@@ -251,7 +251,7 @@ internal sealed class AliDebugAdapterClient : IAsyncDisposable
             },
             cancellationToken).ConfigureAwait(false);
         using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
-        var response = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+        var response = await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (response["success"]?.GetValue<bool>() == false)
         {
             throw new InvalidOperationException(response["message"]?.GetValue<string>() ?? $"Debug adapter command '{command}' failed.");
@@ -264,7 +264,7 @@ internal sealed class AliDebugAdapterClient : IAsyncDisposable
         var completion = _events.GetOrAdd(
             name,
             _ => new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously));
-        return completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        return completion.Task.WaitAsync(cancellationToken);
     }
 
     private async Task ReadLoopAsync()

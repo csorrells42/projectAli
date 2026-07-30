@@ -26,7 +26,10 @@ public sealed class AliToolCatalogTests
         Assert.Contains("never call the same tool again with identical arguments", instructions, StringComparison.Ordinal);
         Assert.Contains("If the user denies any permission request", instructions, StringComparison.Ordinal);
         Assert.Contains("exploit a saved permission", instructions, StringComparison.Ordinal);
-        Assert.Contains("Never reduce a taught fact to its bare value", instructions, StringComparison.Ordinal);
+        Assert.Contains("Every completed user turn is queued for a separate post-response Mem0 review", instructions, StringComparison.Ordinal);
+        Assert.Contains("do not delay the conversational answer for memory storage", instructions, StringComparison.Ordinal);
+        Assert.Contains("A simple correction such as 'Cris' to 'Chris' should replace the mistake", instructions, StringComparison.Ordinal);
+        Assert.Contains("a real state change such as moving from address X to Y may preserve the useful transition history", instructions, StringComparison.Ordinal);
         Assert.Contains("Semantic memory search is read-only", instructions, StringComparison.Ordinal);
         Assert.Contains("use only its exact memoryId", instructions, StringComparison.Ordinal);
         Assert.Contains("use file_access_move", instructions, StringComparison.Ordinal);

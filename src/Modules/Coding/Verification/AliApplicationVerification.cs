@@ -38,9 +38,8 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
         {
             if (health is not null)
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-                var deadline = DateTime.UtcNow.AddSeconds(20);
-                while (DateTime.UtcNow < deadline && !process.HasExited)
+                using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+                while (!process.HasExited)
                 {
                     try { healthPassed = (await client.GetAsync(health, cancellationToken).ConfigureAwait(false)).IsSuccessStatusCode; }
                     catch (HttpRequestException) { }
@@ -52,8 +51,7 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
             }
             else if (kind == "desktop")
             {
-                var deadline = DateTime.UtcNow.AddSeconds(15);
-                while (DateTime.UtcNow < deadline && !process.HasExited)
+                while (!process.HasExited)
                 {
                     process.Refresh();
                     if (process.MainWindowHandle != IntPtr.Zero) break;
@@ -65,10 +63,7 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
             }
             else
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromSeconds(30));
-                try { await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
                 if (process.HasExited) { exitCode = process.ExitCode; success = exitCode == 0; }
             }
         }

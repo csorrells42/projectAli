@@ -29,31 +29,19 @@ internal sealed class AliPerformanceEngineering(AliCodingProjectResolver resolve
             process.Start();
             var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(30));
-            var timedOut = false;
             long peakWorkingSet = 0;
             double cpuMilliseconds = 0;
-            try
+            while (!process.HasExited)
             {
-                while (!process.HasExited)
-                {
-                    process.Refresh();
-                    peakWorkingSet = Math.Max(peakWorkingSet, TryRead(() => process.PeakWorkingSet64));
-                    cpuMilliseconds = Math.Max(cpuMilliseconds, TryRead(() => process.TotalProcessorTime.TotalMilliseconds));
-                    await Task.Delay(10, timeout.Token).ConfigureAwait(false);
-                }
-                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                process.Refresh();
+                peakWorkingSet = Math.Max(peakWorkingSet, TryRead(() => process.PeakWorkingSet64));
+                cpuMilliseconds = Math.Max(cpuMilliseconds, TryRead(() => process.TotalProcessorTime.TotalMilliseconds));
+                await Task.Delay(10, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                timedOut = true;
-                try { process.Kill(entireProcessTree: true); } catch { }
-                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); } catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
             started.Stop();
-            samples.Add(new PerformanceSample(iteration, !timedOut && process.ExitCode == 0, timedOut ? -1 : process.ExitCode,
+            samples.Add(new PerformanceSample(iteration, process.ExitCode == 0, process.ExitCode,
                 started.Elapsed.TotalMilliseconds, peakWorkingSet, cpuMilliseconds));
         }
         var ordered = samples.Select(sample => sample.WallMilliseconds).Order().ToArray();

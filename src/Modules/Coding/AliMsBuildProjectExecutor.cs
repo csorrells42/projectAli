@@ -20,7 +20,6 @@ internal sealed record MsBuildExecutionResult(
 /// </summary>
 internal static class AliMsBuildProjectExecutor
 {
-    private const int BuildTimeoutSeconds = 180;
     private static readonly SemaphoreSlim BuildLock = new(1, 1);
 
     public static async Task<MsBuildExecutionResult> BuildAsync(
@@ -45,10 +44,8 @@ internal static class AliMsBuildProjectExecutor
         await BuildLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(BuildTimeoutSeconds));
             using var manager = new BuildManager("Ali Roslyn/MSBuild");
-            using var cancelRegistration = timeout.Token.Register(manager.CancelAllSubmissions);
+            using var cancelRegistration = cancellationToken.Register(manager.CancelAllSubmissions);
             var logger = new CapturingLogger();
             var globalProperties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
@@ -80,14 +77,9 @@ internal static class AliMsBuildProjectExecutor
                 var success = result.OverallResult == BuildResultCode.Success;
                 return new MsBuildExecutionResult(success, success ? 0 : 1, logger.Output, toolsetPath);
             }
-            catch (BuildAbortedException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            catch (BuildAbortedException) when (cancellationToken.IsCancellationRequested)
             {
-                return new MsBuildExecutionResult(
-                    false,
-                    -1,
-                    $"Build stopped after the {BuildTimeoutSeconds}-second safety timeout.{Environment.NewLine}{logger.Output}",
-                    toolsetPath,
-                    TimedOut: true);
+                throw new OperationCanceledException(cancellationToken);
             }
         }
         finally

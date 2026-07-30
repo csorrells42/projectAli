@@ -84,9 +84,6 @@ internal sealed class GeminiGroundedSearchProvider
             return [];
         }
 
-        var timeoutSeconds = Math.Clamp(settings.RequestTimeoutSeconds, 5, 60);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
             EndpointRoot + PinnedModel + ":generateContent");
@@ -134,8 +131,8 @@ internal sealed class GeminiGroundedSearchProvider
             using var response = await httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                timeout.Token).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 warnings.Add(BuildSafeHttpFailure(response.StatusCode, body, apiKey));
@@ -172,11 +169,6 @@ internal sealed class GeminiGroundedSearchProvider
                 warnings.Add("Google grounding returned no verifiable source citations, so Ali discarded the generated notes.");
             }
             return hits;
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            warnings.Add($"Google grounded search timed out after {timeoutSeconds} seconds.");
-            return [];
         }
         catch (HttpRequestException ex)
         {

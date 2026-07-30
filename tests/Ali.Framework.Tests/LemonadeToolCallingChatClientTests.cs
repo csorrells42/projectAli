@@ -19,6 +19,12 @@ public sealed class LemonadeToolCallingChatClientTests
 
         Assert.Contains(4096, choice.OutputTokenLimits);
         Assert.Contains(8192, choice.OutputTokenLimits);
+        Assert.Contains(16384, choice.OutputTokenLimits);
+        Assert.Contains(65536, choice.ContextTokens);
+        Assert.Contains(131072, choice.ContextTokens);
+        Assert.Equal(131072, OllamaRuntimeSafetyPolicy.MaximumContextTokens);
+        Assert.Equal(65536, OllamaRuntimeSafetyPolicy.ClampContextTokens(65536));
+        Assert.Equal(131072, OllamaRuntimeSafetyPolicy.ClampContextTokens(131072));
     }
 
     [Fact]
@@ -49,6 +55,474 @@ public sealed class LemonadeToolCallingChatClientTests
         var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
         Assert.Contains("use them instead of claiming incapability", decisionPrompt, StringComparison.Ordinal);
         Assert.Contains("giving manual shell instructions", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("reason hierarchically", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("recursively split each unsolved part", decisionPrompt, StringComparison.Ordinal);
+        Assert.Contains("Do not confuse completing one leaf", decisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VisibleTurnFinalDecision_IsSemanticallyAuditedWithoutPhraseMatching()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Repair the existing chess control and build it.",
+            _ => { });
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"Here is a design overview for the repaired chess control.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/AliChess/ChessBoardView.xaml.cs\",\"content\":\"complete source\"},\"summary\":\"Write the requested implementation\",\"basis\":\"No successful write or build result proves the requested repair exists.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var write = AIFunctionFactory.Create(
+            (string fileName, string content) => $"wrote {fileName}",
+            "file_access_write",
+            "Write a requested file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [write] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", call.Name);
+        Assert.Equal(2, inner.CallCount);
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("CURRENT HUMAN TURN", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("AVAILABLE TOOLS AND ARGUMENT SCHEMAS", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("\"fileName\"", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("\"required\"", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("was the complete outcome requested", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("complete outcome tree", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("smaller solvable branches", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("future-tense", auditPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CriticToolCallMissingRequiredArgument_IsRepairedAgainstAuthoritativeSchema()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "What are the most important software engineering developments today?",
+            _ => { })
+        {
+            UsedEvidenceTool = true
+        };
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"These weak snippets prove the ranking.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"software engineering developments July 29 2026\"},\"summary\":\"Refine the search\",\"basis\":\"The available evidence does not establish the requested current ranking.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"software engineering developments July 29 2026\",\"topic\":\"software engineering\"},\"summary\":\"Refine the search with a valid topic\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var search = AIFunctionFactory.Create(
+            (string query, string topic) => $"{topic}: {query}",
+            "search_current_web",
+            "Search current web sources by query and topic.");
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent("call-search", new { sources = new[] { "weak" } }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), result],
+            new ChatOptions { Tools = [search] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("search_current_web", call.Name);
+        Assert.True(call.Arguments!.ContainsKey("query"));
+        Assert.True(call.Arguments.ContainsKey("topic"));
+        Assert.Equal(3, inner.CallCount);
+        var repairPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
+        Assert.Contains("missing required argument(s): topic", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains("\"query\"", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains("\"topic\"", repairPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SingleStringTool_GenericArgumentName_IsMappedOnlyWhenSchemaIsUnambiguous()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"research_web\",\"arguments\":{\"query\":\"official .NET releases\"},\"summary\":\"Research primary sources\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var research = AIFunctionFactory.Create(
+            (string question) => question,
+            "research_web",
+            "Research a question on the web.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Research official .NET releases.")],
+            new ChatOptions { Tools = [research] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("research_web", call.Name);
+        Assert.True(call.Arguments!.ContainsKey("question"));
+        Assert.False(call.Arguments.ContainsKey("query"));
+        Assert.Equal(1, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task ProviderInternalToolName_IsNeverExecutedAndGetsOneSchemaBoundedRepair()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"tavily_search\",\"arguments\":{\"query\":\"official release notes\"},\"summary\":\"Search Tavily\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"tool\":\"research_web\",\"arguments\":{\"question\":\"Find official release notes\"},\"summary\":\"Use Ali's registered research tool\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var research = AIFunctionFactory.Create(
+            (string question) => question,
+            "research_web",
+            "Research a question on the web.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Find official release notes.")],
+            new ChatOptions { Tools = [research] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("research_web", call.Name);
+        Assert.Equal(2, inner.CallCount);
+        var repairPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("'tavily_search' is not a registered tool", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains("research_web", repairPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("Search Tavily", call.Name, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ToolHeavyAudit_CompactsEvidenceBeforeCallingTheCritic()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"I cannot finish this requested repair.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"coding_build_project\",\"arguments\":{\"projectPath\":\"Desktop/AliChess/AliChess.csproj\"},\"summary\":\"Verify the final source\",\"basis\":\"The requested repair has no successful verification result.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var build = AIFunctionFactory.Create(
+            (string projectPath) => $"built {projectPath}",
+            "coding_build_project",
+            "Build a .NET project.");
+        var messages = new List<AIChatMessage>
+        {
+            new(AIChatRole.User, "Finish and verify the chess control without surrendering.")
+        };
+        for (var index = 0; index < 24; index++)
+        {
+            var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+            result.Contents.Add(new FunctionResultContent(
+                $"call-{index}",
+                new { success = true, detail = new string((char)('a' + index % 26), 5_500) }));
+            messages.Add(result);
+        }
+
+        var response = await client.GetResponseAsync(
+            messages,
+            new ChatOptions { Tools = [build] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("coding_build_project", call.Name);
+        Assert.Equal(2, inner.CallCount);
+        var auditCharacterCount = inner.ObservedMessages[1]
+            .Sum(message => message.Text?.Length ?? 0);
+        Assert.True(
+            auditCharacterCount < 40_000,
+            $"Audit prompt remained too large: {auditCharacterCount} characters.");
+    }
+
+    [Fact]
+    public async Task CriticBinaryNoVerdict_ReturnsTheJobToTheToolLoop()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Repair, build, and launch the chess project.",
+            _ => { });
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"I cannot finish the repair.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"coding_build_project\",\"arguments\":{\"projectPath\":\"Desktop/AliChess/AliChess.csproj\"},\"summary\":\"Build the final source now\",\"basis\":\"No successful build result exists for the requested project.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var build = AIFunctionFactory.Create(
+            (string projectPath) => $"built {projectPath}",
+            "coding_build_project",
+            "Build the requested project.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [build] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("coding_build_project", call.Name);
+        Assert.Equal(2, inner.CallCount);
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("two plain-text lines", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("YES or NO", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("not the planner", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("final semantic acceptance review", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("does what the human intended", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("future-tense promise", auditPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CriticNoVerdict_ReturnsItsBasisToThePlannerForTheNextAction()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Build a complete playable chess game.",
+            activity.Add);
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"The chess game is complete.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "NO\nThe source evidence shows the board initialization is still missing.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"assessment\":\"board initialization is missing\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/Chess/MainWindow.xaml.cs\",\"content\":\"complete board\",\"overwrite\":true},\"summary\":\"implement the complete board\",\"next\":\"inspect and build the result\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var write = AIFunctionFactory.Create(
+            (string fileName, string content, bool overwrite) => fileName,
+            "file_access_write",
+            "Write a project file.");
+        var priorResult = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        priorResult.Contents.Add(new FunctionResultContent(
+            "call-write",
+            new { success = true, summary = "Wrote a placeholder file." }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), priorResult],
+            new ChatOptions { Tools = [write] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", call.Name);
+        Assert.Equal(3, inner.CallCount);
+        Assert.Contains(activity, item =>
+            item.IsActivity
+            && item.Text.Contains("Critic answered no", StringComparison.OrdinalIgnoreCase));
+        var criticPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("valid terminal result", criticPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("authoritative evidence conclusively proves", criticPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("There is no partial-credit", criticPrompt, StringComparison.OrdinalIgnoreCase);
+        var replanPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
+        Assert.Contains("board initialization is still missing", replanPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Resume your planner role", replanPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CriticCannotTurnUnfinishedSuccessfulWorkIntoABlocker()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Build a complete playable chess game.",
+            _ => { });
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"The project builds, but chess logic still needs to be implemented.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"blocked\":true,\"action\":\"final\",\"answer\":\"The game is unfinished.\",\"basis\":\"The source is still a skeleton.\",\"evidenceQuote\":\"success\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/ChessGame/Program.cs\",\"content\":\"complete chess engine\",\"overwrite\":true},\"summary\":\"Implement the next atomic chess subsystem\",\"basis\":\"The successful scaffold and build prove progress, not an impossibility.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var write = AIFunctionFactory.Create(
+            (string fileName, string content, bool overwrite) => fileName,
+            "file_access_write",
+            "Write a project file.");
+        var successfulResult = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        successfulResult.Contents.Add(new FunctionResultContent(
+            "call-build",
+            new { success = true, warningCount = 0, summary = "Skeleton project built." }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), successfulResult],
+            new ChatOptions { Tools = [write] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", call.Name);
+        Assert.Equal(3, inner.CallCount);
+        var repairPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
+        Assert.Contains("blocked final requires evidenceQuote", repairPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("return NO", repairPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Do not choose a tool", repairPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CriticCanReportImpossibleOnlyAfterMultipleDistinctToolFailures()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Build the requested project.",
+            _ => { });
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"The build could not be completed.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"blocked\":true,\"action\":\"final\",\"answer\":\"I could not build the project because two independent build attempts failed with the required compiler unavailable.\",\"basis\":\"Two distinct authoritative tool failures report the same external compiler blocker.\",\"evidenceQuote\":\"Required compiler unavailable\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var build = AIFunctionFactory.Create(() => "ok", "coding_build_project", "Build a project.");
+        var firstFailure = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        firstFailure.Contents.Add(new FunctionResultContent(
+            "call-build-1",
+            new { success = false, error = "Required compiler unavailable" }));
+        var secondFailure = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        secondFailure.Contents.Add(new FunctionResultContent(
+            "call-build-2",
+            new { success = false, error = "Required compiler unavailable after environment refresh" }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText), firstFailure, secondFailure],
+            new ChatOptions { Tools = [build] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
+        Assert.Contains("two independent build attempts failed", response.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, inner.CallCount);
+    }
+
+    [Fact]
+    public async Task SarcasticComplaint_ReassertsTheOriginalOutcomeInsteadOfBecomingANewLiteralRequest()
+    {
+        const string originalRequest = "Build me a complete playable chess game.";
+        const string incompleteAnswer = "The project builds, but the chess logic is not implemented yet.";
+        const string complaint = "did i ask for a chess game or did I ask for some half finished flaming bag of dog shit on my doorstep";
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-current",
+            "assistant-current",
+            complaint,
+            _ => { });
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"You asked for a half-finished flaming bag, not a chess game.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/ChessGame/ChessEngine.cs\",\"content\":\"complete chess engine\",\"overwrite\":false},\"summary\":\"Continue the original chess-game request\",\"basis\":\"The complaint criticizes the unfinished prior result and reasserts the original playable-chess outcome.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var write = AIFunctionFactory.Create(
+            (string fileName, string content, bool overwrite) => fileName,
+            "file_access_write",
+            "Write a project file.");
+
+        var response = await client.GetResponseAsync(
+            [
+                new AIChatMessage(AIChatRole.User, originalRequest),
+                new AIChatMessage(AIChatRole.Assistant, incompleteAnswer),
+                new AIChatMessage(AIChatRole.User, complaint)
+            ],
+            new ChatOptions { Tools = [write] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", call.Name);
+        Assert.Equal(2, inner.CallCount);
+        var decisionPrompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
+        Assert.Contains("rhetorical questions", decisionPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("never claim the human requested the defective result", decisionPrompt, StringComparison.OrdinalIgnoreCase);
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains(originalRequest, auditPrompt, StringComparison.Ordinal);
+        Assert.Contains(incompleteAnswer, auditPrompt, StringComparison.Ordinal);
+        Assert.Contains(complaint, auditPrompt, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -58,6 +532,12 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "We need several files. This is lengthy, so maybe I should stop and ask the user.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "The parser failed again, so I should probably give up.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "Still not an executable action.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/Game/MainWindow.xaml\",\"content\":\"<Window />\"},\"summary\":\"Continue building the requested app\"}")));
@@ -81,10 +561,11 @@ public sealed class LemonadeToolCallingChatClientTests
             .OfType<FunctionCallContent>());
         Assert.Equal("file_access_write", call.Name);
         Assert.DoesNotContain("maybe I should stop", response.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(2, inner.CallCount);
-        var repairPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Equal(4, inner.CallCount);
+        var repairPrompt = string.Join("\n", inner.ObservedMessages[3].Select(message => message.Text));
         Assert.Contains("MALFORMED PRIOR DRAFT", repairPrompt, StringComparison.Ordinal);
         Assert.Contains("exactly one valid JSON object", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains("not evidence", repairPrompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -112,9 +593,10 @@ public sealed class LemonadeToolCallingChatClientTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal("Finished safely.", response.Text);
-        Assert.Equal(2, inner.CallCount);
+        Assert.Equal(3, inner.CallCount);
         Assert.IsType<ChatResponseFormatJson>(inner.Formats[0]);
         Assert.Null(inner.Formats[1]);
+        Assert.IsType<ChatResponseFormatJson>(inner.Formats[2]);
         Assert.Contains(activity, item =>
             item.IsActivity
             && item.ActivityKind == AgentActivityKind.Warning
@@ -178,9 +660,9 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
-    public void MainHarness_AllowsACompleteBoundedCodingRunway()
+    public void MainHarness_DoesNotTerminateWorkAtAnArbitraryIterationCount()
     {
-        Assert.True(AliAgentHarnessRunner.MaximumToolIterations >= 16);
+        Assert.Equal(int.MaxValue, AliAgentHarnessRunner.MaximumToolIterations);
     }
 
     [Fact]
@@ -420,7 +902,10 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"Created Desktop/touch.txt.\"}")));
+                "{\"action\":\"final\",\"answer\":\"Created Desktop/touch.txt.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Created Desktop/touch.txt.\",\"basis\":\"The successful write result proves Desktop/touch.txt was created.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -465,7 +950,10 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"call\",\"tool\":\"list_available_tools\",\"arguments\":{},\"summary\":\"List again\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"Here are all 120 authoritative rows.\"}")));
+                "{\"action\":\"final\",\"answer\":\"Here are all 120 authoritative rows.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Here are all 120 authoritative rows.\",\"basis\":\"The authoritative collection result declares a total of 120 rows.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -488,10 +976,10 @@ public sealed class LemonadeToolCallingChatClientTests
 
         Assert.Empty(response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>());
         Assert.Contains("120 authoritative rows", response.Text, StringComparison.Ordinal);
-        Assert.Equal(2, inner.CallCount);
+        Assert.Equal(3, inner.CallCount);
         var repairPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
-        Assert.Contains("DUPLICATE TOOL CALL BLOCKED", repairPrompt, StringComparison.Ordinal);
-        Assert.Contains(activity, item => item.Text.Contains("Blocked a repeated completed tool call", StringComparison.Ordinal));
+        Assert.Contains("UNCHANGED PLAN LOOP STOPPED", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains(activity, item => item.Text.Contains("Detected an unchanged plan", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -500,7 +988,10 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"Handled the bounded result.\"}")));
+                "{\"action\":\"final\",\"answer\":\"Handled the bounded result.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Handled the bounded result.\",\"basis\":\"The requested bounded inspection result was supplied.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -586,7 +1077,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"Everything is clean and complete.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\",\"content\":\"clean\"},\"summary\":\"Remove the unresolved references before rebuilding\"}")));
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\",\"content\":\"clean\"},\"summary\":\"Remove the unresolved references before rebuilding\",\"basis\":\"The successful build still reported unresolved work, so the requested clean result is not complete.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -646,7 +1137,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"These are unquestionably the two most important developments.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"From the limited results returned, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\"}")));
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"From the limited results returned, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\",\"basis\":\"The answer now limits its claim to the evidence returned and labels the ranking as inference.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -674,8 +1165,53 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("Do not claim the search was exhaustive", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("copy them verbatim", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("Current UTC timestamp for freshness comparison", auditPrompt, StringComparison.Ordinal);
-        Assert.Contains("RetrievedAt proves only when Ali fetched", auditPrompt, StringComparison.Ordinal);
-        Assert.Contains("does not establish freshness", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("internal fetch timestamp", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("third-party blog", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("freshness", auditPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SingleMutationResult_IsAuditedAndCannotFinishWithAPlaceholder()
+    {
+        const string request = "Build and launch a complete WPF chess game in Desktop/AliChess.";
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"I cannot finish the full chess game in this interaction.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/AliChess/ChessGame.cs\",\"content\":\"complete engine\",\"overwrite\":false},\"summary\":\"Continue the requested implementation\",\"basis\":\"The existing source is still a placeholder, so the requested complete game is not done.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var write = AIFunctionFactory.Create(
+            () => "ok",
+            "file_access_write",
+            "Write a requested project file.");
+        var callId = $"call-{Guid.NewGuid():N}";
+        var call = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        call.Contents.Add(new FunctionCallContent(callId, "file_access_write"));
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(
+            callId,
+            "File written, but source still says: Main content will be added here by the updated implementation."));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, request), call, result],
+            new ChatOptions { Tools = [write] },
+            TestContext.Current.CancellationToken);
+
+        var correctiveCall = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", correctiveCall.Name);
+        Assert.Equal(2, inner.CallCount);
+        var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("placeholder", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not a concrete blocker", auditPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("real permission mechanism", auditPrompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -699,7 +1235,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"Turn right, drive 1.5 miles to an invented Publix, then continue for 15 minutes.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"call\",\"tool\":\"maps_create_directions_link\",\"arguments\":{\"origin\":\"home\",\"destination\":\"home\",\"waypoints\":[\"Publix near Stuart, FL\",\"Waffle House near Stuart, FL\",\"gym near Stuart, FL\"],\"travelMode\":\"driving\"},\"summary\":\"Create a live map route without inventing directions\"}")));
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"maps_create_directions_link\",\"arguments\":{\"origin\":\"home\",\"destination\":\"home\",\"waypoints\":[\"Publix near Stuart, FL\",\"Waffle House near Stuart, FL\",\"gym near Stuart, FL\"],\"travelMode\":\"driving\"},\"summary\":\"Create a live map route without inventing directions\",\"basis\":\"No route-capable tool result proves the requested directions.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -756,7 +1292,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"As of July 29 it is clear and humidity is probably low, so paint now.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"Retrieved July 29: conditions are clear, so paint now.\"}")),
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Retrieved July 29: conditions are clear, so paint now.\",\"basis\":\"The draft summarizes the returned source, subject to the dedicated freshness gate.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"weather observation July 29 2026\",\"topic\":\"weather\"},\"summary\":\"Verify a same-day observation before recommending\"}")));
@@ -783,8 +1319,9 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Equal("search_current_web", retry.Name);
         Assert.Equal(3, inner.CallCount);
         var freshnessPrompt = string.Join("\n", inner.ObservedMessages[2].Select(message => message.Text));
-        Assert.Contains("Freshness checkpoint", freshnessPrompt, StringComparison.Ordinal);
-        Assert.Contains("pipeline fetch times only", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Contains("internal fetch timestamp", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Contains("not publication evidence", freshnessPrompt, StringComparison.Ordinal);
+        Assert.Contains("Remaining live-search attempts this turn: 1", freshnessPrompt, StringComparison.Ordinal);
         Assert.Contains("missing measurement remains unknown", freshnessPrompt, StringComparison.Ordinal);
         Assert.Contains("July 20, 2026", freshnessPrompt, StringComparison.Ordinal);
     }
@@ -807,7 +1344,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"The warning is harmless.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\",\"content\":\"clean\"},\"summary\":\"Remove the warning source\"}")));
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\",\"content\":\"clean\"},\"summary\":\"Remove the warning source\",\"basis\":\"The build result reports eight warnings, so the requested clean build is not complete.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -863,7 +1400,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "The app is complete with no warnings.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"call\",\"tool\":\"file_access_replace\",\"arguments\":{},\"summary\":\"Remove the warning source\"}")));
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_replace\",\"arguments\":{},\"summary\":\"Remove the warning source\",\"basis\":\"The build result reports nine warnings, so the requested clean runnable app is not complete.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
@@ -921,7 +1458,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "These are unquestionably the two most important developments.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"From the five returned excerpts, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\"}")));
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"From the five returned excerpts, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\",\"basis\":\"The answer reports the evidence limits and labels broader importance as inference.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
@@ -967,7 +1504,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "I do not have a durable record of that codeword.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"Your saved bridge validation codeword is cobalt-heron-4729.\"}")));
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Your saved bridge validation codeword is cobalt-heron-4729.\",\"basis\":\"The durable-memory tool result contains the exact requested codeword.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
@@ -1014,7 +1551,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "I've updated the memory to the correct value.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"I did not update that memory because permission was denied.\"}")));
+                "{\"taskComplete\":false,\"blocked\":true,\"action\":\"final\",\"answer\":\"I did not update that memory because permission was denied.\",\"basis\":\"The user denied the required mutation permission, so the requested update could not be performed.\",\"evidenceQuote\":\"Denied by the user.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
@@ -1092,7 +1629,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 "{\"action\":\"final\",\"answer\":\"The build path implies net10.0-windows and the app is running.\"}")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"call\",\"tool\":\"file_access_read\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\"},\"summary\":\"Read the requested authoritative project file\"}")));
+                "{\"taskComplete\":false,\"action\":\"call\",\"tool\":\"file_access_read\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\"},\"summary\":\"Read the requested authoritative project file\",\"basis\":\"The requested framework fact has not been verified from the specified project file.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -1137,7 +1674,10 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"108 tools across Ali native, Agent Framework, Roslyn, and integration sources.\"}")));
+                "{\"action\":\"final\",\"answer\":\"108 tools across Ali native, Agent Framework, Roslyn, and integration sources.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"108 tools across Ali native, Agent Framework, Roslyn, and integration sources.\",\"basis\":\"The authoritative tool inventory reports exactly 108 tools and the requested source categories.\"}")));
         using var client = new LemonadeToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -1200,6 +1740,41 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Contains("file or complete folder tree", decisionPrompt, StringComparison.Ordinal);
         Assert.Contains("trash destination is selected internally", decisionPrompt, StringComparison.Ordinal);
         Assert.DoesNotContain("\"description\":\"Delete a file.\"", decisionPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeToolCalling_MergesEverySystemGroundingBlockBeforeTheModelCall()
+    {
+        var nativeCallMessage = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        nativeCallMessage.Contents.Add(new FunctionCallContent("call-memory", "recall_user_memory"));
+        using var inner = new RecordingChatClient(new ChatResponse(nativeCallMessage));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null);
+        var recall = AIFunctionFactory.Create(
+            (string query) => query,
+            "recall_user_memory",
+            "Recall a saved memory.");
+
+        await client.GetResponseAsync(
+            [
+                new AIChatMessage(AIChatRole.System, "You are Ali."),
+                new AIChatMessage(
+                    AIChatRole.System,
+                    "ACTIVE USER IDENTITY PROFILE: Christopher lives at 18865 George Mims Rd., Andalusia, AL 36421."),
+                new AIChatMessage(AIChatRole.User, "Where is home?")
+            ],
+            new ChatOptions { Tools = [recall] },
+            TestContext.Current.CancellationToken);
+
+        var observed = Assert.Single(inner.ObservedMessages);
+        var system = Assert.Single(observed, message => message.Role == AIChatRole.System);
+        Assert.Contains("You are Ali.", system.Text, StringComparison.Ordinal);
+        Assert.Contains("ACTIVE USER IDENTITY PROFILE", system.Text, StringComparison.Ordinal);
+        Assert.Contains("18865 George Mims Rd.", system.Text, StringComparison.Ordinal);
+        Assert.Equal("Where is home?", Assert.Single(observed, message => message.Role == AIChatRole.User).Text);
     }
 
     private sealed class RecordingChatClient(params ChatResponse[] responses) : IChatClient
@@ -1265,7 +1840,9 @@ public sealed class LemonadeToolCallingChatClientTests
 
             return Task.FromResult(new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "{\"action\":\"final\",\"answer\":\"Finished safely.\"}")));
+                CallCount == 2
+                    ? "{\"action\":\"final\",\"answer\":\"Finished safely.\"}"
+                    : "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Finished safely.\",\"basis\":\"The requested bounded action completed successfully.\"}")));
         }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

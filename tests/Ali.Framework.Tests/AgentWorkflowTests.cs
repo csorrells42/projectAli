@@ -85,6 +85,27 @@ public sealed class AgentWorkflowTests
     }
 
     [Fact]
+    public async Task ProgrammingGroupChat_CompactsAdvisoryBeforeReturningToOuterAgent()
+    {
+        var client = new LargeWorkflowResponseChatClient();
+        var tools = CreateWorkflowTools(client);
+        var groupChat = Assert.Single(
+            tools.OfType<AIFunction>(),
+            item => item.Name == AliCapabilityCatalog.RunProgrammingGroupChatName);
+
+        var result = await groupChat.InvokeAsync(
+            new AIFunctionArguments { ["query"] = "Design a substantial WPF chess application." },
+            TestContext.Current.CancellationToken);
+        var json = Assert.IsType<System.Text.Json.JsonElement>(result);
+        Assert.Equal(System.Text.Json.JsonValueKind.String, json.ValueKind);
+        var text = json.GetString()!;
+
+        Assert.True(text.Length <= AliAgentWorkflowFactory.MaximumWorkflowAdvisoryCharacters);
+        Assert.Contains("private workflow transcript compacted", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("workflow response 1", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void MagenticTool_IsConstructedWithConfiguredBound()
     {
         var client = new CountingChatClient();
@@ -202,7 +223,7 @@ public sealed class AgentWorkflowTests
     }
 
     private static IReadOnlyList<AITool> CreateWorkflowTools(
-        CountingChatClient client,
+        IChatClient client,
         string? checkpointPath = null)
     {
         var runtime = new DevelopmentLocalModelRuntime();
@@ -280,6 +301,42 @@ public sealed class AgentWorkflowTests
             var call = Interlocked.Increment(ref _callCount);
             await Task.CompletedTask;
             yield return new ChatResponseUpdate(MeaiChatRole.Assistant, $"workflow response {call}");
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) =>
+            serviceType.IsInstanceOfType(this) ? this : null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class LargeWorkflowResponseChatClient : IChatClient
+    {
+        private int _callCount;
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<MeaiChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _callCount);
+            return Task.FromResult(new ChatResponse(
+                new MeaiChatMessage(
+                    MeaiChatRole.Assistant,
+                    $"workflow response {call} " + new string((char)('a' + call - 1), 5000))));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<MeaiChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _callCount);
+            await Task.CompletedTask;
+            yield return new ChatResponseUpdate(
+                MeaiChatRole.Assistant,
+                $"workflow response {call} " + new string((char)('a' + call - 1), 5000));
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) =>

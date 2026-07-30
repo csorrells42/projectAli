@@ -11,35 +11,30 @@ Bundled dependencies and model assets retain their upstream licenses; see
 ```powershell
 dotnet restore .\Ali.sln --configfile .\NuGet.Config --ignore-failed-sources
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\RestoreRuntimeAssets.ps1
-dotnet build .\Ali.sln --no-restore
+dotnet build .\src\Ali.csproj --no-restore --configuration Release
 ```
 
 The restore script provisions the ignored canonical staging tree at
 `artifacts\runtime-assets\win-x64`. It accepts `-VerifyOnly` for full checksum
-validation, `-VerifyOnly -Fast` for the Build-time existence/size check, and
+validation, `-VerifyOnly -Fast` for a quick manual existence/size check, and
 `-OfflineCache <folder>` to restore without network access from a previously
 populated `downloads` and `wheels` cache.
 
 ## Run
 
 ```powershell
-dotnet run --project .\src\Ali.csproj --no-build
+& .\bin\Release\Ali\Ali.exe
 ```
 
-## Copy-Folder Publish
+## Transfer
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\PublishAliRelease.ps1
-```
-
-This is the canonical Ali release command. It always rebuilds the self-contained
-bundle directly into `bin\Release\Ali`, validates every required asset, refreshes
-`Ali Dev Run.lnk` on the current user's Desktop, and removes compiler intermediates.
-Copy or zip that one published folder for a demo or transfer, then launch `Ali.exe`.
-Build fails when a required staged asset is absent. Publish performs the full
-model checksum pass before producing a copy-folder bundle, so a camera-, voice-,
-speech-, or FFmpeg-broken folder cannot be produced accidentally. Non-English
-.NET satellite-resource folders are removed from the finished English bundle.
+Release builds write the self-contained application directly to
+`bin\Release\Ali`. Ali runs from that same folder. There is no separate publish,
+copy, staging, or Debug deployment path. Transfer the complete project folder;
+after runtime assets have been restored, build Release and launch
+`bin\Release\Ali\Ali.exe`. Runtime-asset validation remains available as an
+explicit maintenance command, but it never runs automatically or blocks a normal
+Release build.
 
 ## Runtime Data
 

@@ -68,16 +68,14 @@ public sealed class RipgrepSearchService
         startInfo.ArgumentList.Add(searchRoot);
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Windows did not start Ali's bundled ripgrep process.");
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(timeout);
-        var errorsTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
+        var errorsTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var results = new List<SourceExcerpt>();
         var stoppedAtLimit = false;
         try
         {
             while (results.Count < Math.Max(1, maximumResults))
             {
-                var line = await process.StandardOutput.ReadLineAsync(timeoutSource.Token).ConfigureAwait(false);
+                var line = await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (line is null)
                 {
                     break;
@@ -93,18 +91,12 @@ public sealed class RipgrepSearchService
                 stoppedAtLimit = true;
                 process.Kill(entireProcessTree: true);
             }
-            await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             var error = (await errorsTask.ConfigureAwait(false)).ReplaceLineEndings(" ").Trim();
             if (process.ExitCode > 1 && !stoppedAtLimit)
             {
                 throw new InvalidOperationException($"ripgrep exited with code {process.ExitCode}. {error}");
             }
-            return results;
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-            process.WaitForExit(2_000);
             return results;
         }
         finally

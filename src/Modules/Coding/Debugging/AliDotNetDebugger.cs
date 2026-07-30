@@ -334,7 +334,7 @@ internal sealed class AliDotNetDebugger : IAsyncDisposable
             _pending[sequence] = completion;
             await SendAsync(new { seq = sequence, type = "request", command, arguments }, cancellationToken).ConfigureAwait(false);
             using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
-            var response = await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+            var response = await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (response["success"]?.GetValue<bool>() == false)
             {
                 throw new InvalidOperationException(response["message"]?.GetValue<string>() ?? $"Debugger command '{command}' failed.");
@@ -345,7 +345,7 @@ internal sealed class AliDotNetDebugger : IAsyncDisposable
         private Task<JsonObject> WaitEventAsync(string name, CancellationToken cancellationToken)
         {
             var completion = _events.GetOrAdd(name, _ => new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously));
-            return completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            return completion.Task.WaitAsync(cancellationToken);
         }
 
         private async Task SendAsync(object message, CancellationToken cancellationToken)

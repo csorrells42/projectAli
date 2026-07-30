@@ -19,7 +19,6 @@ public sealed record DotNetCreateProjectResult(
 /// </summary>
 internal sealed class AliDotNetProjectScaffolder
 {
-    private const int CreateTimeoutSeconds = 120;
     private const int MaximumOutputCharacters = 12_000;
     private static readonly JsonSerializerOptions AuditJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly SemaphoreSlim ScaffoldLock = new(1, 1);
@@ -165,25 +164,9 @@ internal sealed class AliDotNetProjectScaffolder
             ?? throw new InvalidOperationException("Windows did not start the .NET SDK.");
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(CreateTimeoutSeconds));
         try
         {
-            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            return new ProcessExecutionResult(
-                -1,
-                $"Project creation stopped after the {CreateTimeoutSeconds}-second safety timeout.\n"
-                + await standardOutput.ConfigureAwait(false)
-                + await standardError.ConfigureAwait(false));
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {

@@ -24,16 +24,6 @@ public static class InternetHttpClientFactory
                 // resilience pipeline owns attempt and total timeouts.
                 client.Timeout = Timeout.InfiniteTimeSpan;
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("AliLocalDesktop/1.0");
-            })
-            .AddStandardResilienceHandler(options =>
-            {
-                options.Retry.MaxRetryAttempts = 2;
-                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(90);
-                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(35);
-                // Microsoft validates that circuit-breaker sampling spans at least
-                // two complete attempts. Keep the longer web-navigation attempt
-                // timeout while giving the breaker enough evidence to act on.
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(70);
             });
         return services.BuildServiceProvider();
     }

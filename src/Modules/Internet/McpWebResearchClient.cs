@@ -30,9 +30,6 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
             return Failure("MCP", "Provider-managed research is disabled in Internet settings.");
         }
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.McpResearchTimeoutSeconds, 20, 300)));
-
         var firecrawlKey = settings.ResolveFirecrawlApiKey();
         if (!string.IsNullOrWhiteSpace(firecrawlKey))
         {
@@ -41,7 +38,7 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
                 new Uri($"https://mcp.firecrawl.dev/{Uri.EscapeDataString(firecrawlKey)}/v2/mcp"),
                 ["firecrawl_deep_research", "firecrawl_agent", "firecrawl_search"],
                 query,
-                timeout.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
             if (firecrawl.Succeeded)
             {
                 return firecrawl;
@@ -56,7 +53,7 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
                 new Uri($"https://mcp.tavily.com/mcp/?tavilyApiKey={Uri.EscapeDataString(tavilyKey)}"),
                 ["tavily-search", "tavily_search"],
                 query,
-                timeout.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
         }
 
         return Failure("MCP", "No Firecrawl or Tavily API key is configured for MCP research.");
@@ -75,8 +72,7 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
             {
                 Name = provider,
                 Endpoint = endpoint,
-                TransportMode = HttpTransportMode.AutoDetect,
-                ConnectionTimeout = TimeSpan.FromSeconds(30)
+                TransportMode = HttpTransportMode.AutoDetect
             });
             await using var client = await McpClient.CreateAsync(
                 transport,

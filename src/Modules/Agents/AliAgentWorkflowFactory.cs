@@ -14,6 +14,7 @@ namespace Ali.Modules.Coordinator;
 internal sealed class AliAgentWorkflowFactory : IDisposable
 {
     internal const int ProgrammingMaximumTurns = 4;
+    internal const int MaximumWorkflowAdvisoryCharacters = 2200;
     internal const string ProgrammingReviewerAgentId = "ali-programming-reviewer";
     internal const string MagenticManagerAgentId = "ali-magentic-manager";
     private const string ResearchArtifactKind = "research-artifact";
@@ -222,11 +223,37 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
             includeExceptionDetails: false,
             includeWorkflowOutputsInResponse: true);
         hosted = AliAgentFrameworkMiddleware.WithVisibleLifecycle(hosted, _turnAccessor, role);
-        return hosted.AsAIFunction(new AIFunctionFactoryOptions
+        var hostedFunction = (AIFunction)hosted.AsAIFunction(new AIFunctionFactoryOptions
         {
             Name = toolName,
             Description = description
         });
+        return AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<string>>)InvokeCompactAsync,
+            toolName,
+            description);
+
+        async Task<string> InvokeCompactAsync(string query, CancellationToken cancellationToken)
+        {
+            var result = await hostedFunction.InvokeAsync(
+                new AIFunctionArguments { ["query"] = query },
+                cancellationToken).ConfigureAwait(false);
+            return CompactWorkflowAdvisory(result?.ToString());
+        }
+    }
+
+    internal static string CompactWorkflowAdvisory(string? value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        if (normalized.Length <= MaximumWorkflowAdvisoryCharacters)
+        {
+            return normalized;
+        }
+
+        const string marker = "\n\n... private workflow transcript compacted; full lifecycle remains in Ali Activity and durable checkpoints ...\n\n";
+        var remaining = MaximumWorkflowAdvisoryCharacters - marker.Length;
+        var headLength = remaining / 3;
+        return normalized[..headLength] + marker + normalized[^(remaining - headLength)..];
     }
 
     public AliRecoverableWorkflowReport ListRecoverableWorkflows() =>

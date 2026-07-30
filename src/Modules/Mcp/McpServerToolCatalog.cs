@@ -15,6 +15,7 @@ public static class McpServerToolCatalog
     private static readonly McpServerToolPolicy[] Defaults =
     [
         Policy(AliCapabilityCatalog.ListAvailableToolsName, "List the Ali capabilities currently exposed by this MCP server."),
+        Policy(AliCapabilityCatalog.GetActiveUserProfileName, "Return Ali's explicitly selected local user profile.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.RecallUserMemoryName, "Recall memories for Ali's active identity profile.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.RememberCurrentUserName, "Save a fact for Ali's active identity profile.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Correct memory for Ali's active identity profile.", writesLocalData: true, readsPrivateData: true),
@@ -155,6 +156,7 @@ public static class McpServerToolCatalog
 
 internal sealed class AliMcpServerToolFactory
 {
+    private readonly AliActiveUserTools _activeUserTools;
     private readonly AliMemoryTools _memoryTools;
     private readonly AliSourceTools _sourceTools;
     private readonly AliNavigationTools _navigationTools;
@@ -171,6 +173,7 @@ internal sealed class AliMcpServerToolFactory
         AssistantProfile assistantProfile,
         AliCodingModule? codingModule = null)
     {
+        _activeUserTools = new AliActiveUserTools(null, static () => null);
         _memoryTools = new AliMemoryTools(memories, static () => null);
         _sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, static () => null);
         _navigationTools = new AliNavigationTools(static () => null);
@@ -191,6 +194,7 @@ internal sealed class AliMcpServerToolFactory
         Func<UserMemorySettings> memorySettings,
         AliCodingModule? codingModule = null)
     {
+        _activeUserTools = new AliActiveUserTools(activeUsers, static () => null);
         _memoryTools = new AliMemoryTools(userMemories, activeUsers, memorySettings, static () => null);
         _sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, static () => null);
         _navigationTools = new AliNavigationTools(static () => null);
@@ -216,6 +220,10 @@ internal sealed class AliMcpServerToolFactory
                     enabledCapabilities)),
                 AliCapabilityCatalog.ListAvailableToolsName,
                 "List the exact tools currently exposed by this Ali MCP server."),
+            [AliCapabilityCatalog.GetActiveUserProfileName] = AIFunctionFactory.Create(
+                (Func<CoordinatorActiveUserResult>)_activeUserTools.GetActiveProfile,
+                AliCapabilityCatalog.GetActiveUserProfileName,
+                "Return Ali's explicitly selected local user profile as authoritative identity data."),
             [AliCapabilityCatalog.RecallUserMemoryName] = AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<CoordinatorMemoryResult>>)_memoryTools.SearchAsync,
                 AliCapabilityCatalog.RecallUserMemoryName,

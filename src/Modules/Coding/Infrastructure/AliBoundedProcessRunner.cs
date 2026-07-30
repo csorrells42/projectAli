@@ -45,19 +45,16 @@ internal static class AliBoundedProcessRunner
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        limit.CancelAfter(timeout);
         try
         {
-            await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             started.Stop();
             return new BoundedProcessResult(process.ExitCode == 0, process.ExitCode, Compact(output.ToString()), started.ElapsedMilliseconds, false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-            started.Stop();
-            return new BoundedProcessResult(false, -1, Compact(output.ToString()), started.ElapsedMilliseconds, true);
+            throw;
         }
     }
 

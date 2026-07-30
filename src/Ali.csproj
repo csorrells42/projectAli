@@ -14,6 +14,13 @@
     <!-- Agent Framework's file-access API is preview in 1.15.0; usage is isolated behind Modules/WorkstationFiles. -->
     <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <OutputPath>$(MSBuildThisFileDirectory)..\bin\Release\Ali\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Ali.Framework.Tests" />
   </ItemGroup>

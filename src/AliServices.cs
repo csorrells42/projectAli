@@ -316,7 +316,11 @@ public sealed class AliServices
             toolPermissions,
             activeUsers);
         var agentWorkMemory = new AliAgentWorkMemory(userDataRoot);
-        var codingModule = new AliCodingModule(fileAccess);
+        var codingModule = new AliCodingModule(
+            fileAccess,
+            () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
+            () => RuntimeSettingsStore.LoadOrDefault(dataRoot),
+            AppContext.BaseDirectory);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         var candidateRuntime = configuredOptions is { Enabled: true }

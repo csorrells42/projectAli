@@ -43,7 +43,6 @@ public sealed record DotNetVerificationResult(
 /// </summary>
 internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver)
 {
-    private const int TestTimeoutSeconds = 240;
     private const int MaximumOutputCharacters = 24_000;
     private static readonly SemaphoreSlim TestLock = new(1, 1);
 
@@ -63,8 +62,6 @@ internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver
         await TestLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(TestTimeoutSeconds));
             var startInfo = new ProcessStartInfo
             {
                 FileName = ResolveDotNetHost(),
@@ -78,7 +75,7 @@ internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver
             {
                 "test", target.PhysicalPath, "--configuration", normalizedConfiguration,
                 "--logger", $"trx;LogFileName={trxName}", "--results-directory", resultDirectory,
-                "--blame-hang-timeout", "2m", "--nologo"
+                "--nologo"
             })
             {
                 startInfo.ArgumentList.Add(argument);
@@ -91,18 +88,7 @@ internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            try
-            {
-                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                TryKill(process);
-                started.Stop();
-                return new DotNetTestResult(false, targetPath, normalizedConfiguration, 0, 0, 0, 0,
-                    $"Tests stopped after the {TestTimeoutSeconds}-second safety timeout.", [],
-                    File.Exists(trxPath) ? trxPath : null, Compact(output.ToString()), started.ElapsedMilliseconds, true);
-            }
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 
             started.Stop();
             return ParseResult(targetPath, normalizedConfiguration, trxPath, process.ExitCode, output.ToString(), started.ElapsedMilliseconds);

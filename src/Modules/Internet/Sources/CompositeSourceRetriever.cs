@@ -29,6 +29,7 @@ public sealed class CompositeSourceRetriever : ISourceRetriever
 
         var excerpts = new List<SourceExcerpt>();
         var warnings = new List<string>();
+        var attempts = new List<SourceProviderAttempt>();
         var requiresSourceGrounding = plan.RequiresSourceGrounding;
 
         foreach (var retriever in _retrievers)
@@ -36,6 +37,7 @@ public sealed class CompositeSourceRetriever : ISourceRetriever
             var result = await retriever.RetrieveAsync(plan, cancellationToken).ConfigureAwait(false);
             requiresSourceGrounding = requiresSourceGrounding || result.RequiresSourceGrounding;
             warnings.AddRange(result.Warnings);
+            attempts.AddRange(result.Attempts);
 
             foreach (var excerpt in result.Excerpts)
             {
@@ -48,6 +50,6 @@ public sealed class CompositeSourceRetriever : ISourceRetriever
             return SourceRetrievalResult.Empty;
         }
 
-        return new SourceRetrievalResult(excerpts, warnings, requiresSourceGrounding);
+        return new SourceRetrievalResult(excerpts, warnings, requiresSourceGrounding, attempts);
     }
 }

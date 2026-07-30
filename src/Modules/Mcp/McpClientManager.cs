@@ -100,8 +100,6 @@ public sealed class McpClientManager(string dataRoot)
             return new McpServerProbeResult(false, validation, []);
         }
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(profile.ConnectionTimeoutSeconds, 5, 300)));
         IClientTransport? transport = null;
         McpClient? client = null;
         try
@@ -109,8 +107,8 @@ public sealed class McpClientManager(string dataRoot)
             transport = CreateTransport(profile);
             client = await McpClient.CreateAsync(
                 transport,
-                cancellationToken: timeout.Token).ConfigureAwait(false);
-            var tools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            var tools = await client.ListToolsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
             var discovered = tools.Select(tool => new McpDiscoveredTool(
                     tool.Name,
                     tool.Description ?? string.Empty,
@@ -179,13 +177,11 @@ public sealed class McpClientManager(string dataRoot)
             McpClient? client = null;
             try
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(profile.ConnectionTimeoutSeconds, 5, 300)));
                 transport = CreateTransport(profile);
                 client = await McpClient.CreateAsync(
                     transport,
-                    cancellationToken: timeout.Token).ConfigureAwait(false);
-                var tools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                var tools = await client.ListToolsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                 foreach (var tool in tools.Where(tool => enabledPolicies.ContainsKey(tool.Name)))
                 {
                     var policy = enabledPolicies[tool.Name];
@@ -297,7 +293,6 @@ public sealed class McpClientManager(string dataRoot)
             Name = profile.Name,
             Endpoint = new Uri(profile.Endpoint, UriKind.Absolute),
             TransportMode = HttpTransportMode.AutoDetect,
-            ConnectionTimeout = TimeSpan.FromSeconds(Math.Clamp(profile.ConnectionTimeoutSeconds, 5, 300)),
             AdditionalHeaders = headers
         });
     }

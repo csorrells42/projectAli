@@ -52,10 +52,7 @@ public sealed class UserDataBackupService(string dataRoot, string profileDataRoo
         ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
         var fullBackupPath = Path.GetFullPath(backupPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullBackupPath)!);
-        if (File.Exists(fullBackupPath))
-        {
-            File.Delete(fullBackupPath);
-        }
+        var pendingBackupPath = fullBackupPath + ".partial-" + Guid.NewGuid().ToString("N");
 
         var createdAt = DateTimeOffset.Now;
         var manifest = new UserDataBackupManifest(
@@ -66,21 +63,30 @@ public sealed class UserDataBackupService(string dataRoot, string profileDataRoo
             Path.GetFileName(_profileDataRoot),
             ExcludedDirectoryNames.Select(name => $"{name}/").ToArray());
 
-        var fileCount = 0;
-        long totalBytes = 0;
-        using (var archive = ZipFile.Open(fullBackupPath, ZipArchiveMode.Create))
+        try
         {
-            var manifestEntry = archive.CreateEntry(ManifestEntryName, CompressionLevel.Optimal);
-            using (var stream = manifestEntry.Open())
+            var fileCount = 0;
+            long totalBytes = 0;
+            using (var archive = ZipFile.Open(pendingBackupPath, ZipArchiveMode.Create))
             {
-                JsonSerializer.Serialize(stream, manifest, JsonOptions);
+                var manifestEntry = archive.CreateEntry(ManifestEntryName, CompressionLevel.Optimal);
+                using (var stream = manifestEntry.Open())
+                {
+                    JsonSerializer.Serialize(stream, manifest, JsonOptions);
+                }
+
+                AddRoot(archive, _dataRoot, DataEntryRoot, fullBackupPath, pendingBackupPath, ref fileCount, ref totalBytes);
+                AddRoot(archive, _profileDataRoot, ProfileEntryRoot, fullBackupPath, pendingBackupPath, ref fileCount, ref totalBytes);
             }
 
-            AddRoot(archive, _dataRoot, DataEntryRoot, fullBackupPath, ref fileCount, ref totalBytes);
-            AddRoot(archive, _profileDataRoot, ProfileEntryRoot, fullBackupPath, ref fileCount, ref totalBytes);
+            VerifyCreatedBackup(pendingBackupPath, fileCount, totalBytes, createdAt);
+            File.Move(pendingBackupPath, fullBackupPath, overwrite: true);
+            return new UserDataBackupResult(fullBackupPath, fileCount, totalBytes, createdAt);
         }
-
-        return new UserDataBackupResult(fullBackupPath, fileCount, totalBytes, createdAt);
+        finally
+        {
+            TryDeleteFile(pendingBackupPath);
+        }
     }
 
     public UserDataBackupManifest InspectBackup(string backupPath)
@@ -140,6 +146,7 @@ public sealed class UserDataBackupService(string dataRoot, string profileDataRoo
         string root,
         string entryRoot,
         string backupPath,
+        string pendingBackupPath,
         ref int fileCount,
         ref long totalBytes)
     {
@@ -152,6 +159,7 @@ public sealed class UserDataBackupService(string dataRoot, string profileDataRoo
         {
             var fullFilePath = Path.GetFullPath(filePath);
             if (fullFilePath.Equals(backupPath, StringComparison.OrdinalIgnoreCase)
+                || fullFilePath.Equals(pendingBackupPath, StringComparison.OrdinalIgnoreCase)
                 || IsExcluded(root, fullFilePath))
             {
                 continue;
@@ -233,6 +241,37 @@ public sealed class UserDataBackupService(string dataRoot, string profileDataRoo
                ?? throw new InvalidOperationException("This is not an Ali backup: manifest is unreadable.");
     }
 
+    private static void VerifyCreatedBackup(
+        string backupPath,
+        int expectedFileCount,
+        long expectedTotalBytes,
+        DateTimeOffset expectedCreatedAt)
+    {
+        using var archive = ZipFile.OpenRead(backupPath);
+        var manifest = ReadManifest(archive);
+        if (manifest.Version != ManifestVersion || manifest.CreatedAt != expectedCreatedAt)
+        {
+            throw new InvalidOperationException("Ali backup verification failed: manifest does not match the backup operation.");
+        }
+
+        var dataEntries = archive.Entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Name)
+                            && (entry.FullName.StartsWith(DataEntryRoot + "/", StringComparison.Ordinal)
+                                || entry.FullName.StartsWith(ProfileEntryRoot + "/", StringComparison.Ordinal)))
+            .ToArray();
+        if (dataEntries.Length != expectedFileCount
+            || dataEntries.Sum(entry => entry.Length) != expectedTotalBytes)
+        {
+            throw new InvalidOperationException("Ali backup verification failed: file inventory does not match the source data.");
+        }
+
+        foreach (var entry in dataEntries)
+        {
+            using var stream = entry.Open();
+            stream.CopyTo(Stream.Null);
+        }
+    }
+
     private static void DeleteEmptyDirectories(string root)
     {
         foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
@@ -259,6 +298,21 @@ public sealed class UserDataBackupService(string dataRoot, string profileDataRoo
         catch
         {
             // Staging cleanup is best-effort; a failed cleanup should not hide restore outcome.
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // A verified destination is never replaced by a partial archive.
         }
     }
 

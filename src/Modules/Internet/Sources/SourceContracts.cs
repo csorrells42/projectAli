@@ -8,12 +8,25 @@ public sealed record SourceExcerpt(
     DateTimeOffset RetrievedAt,
     string Excerpt);
 
+public static class SourceProviderNames
+{
+    public const string GoogleGrounding = "Google Grounding";
+}
+
+public sealed record SourceProviderAttempt(
+    string Provider,
+    string Query,
+    bool ProducedResults);
+
 public sealed record SourceRetrievalResult(
     IReadOnlyList<SourceExcerpt> Excerpts,
     IReadOnlyList<string> Warnings,
-    bool RequiresSourceGrounding = true)
+    bool RequiresSourceGrounding = true,
+    IReadOnlyList<SourceProviderAttempt>? ProviderAttempts = null)
 {
     public bool HasSources => Excerpts.Count > 0;
+
+    public IReadOnlyList<SourceProviderAttempt> Attempts => ProviderAttempts ?? [];
 
     public static SourceRetrievalResult Empty { get; } = new([], [], false);
 }
@@ -31,6 +44,9 @@ public sealed record SourceQueryPlan(
     IReadOnlyList<string> PreferredSourceTopics)
 {
     public string TemporalSelection { get; init; } = "none";
+
+    public IReadOnlySet<string> ExcludedProviders { get; init; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     public static SourceQueryPlan NoSources { get; } = new(
         false,

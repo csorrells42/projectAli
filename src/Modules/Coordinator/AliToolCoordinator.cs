@@ -27,10 +27,12 @@ public sealed class AliToolCoordinator
     private const int MaximumVisibleSources = 5;
     private readonly AliAgentHarnessRunner _harness;
     private readonly AsyncLocal<CoordinatorTurnContext?> _turn = new();
-    private readonly IUserMemoryService? _userMemories;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<UserMemorySettings>? _memorySettings;
+    private readonly AliUserMemoryReviewQueue? _memoryReviewQueue;
     private readonly string _assistantName;
+
+    public event Action<AssistantStreamChunk>? BackgroundActivity;
 
     public AliToolCoordinator(
         ILocalModelRuntime runtime,
@@ -53,9 +55,9 @@ public sealed class AliToolCoordinator
         Func<AgentOrchestrationSettings>? orchestrationSettings = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
-        _userMemories = userMemories;
         _activeUsers = activeUsers;
         _memorySettings = memorySettings;
+        _memoryReviewQueue = userMemories is null ? null : new AliUserMemoryReviewQueue(userMemories);
         codingModule ??= new AliCodingModule(fileAccess);
         var catalog = new AliToolCatalog(
             localLibrary,
@@ -72,7 +74,10 @@ public sealed class AliToolCoordinator
             userMemories,
             activeUsers,
             memorySettings,
-            orchestrationSettings);
+            orchestrationSettings,
+            _memoryReviewQueue is null
+                ? null
+                : cancellationToken => _memoryReviewQueue.DrainAsync(cancellationToken));
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
@@ -149,9 +154,9 @@ public sealed class AliToolCoordinator
             userText,
             chunk => writer.TryWrite(chunk));
         _turn.Value = turn;
+        _memoryReviewQueue?.BeginForegroundTurn();
         try
         {
-            var learnedAnswer = new StringBuilder();
             var result = await _harness.RunAsync(
                 turn,
                 userText,
@@ -159,10 +164,6 @@ public sealed class AliToolCoordinator
                 attachments,
                 chunk =>
                 {
-                    if (!chunk.IsActivity && !chunk.IsReasoning && !string.IsNullOrWhiteSpace(chunk.Text))
-                    {
-                        learnedAnswer.Append(chunk.Text);
-                    }
                     writer.TryWrite(chunk);
                 },
                 cancellationToken).ConfigureAwait(false);
@@ -178,7 +179,7 @@ public sealed class AliToolCoordinator
                     result.FinishReason));
             }
 
-            QueueBackgroundLearning(turn, userText, learnedAnswer.ToString());
+            QueueIncomingUserMemoryReview(turn, userText);
 
             turn.Report(AgentActivityKind.Complete, "Response complete", $"{_assistantName} finished the agent run.");
             writer.TryComplete();
@@ -194,42 +195,77 @@ public sealed class AliToolCoordinator
         }
         finally
         {
+            _memoryReviewQueue?.EndForegroundTurn();
             _turn.Value = null;
         }
     }
 
-    private void QueueBackgroundLearning(CoordinatorTurnContext turn, string userText, string answer)
+    private void QueueIncomingUserMemoryReview(
+        CoordinatorTurnContext turn,
+        string userText)
     {
-        if (_userMemories is null || _activeUsers is null || _memorySettings is null)
+        if (_memoryReviewQueue is null || _activeUsers is null || _memorySettings is null)
         {
-            return;
-        }
-        var settings = _memorySettings().Normalize();
-        if (!settings.Enabled || !settings.AutomaticBackgroundLearning || string.IsNullOrWhiteSpace(answer))
-        {
-            return;
-        }
-        if (_activeUsers.RequiresSelection)
-        {
-            turn.Report(AgentActivityKind.Warning, "Background memory review skipped", "Select the active user profile before Ali stores personal memory.");
             return;
         }
 
-        var user = _activeUsers.Current;
-        var conversation = $"User: {userText.Trim()}\nAssistant: {answer.Trim()}";
-        turn.Report(AgentActivityKind.Status, "Background memory review queued", "The visible answer is complete; durable-memory extraction will run at low effort.");
-        _ = Task.Run(async () =>
+        var settings = _memorySettings().Normalize();
+        if (!settings.Enabled)
         {
-            try
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-                await _userMemories.RememberAsync(user, conversation, "conversation", null, timeout.Token).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Background learning is deliberately fail-safe and must never disturb a completed answer.
-            }
-        });
+            return;
+        }
+
+        if (_activeUsers.RequiresSelection)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                "Personal memory review skipped",
+                "Select the active user profile before Mem0 reviews incoming text.");
+            return;
+        }
+
+        var review = _memoryReviewQueue.Enqueue(_activeUsers.Current, userText);
+        _ = PublishMemoryReviewOutcomeAsync(turn, review);
+        turn.Report(
+            AgentActivityKind.Status,
+            "Personal memory review queued",
+            "The answer is available. Mem0 will ask the configured local model whether this user turn contains durable personal information.");
+    }
+
+    private async Task PublishMemoryReviewOutcomeAsync(
+        CoordinatorTurnContext turn,
+        Task<MemoryOperationResult> review)
+    {
+        MemoryOperationResult result;
+        try
+        {
+            result = await review.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            result = MemoryOperationResult.Failed(
+                $"Mem0 review failed safely: {ex.Message}",
+                "background_review_failed");
+        }
+
+        var count = result.Memories.Count;
+        var title = !result.Success
+            ? "Mem0 review failed; no memory change was confirmed."
+            : count == 0
+                ? "Mem0 found nothing worth keeping from that turn."
+                : $"Mem0 found {count} durable memory change{(count == 1 ? string.Empty : "s")}.";
+        var changed = count == 0
+            ? string.Empty
+            : " Changes: " + string.Join(" | ", result.Memories.Take(3).Select(memory => memory.Text));
+        BackgroundActivity?.Invoke(new AssistantStreamChunk(
+            turn.ConversationId,
+            turn.UserMessageId,
+            turn.AssistantMessageId,
+            title,
+            Ali.Modules.Evidence.EvidenceStatus.Unknown,
+            IsActivity: true,
+            ActivityKind: result.Success ? AgentActivityKind.Status : AgentActivityKind.Warning,
+            ActivityDetail: $"{result.Message}{changed}"));
     }
 
     private static void PublishSourceAppendix(

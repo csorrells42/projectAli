@@ -21,6 +21,8 @@ using Ali.Modules.Coding.VisualStudio;
 using Ali.Modules.Coding.Native;
 using Ali.Modules.Coding.Embedded.Arduino;
 using Ali.Modules.Coding.Embedded.RaspberryPi;
+using Ali.Modules.Coding.Agents;
+using Ali.Modules.Runtime;
 using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 
@@ -32,7 +34,11 @@ namespace Ali.Modules.Coding;
 /// </summary>
 public sealed class AliCodingModule : IAsyncDisposable
 {
-    internal AliCodingModule(AliWorkstationFileAccess fileAccess)
+    internal AliCodingModule(
+        AliWorkstationFileAccess fileAccess,
+        Func<AgentOrchestrationSettings>? orchestrationSettings = null,
+        Func<OpenAiCompatibleRuntimeOptions>? runtimeSettings = null,
+        string? installRoot = null)
     {
         ArgumentNullException.ThrowIfNull(fileAccess);
         var auditPath = Path.Combine(Path.GetDirectoryName(fileAccess.Audit.Path)!, "dotnet-actions.jsonl");
@@ -72,6 +78,11 @@ public sealed class AliCodingModule : IAsyncDisposable
             sourceIndex);
         CrossLanguageArchitecture = new AliCrossLanguageArchitecture(languageResolver, sourceIndex);
         Operations = new AliCodingOperations(languageResolver, LanguageProviders);
+        ExternalAgents = new AliExternalCodingAgents(
+            fileAccess,
+            orchestrationSettings ?? (() => new AgentOrchestrationSettings()),
+            runtimeSettings ?? RuntimeSettingsStore.GetDefaultOptions,
+            installRoot);
     }
 
     internal AliDotNetProjectScaffolder ProjectScaffolder { get; }
@@ -94,9 +105,18 @@ public sealed class AliCodingModule : IAsyncDisposable
     internal AliGnuNativeTools GnuNative { get; }
     internal AliArduinoTools Arduino { get; }
     internal AliRaspberryPiTools RaspberryPi { get; }
+    internal AliExternalCodingAgents ExternalAgents { get; }
 
     internal IReadOnlyList<AIFunction> CreateFunctions() =>
     [
+        AIFunctionFactory.Create(
+            (Func<CancellationToken, Task<ExternalCodingAgentStatus>>)ExternalAgents.GetStatusAsync,
+            AliCapabilityCatalog.CodingAgentStatusName,
+            "Report the selected Aider, OpenHands, or Hybrid programming mode and truthful readiness of both external coding engines."),
+        AIFunctionFactory.Create(
+            (Func<string, string, CancellationToken, Task<ExternalCodingAgentRunResult>>)ExternalAgents.ExecuteAsync,
+            AliCapabilityCatalog.CodingAgentExecuteName,
+            "Execute one substantial programming objective in the approved existing project using the mode selected in Settings: Aider architect/edit, OpenHands autonomous implementation, or OpenHands followed by Aider in Hybrid mode. This can modify and execute project files and always requires approval."),
         AIFunctionFactory.Create((Func<AliVisualStudioReport>)VisualStudio.Inspect,
             AliCapabilityCatalog.VisualStudioInspectName,
             "Inspect installed Visual Studio instances and report MSBuild, MSVC, CMake, Ninja, test, formatting, language-server, and debugger features truthfully."),

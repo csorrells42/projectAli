@@ -13,6 +13,7 @@ using AvatarBuilder.Modules.Vision.IdentityEnrollment;
 using AvatarBuilder.Modules.Audio.SpeakerRecognition;
 using AvatarBuilder.Modules.Audio.Microphone;
 using Ali.UI;
+using Ali.Modules.UserMemory;
 using Microsoft.Win32;
 using Brush = System.Windows.Media.Brush;
 using MessageBox = System.Windows.MessageBox;
@@ -31,6 +32,8 @@ public partial class IdentityReviewWindow : Window
 	private readonly ISpeakerEnrollmentService? _speakerEnrollment;
 
 	private readonly IMicrophoneInputService? _microphoneInput;
+
+	private readonly IActiveUserSession? _activeUsers;
 
 	private readonly System.Windows.Controls.Panel? _originalViewportParent;
 
@@ -55,7 +58,8 @@ public partial class IdentityReviewWindow : Window
 		FrameworkElement? liveViewport = null,
 		IdentityEnrollmentGuidanceModule? guidance = null,
 		ISpeakerEnrollmentService? speakerEnrollment = null,
-		IMicrophoneInputService? microphoneInput = null)
+		IMicrophoneInputService? microphoneInput = null,
+		IActiveUserSession? activeUsers = null)
 	{
 		NativeTitleBarTheme.ApplyDarkTitleBar(this);
 		_service = service ?? throw new ArgumentNullException(nameof(service));
@@ -63,6 +67,7 @@ public partial class IdentityReviewWindow : Window
 		_guidance = guidance;
 		_speakerEnrollment = speakerEnrollment;
 		_microphoneInput = microphoneInput;
+		_activeUsers = activeUsers;
 		if (liveViewport?.Parent is System.Windows.Controls.Panel parent)
 		{
 			_originalViewportParent = parent;
@@ -148,7 +153,42 @@ public partial class IdentityReviewWindow : Window
 			$"Encounters: {item.EncounterCount:n0}\n" +
 			$"User ID: {item.IdentityId}";
 		LoadPhoto(item.ContextPhotoPath);
+		UpdateActiveUserUi();
 		UpdateVoiceEnrollmentUi();
+	}
+
+	private void UseAsActiveUserClicked(object sender, RoutedEventArgs e)
+	{
+		PersonIdentityReviewItem? selected = Selected;
+		if (selected is null || _activeUsers is null)
+		{
+			StatusText.Text = "Select a registered user before changing the active profile.";
+			return;
+		}
+
+		_activeUsers.Refresh();
+		_activeUsers.Select(selected.IdentityId);
+		StatusText.Text = $"{selected.DisplayName} is now the active user for memory, permissions, and personal context.";
+		UpdateActiveUserUi();
+	}
+
+	private void UpdateActiveUserUi()
+	{
+		if (UseAsActiveUserButton is null)
+		{
+			return;
+		}
+
+		var selected = Selected;
+		var isActive = selected is not null
+			&& _activeUsers is not null
+			&& !_activeUsers.RequiresSelection
+			&& string.Equals(
+				selected.IdentityId,
+				_activeUsers.Current.StableId,
+				StringComparison.OrdinalIgnoreCase);
+		UseAsActiveUserButton.Content = isActive ? "Active user" : "Use as active user";
+		UseAsActiveUserButton.IsEnabled = selected is not null && _activeUsers is not null && !isActive;
 	}
 
 	private void RegistrationChanged(

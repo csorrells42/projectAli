@@ -16,35 +16,23 @@ public sealed class AgentTurnIsolationTests
             new("user-1", RuntimeChatRole.User, "what can you do", DateTimeOffset.UtcNow),
             new("assistant-1", RuntimeChatRole.Assistant, "Previous turn did not finish.", DateTimeOffset.UtcNow)
         };
-        var memory = new CoordinatorMemoryResult("No memories", [], []);
+        var input = AliAgentHarnessRunner.BuildInitialInput(history, "hello Ali", []);
 
-        var input = AliAgentHarnessRunner.BuildInitialInput(history, "hello Ali", memory, []);
-
-        Assert.Equal(4, input.Count);
+        Assert.Equal(3, input.Count);
         Assert.Equal("what can you do", input[0].Text);
         Assert.Equal("Previous turn did not finish.", input[1].Text);
-        Assert.Equal(ChatRole.System, input[2].Role);
-        Assert.Equal("hello Ali", input[3].Text);
-        Assert.Equal(ChatRole.User, input[3].Role);
+        Assert.Equal("hello Ali", input[2].Text);
+        Assert.Equal(ChatRole.User, input[2].Role);
     }
 
     [Fact]
-    public void InitialInput_PlacesRetrievedPerUserMemoryImmediatelyBeforeCurrentQuestion()
+    public void InitialInput_DoesNotInjectMemoryOrIdentityBeforeTheModelChoosesATool()
     {
-        var memory = new CoordinatorMemoryResult(
-            "Found one memory",
-            [new CoordinatorMemoryItem("memory-1", "The current user works in Stuart, Florida.", "dates_places", DateTimeOffset.UtcNow)],
-            []);
+        var input = AliAgentHarnessRunner.BuildInitialInput([], "Where does the user work?", []);
 
-        var input = AliAgentHarnessRunner.BuildInitialInput([], "Where does the user work?", memory, []);
-
-        Assert.Equal(2, input.Count);
-        Assert.Equal(ChatRole.System, input[0].Role);
-        Assert.Contains("PER-USER MEM0 MEMORY", input[0].Text, StringComparison.Ordinal);
-        Assert.Contains("memory-1", input[0].Text, StringComparison.Ordinal);
-        Assert.Contains("Stuart, Florida", input[0].Text, StringComparison.Ordinal);
-        Assert.Equal(ChatRole.User, input[1].Role);
-        Assert.Equal("Where does the user work?", input[1].Text);
+        Assert.Single(input);
+        Assert.Equal(ChatRole.User, input[0].Role);
+        Assert.Equal("Where does the user work?", input[0].Text);
     }
 
     [Fact]
@@ -121,10 +109,79 @@ public sealed class AgentTurnIsolationTests
         Assert.NotEmpty(second.Sources);
         Assert.False(second.CanRetry);
         Assert.Equal(2, retriever.CallCount);
-        Assert.All(retriever.Plans, plan =>
-            Assert.Contains(DateTimeOffset.Now.ToString("yyyy-MM-dd"), plan.SearchText, StringComparison.Ordinal));
-        Assert.Contains("RetrievedAt records when Ali fetched", first.Status, StringComparison.Ordinal);
+        Assert.Equal("broad current query", retriever.Plans[0].Topic);
+        Assert.Equal("refined authoritative query", retriever.Plans[1].Topic);
+        Assert.All(retriever.Plans, plan => Assert.Equal("model-selected-query", plan.TemporalSelection));
+        Assert.Contains("internal fetch time is deliberately not exposed", first.Status, StringComparison.Ordinal);
         Assert.Contains("current status could not be verified", first.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CurrentWebSearch_PreservesTheModelSelectedQueryWithoutRewritingItsYear()
+    {
+        var retriever = new NonEmptySourceRetriever();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user",
+            "assistant",
+            "What are the most important software-engineering developments today?",
+            _ => { });
+        var sourceTools = new AliSourceTools(
+            retriever,
+            retriever,
+            null!,
+            () => turn);
+
+        await sourceTools.SearchCurrentWebAsync(
+            "current software engineering developments 2024",
+            "news",
+            TestContext.Current.CancellationToken);
+
+        var plan = Assert.Single(retriever.Plans);
+        Assert.Contains("2024", plan.SearchText, StringComparison.Ordinal);
+        Assert.Equal("current software engineering developments 2024", plan.Topic);
+        Assert.Equal("model-selected-query", plan.TemporalSelection);
+    }
+
+    [Fact]
+    public async Task CurrentWebSearch_PreservesHistoricalYearExplicitlyRequestedByUser()
+    {
+        var retriever = new NonEmptySourceRetriever();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user",
+            "assistant",
+            "Compare software engineering in 2024 with today.",
+            _ => { });
+        var sourceTools = new AliSourceTools(
+            retriever,
+            retriever,
+            null!,
+            () => turn);
+
+        await sourceTools.SearchCurrentWebAsync(
+            "software engineering 2024 compared with current developments",
+            "news",
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains("2024", Assert.Single(retriever.Plans).SearchText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CurrentWebSourceSerialization_OmitsInternalFetchTimestamp()
+    {
+        var source = new CoordinatorSourceItem(
+            "Official release notes",
+            "news",
+            "https://example.com/releases",
+            DateTimeOffset.UtcNow,
+            "Published: 2026-07-29");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(source);
+
+        Assert.DoesNotContain("RetrievedAt", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("2026-07-30T", json, StringComparison.Ordinal);
+        Assert.Contains("Official release notes", json, StringComparison.Ordinal);
     }
 
     private sealed class EmptySourceRetriever : ISourceRetriever

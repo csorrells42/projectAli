@@ -176,18 +176,20 @@ class Worker:
                 raise ValueError("Conversation is empty")
             source = str(request.get("source", "conversation")).strip() or "conversation"
             explicit = source == "explicit_user_request"
+            model_selected = source == "model_selected_user_fact"
+            user_stated = explicit or model_selected
             metadata = {
                 "display_name_snapshot": str(user.get("displayName", "")),
                 "category": str(request.get("category") or "general"),
                 "source": source,
-                "explicitly_taught": explicit,
-                "confidence": 1.0 if explicit else 0.8,
+                "explicitly_taught": user_stated,
+                "confidence": 1.0 if user_stated else 0.8,
                 "identity_resolution_method": str(user.get("resolutionMethod", "explicit-selection")),
                 "updated_utc": datetime.now(timezone.utc).isoformat(),
             }
-            # Explicitly approved teaching already contains the exact durable fact.
-            # Store it verbatim instead of paying for another LLM extraction pass
-            # that can discard the label the user will naturally recall it by.
+            # An explicit low-level import can still request verbatim storage. Facts
+            # selected by Ali's conversation model go through Mem0's own semantic
+            # ADD/UPDATE/DELETE/NONE reconciliation against this user's memories.
             result = self.memory.add(
                 conversation,
                 user_id=stable_id,

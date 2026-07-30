@@ -12,7 +12,6 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
 {
     private readonly AliServices _services;
     private bool _enabled;
-    private bool _automaticLearning;
     private ActiveUser? _selectedUser;
     private UserMemoryItemViewModel? _selectedMemory;
     private string _searchText = string.Empty;
@@ -44,14 +43,12 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         ["", "people_relationships", "preferences", "dates_places", "taught_facts", "procedures", "stories_experiences", "events", "corrections", "accessibility_communication", "general"];
 
     public bool Enabled { get => _enabled; set => SetProperty(ref _enabled, value); }
-    public bool AutomaticBackgroundLearning { get => _automaticLearning; set => SetProperty(ref _automaticLearning, value); }
     public ActiveUser? SelectedUser
     {
         get => _selectedUser;
-        set
+        private set
         {
             if (!SetProperty(ref _selectedUser, value) || value is null) return;
-            _services.ActiveUsers.Select(value.StableId);
             OnPropertyChanged(nameof(ActiveUserText));
             OnPropertyChanged(nameof(IsTestProfile));
             RaiseCommandStates();
@@ -95,9 +92,12 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
     {
         var settings = _services.LoadUserMemorySettings();
         Enabled = settings.Enabled;
-        AutomaticBackgroundLearning = settings.AutomaticBackgroundLearning;
         _services.ActiveUsers.Refresh();
         LoadUsers(_services.ActiveUsers.Current);
+        if (SelectedUser is not null)
+        {
+            RefreshCommand.Execute(null);
+        }
     }
 
     private Task SaveAsync()
@@ -105,8 +105,7 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         var current = _services.LoadUserMemorySettings();
         _services.SaveUserMemorySettings(current with
         {
-            Enabled = Enabled,
-            AutomaticBackgroundLearning = AutomaticBackgroundLearning
+            Enabled = Enabled
         });
         StatusText = $"Per-user memory settings saved to {SettingsPath}.";
         return Task.CompletedTask;
@@ -132,7 +131,7 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
             var values = await _services.UserMemories.ListAsync(SelectedUser, CategoryFilter, CancellationToken.None);
             SetMemories(values);
             CollectionStatus = $"{values.Count} current-user memories loaded.";
-            StatusText = "Memory review refreshed with strict active-user filtering.";
+            StatusText = $"Memory review refreshed for {SelectedUser.DisplayName} with strict stable-ID filtering.";
         });
     }
 

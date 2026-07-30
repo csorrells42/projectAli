@@ -96,7 +96,7 @@ public static class LocalRuntimeEngines
 public static class OllamaRuntimeSafetyPolicy
 {
     public const int DefaultContextTokens = 8192;
-    public const int MaximumContextTokens = 32768;
+    public const int MaximumContextTokens = 131072;
     public const string KeepAlive = "30m";
     public const string DefaultGptOssReasoningEffort = "low";
 

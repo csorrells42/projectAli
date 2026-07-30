@@ -18,7 +18,9 @@ public sealed record AssistantStreamChunk(
     AgentActivityKind? ActivityKind = null,
     string? ActivityDetail = null,
     double? ElapsedMilliseconds = null,
-    AgentToolApprovalPrompt? ApprovalPrompt = null)
+    AgentToolApprovalPrompt? ApprovalPrompt = null,
+    string? ActivityKey = null,
+    AgentToolExecutionReceipt? ExecutionReceipt = null)
 {
     public bool ReachedOutputLimit =>
         string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase);
@@ -33,6 +35,12 @@ public sealed class ConversationOrchestrator(
     CorrectionQueueService correctionQueue,
     AliToolCoordinator coordinator)
 {
+    public event Action<AssistantStreamChunk>? BackgroundActivity
+    {
+        add => coordinator.BackgroundActivity += value;
+        remove => coordinator.BackgroundActivity -= value;
+    }
+
     public ILocalModelRuntime Runtime { get; } = runtime;
 
     public CorrectionQueueService Corrections { get; } = correctionQueue;

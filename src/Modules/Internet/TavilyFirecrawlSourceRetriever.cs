@@ -99,6 +99,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         }
 
         var warnings = new List<string>();
+        var providerAttempts = new List<SourceProviderAttempt>();
         var query = BuildSearchQuery(plan);
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -111,7 +112,18 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         var results = await ScrapeDirectUrlsAsync(plan, warnings, cancellationToken).ConfigureAwait(false);
         if (results.Count == 0)
         {
-            results = await SearchWithGeminiAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
+            if (plan.ExcludedProviders.Contains(SourceProviderNames.GoogleGrounding))
+            {
+                warnings.Add("Google grounding was skipped because this turn exhausted its Google allowance or the exact query already returned no usable Google result.");
+            }
+            else
+            {
+                results = await SearchWithGeminiAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
+                providerAttempts.Add(new SourceProviderAttempt(
+                    SourceProviderNames.GoogleGrounding,
+                    query,
+                    results.Count > 0));
+            }
         }
 
         if (results.Count == 0)
@@ -141,7 +153,11 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 warnings.Add("No internet search results were returned by Google grounding, Tavily, Firecrawl, Brave Search, or Serper.");
             }
 
-            return new SourceRetrievalResult(Array.Empty<SourceExcerpt>(), warnings, plan.RequiresSourceGrounding);
+            return new SourceRetrievalResult(
+                Array.Empty<SourceExcerpt>(),
+                warnings,
+                plan.RequiresSourceGrounding,
+                providerAttempts);
         }
 
         var excerpts = new List<SourceExcerpt>();
@@ -192,8 +208,9 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
             ? new SourceRetrievalResult(
                 Array.Empty<SourceExcerpt>(),
                 warnings.Count == 0 ? ["Internet search results did not include usable text."] : warnings,
-                plan.RequiresSourceGrounding)
-            : new SourceRetrievalResult(excerpts, warnings, plan.RequiresSourceGrounding);
+                plan.RequiresSourceGrounding,
+                providerAttempts)
+            : new SourceRetrievalResult(excerpts, warnings, plan.RequiresSourceGrounding, providerAttempts);
     }
 
     public async Task<InternetBackendProviderProbeResult> TestProviderAsync(
@@ -332,7 +349,7 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 hit.Content,
                 hit.Content,
                 null,
-                "Google Grounding"))
+                SourceProviderNames.GoogleGrounding))
             .ToArray();
     }
 
@@ -419,13 +436,11 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 limit = Math.Clamp(settings.MaxSearchResults, 1, 10),
                 sources = ResolveFirecrawlSources(plan),
                 tbs = ResolveFirecrawlTbs(plan),
-                timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000,
                 scrapeOptions = settings.UseFirecrawlSearchScrapeOptions
                     ? new
                     {
                         formats = new[] { new FirecrawlFormat("markdown") },
                         onlyMainContent = true,
-                        timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000
                     }
                     : null
             };
@@ -583,7 +598,6 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 url,
                 formats = new[] { "markdown" },
                 onlyMainContent = true,
-                timeout = Math.Clamp(settings.RequestTimeoutSeconds, 5, 120) * 1000
             };
             var body = await PostJsonAsync(
                 BuildFirecrawlEndpoint("scrape"),
@@ -627,14 +641,12 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 5, 120)));
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml;q=0.9,text/plain;q=0.5");
             using var response = await httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
-                timeout.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var mediaType = response.Content.Headers.ContentType?.MediaType;
@@ -652,8 +664,8 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 return null;
             }
 
-            var html = await ReadBoundedTextAsync(response.Content, 4_000_000, timeout.Token).ConfigureAwait(false);
-            var extracted = await contentExtractor.ExtractAsync(uri, html, timeout.Token).ConfigureAwait(false);
+            var html = await ReadBoundedTextAsync(response.Content, 4_000_000, cancellationToken).ConfigureAwait(false);
+            var extracted = await contentExtractor.ExtractAsync(uri, html, cancellationToken).ConfigureAwait(false);
             return !string.IsNullOrWhiteSpace(extracted.Markdown)
                 ? extracted.Markdown
                 : extracted.PlainText;
@@ -697,8 +709,6 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         string? bearerToken,
         CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 5, 120)));
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
         if (!string.IsNullOrWhiteSpace(bearerToken))
         {
@@ -707,8 +717,8 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException($"{endpoint.Host}{endpoint.AbsolutePath} returned HTTP {(int)response.StatusCode}: {TrimError(body)}");
@@ -724,14 +734,12 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         string headerValue,
         CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 5, 120)));
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
         request.Headers.TryAddWithoutValidation(headerName, headerValue.Trim());
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException($"{endpoint.Host}{endpoint.AbsolutePath} returned HTTP {(int)response.StatusCode}: {TrimError(body)}");
@@ -746,12 +754,10 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         string headerValue,
         CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 5, 120)));
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.TryAddWithoutValidation(headerName, headerValue.Trim());
-        using var response = await httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException($"{endpoint.Host}{endpoint.AbsolutePath} returned HTTP {(int)response.StatusCode}: {TrimError(body)}");
@@ -765,12 +771,10 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         string bearerToken,
         CancellationToken cancellationToken)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.RequestTimeoutSeconds, 5, 120)));
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {bearerToken.Trim()}");
-        using var response = await httpClient.SendAsync(request, timeout.Token).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException($"{endpoint.Host}{endpoint.AbsolutePath} returned HTTP {(int)response.StatusCode}: {TrimError(body)}");

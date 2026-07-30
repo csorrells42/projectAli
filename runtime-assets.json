@@ -326,7 +326,8 @@
     { "id": "mediapipe", "requirements": "tools/runtime-assets/requirements-mediapipe.txt", "destination": "runtime/python-packages" },
     { "id": "voice", "requirements": "tools/runtime-assets/requirements-voice.txt", "destination": "runtime/tts-packages" },
     { "id": "whisper", "requirements": "tools/runtime-assets/requirements-whisper.txt", "destination": "runtime/whisper-packages" },
-    { "id": "mem0", "requirements": "tools/runtime-assets/requirements-mem0.txt", "destination": "runtime/mem0-packages" }
+    { "id": "mem0", "requirements": "tools/runtime-assets/requirements-mem0.txt", "destination": "runtime/mem0-packages" },
+    { "id": "aider", "requirements": "tools/runtime-assets/requirements-aider.txt", "destination": "runtime/aider-packages" }
   ],
   "wheelInstalls": [
     { "assetId": "spacy-en-core-web-sm-wheel", "destination": "runtime/mem0-packages" }
@@ -351,7 +352,9 @@
     "runtime/mem0-packages/mem0/__init__.py",
     "runtime/mem0-packages/fastembed/__init__.py",
     "runtime/mem0-packages/spacy/__init__.py",
-    "runtime/mem0-packages/en_core_web_sm/__init__.py"
+    "runtime/mem0-packages/en_core_web_sm/__init__.py",
+    "runtime/aider-packages/aider/__main__.py",
+    "runtime/aider-packages/litellm/__init__.py"
   ],
   "requiredFiles": [
     { "path": "runtime/python/python.exe", "size": 104952, "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a" },

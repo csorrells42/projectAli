@@ -3,5 +3,56 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <SolidColorBrush x:Key="AliControlBackgroundBrush" Color="#0F0F11" />
+        <SolidColorBrush x:Key="AliControlAlternateBackgroundBrush" Color="#18181B" />
+        <SolidColorBrush x:Key="AliControlHeaderBackgroundBrush" Color="#202024" />
+        <SolidColorBrush x:Key="AliControlForegroundBrush" Color="#F8FAFC" />
+        <SolidColorBrush x:Key="AliControlBorderBrush" Color="#3A3A40" />
+
+        <!--
+            Application-wide fallbacks keep every editable field and table readable even
+            when a new window forgets to declare its own dark theme. Window-local styles
+            may refine these values, but the UI theme regression test rejects light
+            background overrides for these control families.
+        -->
+        <Style TargetType="{x:Type TextBox}">
+            <Setter Property="Background" Value="{StaticResource AliControlBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AliControlBorderBrush}" />
+            <Setter Property="CaretBrush" Value="{StaticResource AliControlForegroundBrush}" />
+        </Style>
+        <Style TargetType="{x:Type ComboBox}">
+            <Setter Property="Background" Value="{StaticResource AliControlBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AliControlBorderBrush}" />
+        </Style>
+        <Style TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="Background" Value="{StaticResource AliControlAlternateBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+        </Style>
+        <Style TargetType="{x:Type DataGrid}">
+            <Setter Property="Background" Value="{StaticResource AliControlBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AliControlBorderBrush}" />
+            <Setter Property="RowBackground" Value="{StaticResource AliControlBackgroundBrush}" />
+            <Setter Property="AlternatingRowBackground" Value="{StaticResource AliControlAlternateBackgroundBrush}" />
+            <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource AliControlBorderBrush}" />
+            <Setter Property="VerticalGridLinesBrush" Value="{StaticResource AliControlBorderBrush}" />
+        </Style>
+        <Style TargetType="{x:Type DataGridRow}">
+            <Setter Property="Background" Value="{StaticResource AliControlBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+        </Style>
+        <Style TargetType="{x:Type DataGridCell}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AliControlBorderBrush}" />
+        </Style>
+        <Style TargetType="{x:Type DataGridColumnHeader}">
+            <Setter Property="Background" Value="{StaticResource AliControlHeaderBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AliControlForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AliControlBorderBrush}" />
+            <Setter Property="Padding" Value="7,5" />
+        </Style>
     </Application.Resources>
 </Application>

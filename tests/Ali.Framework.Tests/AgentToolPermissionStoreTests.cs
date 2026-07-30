@@ -51,7 +51,15 @@ public sealed class AgentToolPermissionStoreTests
     [Fact]
     public void NativeRiskClassification_KeepsWritesAndPaidResearchApprovalGated()
     {
-        Assert.True(AliToolPermissionPolicy.RequiresApproval("remember_for_current_user"));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval("remember_for_current_user"));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            "remember_for_current_user",
+            AgentPermissionProfile.LockedDown));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.CorrectCurrentUserMemoryName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+            AgentPermissionProfile.LockedDown));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("forget_current_user_memory"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("create_calendar_event"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("research_web"));

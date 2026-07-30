@@ -16,16 +16,38 @@ public static class MagenticPolicies
             : AskFirst;
 }
 
+public static class ProgrammingAgentModes
+{
+    public const string Aider = "aider";
+    public const string OpenHands = "openhands";
+    public const string Hybrid = "hybrid";
+
+    public static IReadOnlyList<string> All { get; } = [Aider, OpenHands, Hybrid];
+
+    public static string Normalize(string? value) =>
+        All.Contains(value?.Trim(), StringComparer.OrdinalIgnoreCase)
+            ? All.First(item => item.Equals(value?.Trim(), StringComparison.OrdinalIgnoreCase))
+            : Hybrid;
+}
+
 public sealed record AgentOrchestrationSettings
 {
     public string MagenticPolicy { get; init; } = MagenticPolicies.AskFirst;
 
     public int MagenticMaximumRounds { get; init; } = 6;
 
+    public string ProgrammingAgentMode { get; init; } = ProgrammingAgentModes.Hybrid;
+
+    public string OpenHandsWslDistribution { get; init; } = "Ubuntu";
+
     public AgentOrchestrationSettings Normalize() => this with
     {
         MagenticPolicy = MagenticPolicies.Normalize(MagenticPolicy),
-        MagenticMaximumRounds = Math.Clamp(MagenticMaximumRounds, 2, 12)
+        MagenticMaximumRounds = Math.Clamp(MagenticMaximumRounds, 2, 12),
+        ProgrammingAgentMode = ProgrammingAgentModes.Normalize(ProgrammingAgentMode),
+        OpenHandsWslDistribution = string.IsNullOrWhiteSpace(OpenHandsWslDistribution)
+            ? "Ubuntu"
+            : OpenHandsWslDistribution.Trim()
     };
 }
 

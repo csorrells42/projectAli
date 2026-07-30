@@ -12,6 +12,7 @@ internal sealed class AliMemoryTools
     private readonly IUserMemoryService? _userMemories;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<UserMemorySettings>? _settings;
+    private readonly Func<CancellationToken, Task>? _waitForPendingReview;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
 
     public AliMemoryTools(IMemoryStore memories, Func<CoordinatorTurnContext?> turnAccessor)
@@ -24,12 +25,14 @@ internal sealed class AliMemoryTools
         IUserMemoryService memories,
         IActiveUserSession activeUsers,
         Func<UserMemorySettings> settings,
-        Func<CoordinatorTurnContext?> turnAccessor)
+        Func<CoordinatorTurnContext?> turnAccessor,
+        Func<CancellationToken, Task>? waitForPendingReview = null)
     {
         _userMemories = memories;
         _activeUsers = activeUsers;
         _settings = settings;
         _turnAccessor = turnAccessor;
+        _waitForPendingReview = waitForPendingReview;
     }
 
     public Task<CoordinatorMemoryResult> SearchAsync(
@@ -89,21 +92,6 @@ internal sealed class AliMemoryTools
         if (string.IsNullOrWhiteSpace(fact))
         {
             return Task.FromResult(new CoordinatorMemoryWriteResult(false, "Nothing was saved because the fact was empty."));
-        }
-
-        if (!IsSelfContainedFact(fact))
-        {
-            return Task.FromResult(new CoordinatorMemoryWriteResult(
-                false,
-                "Nothing was saved because the proposed memory was only a bare value. Retry with one self-contained fact that preserves who or what the value belongs to and the relationship the user taught."));
-        }
-
-        var sensitivity = MemoryRequestParser.Evaluate($"remember that {fact}").Sensitivity;
-        if (sensitivity == MemorySensitivity.PotentiallySensitive)
-        {
-            return Task.FromResult(new CoordinatorMemoryWriteResult(
-                false,
-                "Potentially sensitive information requires direct user review and was not saved automatically."));
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -168,23 +156,22 @@ internal sealed class AliMemoryTools
 
     private async Task<CoordinatorMemoryResult> SearchPerUserAsync(string query, CancellationToken cancellationToken)
     {
+        if (_waitForPendingReview is not null)
+        {
+            await _waitForPendingReview(cancellationToken).ConfigureAwait(false);
+        }
+
         var settings = (_settings?.Invoke() ?? new UserMemorySettings()).Normalize();
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(settings.RecallTimeoutMilliseconds);
         try
         {
             var values = await _userMemories!.RecallAsync(
                 _activeUsers!.Current,
                 query,
                 Math.Min(MaximumResults, settings.RecallMaximumResults),
-                timeout.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
             return ToCoordinatorResult(values, values.Count == 0
                 ? "No matching saved memory was found."
                 : $"Found {values.Count} matching saved memories.");
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new("Memory recall timed out; Ali continued safely.", [], ["Per-user memory recall exceeded its short timeout."]);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or TimeoutException)
         {
@@ -201,9 +188,6 @@ internal sealed class AliMemoryTools
         }
     }
 
-    private static bool IsSelfContainedFact(string fact) =>
-        fact.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length >= 2;
-
     private async Task<CoordinatorMemoryWriteResult> RememberPerUserAsync(
         string fact,
         string? category,
@@ -213,16 +197,11 @@ internal sealed class AliMemoryTools
         {
             return new(false, "Select the active user profile before saving personal memory.");
         }
-        var normalizedFact = fact.Trim();
         var normalizedCategory = string.IsNullOrWhiteSpace(category) ? "general" : category.Trim();
-        var storedFact = string.Equals(normalizedCategory, "general", StringComparison.OrdinalIgnoreCase)
-            || normalizedFact.Contains(normalizedCategory, StringComparison.OrdinalIgnoreCase)
-                ? normalizedFact
-                : $"{normalizedCategory}: {normalizedFact}";
         var result = await _userMemories!.RememberAsync(
             _activeUsers!.Current,
-            storedFact,
-            "explicit_user_request",
+            fact.Trim(),
+            "model_selected_user_fact",
             normalizedCategory,
             cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);

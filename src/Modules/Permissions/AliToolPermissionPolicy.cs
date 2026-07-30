@@ -13,8 +13,6 @@ internal sealed class AliToolPermissionPolicy(
 {
     private static IReadOnlyList<AgentToolPermissionDefinition> TrustedWorkstationTools { get; } =
     [
-        new(AliCapabilityCatalog.RememberCurrentUserName, "Writes personal long-term memory"),
-        new(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Changes personal long-term memory"),
         new(AliCapabilityCatalog.ForgetCurrentUserMemoryName, "Deletes personal long-term memory"),
         new(AliCapabilityCatalog.ListCurrentUserMemoriesName, "Reads private personal memory"),
         new(AliCapabilityCatalog.CreateCalendarEventName, "Creates a persistent calendar event and Windows notification"),
@@ -25,6 +23,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.FileReplaceName, "Edits matching text in an existing file"),
         new(AliCapabilityCatalog.FileReplaceLinesName, "Edits specific lines in an existing file"),
         new(AliCapabilityCatalog.FileMoveName, "Renames or moves an existing workstation file"),
+        new(AliCapabilityCatalog.CodingAgentExecuteName, "Lets the selected external coding engine inspect, modify, build, test, and run an approved project", "Controlled by the Agents tab"),
         new(AliCapabilityCatalog.CodingFormatProjectName, "Reformats existing source files through the detected language provider"),
         new(AliCapabilityCatalog.CodingBuildProjectName, "Executes the detected local build toolchain and project targets"),
         new(AliCapabilityCatalog.CodingTestProjectName, "Executes project test code through the detected language provider"),
@@ -74,6 +73,9 @@ internal sealed class AliToolPermissionPolicy(
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =
     [
+        new(AliCapabilityCatalog.RememberCurrentUserName, "Writes personal long-term memory"),
+        new(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Changes personal long-term memory"),
+        new(AliCapabilityCatalog.GetActiveUserProfileName, "Reads the selected local identity profile"),
         new(AliCapabilityCatalog.RecallUserMemoryName, "Reads private personal memory"),
         new(AliCapabilityCatalog.SearchCurrentWebName, "Transmits a query to configured web sources"),
         new(AliCapabilityCatalog.SearchLocalLibraryName, "Reads indexed local documents"),
@@ -87,6 +89,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.ArchiveListName, "Reads private archive contents"),
         new(AliCapabilityCatalog.ArchiveExtractName, "Extracts an archive into workstation files"),
         new(AliCapabilityCatalog.CodingInspectProjectName, "Reads private project structure and toolchain state"),
+        new(AliCapabilityCatalog.CodingAgentStatusName, "Reads installed external coding-engine and local runtime readiness"),
         new(AliCapabilityCatalog.CodingIndexProjectName, "Reads and indexes private project source"),
         new(AliCapabilityCatalog.CodingSearchSymbolsName, "Searches a private project source index"),
         new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer"),
