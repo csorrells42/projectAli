@@ -31,7 +31,8 @@ internal sealed class AliActiveUserTools(
                 null);
         }
 
-        if (activeUsers.RequiresSelection)
+        var selection = turn?.CapturedUserSelection ?? activeUsers.CaptureSelectionSnapshot();
+        if (!selection.IsResolved)
         {
             turn?.Report(
                 AgentActivityKind.Warning,
@@ -47,7 +48,7 @@ internal sealed class AliActiveUserTools(
                 null);
         }
 
-        var user = activeUsers.Current.Normalize();
+        var user = selection.SelectedUser!.Normalize();
         if (turn is not null)
         {
             turn.UsedEvidenceTool = true;

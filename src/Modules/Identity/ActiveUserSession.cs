@@ -36,6 +36,16 @@ public sealed class ActiveUserSession : IActiveUserSession
 
     public bool RequiresSelection { get { lock (_sync) return _requiresSelection; } }
 
+    public ActiveUserSelectionSnapshot CaptureSelectionSnapshot()
+    {
+        lock (_sync)
+        {
+            return _requiresSelection
+                ? ActiveUserSelectionSnapshot.SelectionRequired
+                : ActiveUserSelectionSnapshot.Resolved(_current);
+        }
+    }
+
     public event EventHandler<ActiveUser>? Changed;
 
     public void Refresh()

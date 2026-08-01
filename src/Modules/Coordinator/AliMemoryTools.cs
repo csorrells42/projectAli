@@ -42,14 +42,14 @@ internal sealed class AliMemoryTools
         cancellationToken.ThrowIfCancellationRequested();
         if (_userMemories is not null && _activeUsers is not null)
         {
-            if (_activeUsers.RequiresSelection)
+            if (!TryGetTurnUser(out var activeUser))
             {
                 return Task.FromResult(new CoordinatorMemoryResult(
                     "Select the active user profile before Ali accesses personal memory.",
                     [],
                     ["Personal memory was skipped because more than one identity profile is available and none was explicitly selected."]));
             }
-            return SearchPerUserAsync(query, cancellationToken);
+            return SearchPerUserAsync(activeUser, query, cancellationToken);
         }
 
         var result = _legacyMemories!.List();
@@ -97,7 +97,11 @@ internal sealed class AliMemoryTools
         var now = DateTimeOffset.UtcNow;
         if (_userMemories is not null && _activeUsers is not null)
         {
-            return RememberPerUserAsync(fact, category, cancellationToken);
+            return TryGetTurnUser(out var activeUser)
+                ? RememberPerUserAsync(activeUser, fact, category, cancellationToken)
+                : Task.FromResult(new CoordinatorMemoryWriteResult(
+                    false,
+                    "Select the active user profile before saving personal memory."));
         }
 
         var context = _turnAccessor();
@@ -124,9 +128,9 @@ internal sealed class AliMemoryTools
         MarkAuthoritativeToolUsed();
         if (_userMemories is null || _activeUsers is null)
             return new(false, "Per-user correction is unavailable in the legacy memory store.");
-        if (_activeUsers.RequiresSelection)
+        if (!TryGetTurnUser(out var activeUser))
             return new(false, "Select the active user profile before correcting personal memory.");
-        var result = await _userMemories.CorrectAsync(_activeUsers.Current, memoryId, correction, cancellationToken).ConfigureAwait(false);
+        var result = await _userMemories.CorrectAsync(activeUser, memoryId, correction, cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
     }
 
@@ -137,9 +141,9 @@ internal sealed class AliMemoryTools
         MarkAuthoritativeToolUsed();
         if (_userMemories is null || _activeUsers is null)
             return new(false, "Per-user forgetting is unavailable in the legacy memory store.");
-        if (_activeUsers.RequiresSelection)
+        if (!TryGetTurnUser(out var activeUser))
             return new(false, "Select the active user profile before forgetting personal memory.");
-        var result = await _userMemories.DeleteAsync(_activeUsers.Current, memoryId, cancellationToken).ConfigureAwait(false);
+        var result = await _userMemories.DeleteAsync(activeUser, memoryId, cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
     }
 
@@ -148,13 +152,16 @@ internal sealed class AliMemoryTools
         MarkAuthoritativeToolUsed();
         if (_userMemories is null || _activeUsers is null)
             return await SearchAsync(string.Empty, cancellationToken).ConfigureAwait(false);
-        if (_activeUsers.RequiresSelection)
+        if (!TryGetTurnUser(out var activeUser))
             return new("Select the active user profile before listing personal memory.", [], ["No personal memory was read."]);
-        var values = await _userMemories.ListAsync(_activeUsers.Current, null, cancellationToken).ConfigureAwait(false);
+        var values = await _userMemories.ListAsync(activeUser, null, cancellationToken).ConfigureAwait(false);
         return ToCoordinatorResult(values, "Loaded current-user memories.");
     }
 
-    private async Task<CoordinatorMemoryResult> SearchPerUserAsync(string query, CancellationToken cancellationToken)
+    private async Task<CoordinatorMemoryResult> SearchPerUserAsync(
+        ActiveUser activeUser,
+        string query,
+        CancellationToken cancellationToken)
     {
         if (_waitForPendingReview is not null)
         {
@@ -165,7 +172,7 @@ internal sealed class AliMemoryTools
         try
         {
             var values = await _userMemories!.RecallAsync(
-                _activeUsers!.Current,
+                activeUser,
                 query,
                 Math.Min(MaximumResults, settings.RecallMaximumResults),
                 cancellationToken).ConfigureAwait(false);
@@ -189,22 +196,45 @@ internal sealed class AliMemoryTools
     }
 
     private async Task<CoordinatorMemoryWriteResult> RememberPerUserAsync(
+        ActiveUser activeUser,
         string fact,
         string? category,
         CancellationToken cancellationToken)
     {
-        if (_activeUsers!.RequiresSelection)
-        {
-            return new(false, "Select the active user profile before saving personal memory.");
-        }
         var normalizedCategory = string.IsNullOrWhiteSpace(category) ? "general" : category.Trim();
         var result = await _userMemories!.RememberAsync(
-            _activeUsers!.Current,
+            activeUser,
             fact.Trim(),
             "model_selected_user_fact",
             normalizedCategory,
             cancellationToken).ConfigureAwait(false);
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
+    }
+
+    private bool TryGetTurnUser(out ActiveUser activeUser)
+    {
+        var captured = _turnAccessor()?.CapturedUserSelection;
+        if (captured is not null)
+        {
+            if (captured.IsResolved)
+            {
+                activeUser = captured.SelectedUser!;
+                return true;
+            }
+
+            activeUser = null!;
+            return false;
+        }
+
+        var current = _activeUsers?.CaptureSelectionSnapshot();
+        if (current?.IsResolved == true)
+        {
+            activeUser = current.SelectedUser!;
+            return true;
+        }
+
+        activeUser = null!;
+        return false;
     }
 
     private static CoordinatorMemoryResult ToCoordinatorResult(IReadOnlyList<Ali.Modules.UserMemory.UserMemory> values, string message) =>

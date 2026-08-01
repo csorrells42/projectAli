@@ -1,23 +1,29 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Ali.Modules.Orchestration.Evidence;
+using Ali.Modules.Orchestration.Observation;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
 
 internal sealed class ActivityReportingAIFunction(
     AIFunction innerFunction,
-    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
+    Func<CoordinatorTurnContext?> turnAccessor,
+    IShadowToolObserver? shadowObserver = null,
+    bool requiresApproval = false) : DelegatingAIFunction(innerFunction)
 {
-    private const int MaximumVisibleResultCharacters = 520;
-
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        var turn = turnAccessor();
+        var turn = TryGetTurn(turnAccessor);
         var plan = turn?.CurrentToolPlan;
         var started = Stopwatch.GetTimestamp();
-        turn?.Report(
+        var startedAtUtc = DateTimeOffset.UtcNow;
+        var callId = TryResolveCallId(turn, Name);
+        var permission = ResolvePermission(turn, callId, Name, requiresApproval);
+        TryReport(
+            turn,
             AgentActivityKind.ToolCall,
             plan is not null && string.Equals(plan.ToolName, Name, StringComparison.Ordinal)
                 ? plan.SelectionHeadline
@@ -28,7 +34,18 @@ internal sealed class ActivityReportingAIFunction(
         try
         {
             var result = await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
-            turn?.Report(
+            TryObserveReturned(
+                shadowObserver,
+                turn,
+                callId,
+                Name,
+                arguments,
+                result,
+                startedAtUtc,
+                DateTimeOffset.UtcNow,
+                permission);
+            TryReport(
+                turn,
                 AgentActivityKind.ToolResult,
                 plan is not null && string.Equals(plan.ToolName, Name, StringComparison.Ordinal)
                     ? plan.ResultHeadline
@@ -40,54 +57,334 @@ internal sealed class ActivityReportingAIFunction(
                 executionReceipt: new AgentToolExecutionReceipt(
                     Name,
                     AgentToolExecutionOutcome.Completed,
-                    Compact(SerializeResult(result)),
+                    DescribeResult(result),
                     DateTimeOffset.UtcNow));
             return result;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex)
         {
-            turn?.Report(
-                AgentActivityKind.Warning,
-                $"{Humanize(Name)} was cancelled",
-                "The user or application cancelled the in-flight tool call.",
-                Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-                executionReceipt: new AgentToolExecutionReceipt(
+            if (cancellationToken.IsCancellationRequested)
+            {
+                TryObserveCancelled(
+                    shadowObserver,
+                    turn,
+                    callId,
                     Name,
-                    AgentToolExecutionOutcome.Cancelled,
-                    "The in-flight tool call was cancelled before it returned a result.",
-                    DateTimeOffset.UtcNow));
+                    arguments,
+                    ex,
+                    startedAtUtc,
+                    DateTimeOffset.UtcNow,
+                    permission);
+                TryReport(
+                    turn,
+                    AgentActivityKind.Warning,
+                    $"{Humanize(Name)} was cancelled",
+                    "The user or application cancelled the in-flight tool call.",
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    executionReceipt: new AgentToolExecutionReceipt(
+                        Name,
+                        AgentToolExecutionOutcome.Cancelled,
+                        "The in-flight tool call was cancelled before it returned a result.",
+                        DateTimeOffset.UtcNow));
+            }
+            else
+            {
+                TryObserveThrew(
+                    shadowObserver,
+                    turn,
+                    callId,
+                    Name,
+                    arguments,
+                    ex,
+                    startedAtUtc,
+                    DateTimeOffset.UtcNow,
+                    permission);
+                var failureDetail = DescribeException(ex);
+                TryReport(
+                    turn,
+                    AgentActivityKind.Error,
+                    $"{Humanize(Name)} failed",
+                    failureDetail,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    executionReceipt: new AgentToolExecutionReceipt(
+                        Name,
+                        AgentToolExecutionOutcome.Failed,
+                        failureDetail,
+                        DateTimeOffset.UtcNow));
+            }
             throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            turn?.Report(
+            TryObserveThrew(
+                shadowObserver,
+                turn,
+                callId,
+                Name,
+                arguments,
+                ex,
+                startedAtUtc,
+                DateTimeOffset.UtcNow,
+                permission);
+            var failureDetail = DescribeException(ex);
+            TryReport(
+                turn,
                 AgentActivityKind.Error,
                 $"{Humanize(Name)} failed",
-                ex.Message,
+                failureDetail,
                 Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                 executionReceipt: new AgentToolExecutionReceipt(
                     Name,
                     AgentToolExecutionOutcome.Failed,
-                    Compact(ex.Message),
+                    failureDetail,
                     DateTimeOffset.UtcNow));
             throw;
         }
     }
 
-    private static string SerializeResult(object? result) => result switch
+    private static string? TryResolveCallId(CoordinatorTurnContext? turn, string toolName)
     {
-        null => "No result",
-        string text => text,
-        JsonElement element => element.GetRawText(),
-        _ => JsonSerializer.Serialize(result)
-    };
+        try
+        {
+            if (turn?.TryGetCurrentToolCallId(toolName, out var callId) == true
+                && !string.IsNullOrWhiteSpace(callId))
+            {
+                return callId;
+            }
+        }
+        catch
+        {
+            // Shadow correlation must never affect the actual tool call.
+        }
 
-    private static string Compact(string value)
+        return null;
+    }
+
+    private static CoordinatorTurnContext? TryGetTurn(
+        Func<CoordinatorTurnContext?> accessor)
     {
-        var normalized = value.ReplaceLineEndings(" ").Trim();
-        return normalized.Length <= MaximumVisibleResultCharacters
-            ? normalized
-            : normalized[..MaximumVisibleResultCharacters] + "...";
+        try
+        {
+            return accessor();
+        }
+        catch
+        {
+            // Ambient activity context is optional and cannot prevent the real invocation.
+            return null;
+        }
+    }
+
+    private static EvidencePermissionMetadata ResolvePermission(
+        CoordinatorTurnContext? turn,
+        string? callId,
+        string toolName,
+        bool requiresApproval)
+    {
+        if (!requiresApproval)
+        {
+            return new EvidencePermissionMetadata("not-required", "none");
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(callId)
+                && turn?.TryGetShadowPermission(callId, out var permission) == true
+                && permission is not null)
+            {
+                return permission;
+            }
+
+            if (turn?.TryGetShadowStandingPermission(toolName, out var standingPermission) == true
+                && standingPermission is not null)
+            {
+                return standingPermission;
+            }
+        }
+        catch
+        {
+            // Permission enrichment is receipt-only and cannot affect the invocation.
+        }
+
+        return new EvidencePermissionMetadata("unknown", "unknown");
+    }
+
+    private static void TryObserveReturned(
+        IShadowToolObserver? observer,
+        CoordinatorTurnContext? turn,
+        string? callId,
+        string toolName,
+        object? arguments,
+        object? result,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset completedAtUtc,
+        EvidencePermissionMetadata permission)
+    {
+        if (observer is null || string.IsNullOrWhiteSpace(callId))
+        {
+            return;
+        }
+
+        try
+        {
+            if (observer.TryObserveReturned(
+                turn?.ObservationIdentity,
+                callId,
+                toolName,
+                arguments,
+                result,
+                startedAtUtc,
+                completedAtUtc,
+                permission))
+            {
+                turn?.MarkShadowObserved(callId);
+            }
+        }
+        catch
+        {
+            // The shadow observer is failure-isolated from the live invocation path.
+        }
+    }
+
+    private static void TryObserveThrew(
+        IShadowToolObserver? observer,
+        CoordinatorTurnContext? turn,
+        string? callId,
+        string toolName,
+        object? arguments,
+        Exception exception,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset completedAtUtc,
+        EvidencePermissionMetadata permission)
+    {
+        if (observer is null || string.IsNullOrWhiteSpace(callId))
+        {
+            return;
+        }
+
+        try
+        {
+            if (observer.TryObserveThrew(
+                turn?.ObservationIdentity,
+                callId,
+                toolName,
+                arguments,
+                exception,
+                startedAtUtc,
+                completedAtUtc,
+                permission))
+            {
+                turn?.MarkShadowObserved(callId);
+            }
+        }
+        catch
+        {
+            // The original exception and stack remain authoritative.
+        }
+    }
+
+    private static void TryObserveCancelled(
+        IShadowToolObserver? observer,
+        CoordinatorTurnContext? turn,
+        string? callId,
+        string toolName,
+        object? arguments,
+        OperationCanceledException exception,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset completedAtUtc,
+        EvidencePermissionMetadata permission)
+    {
+        if (observer is null || string.IsNullOrWhiteSpace(callId))
+        {
+            return;
+        }
+
+        try
+        {
+            if (observer.TryObserveCancelled(
+                turn?.ObservationIdentity,
+                callId,
+                toolName,
+                arguments,
+                exception,
+                startedAtUtc,
+                completedAtUtc,
+                permission))
+            {
+                turn?.MarkShadowObserved(callId);
+            }
+        }
+        catch
+        {
+            // The original cancellation and stack remain authoritative.
+        }
+    }
+
+    internal static string DescribeResult(object? result)
+    {
+        try
+        {
+            return result switch
+            {
+                null => "No result was returned.",
+                string text => $"Returned text ({text.Length} characters).",
+                bool value => $"Returned {value.ToString().ToLowerInvariant()}.",
+                JsonElement element => $"Returned JSON {element.ValueKind.ToString().ToLowerInvariant()}.",
+                _ => $"{BoundedTypeName(result.GetType())} returned."
+            };
+        }
+        catch
+        {
+            return "Tool returned a result.";
+        }
+    }
+
+    private static string DescribeException(Exception exception)
+    {
+        try
+        {
+            return $"{BoundedTypeName(exception.GetType())} occurred while the tool was running.";
+        }
+        catch
+        {
+            // A hostile exception type cannot replace the exception being rethrown.
+            return "The tool failed with an exception.";
+        }
+    }
+
+    private static string BoundedTypeName(Type type)
+    {
+        const int maximumTypeNameCharacters = 120;
+        var name = type.Name;
+        return name.Length <= maximumTypeNameCharacters
+            ? name
+            : name[..maximumTypeNameCharacters];
+    }
+
+    private static void TryReport(
+        CoordinatorTurnContext? turn,
+        AgentActivityKind kind,
+        string title,
+        string? detail = null,
+        double? elapsedMilliseconds = null,
+        AgentToolApprovalPrompt? approvalPrompt = null,
+        string? activityKey = null,
+        AgentToolExecutionReceipt? executionReceipt = null)
+    {
+        try
+        {
+            turn?.Report(
+                kind,
+                title,
+                detail,
+                elapsedMilliseconds,
+                approvalPrompt,
+                activityKey,
+                executionReceipt);
+        }
+        catch
+        {
+            // Activity presentation must never alter a tool's return or exception semantics.
+        }
     }
 
     private static string Humanize(string value) => value.Replace('_', ' ').Trim();

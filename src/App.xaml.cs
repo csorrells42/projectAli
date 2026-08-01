@@ -32,17 +32,27 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        TryShutdown(() =>
+            _services?.OrchestrationObserver?.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        TryShutdown(() =>
+            _services?.UserMemories.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        TryShutdown(() =>
+            _services?.CodingModule.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        TryShutdown(() =>
+            _services?.Qdrant.StopAsync().GetAwaiter().GetResult());
+        base.OnExit(e);
+    }
+
+    private static void TryShutdown(Action cleanup)
+    {
         try
         {
-            _services?.UserMemories.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _services?.CodingModule.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            _services?.Qdrant.StopAsync().GetAwaiter().GetResult();
+            cleanup();
         }
         catch
         {
-            // Shutdown must continue even if the owned helper process has already exited.
+            // Every owned component gets its own cleanup attempt during shutdown.
         }
-        base.OnExit(e);
     }
 
     private static AssistantProfile LoadOrCreateAssistantProfile()

@@ -8,6 +8,49 @@ namespace Ali.Framework.Tests.OrchestrationV2;
 public sealed class ProtectedEvidenceLedgerTests
 {
     [Fact]
+    public async Task DesktopComposition_SeparatesEvidenceKeysByAssistantProfileRoot()
+    {
+        using var directory = new OutcomeAndEvidenceTests.TemporaryDirectory();
+        var profileARoot = global::Ali.AliServices.GetOrchestrationEvidenceRoot(
+            Path.Combine(directory.Path, "Profiles", "profile-a"));
+        var profileBRoot = global::Ali.AliServices.GetOrchestrationEvidenceRoot(
+            Path.Combine(directory.Path, "Profiles", "profile-b"));
+        var identity = new TurnIdentity("user", "conversation", "message");
+
+        Assert.NotEqual(profileARoot, profileBRoot);
+        Assert.Equal(
+            Path.Combine(directory.Path, "Profiles", "profile-a", "Orchestration", "Evidence"),
+            profileARoot);
+        Assert.Equal(
+            Path.Combine(directory.Path, "Profiles", "profile-b", "Orchestration", "Evidence"),
+            profileBRoot);
+
+        await new EvidenceLedger(profileARoot, "profile-a").AppendAsync(
+            identity,
+            OutcomeAndEvidenceTests.CreateDraft(
+                "call-a",
+                "tool",
+                JsonSerializer.SerializeToElement(new { profile = "a" }),
+                JsonSerializer.SerializeToElement(new { success = true })),
+            TestContext.Current.CancellationToken);
+        await new EvidenceLedger(profileBRoot, "profile-b").AppendAsync(
+            identity,
+            OutcomeAndEvidenceTests.CreateDraft(
+                "call-b",
+                "tool",
+                JsonSerializer.SerializeToElement(new { profile = "b" }),
+                JsonSerializer.SerializeToElement(new { success = true })),
+            TestContext.Current.CancellationToken);
+
+        Assert.Single(await new EvidenceLedger(profileARoot, "profile-a").ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken));
+        Assert.Single(await new EvidenceLedger(profileBRoot, "profile-b").ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task IndependentWriters_ProduceOneContiguousJournal()
     {
         using var directory = new OutcomeAndEvidenceTests.TemporaryDirectory();

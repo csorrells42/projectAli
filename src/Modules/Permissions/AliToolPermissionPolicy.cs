@@ -1,4 +1,6 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.Orchestration.Evidence;
+using Ali.Modules.Orchestration.Observation;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Permissions;
@@ -9,7 +11,8 @@ namespace Ali.Modules.Permissions;
 /// </summary>
 internal sealed class AliToolPermissionPolicy(
     Func<CoordinatorTurnContext?> turnAccessor,
-    Func<AgentPermissionProfile>? profileAccessor = null)
+    Func<AgentPermissionProfile>? profileAccessor = null,
+    IShadowToolObserver? shadowObserver = null)
 {
     private static IReadOnlyList<AgentToolPermissionDefinition> TrustedWorkstationTools { get; } =
     [
@@ -140,17 +143,27 @@ internal sealed class AliToolPermissionPolicy(
         bool requiresApproval,
         AliToolTurnRole turnRole = AliToolTurnRole.Default)
     {
-        AIFunction observable = new ActivityReportingAIFunction(function, turnAccessor);
+        AIFunction observable = new ActivityReportingAIFunction(
+            function,
+            turnAccessor,
+            shadowObserver,
+            requiresApproval);
         observable = turnRole switch
         {
             AliToolTurnRole.ExternalCodingAgent =>
                 new ExternalCodingOwnershipAIFunction(observable, turnAccessor),
             AliToolTurnRole.ImplementationMutation =>
-                new ExternalCodingOwnerGuardAIFunction(observable, turnAccessor),
+                new ExternalCodingOwnerGuardAIFunction(
+                    observable,
+                    turnAccessor,
+                    shadowObserver),
             _ => observable
         };
         return requiresApproval
-            ? new TurnDenialGuardAIFunction(new ApprovalRequiredAIFunction(observable), turnAccessor)
+            ? new TurnDenialGuardAIFunction(
+                new ApprovalRequiredAIFunction(observable),
+                turnAccessor,
+                shadowObserver)
             : observable;
     }
 }
@@ -209,27 +222,80 @@ internal sealed class ExternalCodingOwnershipAIFunction(
 
 internal sealed class ExternalCodingOwnerGuardAIFunction(
     AIFunction innerFunction,
-    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
+    Func<CoordinatorTurnContext?> turnAccessor,
+    IShadowToolObserver? shadowObserver = null) : DelegatingAIFunction(innerFunction)
 {
     protected override ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        if (turnAccessor()?.ExternalCodingAgentOwnsTurn == true)
+        var turn = turnAccessor();
+        if (turn?.ExternalCodingAgentOwnsTurn == true)
         {
-            throw new InvalidOperationException(
+            var exception = new InvalidOperationException(
                 "The selected external coding agent owns this programming turn. "
                 + "Ali cannot modify the implementation; return the critic or verification diagnostics "
                 + "to the external coding agent.");
+            TryObservePolicyBlocked(turn, arguments);
+            throw exception;
         }
 
         return InnerFunction.InvokeAsync(arguments, cancellationToken);
+    }
+
+    private void TryObservePolicyBlocked(
+        CoordinatorTurnContext turn,
+        AIFunctionArguments arguments)
+    {
+        if (shadowObserver is null)
+        {
+            return;
+        }
+
+        if (!turn.TryGetCurrentToolCallId(Name, out var callId)
+            || string.IsNullOrWhiteSpace(callId)
+            || turn.WasShadowObserved(callId))
+        {
+            return;
+        }
+
+        var observedAtUtc = DateTimeOffset.UtcNow;
+        var permission = new EvidencePermissionMetadata("policy-blocked", "none");
+        turn.RecordPendingExplicitShadowTerminal(new PendingExplicitShadowTerminal(
+            callId,
+            Name,
+            ExplicitShadowTerminalKind.Denied,
+            "external-coding-agent-owns-turn",
+            observedAtUtc,
+            observedAtUtc,
+            permission));
+        try
+        {
+            if (shadowObserver.TryObserveDenied(
+                turn.ObservationIdentity,
+                callId,
+                Name,
+                arguments,
+                "external-coding-agent-owns-turn",
+                observedAtUtc,
+                observedAtUtc,
+                permission))
+            {
+                turn.ClearPendingExplicitShadowTerminal(callId);
+                turn.MarkShadowObserved(callId);
+            }
+        }
+        catch
+        {
+            // External coding ownership remains authoritative if shadow storage fails.
+        }
     }
 }
 
 internal sealed class TurnDenialGuardAIFunction(
     AIFunction innerFunction,
-    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
+    Func<CoordinatorTurnContext?> turnAccessor,
+    IShadowToolObserver? shadowObserver = null) : DelegatingAIFunction(innerFunction)
 {
     protected override ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
@@ -245,12 +311,61 @@ internal sealed class TurnDenialGuardAIFunction(
             AgentActivityKind.Warning,
             $"Blocked follow-up protected action {Name.Replace('_', ' ')}",
             "A protected action was denied earlier in this turn. Ali will not retry it through another tool or saved permission.");
+        TryObservePolicyBlocked(turn, arguments);
         return ValueTask.FromResult<object?>(new
         {
             success = false,
             denied = true,
             message = "A protected action was denied earlier in this turn. Stop the action plan, do not call an alternate tool, and tell the user that no further protected action was performed."
         });
+    }
+
+    private void TryObservePolicyBlocked(
+        CoordinatorTurnContext turn,
+        AIFunctionArguments arguments)
+    {
+        if (shadowObserver is null)
+        {
+            return;
+        }
+
+        if (!turn.TryGetCurrentToolCallId(Name, out var callId)
+            || string.IsNullOrWhiteSpace(callId)
+            || turn.WasShadowObserved(callId))
+        {
+            return;
+        }
+
+        var observedAtUtc = DateTimeOffset.UtcNow;
+        var permission = new EvidencePermissionMetadata("policy-blocked", "none");
+        turn.RecordPendingExplicitShadowTerminal(new PendingExplicitShadowTerminal(
+            callId,
+            Name,
+            ExplicitShadowTerminalKind.Denied,
+            "prior-permission-denial",
+            observedAtUtc,
+            observedAtUtc,
+            permission));
+        try
+        {
+            if (shadowObserver.TryObserveDenied(
+                turn.ObservationIdentity,
+                callId,
+                Name,
+                arguments,
+                "prior-permission-denial",
+                observedAtUtc,
+                observedAtUtc,
+                permission))
+            {
+                turn.ClearPendingExplicitShadowTerminal(callId);
+                turn.MarkShadowObserved(callId);
+            }
+        }
+        catch
+        {
+            // Policy enforcement and its returned denial must not depend on shadow storage.
+        }
     }
 }
 

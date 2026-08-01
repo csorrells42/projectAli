@@ -67,11 +67,17 @@ public sealed record ToolInvocationOutcome
     public static ToolInvocationOutcome Threw(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
+        return ThrewType(exception.GetType().FullName ?? exception.GetType().Name);
+    }
+
+    internal static ToolInvocationOutcome ThrewType(string exceptionType)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(exceptionType);
         return new ToolInvocationOutcome(
             InvocationStatus.Threw,
             DomainOutcome.Unreported,
-            Digest(Encoding.UTF8.GetBytes(exception.GetType().FullName ?? exception.GetType().Name)),
-            exception.GetType().FullName);
+            Digest(Encoding.UTF8.GetBytes(exceptionType)),
+            exceptionType);
     }
 
     public static ToolInvocationOutcome Cancelled() =>

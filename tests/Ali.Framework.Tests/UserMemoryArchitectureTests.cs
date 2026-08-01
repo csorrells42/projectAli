@@ -186,6 +186,63 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
+    public void ActiveUserSelectionSnapshot_IsAtomicAndNeverExposesAProvisionalUser()
+    {
+        var root = TemporaryRoot();
+        try
+        {
+            var profiles = new FakeIdentityProfiles([Person("person-a", "Alice"), Person("person-b", "Bob")]);
+            var session = new ActiveUserSession(root, profiles);
+
+            var unresolved = session.CaptureSelectionSnapshot();
+            Assert.True(unresolved.RequiresSelection);
+            Assert.False(unresolved.IsResolved);
+            Assert.Null(unresolved.SelectedUser);
+
+            session.Select("person-b");
+            var resolved = session.CaptureSelectionSnapshot();
+            Assert.False(resolved.RequiresSelection);
+            Assert.True(resolved.IsResolved);
+            Assert.Equal("person-b", resolved.SelectedUser?.StableId);
+            Assert.NotSame(session.Current, resolved.SelectedUser);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task UserBoundCoordinatorTools_KeepTheUserCapturedAtTurnAdmission()
+    {
+        var admittedUser = new ActiveUser("person-a", "Alice", false, "explicit-selection");
+        var laterLiveUser = new ActiveUser("person-b", "Bob", false, "explicit-selection");
+        var snapshot = ActiveUserSelectionSnapshot.Resolved(admittedUser);
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "request",
+            static _ => { },
+            snapshot,
+            new Ali.Modules.Orchestration.Contracts.TurnIdentity(
+                admittedUser.StableId,
+                "conversation",
+                "assistant-message"));
+        var liveSession = new FakeActiveSession(laterLiveUser);
+        var service = new CapturingMemoryService();
+        var memoryTools = new AliMemoryTools(
+            service,
+            liveSession,
+            () => new UserMemorySettings(),
+            () => turn);
+
+        await memoryTools.SearchAsync("calibration", TestContext.Current.CancellationToken);
+        var profile = new AliActiveUserTools(liveSession, () => turn).GetActiveProfile();
+
+        Assert.Equal(admittedUser.StableId, service.LastUser?.StableId);
+        Assert.Equal(admittedUser.StableId, profile.StableId);
+        Assert.NotEqual(laterLiveUser.StableId, profile.StableId);
+    }
+
+    [Fact]
     public async Task PreAnswerRecallIsBoundedUsesOnlyActiveUserAndFailsSafe()
     {
         var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
@@ -668,6 +725,8 @@ public sealed class UserMemoryArchitectureTests
         public ActiveUser Current { get; private set; } = user;
         public IReadOnlyList<ActiveUser> AvailableUsers => [Current];
         public bool RequiresSelection => false;
+        public ActiveUserSelectionSnapshot CaptureSelectionSnapshot() =>
+            ActiveUserSelectionSnapshot.Resolved(Current);
         public event EventHandler<ActiveUser>? Changed { add { } remove { } }
         public ActiveUser Select(string stableId) => Current;
         public void Refresh() { }

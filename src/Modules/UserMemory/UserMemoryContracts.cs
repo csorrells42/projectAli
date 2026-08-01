@@ -27,6 +27,36 @@ public sealed record ActiveUser(
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
+/// <summary>
+/// An immutable, point-in-time view of the explicit active-user selection boundary.
+/// A selection-required snapshot deliberately contains no provisional user.
+/// </summary>
+public sealed record ActiveUserSelectionSnapshot
+{
+    private ActiveUserSelectionSnapshot(bool requiresSelection, ActiveUser? selectedUser)
+    {
+        RequiresSelection = requiresSelection;
+        SelectedUser = selectedUser;
+    }
+
+    public bool RequiresSelection { get; }
+
+    public bool IsResolved => !RequiresSelection && SelectedUser is not null;
+
+    public ActiveUser? SelectedUser { get; }
+
+    public static ActiveUserSelectionSnapshot SelectionRequired { get; } =
+        new(requiresSelection: true, selectedUser: null);
+
+    public static ActiveUserSelectionSnapshot Resolved(ActiveUser selectedUser)
+    {
+        ArgumentNullException.ThrowIfNull(selectedUser);
+        return new ActiveUserSelectionSnapshot(
+            requiresSelection: false,
+            selectedUser.Normalize());
+    }
+}
+
 public sealed record UserMemory(
     string MemoryId,
     string Text,
@@ -99,6 +129,15 @@ public interface IActiveUserSession
     IReadOnlyList<ActiveUser> AvailableUsers { get; }
 
     bool RequiresSelection { get; }
+
+    /// <summary>
+    /// Captures the selection boundary once. Implementations should override this method and
+    /// read selection state atomically; the default preserves compatibility for legacy sessions.
+    /// </summary>
+    ActiveUserSelectionSnapshot CaptureSelectionSnapshot() =>
+        RequiresSelection
+            ? ActiveUserSelectionSnapshot.SelectionRequired
+            : ActiveUserSelectionSnapshot.Resolved(Current);
 
     event EventHandler<ActiveUser>? Changed;
 

@@ -15,6 +15,8 @@ using Ali.Modules.UserMemory;
 using Ali.Modules.Coding;
 using Ali.Modules.Calendar;
 using Ali.Modules.ToolDiscovery;
+using Ali.Modules.Orchestration.Evidence;
+using Ali.Modules.Orchestration.Observation;
 
 namespace Ali;
 
@@ -51,7 +53,8 @@ public sealed class AliServices
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
         AliAgentWorkMemory agentWorkMemory,
-        AliCodingModule codingModule)
+        AliCodingModule codingModule,
+        IAsyncDisposable? orchestrationObserver = null)
     {
         DataRoot = dataRoot;
         UserDataRoot = userDataRoot;
@@ -77,6 +80,7 @@ public sealed class AliServices
         FileAccess = fileAccess;
         AgentWorkMemory = agentWorkMemory;
         CodingModule = codingModule;
+        OrchestrationObserver = orchestrationObserver;
         GoogleBillingGuard = new GoogleBillingSettingsGuard(DataRoot);
     }
 
@@ -147,6 +151,11 @@ public sealed class AliServices
     public AliWorkstationFileAccess FileAccess { get; }
 
     public AliAgentWorkMemory AgentWorkMemory { get; }
+
+    internal IAsyncDisposable? OrchestrationObserver { get; }
+
+    internal ShadowObservationHealthSnapshot? OrchestrationObservationHealth =>
+        (OrchestrationObserver as IShadowToolObserver)?.Health;
 
     public GoogleBillingSettingsGuard GoogleBillingGuard { get; }
 
@@ -240,6 +249,15 @@ public sealed class AliServices
     public static string GetProfileDataRoot(AssistantProfile assistantProfile) =>
         Path.Combine(DesktopUserDataRoot, "Profiles", assistantProfile.Normalize().ProfileId);
 
+    internal static string GetOrchestrationEvidenceRoot(string profileDataRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(profileDataRoot);
+        return Path.Combine(
+            Path.GetFullPath(profileDataRoot),
+            "Orchestration",
+            "Evidence");
+    }
+
     public static void EnsureLocalAliFilesLayout()
     {
         Directory.CreateDirectory(LocalAliRoot);
@@ -310,7 +328,11 @@ public sealed class AliServices
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
-        userMemories.BeginWarmup(activeUsers.Current);
+        var initialUserSelection = activeUsers.CaptureSelectionSnapshot();
+        if (initialUserSelection.IsResolved)
+        {
+            userMemories.BeginWarmup(initialUserSelection.SelectedUser!);
+        }
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
         var fileAccess = AliWorkstationFileAccess.CreateDefault(
             userDataRoot,
@@ -354,62 +376,83 @@ public sealed class AliServices
                 activeUsers,
                 () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
                 codingModule));
-        var coordinator = new AliToolCoordinator(
-            runtime,
-            runtime,
-            localLibrary,
-            webSources,
-            webResearch,
-            memories,
-            reminders,
-            profile,
-            mcpClients,
-            toolPermissions,
-            fileAccess,
-            agentWorkMemory,
-            codingModule,
-            userMemories,
-            activeUsers,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-            AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot),
-            () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
-            semanticToolCatalog);
-        var orchestrator = new ConversationOrchestrator(
-            runtime,
-            correctionQueue,
-            coordinator);
-
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(CreateSpeechToTextOptions(dataRoot, voiceSettings));
         var textToSpeech = CreateTextToSpeechProvider(userDataRoot, voiceSettings);
         var speechPlayer = new NAudioWaveSpeechPlayer();
+        var shadowObserver = new ShadowToolObservationService(
+            new EvidenceLedger(
+                GetOrchestrationEvidenceRoot(profileDataRoot),
+                profile.ProfileId));
+        try
+        {
+            var coordinator = new AliToolCoordinator(
+                runtime,
+                runtime,
+                localLibrary,
+                webSources,
+                webResearch,
+                memories,
+                reminders,
+                profile,
+                mcpClients,
+                toolPermissions,
+                fileAccess,
+                agentWorkMemory,
+                codingModule,
+                userMemories,
+                activeUsers,
+                () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+                AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot),
+                () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
+                semanticToolCatalog,
+                shadowObserver);
+            var orchestrator = new ConversationOrchestrator(
+                runtime,
+                correctionQueue,
+                coordinator);
 
-        return new AliServices(
-            dataRoot,
-            userDataRoot,
-            profileDataRoot,
-            profile,
-            runtime,
-            orchestrator,
-            runtimeHttpClient,
-            internetHttpClient,
-            voiceRecorder,
-            speechToText,
-            textToSpeech,
-            speechPlayer,
-            conversations,
-            memories,
-            reminders,
-            mcpClients,
-            mcpServer,
-            qdrant,
-            activeUsers,
-            userMemories,
-            toolPermissions,
-            fileAccess,
-            agentWorkMemory,
-            codingModule);
+            return new AliServices(
+                dataRoot,
+                userDataRoot,
+                profileDataRoot,
+                profile,
+                runtime,
+                orchestrator,
+                runtimeHttpClient,
+                internetHttpClient,
+                voiceRecorder,
+                speechToText,
+                textToSpeech,
+                speechPlayer,
+                conversations,
+                memories,
+                reminders,
+                mcpClients,
+                mcpServer,
+                qdrant,
+                activeUsers,
+                userMemories,
+                toolPermissions,
+                fileAccess,
+                agentWorkMemory,
+                codingModule,
+                shadowObserver);
+        }
+        catch
+        {
+            try
+            {
+                shadowObserver.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Preserve the original composition failure.
+            }
+
+            throw;
+        }
     }
 
     private static ITextToSpeechProvider CreateTextToSpeechProvider(

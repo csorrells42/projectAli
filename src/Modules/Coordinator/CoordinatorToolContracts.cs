@@ -1,4 +1,7 @@
 using System.Text.Json.Serialization;
+using Ali.Modules.Orchestration.Contracts;
+using Ali.Modules.Orchestration.Evidence;
+using Ali.Modules.UserMemory;
 
 namespace Ali.Modules.Coordinator;
 
@@ -81,15 +84,52 @@ public sealed record AgentToolExecutionReceipt(
     string Summary,
     DateTimeOffset RecordedAt);
 
+internal enum ExplicitShadowTerminalKind
+{
+    Denied,
+    Cancelled
+}
+
+internal sealed record PendingExplicitShadowTerminal(
+    string CallId,
+    string ToolName,
+    ExplicitShadowTerminalKind Kind,
+    string? FailureCode,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset CompletedAtUtc,
+    EvidencePermissionMetadata Permission);
+
 internal sealed class CoordinatorTurnContext(
     string conversationId,
     string userMessageId,
     string assistantMessageId,
     string originalUserText,
-    Action<AssistantStreamChunk> publish)
+    Action<AssistantStreamChunk> publish,
+    ActiveUserSelectionSnapshot? capturedUserSelection = null,
+    TurnIdentity? observationIdentity = null)
 {
+    internal const int MaximumRememberedShadowTerminals = 4_096;
+    internal const int MaximumRememberedShadowPermissions = 4_096;
+    internal const int MaximumRememberedShadowStandingPermissions = 4_096;
+    internal const int MaximumRememberedPendingExplicitShadowTerminals = 4_096;
+    internal const int MaximumShadowCallIdCharacters = 256;
+    internal const int MaximumShadowToolNameCharacters = 256;
+    internal const int MaximumShadowFailureCodeCharacters = 128;
+    internal const int MaximumShadowPermissionValueCharacters = 64;
+
     private readonly long _startedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
     private readonly Dictionary<string, CoordinatorToolPlan> _toolPlans = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _shadowObservedCallIds = new(StringComparer.Ordinal);
+    private readonly Queue<string> _shadowObservedOldestFirst = new();
+    private readonly Dictionary<string, EvidencePermissionMetadata> _shadowPermissions =
+        new(StringComparer.Ordinal);
+    private readonly Queue<string> _shadowPermissionOldestFirst = new();
+    private readonly Dictionary<string, EvidencePermissionMetadata> _shadowStandingPermissions =
+        new(StringComparer.Ordinal);
+    private readonly Queue<string> _shadowStandingPermissionOldestFirst = new();
+    private readonly Dictionary<string, PendingExplicitShadowTerminalEntry> _pendingExplicitShadowTerminals =
+        new(StringComparer.Ordinal);
+    private readonly LinkedList<string> _pendingExplicitShadowOldestFirst = new();
     private readonly object _toolPlanSync = new();
 
     public string ConversationId { get; } = conversationId;
@@ -99,6 +139,10 @@ internal sealed class CoordinatorTurnContext(
     public string AssistantMessageId { get; } = assistantMessageId;
 
     public string OriginalUserText { get; } = originalUserText;
+
+    public ActiveUserSelectionSnapshot? CapturedUserSelection { get; } = capturedUserSelection;
+
+    public TurnIdentity? ObservationIdentity { get; } = observationIdentity;
 
     public bool UsedEvidenceTool { get; set; }
 
@@ -147,6 +191,286 @@ internal sealed class CoordinatorTurnContext(
             return _toolPlans.TryGetValue(callId, out plan);
         }
     }
+
+    public bool TryGetCurrentToolCallId(string toolName, out string? callId)
+    {
+        if (string.IsNullOrWhiteSpace(toolName))
+        {
+            callId = null;
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (CurrentToolPlan is not null
+                && string.Equals(CurrentToolPlan.ToolName, toolName, StringComparison.Ordinal))
+            {
+                callId = CurrentToolPlan.CallId;
+                return true;
+            }
+
+            callId = null;
+            return false;
+        }
+    }
+
+    public bool MarkShadowObserved(string callId)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (!_shadowObservedCallIds.Add(callId))
+            {
+                return false;
+            }
+
+            if (_shadowObservedCallIds.Count > MaximumRememberedShadowTerminals)
+            {
+                var oldest = _shadowObservedOldestFirst.Dequeue();
+                _shadowObservedCallIds.Remove(oldest);
+            }
+
+            _shadowObservedOldestFirst.Enqueue(callId);
+            return true;
+        }
+    }
+
+    public bool WasShadowObserved(string callId)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            return _shadowObservedCallIds.Contains(callId);
+        }
+    }
+
+    public void RecordShadowPermission(
+        string callId,
+        EvidencePermissionMetadata permission)
+    {
+        if (!IsBoundedShadowCallId(callId)
+            || !IsBoundedShadowPermission(permission))
+        {
+            return;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_shadowPermissions.ContainsKey(callId))
+            {
+                _shadowPermissions[callId] = permission with { };
+                return;
+            }
+
+            if (_shadowPermissions.Count >= MaximumRememberedShadowPermissions)
+            {
+                var oldest = _shadowPermissionOldestFirst.Dequeue();
+                _shadowPermissions.Remove(oldest);
+            }
+
+            _shadowPermissions.Add(callId, permission with { });
+            _shadowPermissionOldestFirst.Enqueue(callId);
+        }
+    }
+
+    public bool TryGetShadowPermission(
+        string callId,
+        out EvidencePermissionMetadata? permission)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
+            permission = null;
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_shadowPermissions.TryGetValue(callId, out var stored))
+            {
+                permission = stored with { };
+                return true;
+            }
+
+            permission = null;
+            return false;
+        }
+    }
+
+    public void RecordShadowStandingPermission(
+        string toolName,
+        EvidencePermissionMetadata permission)
+    {
+        if (!IsBoundedShadowToolName(toolName)
+            || !IsBoundedShadowPermission(permission))
+        {
+            return;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_shadowStandingPermissions.ContainsKey(toolName))
+            {
+                _shadowStandingPermissions[toolName] = permission with { };
+                return;
+            }
+
+            if (_shadowStandingPermissions.Count
+                >= MaximumRememberedShadowStandingPermissions)
+            {
+                var oldest = _shadowStandingPermissionOldestFirst.Dequeue();
+                _shadowStandingPermissions.Remove(oldest);
+            }
+
+            _shadowStandingPermissions.Add(toolName, permission with { });
+            _shadowStandingPermissionOldestFirst.Enqueue(toolName);
+        }
+    }
+
+    public bool TryGetShadowStandingPermission(
+        string toolName,
+        out EvidencePermissionMetadata? permission)
+    {
+        if (!IsBoundedShadowToolName(toolName))
+        {
+            permission = null;
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_shadowStandingPermissions.TryGetValue(toolName, out var stored))
+            {
+                permission = stored with { };
+                return true;
+            }
+
+            permission = null;
+            return false;
+        }
+    }
+
+    public bool RecordPendingExplicitShadowTerminal(PendingExplicitShadowTerminal terminal)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!IsBoundedShadowCallId(terminal.CallId)
+            || !IsBoundedShadowToolName(terminal.ToolName)
+            || terminal.Kind is not (ExplicitShadowTerminalKind.Denied
+                or ExplicitShadowTerminalKind.Cancelled)
+            || !IsOptionalBoundedValue(
+                terminal.FailureCode,
+                MaximumShadowFailureCodeCharacters)
+            || !IsBoundedShadowPermission(terminal.Permission)
+            || terminal.CompletedAtUtc < terminal.StartedAtUtc)
+        {
+            return false;
+        }
+
+        var snapshot = terminal with { Permission = terminal.Permission with { } };
+        lock (_toolPlanSync)
+        {
+            if (_pendingExplicitShadowTerminals.TryGetValue(terminal.CallId, out var existing))
+            {
+                _pendingExplicitShadowTerminals[terminal.CallId] = existing with
+                {
+                    Terminal = snapshot
+                };
+                return true;
+            }
+
+            if (_pendingExplicitShadowTerminals.Count
+                >= MaximumRememberedPendingExplicitShadowTerminals)
+            {
+                var oldest = _pendingExplicitShadowOldestFirst.First
+                    ?? throw new InvalidOperationException(
+                        "The pending explicit shadow-terminal map is inconsistent.");
+                _pendingExplicitShadowOldestFirst.RemoveFirst();
+                _pendingExplicitShadowTerminals.Remove(oldest.Value);
+            }
+
+            var node = _pendingExplicitShadowOldestFirst.AddLast(terminal.CallId);
+            _pendingExplicitShadowTerminals.Add(
+                terminal.CallId,
+                new PendingExplicitShadowTerminalEntry(snapshot, node));
+            return true;
+        }
+    }
+
+    public bool TryGetPendingExplicitShadowTerminal(
+        string callId,
+        out PendingExplicitShadowTerminal? terminal)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
+            terminal = null;
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_pendingExplicitShadowTerminals.TryGetValue(callId, out var entry))
+            {
+                terminal = entry.Terminal with
+                {
+                    Permission = entry.Terminal.Permission with { }
+                };
+                return true;
+            }
+
+            terminal = null;
+            return false;
+        }
+    }
+
+    public bool ClearPendingExplicitShadowTerminal(string callId)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (!_pendingExplicitShadowTerminals.Remove(callId, out var entry))
+            {
+                return false;
+            }
+
+            _pendingExplicitShadowOldestFirst.Remove(entry.Node);
+            return true;
+        }
+    }
+
+    internal static bool IsBoundedShadowCallId(string? value) =>
+        IsBoundedValue(value, MaximumShadowCallIdCharacters);
+
+    internal static bool IsBoundedShadowToolName(string? value) =>
+        IsBoundedValue(value, MaximumShadowToolNameCharacters);
+
+    private static bool IsBoundedShadowPermission(EvidencePermissionMetadata? permission) =>
+        permission is not null
+        && IsBoundedValue(permission.Decision, MaximumShadowPermissionValueCharacters)
+        && IsBoundedValue(permission.Scope, MaximumShadowPermissionValueCharacters);
+
+    private static bool IsBoundedValue(string? value, int maximumCharacters) =>
+        value is not null
+        && value.Length > 0
+        && value.Length <= maximumCharacters
+        && !string.IsNullOrWhiteSpace(value);
+
+    private static bool IsOptionalBoundedValue(string? value, int maximumCharacters) =>
+        value is null || IsBoundedValue(value, maximumCharacters);
+
+    private sealed record PendingExplicitShadowTerminalEntry(
+        PendingExplicitShadowTerminal Terminal,
+        LinkedListNode<string> Node);
 
     public void RecordPermissionDecision(AgentToolApprovalChoice choice)
     {

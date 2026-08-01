@@ -5,6 +5,7 @@ using Ali.Modules.Internet;
 using Ali.Modules.Memory;
 using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
+using Ali.Modules.Orchestration.Observation;
 using Ali.Modules.Reminders;
 using Ali.Modules.UserMemory;
 using Ali.Modules.WorkstationFiles;
@@ -42,7 +43,8 @@ internal sealed class AliToolCatalog
         Func<UserMemorySettings>? memorySettings = null,
         Func<AgentOrchestrationSettings>? orchestrationSettings = null,
         Func<CancellationToken, Task>? waitForPendingMemoryReview = null,
-        ISemanticToolCatalog? semanticToolCatalog = null)
+        ISemanticToolCatalog? semanticToolCatalog = null,
+        IShadowToolObserver? shadowObserver = null)
     {
         var profile = assistantProfile.Normalize();
         MemoryTools = userMemories is not null && activeUsers is not null && memorySettings is not null
@@ -53,7 +55,10 @@ internal sealed class AliToolCatalog
         var navigationTools = new AliNavigationTools(turnAccessor);
         var reminderTools = new AliReminderTools(reminders, turnAccessor);
         var identityTimeTools = new AliIdentityTimeTools(profile);
-        var permissionPolicy = new AliToolPermissionPolicy(turnAccessor, () => toolPermissions.CurrentProfile);
+        var permissionPolicy = new AliToolPermissionPolicy(
+            turnAccessor,
+            () => toolPermissions.CurrentProfile,
+            shadowObserver);
         var fileUtilities = new AliWorkstationFileUtilities(fileAccess);
         semanticToolCatalog ??= new RegistryOnlySemanticToolCatalog();
         codingModule.ExternalAgents.ProgressReported += progress =>

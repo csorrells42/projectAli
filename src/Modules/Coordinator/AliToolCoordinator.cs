@@ -10,6 +10,8 @@ using Ali.Modules.Internet;
 using Ali.Modules.Memory;
 using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
+using Ali.Modules.Orchestration.Contracts;
+using Ali.Modules.Orchestration.Observation;
 using Ali.Modules.Reminders;
 using Ali.Modules.Runtime;
 using Ali.Modules.UserMemory;
@@ -55,6 +57,51 @@ public sealed class AliToolCoordinator
         string? workflowCheckpointPath = null,
         Func<AgentOrchestrationSettings>? orchestrationSettings = null,
         ISemanticToolCatalog? semanticToolCatalog = null)
+        : this(
+            runtime,
+            chatClient,
+            localLibrary,
+            webSources,
+            webResearch,
+            memories,
+            reminders,
+            assistantProfile,
+            mcpClients,
+            toolPermissions,
+            fileAccess,
+            workMemory,
+            codingModule,
+            userMemories,
+            activeUsers,
+            memorySettings,
+            workflowCheckpointPath,
+            orchestrationSettings,
+            semanticToolCatalog,
+            shadowObserver: null)
+    {
+    }
+
+    internal AliToolCoordinator(
+        ILocalModelRuntime runtime,
+        IChatClient chatClient,
+        ISourceRetriever localLibrary,
+        ISourceRetriever webSources,
+        McpWebResearchClient webResearch,
+        IMemoryStore memories,
+        IReminderStore reminders,
+        AssistantProfile assistantProfile,
+        McpClientManager mcpClients,
+        AgentToolPermissionStore toolPermissions,
+        AliWorkstationFileAccess fileAccess,
+        AliAgentWorkMemory workMemory,
+        AliCodingModule? codingModule,
+        IUserMemoryService? userMemories,
+        IActiveUserSession? activeUsers,
+        Func<UserMemorySettings>? memorySettings,
+        string? workflowCheckpointPath,
+        Func<AgentOrchestrationSettings>? orchestrationSettings,
+        ISemanticToolCatalog? semanticToolCatalog,
+        IShadowToolObserver? shadowObserver)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
@@ -80,7 +127,8 @@ public sealed class AliToolCoordinator
             _memoryReviewQueue is null
                 ? null
                 : cancellationToken => _memoryReviewQueue.DrainAsync(cancellationToken),
-            semanticToolCatalog);
+            semanticToolCatalog,
+            shadowObserver);
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
@@ -94,7 +142,8 @@ public sealed class AliToolCoordinator
             () => _turn.Current,
             workflowCheckpointPath ?? Path.Combine(Path.GetTempPath(), "ProjectAli", "WorkflowCheckpoints"),
             orchestrationSettings ?? (() => new AgentOrchestrationSettings()),
-            semanticToolCatalog);
+            semanticToolCatalog,
+            shadowObserver);
     }
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision)
@@ -151,12 +200,19 @@ public sealed class AliToolCoordinator
         ChannelWriter<AssistantStreamChunk> writer,
         CancellationToken cancellationToken)
     {
+        var (capturedUserSelection, observationIdentity) = CaptureTurnAdmissionIdentity(
+            _activeUsers,
+            conversationId,
+            assistantMessageId);
+
         var turn = new CoordinatorTurnContext(
             conversationId,
             userMessageId,
             assistantMessageId,
             userText,
-            chunk => writer.TryWrite(chunk));
+            chunk => writer.TryWrite(chunk),
+            capturedUserSelection,
+            observationIdentity);
         using var turnScope = _turn.Enter(turn);
         _memoryReviewQueue?.BeginForegroundTurn();
         try
@@ -203,11 +259,51 @@ public sealed class AliToolCoordinator
         }
     }
 
+    internal static (
+        ActiveUserSelectionSnapshot? CapturedUserSelection,
+        TurnIdentity? ObservationIdentity) CaptureTurnAdmissionIdentity(
+            IActiveUserSession? activeUsers,
+            string conversationId,
+            string assistantMessageId)
+    {
+        ActiveUserSelectionSnapshot? capturedUserSelection;
+        try
+        {
+            capturedUserSelection = activeUsers?.CaptureSelectionSnapshot();
+        }
+        catch
+        {
+            // An unusable selection source must fail closed for all user-bound work.
+            return (ActiveUserSelectionSnapshot.SelectionRequired, null);
+        }
+
+        if (capturedUserSelection?.IsResolved != true)
+        {
+            return (capturedUserSelection, null);
+        }
+
+        try
+        {
+            return (
+                capturedUserSelection,
+                new TurnIdentity(
+                    capturedUserSelection.SelectedUser!.StableId,
+                    conversationId,
+                    assistantMessageId));
+        }
+        catch
+        {
+            // Protected evidence is optional. Its identity validation cannot replace an
+            // already captured user or alter live memory, permission, or tool behavior.
+            return (capturedUserSelection, null);
+        }
+    }
+
     private void QueueIncomingUserMemoryReview(
         CoordinatorTurnContext turn,
         string userText)
     {
-        if (_memoryReviewQueue is null || _activeUsers is null || _memorySettings is null)
+        if (_memoryReviewQueue is null || _memorySettings is null)
         {
             return;
         }
@@ -218,7 +314,8 @@ public sealed class AliToolCoordinator
             return;
         }
 
-        if (_activeUsers.RequiresSelection)
+        var capturedUser = turn.CapturedUserSelection?.SelectedUser;
+        if (capturedUser is null)
         {
             turn.Report(
                 AgentActivityKind.Warning,
@@ -227,7 +324,7 @@ public sealed class AliToolCoordinator
             return;
         }
 
-        var review = _memoryReviewQueue.Enqueue(_activeUsers.Current, userText);
+        var review = _memoryReviewQueue.Enqueue(capturedUser, userText);
         _ = PublishMemoryReviewOutcomeAsync(turn, review);
         turn.Report(
             AgentActivityKind.Status,

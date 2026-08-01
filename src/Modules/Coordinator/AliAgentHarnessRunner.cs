@@ -7,6 +7,8 @@ using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
 using Ali.Modules.Mcp;
+using Ali.Modules.Orchestration.Evidence;
+using Ali.Modules.Orchestration.Observation;
 using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Ali.Modules.UserMemory;
@@ -44,6 +46,7 @@ internal sealed class AliAgentHarnessRunner
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
     private readonly ISemanticToolCatalog _semanticToolCatalog;
+    private readonly IShadowToolObserver? _shadowObserver;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
 
     public AliAgentHarnessRunner(
@@ -59,7 +62,8 @@ internal sealed class AliAgentHarnessRunner
         Func<CoordinatorTurnContext?> turnAccessor,
         string checkpointPath,
         Func<AgentOrchestrationSettings> orchestrationSettings,
-        ISemanticToolCatalog? semanticToolCatalog = null)
+        ISemanticToolCatalog? semanticToolCatalog = null,
+        IShadowToolObserver? shadowObserver = null)
     {
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
@@ -92,6 +96,7 @@ internal sealed class AliAgentHarnessRunner
         _workMemory = workMemory;
         _activeUsers = activeUsers;
         _turnAccessor = turnAccessor;
+        _shadowObserver = shadowObserver;
     }
 
     private AIAgent CreateAgent(
@@ -164,7 +169,8 @@ internal sealed class AliAgentHarnessRunner
 
         var permissionPolicy = new AliToolPermissionPolicy(
             _turnAccessor,
-            () => _toolPermissions.CurrentProfile);
+            () => _toolPermissions.CurrentProfile,
+            _shadowObserver);
         var magentic = _workflowFactory.CreateMagenticTool(_specialistTeam, normalized);
         return baseTools
             .Append((AITool)permissionPolicy.Apply(
@@ -185,8 +191,10 @@ internal sealed class AliAgentHarnessRunner
         Action<AssistantStreamChunk> publish,
         CancellationToken cancellationToken)
     {
-        var workMemoryUser = _activeUsers is not null && !_activeUsers.RequiresSelection
-            ? _activeUsers.Current
+        var userSelection = turn.CapturedUserSelection
+            ?? _activeUsers?.CaptureSelectionSnapshot();
+        var workMemoryUser = userSelection?.IsResolved == true
+            ? userSelection.SelectedUser
             : null;
         using var workMemoryScope = _workMemory.EnterScope(turn.ConversationId, workMemoryUser);
         using var connectorTurnScope = _compatibilityClient.BeginTurn(turn);
@@ -225,7 +233,10 @@ internal sealed class AliAgentHarnessRunner
         var activeAgent = CreateAgent(activeTools, orchestrationSettings);
         if (mcpSession.Tools.Count > 0)
         {
-            var permissionPolicy = new AliToolPermissionPolicy(_turnAccessor, () => _toolPermissions.CurrentProfile);
+            var permissionPolicy = new AliToolPermissionPolicy(
+                _turnAccessor,
+                () => _toolPermissions.CurrentProfile,
+                _shadowObserver);
             activeTools = activeTools
                 .Concat(mcpSession.Tools.Select(tool =>
                     (AITool)permissionPolicy.Apply(tool.Function, tool.RequiresApproval)))
@@ -280,6 +291,7 @@ internal sealed class AliAgentHarnessRunner
         }
         string? finishReason = null;
         var wroteAnswer = false;
+        var pendingShadowCalls = new PendingShadowCallTracker();
 
         while (true)
         {
@@ -296,9 +308,11 @@ internal sealed class AliAgentHarnessRunner
                     switch (content)
                     {
                         case ToolApprovalRequestContent approval:
+                            TrackPendingShadowCall(turn, pendingShadowCalls, approval.ToolCall);
                             approvalRequest = approval;
                             break;
                         case FunctionCallContent functionCall when !functionCall.InformationalOnly:
+                            TrackPendingShadowCall(turn, pendingShadowCalls, functionCall);
                             if (!turn.TryGetToolPlan(functionCall.CallId, out _))
                             {
                                 turn.Report(
@@ -308,6 +322,11 @@ internal sealed class AliAgentHarnessRunner
                             }
                             break;
                         case FunctionResultContent functionResult:
+                            TryObserveFrameworkResult(
+                                _shadowObserver,
+                                turn,
+                                pendingShadowCalls,
+                                functionResult);
                             if (!turn.TryGetToolPlan(functionResult.CallId, out _))
                             {
                                 turn.Report(
@@ -395,6 +414,7 @@ internal sealed class AliAgentHarnessRunner
         IReadOnlyList<AITool> activeTools,
         CancellationToken cancellationToken)
     {
+        var approvalRequestedAtUtc = DateTimeOffset.UtcNow;
         var functionCall = request.ToolCall as FunctionCallContent;
         var toolName = functionCall?.Name ?? request.ToolCall.GetType().Name;
         var arguments = functionCall is null ? "{}" : CompactArguments(functionCall.Arguments, 1200);
@@ -404,10 +424,11 @@ internal sealed class AliAgentHarnessRunner
             .Description ?? "Ali requested permission to run this tool.";
 
         if (functionCall is not null
-            && TryGetActiveUser(out var activeUser)
+            && TryGetActiveUser(turn, out var activeUser)
             && _toolPermissions.TryMatch(activeUser, toolName, functionCall.Arguments, out var savedGrant)
             && savedGrant is not null)
         {
+            RecordStandingShadowPermission(turn, functionCall, savedGrant.Scope);
             turn.Report(
                 AgentActivityKind.Status,
                 $"Used saved permission for {Humanize(toolName)}",
@@ -437,16 +458,39 @@ internal sealed class AliAgentHarnessRunner
         {
             choice = await completion.Task.ConfigureAwait(false);
         }
+        catch (OperationCanceledException ex)
+        {
+            TryObserveApprovalCancelled(
+                _shadowObserver,
+                turn,
+                functionCall,
+                toolName,
+                ex,
+                approvalRequestedAtUtc,
+                DateTimeOffset.UtcNow);
+            throw;
+        }
         finally
         {
             _pendingApprovals.TryRemove(request.RequestId, out _);
         }
 
+        RecordInteractiveShadowPermission(turn, functionCall, choice);
         turn.Report(
             choice == AgentToolApprovalChoice.Deny ? AgentActivityKind.Warning : AgentActivityKind.Status,
             choice == AgentToolApprovalChoice.Deny ? "Permission denied" : "Permission granted",
             choice.ToString());
         turn.RecordPermissionDecision(choice);
+        if (choice == AgentToolApprovalChoice.Deny)
+        {
+            TryObserveApprovalDenied(
+                _shadowObserver,
+                turn,
+                functionCall,
+                toolName,
+                approvalRequestedAtUtc,
+                DateTimeOffset.UtcNow);
+        }
 
         if (choice is AgentToolApprovalChoice.AlwaysAllowArguments or AgentToolApprovalChoice.AlwaysAllowTool)
         {
@@ -470,7 +514,7 @@ internal sealed class AliAgentHarnessRunner
         string toolName,
         FunctionCallContent? functionCall)
     {
-        if (!TryGetActiveUser(out var activeUser))
+        if (!TryGetActiveUser(turn, out var activeUser))
         {
             turn.Report(
                 AgentActivityKind.Warning,
@@ -510,16 +554,327 @@ internal sealed class AliAgentHarnessRunner
         }
     }
 
-    private bool TryGetActiveUser(out ActiveUser activeUser)
+    private void TrackPendingShadowCall(
+        CoordinatorTurnContext turn,
+        PendingShadowCallTracker pendingCalls,
+        ToolCallContent toolCall)
     {
-        if (_activeUsers is null || _activeUsers.RequiresSelection)
+        if (_shadowObserver is null)
+        {
+            return;
+        }
+
+        try
+        {
+            pendingCalls.TryTrack(toolCall, DateTimeOffset.UtcNow);
+        }
+        catch
+        {
+            // Stream tracking is shadow-only and cannot affect Agent Framework output.
+        }
+    }
+
+    internal static void TryObserveFrameworkResult(
+        IShadowToolObserver? shadowObserver,
+        CoordinatorTurnContext turn,
+        PendingShadowCallTracker pendingCalls,
+        FunctionResultContent functionResult)
+    {
+        if (shadowObserver is null
+            || !CoordinatorTurnContext.IsBoundedShadowCallId(functionResult.CallId))
+        {
+            return;
+        }
+
+        try
+        {
+            if (turn.WasShadowObserved(functionResult.CallId))
+            {
+                pendingCalls.TryTake(functionResult.CallId, out _);
+                return;
+            }
+
+            if (turn.TryGetPendingExplicitShadowTerminal(
+                    functionResult.CallId,
+                    out var explicitTerminal)
+                && explicitTerminal is not null)
+            {
+                pendingCalls.TryTake(functionResult.CallId, out _);
+                TryObservePendingExplicitTerminal(
+                    shadowObserver,
+                    turn,
+                    explicitTerminal,
+                    functionResult.Exception);
+                return;
+            }
+
+            var hasTrackedCall = pendingCalls.TryGet(functionResult.CallId, out var pending);
+            if (!hasTrackedCall || pending is null)
+            {
+                if (!turn.TryGetToolPlan(functionResult.CallId, out var plan) || plan is null)
+                {
+                    return;
+                }
+
+                pending = new PendingShadowCall(
+                    plan.ToolName,
+                    DateTimeOffset.UtcNow);
+            }
+
+            if (!CoordinatorTurnContext.IsBoundedShadowToolName(pending.ToolName))
+            {
+                return;
+            }
+
+            var completedAtUtc = DateTimeOffset.UtcNow;
+            var permission = turn.TryGetShadowPermission(functionResult.CallId, out var recordedPermission)
+                && recordedPermission is not null
+                    ? recordedPermission
+                    : turn.TryGetShadowStandingPermission(pending.ToolName, out var standingPermission)
+                      && standingPermission is not null
+                        ? standingPermission
+                        : new EvidencePermissionMetadata("unknown", "unknown");
+            bool accepted;
+            if (functionResult.Exception is Exception exception)
+            {
+                accepted = shadowObserver.TryObserveThrew(
+                    turn.ObservationIdentity,
+                    functionResult.CallId,
+                    pending.ToolName,
+                    null,
+                    exception,
+                    pending.StartedAtUtc,
+                    completedAtUtc,
+                    permission);
+            }
+            else
+            {
+                accepted = shadowObserver.TryObserveReturned(
+                    turn.ObservationIdentity,
+                    functionResult.CallId,
+                    pending.ToolName,
+                    null,
+                    functionResult.Result,
+                    pending.StartedAtUtc,
+                    completedAtUtc,
+                    permission);
+            }
+
+            if (accepted)
+            {
+                if (hasTrackedCall)
+                {
+                    pendingCalls.TryTake(functionResult.CallId, out _);
+                }
+                turn.MarkShadowObserved(functionResult.CallId);
+            }
+        }
+        catch
+        {
+            // Framework stream observation is supplementary and failure-isolated.
+        }
+    }
+
+    private static void TryObservePendingExplicitTerminal(
+        IShadowToolObserver shadowObserver,
+        CoordinatorTurnContext turn,
+        PendingExplicitShadowTerminal terminal,
+        Exception? frameworkException)
+    {
+        try
+        {
+            var accepted = terminal.Kind switch
+            {
+                ExplicitShadowTerminalKind.Denied => shadowObserver.TryObserveDenied(
+                    turn.ObservationIdentity,
+                    terminal.CallId,
+                    terminal.ToolName,
+                    null,
+                    terminal.FailureCode,
+                    terminal.StartedAtUtc,
+                    terminal.CompletedAtUtc,
+                    terminal.Permission),
+                ExplicitShadowTerminalKind.Cancelled => shadowObserver.TryObserveCancelled(
+                    turn.ObservationIdentity,
+                    terminal.CallId,
+                    terminal.ToolName,
+                    null,
+                    frameworkException as OperationCanceledException
+                        ?? new OperationCanceledException("The approval wait was cancelled."),
+                    terminal.StartedAtUtc,
+                    terminal.CompletedAtUtc,
+                    terminal.Permission),
+                _ => false
+            };
+            if (accepted)
+            {
+                turn.ClearPendingExplicitShadowTerminal(terminal.CallId);
+                turn.MarkShadowObserved(terminal.CallId);
+            }
+        }
+        catch
+        {
+            // A rejected or failed retry remains pending as the same typed terminal.
+        }
+    }
+
+    internal static void TryObserveApprovalDenied(
+        IShadowToolObserver? shadowObserver,
+        CoordinatorTurnContext turn,
+        FunctionCallContent? functionCall,
+        string toolName,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset completedAtUtc)
+    {
+        if (shadowObserver is null || functionCall is null)
+        {
+            return;
+        }
+
+        var callId = functionCall.CallId;
+        if (string.IsNullOrWhiteSpace(callId) || turn.WasShadowObserved(callId))
+        {
+            return;
+        }
+
+        var permission = new EvidencePermissionMetadata("denied", "none");
+        turn.RecordPendingExplicitShadowTerminal(new PendingExplicitShadowTerminal(
+            callId,
+            toolName,
+            ExplicitShadowTerminalKind.Denied,
+            "user-denied",
+            startedAtUtc,
+            completedAtUtc,
+            permission));
+        try
+        {
+            if (shadowObserver.TryObserveDenied(
+                turn.ObservationIdentity,
+                callId,
+                toolName,
+                functionCall.Arguments,
+                "user-denied",
+                startedAtUtc,
+                completedAtUtc,
+                permission))
+            {
+                turn.ClearPendingExplicitShadowTerminal(callId);
+                turn.MarkShadowObserved(callId);
+            }
+        }
+        catch
+        {
+            // The user's denial remains authoritative even if shadow storage fails.
+        }
+    }
+
+    internal static void TryObserveApprovalCancelled(
+        IShadowToolObserver? shadowObserver,
+        CoordinatorTurnContext turn,
+        FunctionCallContent? functionCall,
+        string toolName,
+        OperationCanceledException exception,
+        DateTimeOffset startedAtUtc,
+        DateTimeOffset completedAtUtc)
+    {
+        if (shadowObserver is null
+            || functionCall is null
+            || !CoordinatorTurnContext.IsBoundedShadowCallId(functionCall.CallId)
+            || turn.WasShadowObserved(functionCall.CallId))
+        {
+            return;
+        }
+
+        var permission = new EvidencePermissionMetadata("unknown", "unknown");
+        turn.RecordPendingExplicitShadowTerminal(new PendingExplicitShadowTerminal(
+            functionCall.CallId,
+            toolName,
+            ExplicitShadowTerminalKind.Cancelled,
+            null,
+            startedAtUtc,
+            completedAtUtc,
+            permission));
+        try
+        {
+            if (shadowObserver.TryObserveCancelled(
+                    turn.ObservationIdentity,
+                    functionCall.CallId,
+                    toolName,
+                    functionCall.Arguments,
+                    exception,
+                    startedAtUtc,
+                    completedAtUtc,
+                    permission))
+            {
+                turn.ClearPendingExplicitShadowTerminal(functionCall.CallId);
+                turn.MarkShadowObserved(functionCall.CallId);
+            }
+        }
+        catch
+        {
+            // Approval cancellation must retain its original exception and stack.
+        }
+    }
+
+    private bool TryGetActiveUser(
+        CoordinatorTurnContext turn,
+        out ActiveUser activeUser)
+    {
+        var selection = turn.CapturedUserSelection
+            ?? _activeUsers?.CaptureSelectionSnapshot();
+        if (selection?.IsResolved != true || selection.SelectedUser is null)
         {
             activeUser = null!;
             return false;
         }
 
-        activeUser = _activeUsers.Current;
+        activeUser = selection.SelectedUser;
         return true;
+    }
+
+    internal static void RecordInteractiveShadowPermission(
+        CoordinatorTurnContext turn,
+        FunctionCallContent? functionCall,
+        AgentToolApprovalChoice choice)
+    {
+        if (functionCall is null || string.IsNullOrWhiteSpace(functionCall.CallId))
+        {
+            return;
+        }
+
+        var permission = choice switch
+        {
+            AgentToolApprovalChoice.AllowOnce =>
+                new EvidencePermissionMetadata("approved-once", "once"),
+            AgentToolApprovalChoice.AlwaysAllowArguments =>
+                new EvidencePermissionMetadata("approved-standing", "exact-arguments"),
+            AgentToolApprovalChoice.AlwaysAllowTool =>
+                new EvidencePermissionMetadata("approved-standing", "tool"),
+            _ => new EvidencePermissionMetadata("denied", "none")
+        };
+        turn.RecordShadowPermission(functionCall.CallId, permission);
+        if (choice is AgentToolApprovalChoice.AlwaysAllowArguments
+            or AgentToolApprovalChoice.AlwaysAllowTool)
+        {
+            turn.RecordShadowStandingPermission(functionCall.Name, permission);
+        }
+    }
+
+    internal static void RecordStandingShadowPermission(
+        CoordinatorTurnContext turn,
+        FunctionCallContent? functionCall,
+        AgentToolPermissionScope scope)
+    {
+        if (functionCall is null || string.IsNullOrWhiteSpace(functionCall.CallId))
+        {
+            return;
+        }
+
+        var permission = scope == AgentToolPermissionScope.Tool
+            ? new EvidencePermissionMetadata("approved-standing", "tool")
+            : new EvidencePermissionMetadata("approved-standing", "exact-arguments");
+        turn.RecordShadowPermission(functionCall.CallId, permission);
+        turn.RecordShadowStandingPermission(functionCall.Name, permission);
     }
 
     private static MeaiChatMessage ToExtensionsAiMessage(RuntimeChatMessage message) =>
@@ -552,5 +907,88 @@ internal sealed class AliAgentHarnessRunner
 
     private sealed record PendingApproval(TaskCompletionSource<AgentToolApprovalChoice> Completion);
 }
+
+internal sealed class PendingShadowCallTracker
+{
+    internal const int DefaultCapacity = 256;
+
+    private readonly int _capacity;
+    private readonly Dictionary<string, PendingShadowEntry> _calls = new(StringComparer.Ordinal);
+    private readonly LinkedList<string> _oldestFirst = new();
+
+    public PendingShadowCallTracker(int capacity = DefaultCapacity)
+    {
+        if (capacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        }
+
+        _capacity = capacity;
+    }
+
+    internal int Count => _calls.Count;
+
+    internal bool TryTrack(
+        ToolCallContent? toolCall,
+        DateTimeOffset observedAtUtc)
+    {
+        if (toolCall is not FunctionCallContent functionCall
+            || functionCall.InformationalOnly
+            || !CoordinatorTurnContext.IsBoundedShadowCallId(functionCall.CallId)
+            || !CoordinatorTurnContext.IsBoundedShadowToolName(functionCall.Name)
+            || _calls.ContainsKey(functionCall.CallId))
+        {
+            return false;
+        }
+
+        if (_calls.Count >= _capacity)
+        {
+            var oldest = _oldestFirst.First
+                ?? throw new InvalidOperationException("The pending shadow-call tracker is inconsistent.");
+            _oldestFirst.RemoveFirst();
+            _calls.Remove(oldest.Value);
+        }
+
+        var node = _oldestFirst.AddLast(functionCall.CallId);
+        _calls.Add(functionCall.CallId, new PendingShadowEntry(
+            new PendingShadowCall(functionCall.Name, observedAtUtc),
+            node));
+        return true;
+    }
+
+    internal bool TryTake(string callId, out PendingShadowCall? pending)
+    {
+        if (string.IsNullOrWhiteSpace(callId) || !_calls.Remove(callId, out var entry))
+        {
+            pending = null;
+            return false;
+        }
+
+        _oldestFirst.Remove(entry.Node);
+        pending = entry.Pending;
+        return true;
+    }
+
+    internal bool TryGet(string callId, out PendingShadowCall? pending)
+    {
+        if (!CoordinatorTurnContext.IsBoundedShadowCallId(callId)
+            || !_calls.TryGetValue(callId, out var entry))
+        {
+            pending = null;
+            return false;
+        }
+
+        pending = entry.Pending;
+        return true;
+    }
+
+    private sealed record PendingShadowEntry(
+        PendingShadowCall Pending,
+        LinkedListNode<string> Node);
+}
+
+internal sealed record PendingShadowCall(
+    string ToolName,
+    DateTimeOffset StartedAtUtc);
 
 internal sealed record AgentHarnessRunResult(bool WroteAnswer, string? FinishReason);
