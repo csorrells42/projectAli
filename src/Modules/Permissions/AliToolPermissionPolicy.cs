@@ -117,12 +117,15 @@ internal sealed class AliToolPermissionPolicy(
             .Select(tool => tool.ToolName)
             .ToHashSet(StringComparer.Ordinal);
 
-    public AIFunction Apply(AIFunction function)
+    public AIFunction Apply(
+        AIFunction function,
+        AliToolTurnRole turnRole = AliToolTurnRole.Default)
         => Apply(
             function,
             RequiresApproval(
                 function.Name,
-                profileAccessor?.Invoke() ?? AgentPermissionProfile.TrustedWorkstation));
+                profileAccessor?.Invoke() ?? AgentPermissionProfile.TrustedWorkstation),
+            turnRole);
 
     internal static bool RequiresApproval(string toolName) =>
         ApprovalRequiredTools.Contains(toolName);
@@ -132,12 +135,95 @@ internal sealed class AliToolPermissionPolicy(
             ? LockedDownApprovalRequiredTools.Contains(toolName)
             : ApprovalRequiredTools.Contains(toolName);
 
-    public AIFunction Apply(AIFunction function, bool requiresApproval)
+    public AIFunction Apply(
+        AIFunction function,
+        bool requiresApproval,
+        AliToolTurnRole turnRole = AliToolTurnRole.Default)
     {
-        var observable = new ActivityReportingAIFunction(function, turnAccessor);
+        AIFunction observable = new ActivityReportingAIFunction(function, turnAccessor);
+        observable = turnRole switch
+        {
+            AliToolTurnRole.ExternalCodingAgent =>
+                new ExternalCodingOwnershipAIFunction(observable, turnAccessor),
+            AliToolTurnRole.ImplementationMutation =>
+                new ExternalCodingOwnerGuardAIFunction(observable, turnAccessor),
+            _ => observable
+        };
         return requiresApproval
             ? new TurnDenialGuardAIFunction(new ApprovalRequiredAIFunction(observable), turnAccessor)
             : observable;
+    }
+}
+
+internal enum AliToolTurnRole
+{
+    Default,
+    ExternalCodingAgent,
+    ImplementationMutation
+}
+
+internal sealed class ExternalCodingOwnershipAIFunction(
+    AIFunction innerFunction,
+    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
+{
+    protected override ValueTask<object?> InvokeCoreAsync(
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var turn = turnAccessor();
+        if (turn is not null)
+        {
+            var job = turn.ClaimExternalCodingAgentOwnership(
+                ReadRequiredString(arguments, "targetPath"),
+                ReadRequiredString(arguments, "objective"));
+            arguments["targetPath"] = job.ProjectPath;
+            arguments["objective"] = job.Objective;
+        }
+
+        return InnerFunction.InvokeAsync(arguments, cancellationToken);
+    }
+
+    private static string ReadRequiredString(AIFunctionArguments arguments, string name)
+    {
+        if (!arguments.TryGetValue(name, out var value))
+        {
+            throw new InvalidOperationException($"The external coding tool requires {name}.");
+        }
+
+        var text = value switch
+        {
+            string direct => direct,
+            System.Text.Json.JsonElement element
+                when element.ValueKind == System.Text.Json.JsonValueKind.String => element.GetString(),
+            _ => value?.ToString()
+        };
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException(
+                $"The external coding tool requires a non-empty {name}.");
+        }
+
+        return text;
+    }
+}
+
+internal sealed class ExternalCodingOwnerGuardAIFunction(
+    AIFunction innerFunction,
+    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
+{
+    protected override ValueTask<object?> InvokeCoreAsync(
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        if (turnAccessor()?.ExternalCodingAgentOwnsTurn == true)
+        {
+            throw new InvalidOperationException(
+                "The selected external coding agent owns this programming turn. "
+                + "Ali cannot modify the implementation; return the critic or verification diagnostics "
+                + "to the external coding agent.");
+        }
+
+        return InnerFunction.InvokeAsync(arguments, cancellationToken);
     }
 }
 

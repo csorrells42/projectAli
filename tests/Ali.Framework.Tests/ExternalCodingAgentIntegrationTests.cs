@@ -10,7 +10,7 @@ namespace Ali.Framework.Tests;
 public sealed class ExternalCodingAgentIntegrationTests
 {
     [Fact]
-    public async Task Hybrid_RunsOpenHandsThenAiderAgainstOneApprovedProject()
+    public async Task LegacyHybridSelection_DoesNotStartEitherExternalProvider()
     {
         var calls = new List<string>();
         var openHands = new FakeProvider("OpenHands", calls);
@@ -26,10 +26,10 @@ public sealed class ExternalCodingAgentIntegrationTests
                     "Add a verified feature.",
                     TestContext.Current.CancellationToken);
 
-                Assert.True(result.Success);
-                Assert.Equal(["OpenHands", "Aider"], calls);
-                Assert.Equal(2, result.Passes.Count);
-                Assert.Contains("direct build, test, diff, or runtime evidence", result.Summary, StringComparison.Ordinal);
+                Assert.False(result.Success);
+                Assert.Empty(calls);
+                Assert.Empty(result.Passes);
+                Assert.Contains("Ali is the selected coding executor", result.Summary, StringComparison.Ordinal);
             });
     }
 
@@ -56,11 +56,32 @@ public sealed class ExternalCodingAgentIntegrationTests
     }
 
     [Fact]
-    public async Task Hybrid_DoesNotPolishFailedOpenHandsPassOrClaimCompletion()
+    public async Task SelectedProvider_CanCreateANewProjectDirectoryInsideAnApprovedMount()
     {
         var calls = new List<string>();
         await WithAgentsAsync(
-            ProgrammingAgentModes.Hybrid,
+            ProgrammingAgentModes.Aider,
+            new FakeProvider("Aider", calls),
+            new FakeProvider("OpenHands", calls),
+            async agents =>
+            {
+                var result = await agents.ExecuteAsync(
+                    "Workspace/new-project",
+                    "Implement the objective.",
+                    TestContext.Current.CancellationToken);
+
+                Assert.True(result.Success);
+                Assert.Equal(["Aider"], calls);
+            },
+            createExistingProject: false);
+    }
+
+    [Fact]
+    public async Task OffMode_DoesNotStartEitherExternalProvider()
+    {
+        var calls = new List<string>();
+        await WithAgentsAsync(
+            ProgrammingAgentModes.Off,
             new FakeProvider("Aider", calls),
             new FakeProvider("OpenHands", calls, succeeds: false),
             async agents =>
@@ -71,8 +92,8 @@ public sealed class ExternalCodingAgentIntegrationTests
                     TestContext.Current.CancellationToken);
 
                 Assert.False(result.Success);
-                Assert.Equal(["OpenHands"], calls);
-                Assert.Contains("could not complete", result.Summary, StringComparison.OrdinalIgnoreCase);
+                Assert.Empty(calls);
+                Assert.Contains("No external coding agent was started", result.Summary, StringComparison.OrdinalIgnoreCase);
             });
     }
 
@@ -84,7 +105,10 @@ public sealed class ExternalCodingAgentIntegrationTests
         Assert.True(AliToolPermissionPolicy.RequiresApproval(
             AliCapabilityCatalog.CodingAgentStatusName,
             AgentPermissionProfile.LockedDown));
-        var inventory = AliCapabilityCatalog.ListAvailableTools(new AgentOrchestrationSettings());
+        var inventory = AliCapabilityCatalog.ListAvailableTools(new AgentOrchestrationSettings
+        {
+            ProgrammingAgentMode = ProgrammingAgentModes.Aider
+        });
         Assert.Contains(inventory.Tools, tool => tool.Name == AliCapabilityCatalog.CodingAgentExecuteName);
         Assert.Contains(inventory.Tools, tool => tool.Name == AliCapabilityCatalog.CodingAgentStatusName);
     }
@@ -158,6 +182,49 @@ public sealed class ExternalCodingAgentIntegrationTests
     }
 
     [Fact]
+    public async Task OpenHands_PublishesHumanReadableStructuredProgress()
+    {
+        var runner = new FakeOpenHandsProcessRunner
+        {
+            ExecutionOutput = string.Join(
+                '\n',
+                """{"kind":"ActionEvent","action":{"kind":"CmdRunAction"},"args":{"command":"dotnet build --configuration Release"}}""",
+                """{"kind":"ObservationEvent","observation":{"kind":"CmdOutputObservation"},"content":"Build succeeded."}""",
+                """{"kind":"FinishObservation"}""")
+        };
+        var progress = new List<ExternalCodingAgentProgress>();
+        var provider = new OpenHandsCodingAgentProvider(
+            () => new AgentOrchestrationSettings { OpenHandsWslDistribution = "Ubuntu-24.04" },
+            RuntimeSettingsStore.GetDefaultOptions,
+            runner,
+            progress.Add);
+
+        var result = await provider.ExecuteAsync(
+            @"C:\work\sample",
+            "Implement and verify the feature.",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        Assert.Contains(progress, item => item.Title == "OpenHands accepted the coding job");
+        Assert.Contains(progress, item => item.Title.Contains("chose cmd run", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(progress, item => item.Detail.Contains("dotnet build", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(progress, item => item.Title.Contains("completed cmd output", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(progress, item => item.Kind == ExternalCodingAgentProgressKind.Completed);
+        Assert.DoesNotContain(progress, item => item.Detail.Contains('{') || item.Detail.Contains('}'));
+    }
+
+    [Fact]
+    public void OpenHandsProgressParser_RedactsSecretsAndRejectsRawNoise()
+    {
+        Assert.True(OpenHandsProgressParser.TryParseEvent(
+            """{"kind":"ActionEvent","action":"CmdRunAction","args":{"command":"tool --api_key=secret-value --project sample"}}""",
+            out var progress));
+        Assert.Contains("[redacted]", progress.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-value", progress.Detail, StringComparison.Ordinal);
+        Assert.False(OpenHandsProgressParser.TryParseEvent("ordinary console noise", out _));
+    }
+
+    [Fact]
     public async Task Aider_ReceivesAliRuntimeBudgetAndConnectorSettingsThroughPrivateFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), "AliAiderProviderTests", Guid.NewGuid().ToString("N"));
@@ -192,6 +259,12 @@ public sealed class ExternalCodingAgentIntegrationTests
             Assert.EndsWith("ali_aider_launcher.py", runner.ExecutionArguments[0], StringComparison.OrdinalIgnoreCase);
             Assert.Contains("--no-auto-commits", runner.ExecutionArguments);
             Assert.Contains("--no-dirty-commits", runner.ExecutionArguments);
+            Assert.Contains("--auto-lint", runner.ExecutionArguments);
+            Assert.Contains("--auto-test", runner.ExecutionArguments);
+            Assert.Contains("AliAiderProviderTests.csproj", runner.ExecutionArguments);
+            Assert.Equal(
+                "dotnet build \"AliAiderProviderTests.csproj\" --configuration Release --nologo",
+                FakeAiderProcessRunner.ValueAfter(runner.ExecutionArguments, "--test-cmd"));
             Assert.DoesNotContain("--reasoning-effort", runner.ExecutionArguments);
 
             using var metadata = JsonDocument.Parse(runner.ObservedModelMetadata!);
@@ -251,21 +324,29 @@ public sealed class ExternalCodingAgentIntegrationTests
             Path.Combine(root, "Modules", "Coding", "Agents", "Tools", "ali_aider_launcher.py"),
             string.Empty,
             TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "AliAiderProviderTests.csproj"),
+            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+            TestContext.Current.CancellationToken);
     }
 
     private static async Task WithAgentsAsync(
         string mode,
         IExternalCodingAgentProvider aider,
         IExternalCodingAgentProvider openHands,
-        Func<AliExternalCodingAgents, Task> test)
+        Func<AliExternalCodingAgents, Task> test,
+        bool createExistingProject = true)
     {
         var root = Path.Combine(Path.GetTempPath(), "AliExternalCodingAgentTests", Guid.NewGuid().ToString("N"));
         var workspace = Path.Combine(root, "workspace", "sample");
-        Directory.CreateDirectory(workspace);
-        await File.WriteAllTextAsync(
-            Path.Combine(workspace, "sample.csproj"),
-            "<Project Sdk=\"Microsoft.NET.Sdk\" />",
-            TestContext.Current.CancellationToken);
+        if (createExistingProject)
+        {
+            Directory.CreateDirectory(workspace);
+            await File.WriteAllTextAsync(
+                Path.Combine(workspace, "sample.csproj"),
+                "<Project Sdk=\"Microsoft.NET.Sdk\" />",
+                TestContext.Current.CancellationToken);
+        }
         try
         {
             var permissions = new AgentToolPermissionStore(root);
@@ -332,7 +413,8 @@ public sealed class ExternalCodingAgentIntegrationTests
             string workingDirectory,
             IReadOnlyList<string> arguments,
             CancellationToken cancellationToken,
-            IReadOnlyDictionary<string, string>? environment = null)
+            IReadOnlyDictionary<string, string>? environment = null,
+            Action<string, bool>? outputLine = null)
         {
             Calls.Add(arguments.ToArray());
             var output = arguments.Any(argument => argument.Contains("--version", StringComparison.Ordinal))
@@ -342,6 +424,13 @@ public sealed class ExternalCodingAgentIntegrationTests
                     : arguments.Contains("ip") && arguments.Contains("route")
                         ? "default via 172.22.64.1 dev eth0"
                         : ExecutionOutput;
+            if (arguments.Contains("--headless"))
+            {
+                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    outputLine?.Invoke(line.Trim(), false);
+                }
+            }
             return Task.FromResult(new Ali.Modules.Coding.Infrastructure.BoundedProcessResult(
                 true,
                 0,
@@ -390,7 +479,8 @@ public sealed class ExternalCodingAgentIntegrationTests
             string workingDirectory,
             IReadOnlyList<string> arguments,
             CancellationToken cancellationToken,
-            IReadOnlyDictionary<string, string>? environment = null)
+            IReadOnlyDictionary<string, string>? environment = null,
+            Action<string, bool>? outputLine = null)
         {
             var version = arguments.Contains("--version");
             if (!version)
@@ -409,6 +499,13 @@ public sealed class ExternalCodingAgentIntegrationTests
                 Assert.Equal("1", environment["PYTHONNOUSERSITE"]);
             }
 
+            if (!version)
+            {
+                foreach (var line in ExecutionOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    outputLine?.Invoke(line.Trim(), false);
+                }
+            }
             return Task.FromResult(new Ali.Modules.Coding.Infrastructure.BoundedProcessResult(
                 true,
                 0,
@@ -417,7 +514,7 @@ public sealed class ExternalCodingAgentIntegrationTests
                 false));
         }
 
-        private static string ValueAfter(IReadOnlyList<string> arguments, string option)
+        public static string ValueAfter(IReadOnlyList<string> arguments, string option)
         {
             var index = -1;
             for (var candidate = 0; candidate < arguments.Count; candidate++)

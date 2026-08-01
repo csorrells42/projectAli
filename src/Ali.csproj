@@ -28,6 +28,9 @@
     <Resource Include="Assets\ali.ico" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Remove="Ali.McpHost\**\*.cs" />
+    <EmbeddedResource Remove="Ali.McpHost\**\*" />
+    <None Remove="Ali.McpHost\**\*" />
     <Compile Remove="depricated\**\*.cs" />
     <EmbeddedResource Remove="depricated\**\*" />
     <None Remove="depricated\**\*" />
@@ -40,6 +43,8 @@
     <None Update="Modules\Coding\Python\Tools\ali_python_analyzer.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\Coding\Agents\Tools\ali_openhands_launcher.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\Coding\Agents\Tools\ali_aider_launcher.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Modules\UserMemory\Tools\mem0_service.py" TargetPath="lib\memory\mem0_service.py" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <None Update="Modules\UserMemory\Tools\lemonade_llm.py" TargetPath="lib\memory\lemonade_llm.py" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.3.0" />

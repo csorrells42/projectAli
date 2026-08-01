@@ -64,7 +64,7 @@ public sealed class AgentOrchestrationSettingsTests
             });
 
         Assert.Contains(AliCapabilityCatalog.RunMagenticOrchestrationName, instructions);
-        Assert.Contains("Magentic activation policy is automatic-complex", instructions);
+        Assert.Contains("Use run_magentic_orchestration automatically only", instructions);
         Assert.Contains("Automatic for complex work", File.ReadAllText(FindArchitectureDocument()));
     }
 
@@ -77,8 +77,9 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.Contains("SettingsMagenticPolicy", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsMagenticMaximumRounds", xaml, StringComparison.Ordinal);
         Assert.Contains("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsAlwaysUseProgrammingAgent", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsAlwaysUseProgrammingAgent", xaml, StringComparison.Ordinal);
+        Assert.Contains("Coding selector beside Effort", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsOpenHandsWslDistribution", xaml, StringComparison.Ordinal);
         Assert.Contains("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
         Assert.Contains("concurrent and background agents are disabled", xaml, StringComparison.OrdinalIgnoreCase);
@@ -91,24 +92,56 @@ public sealed class AgentOrchestrationSettingsTests
             "Ali",
             new AgentOrchestrationSettings
             {
-                ProgrammingAgentMode = ProgrammingAgentModes.Hybrid,
+                ProgrammingAgentMode = ProgrammingAgentModes.OpenHands,
                 AlwaysUseProgrammingAgent = true
             });
 
-        Assert.Contains("you must call coding_agent_execute", instructions, StringComparison.Ordinal);
+        Assert.Contains("call coding_agent_execute", instructions, StringComparison.Ordinal);
         Assert.Contains("semantically determine", instructions, StringComparison.Ordinal);
-        Assert.Contains("selected Settings mode is hybrid", instructions, StringComparison.Ordinal);
+        Assert.Contains("selected mode is openhands", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("owns its architecture, file edits, terminal work, build/test cycle, diagnosis and repairs", instructions, StringComparison.Ordinal);
+        Assert.Contains("do not edit, replace, move, create or delete project source yourself", instructions, StringComparison.Ordinal);
     }
 
     [Theory]
+    [InlineData(ProgrammingAgentModes.Off)]
     [InlineData(ProgrammingAgentModes.Aider)]
     [InlineData(ProgrammingAgentModes.OpenHands)]
-    [InlineData(ProgrammingAgentModes.Hybrid)]
     public void ProgrammingAgentMode_NormalizesSupportedSelections(string mode)
     {
         Assert.Equal(mode, new AgentOrchestrationSettings { ProgrammingAgentMode = mode }.Normalize().ProgrammingAgentMode);
-        Assert.Equal(ProgrammingAgentModes.Hybrid,
+        Assert.Equal(ProgrammingAgentModes.Off,
             new AgentOrchestrationSettings { ProgrammingAgentMode = "retired-provider" }.Normalize().ProgrammingAgentMode);
+    }
+
+    [Fact]
+    public void LegacyHybridSelection_FallsBackToAliInsteadOfRunningTwoAgents()
+    {
+        var settings = new AgentOrchestrationSettings
+        {
+            ProgrammingAgentMode = ProgrammingAgentModes.Hybrid,
+            AlwaysUseProgrammingAgent = true
+        }.Normalize();
+
+        Assert.Equal(ProgrammingAgentModes.Off, settings.ProgrammingAgentMode);
+        Assert.False(settings.AlwaysUseProgrammingAgent);
+    }
+
+    [Fact]
+    public void OffProgrammingAgentMode_RemovesExternalAgentsAndClearsAlwaysUse()
+    {
+        var settings = new AgentOrchestrationSettings
+        {
+            ProgrammingAgentMode = ProgrammingAgentModes.Off,
+            AlwaysUseProgrammingAgent = true
+        }.Normalize();
+
+        var inventory = AliCapabilityCatalog.ListAvailableTools(settings);
+
+        Assert.False(settings.AlwaysUseProgrammingAgent);
+        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentStatusName);
+        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentExecuteName);
+        Assert.Contains("Aider and OpenHands are disabled", AliToolCatalog.BuildInstructions("Ali", settings));
     }
 
     private static string FindArchitectureDocument()

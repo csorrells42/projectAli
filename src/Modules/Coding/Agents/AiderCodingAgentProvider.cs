@@ -9,7 +9,8 @@ namespace Ali.Modules.Coding.Agents;
 internal sealed class AiderCodingAgentProvider(
     string installRoot,
     Func<OpenAiCompatibleRuntimeOptions> runtimeSettings,
-    IExternalCodingAgentProcessRunner processRunner) : IExternalCodingAgentProvider
+    IExternalCodingAgentProcessRunner processRunner,
+    Action<ExternalCodingAgentProgress>? progress = null) : IExternalCodingAgentProvider
 {
     private readonly string _python = Path.Combine(installRoot, "runtime", "python", "python.exe");
     private readonly string _packages = Path.Combine(installRoot, "runtime", "aider-packages");
@@ -48,7 +49,7 @@ internal sealed class AiderCodingAgentProvider(
             Name,
             result.Success,
             result.Success ? result.Output.Trim() : "unknown",
-            result.Success ? "Aider's scripted architect mode is ready." : $"Aider failed its version check: {result.Output}",
+            result.Success ? "Aider's autonomous architect, edit, lint and build/test repair loop is ready." : $"Aider failed its version check: {result.Output}",
             _python);
     }
 
@@ -90,6 +91,7 @@ internal sealed class AiderCodingAgentProvider(
             "--architect",
             "--auto-accept-architect",
             "--yes-always",
+            "--auto-lint",
             "--no-auto-commits",
             "--no-dirty-commits",
             "--no-gitignore",
@@ -101,13 +103,27 @@ internal sealed class AiderCodingAgentProvider(
             "--encoding", "utf-8",
             "--message-file", taskFile.Path
         };
+        var verificationCommand = ResolveAutomaticVerificationCommand(projectDirectory);
+        if (!string.IsNullOrWhiteSpace(verificationCommand))
+        {
+            arguments.Add("--test-cmd");
+            arguments.Add(verificationCommand);
+            arguments.Add("--auto-test");
+        }
+        arguments.AddRange(ResolveInitialProjectFiles(projectDirectory));
 
+        progress?.Invoke(new ExternalCodingAgentProgress(
+            Name,
+            ExternalCodingAgentProgressKind.Started,
+            "Aider accepted the coding job",
+            "Aider is inspecting the repository and will own its edit, lint, build and repair loop."));
         var result = await processRunner.RunAsync(
             _python,
             projectDirectory,
             arguments,
             cancellationToken,
-            Environment()).ConfigureAwait(false);
+            Environment(),
+            (line, isError) => ReportProgressLine(line, isError, progress)).ConfigureAwait(false);
         var completed = result.Success
             && !result.Output.Contains("failed due to:", StringComparison.OrdinalIgnoreCase)
             && !result.Output.Contains("Traceback (most recent call last):", StringComparison.Ordinal);
@@ -117,9 +133,93 @@ internal sealed class AiderCodingAgentProvider(
             result.ExitCode,
             result.DurationMilliseconds,
             completed
-                ? "Aider completed its architect/edit pass."
-                : "Aider reported an execution failure, so Ali will not treat the pass as complete.",
+                ? "Aider completed its native architect, edit, lint, build/test and repair loop."
+                : "Aider's autonomous implementation loop reported an execution failure, so Ali will not treat the work as complete.",
             result.Output);
+    }
+
+    private static void ReportProgressLine(
+        string line,
+        bool isError,
+        Action<ExternalCodingAgentProgress>? progress)
+    {
+        if (progress is null || string.IsNullOrWhiteSpace(line))
+        {
+            return;
+        }
+
+        var text = line.Trim();
+        if (text.StartsWith("Applied edit to ", StringComparison.OrdinalIgnoreCase))
+        {
+            progress(new ExternalCodingAgentProgress(
+                "Aider",
+                ExternalCodingAgentProgressKind.Working,
+                "Aider updated a project file",
+                text));
+        }
+        else if (text.Contains("Running", StringComparison.OrdinalIgnoreCase)
+                 && text.Contains("test", StringComparison.OrdinalIgnoreCase))
+        {
+            progress(new ExternalCodingAgentProgress(
+                "Aider",
+                ExternalCodingAgentProgressKind.Working,
+                "Aider is verifying the project",
+                text));
+        }
+        else if (text.Contains("failed", StringComparison.OrdinalIgnoreCase) || isError)
+        {
+            progress(new ExternalCodingAgentProgress(
+                "Aider",
+                ExternalCodingAgentProgressKind.Warning,
+                "Aider is repairing a failed step",
+                text.Length <= 240 ? text : $"{text[..240]}…"));
+        }
+    }
+
+    private static string? ResolveAutomaticVerificationCommand(string projectDirectory)
+    {
+        var candidates = Directory
+            .EnumerateFiles(projectDirectory, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => Path.GetExtension(path) is ".sln" or ".slnx" or ".csproj")
+            .OrderBy(path => Path.GetExtension(path) is ".sln" or ".slnx" ? 0 : 1)
+            .ThenBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return null;
+        }
+
+        var target = Path.GetFileName(candidates[0]).Replace("\"", "\"\"");
+        return $"dotnet build \"{target}\" --configuration Release --nologo";
+    }
+
+    private static IReadOnlyList<string> ResolveInitialProjectFiles(string projectDirectory)
+    {
+        if (Directory.Exists(Path.Combine(projectDirectory, ".git")))
+        {
+            return [];
+        }
+
+        var supportedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".cs", ".csproj", ".sln", ".slnx", ".xaml",
+            ".py", ".pyi", ".toml",
+            ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
+            ".html", ".htm", ".css", ".scss", ".sass", ".less", ".json",
+            ".java", ".gradle", ".xml",
+            ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".ixx", ".cppm",
+            ".ino", ".yaml", ".yml"
+        };
+        return Directory
+            .EnumerateFiles(projectDirectory, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => supportedExtensions.Contains(Path.GetExtension(path)))
+            .OrderBy(path => Path.GetExtension(path) is ".sln" or ".slnx" or ".csproj" ? 0 : 1)
+            .ThenBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .Take(32)
+            .ToArray();
     }
 
     private Dictionary<string, string> Environment() => new(StringComparer.OrdinalIgnoreCase)

@@ -34,6 +34,21 @@ public sealed record ExternalCodingAgentRunResult(
     IReadOnlyList<ExternalCodingAgentPassResult> Passes,
     string Summary);
 
+public enum ExternalCodingAgentProgressKind
+{
+    Started,
+    Working,
+    Completed,
+    Warning,
+    Error
+}
+
+public sealed record ExternalCodingAgentProgress(
+    string Provider,
+    ExternalCodingAgentProgressKind Kind,
+    string Title,
+    string Detail);
+
 internal interface IExternalCodingAgentProvider
 {
     string Name { get; }
@@ -53,7 +68,8 @@ internal interface IExternalCodingAgentProcessRunner
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? environment = null);
+        IReadOnlyDictionary<string, string>? environment = null,
+        Action<string, bool>? outputLine = null);
 }
 
 internal sealed class ExternalCodingAgentProcessRunner : IExternalCodingAgentProcessRunner
@@ -63,14 +79,16 @@ internal sealed class ExternalCodingAgentProcessRunner : IExternalCodingAgentPro
         string workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? environment = null) =>
+        IReadOnlyDictionary<string, string>? environment = null,
+        Action<string, bool>? outputLine = null) =>
         AliBoundedProcessRunner.RunAsync(
             executable,
             workingDirectory,
             arguments,
             Timeout.InfiniteTimeSpan,
             cancellationToken,
-            environment);
+            environment,
+            outputLine);
 }
 
 /// <summary>
@@ -81,10 +99,13 @@ internal sealed class ExternalCodingAgentProcessRunner : IExternalCodingAgentPro
 /// </summary>
 internal sealed class AliExternalCodingAgents
 {
+    private readonly AliWorkstationFileAccess _fileAccess;
     private readonly AliLanguageProjectResolver _resolver;
     private readonly Func<AgentOrchestrationSettings> _settings;
     private readonly IExternalCodingAgentProvider _aider;
     private readonly IExternalCodingAgentProvider _openHands;
+
+    public event Action<ExternalCodingAgentProgress>? ProgressReported;
 
     public AliExternalCodingAgents(
         AliWorkstationFileAccess fileAccess,
@@ -96,12 +117,13 @@ internal sealed class AliExternalCodingAgents
         IExternalCodingAgentProvider? openHands = null)
     {
         ArgumentNullException.ThrowIfNull(fileAccess);
+        _fileAccess = fileAccess;
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         var runner = processRunner ?? new ExternalCodingAgentProcessRunner();
         var root = installRoot ?? AppContext.BaseDirectory;
         _resolver = new AliLanguageProjectResolver(fileAccess);
-        _aider = aider ?? new AiderCodingAgentProvider(root, runtimeSettings, runner);
-        _openHands = openHands ?? new OpenHandsCodingAgentProvider(settings, runtimeSettings, runner);
+        _aider = aider ?? new AiderCodingAgentProvider(root, runtimeSettings, runner, ReportProgress);
+        _openHands = openHands ?? new OpenHandsCodingAgentProvider(settings, runtimeSettings, runner, ReportProgress);
     }
 
     public async Task<ExternalCodingAgentStatus> GetStatusAsync(CancellationToken cancellationToken)
@@ -131,45 +153,76 @@ internal sealed class AliExternalCodingAgents
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(objective);
-        var project = _resolver.Resolve(targetPath);
+        var projectDirectory = await ResolveOrCreateProjectDirectoryAsync(targetPath, cancellationToken)
+            .ConfigureAwait(false);
         var mode = _settings().Normalize().ProgrammingAgentMode;
         var passes = new List<ExternalCodingAgentPassResult>();
 
-        if (mode is ProgrammingAgentModes.OpenHands or ProgrammingAgentModes.Hybrid)
+        if (mode == ProgrammingAgentModes.Off)
+        {
+            return Finish(
+                false,
+                mode,
+                targetPath,
+                passes,
+                "Ali is the selected coding executor. No external coding agent was started.");
+        }
+
+        if (mode == ProgrammingAgentModes.OpenHands)
         {
             var tractorTask = BuildScopedObjective(
                 objective,
-                "Implement the complete requested change in the current approved project. Inspect the existing project, modify it directly, build and test it when its native toolchain permits, and leave concrete evidence. Do not access paths outside the current project directory.");
-            var tractor = await _openHands.ExecuteAsync(project.ProjectDirectory, tractorTask, cancellationToken).ConfigureAwait(false);
+                "You own the entire implementation and repair loop for this objective. Use your native file, terminal, build, test, run, inspection and debugging tools as needed. Inspect the project, implement the complete result, run authoritative checks, diagnose every failure, and keep repairing until the objective succeeds or your tool evidence proves a concrete terminal blocker. Do not hand intermediate coding work back to Ali. Do not access paths outside the current project directory.");
+            var tractor = await _openHands.ExecuteAsync(projectDirectory, tractorTask, cancellationToken).ConfigureAwait(false);
             passes.Add(tractor);
             if (!tractor.Success)
             {
                 return Finish(false, mode, targetPath, passes,
-                    "OpenHands could not complete the implementation pass. No unsupported success claim was made and Aider was not asked to polish an unverified tractor pass.");
+                    "OpenHands could not complete the implementation pass. Ali must not edit the project. Return the exact critic or verification diagnostics to coding_agent_execute so OpenHands can continue its own repair loop.");
             }
         }
 
-        if (mode is ProgrammingAgentModes.Aider or ProgrammingAgentModes.Hybrid)
+        if (mode == ProgrammingAgentModes.Aider)
         {
-            var role = mode == ProgrammingAgentModes.Hybrid
-                ? "OpenHands has completed an implementation pass. Review the current working tree against the full objective, find omissions or weak design, improve the implementation directly, and run the most relevant available checks. Preserve correct existing work."
-                : "Act as the architect and senior implementer. Inspect the current approved project, make the complete requested change directly, and run the most relevant available checks.";
             var refinement = await _aider.ExecuteAsync(
-                project.ProjectDirectory,
-                BuildScopedObjective(objective, role + " Do not access paths outside the current project directory."),
+                projectDirectory,
+                BuildScopedObjective(
+                    objective,
+                    "You own the entire implementation and repair loop for this objective. Act as architect and senior implementer, use Aider's native repository map, file-editing, shell-command, lint and automatic build/test repair capabilities, and keep working until the complete objective succeeds or concrete tool evidence proves a terminal blocker. Do not hand intermediate coding work back to Ali. Do not access paths outside the current project directory."),
                 cancellationToken).ConfigureAwait(false);
             passes.Add(refinement);
             if (!refinement.Success)
             {
                 return Finish(false, mode, targetPath, passes,
-                    "Aider could not complete its architect/refinement pass. Earlier file changes remain available for Ali to inspect; the workflow did not claim completion.");
+                    "Aider could not complete its architect/refinement pass. Ali must not edit the project. Return the exact critic or verification diagnostics to coding_agent_execute so Aider can continue its own repair loop.");
             }
         }
 
-        return Finish(true, mode, targetPath, passes,
-            mode == ProgrammingAgentModes.Hybrid
-                ? "OpenHands completed the implementation pass and Aider completed the architect/refinement pass. Ali must now inspect direct build, test, diff, or runtime evidence before claiming the user's task complete."
-                : $"{passes[^1].Provider} completed the selected programming pass. Ali must now inspect direct build, test, diff, or runtime evidence before claiming the user's task complete.");
+        return Finish(
+            true,
+            mode,
+            targetPath,
+            passes,
+            $"{passes[^1].Provider} completed and owns the selected implementation loop. Ali may independently inspect build, test, diff, or runtime evidence, but must not take over source editing.");
+    }
+
+    private async Task<string> ResolveOrCreateProjectDirectoryAsync(
+        string targetPath,
+        CancellationToken cancellationToken)
+    {
+        var resolved = _fileAccess.ResolvePhysicalDirectoryPath(targetPath);
+        if (File.Exists(resolved.PhysicalPath))
+        {
+            return _resolver.Resolve(targetPath).ProjectDirectory;
+        }
+
+        if (!Directory.Exists(resolved.PhysicalPath))
+        {
+            await _fileAccess.Store.CreateDirectoryAsync(targetPath, cancellationToken).ConfigureAwait(false);
+        }
+
+        AliCodingProjectResolver.RejectReparsePoints(resolved.MountRoot, resolved.PhysicalPath);
+        return resolved.PhysicalPath;
     }
 
     private static string BuildScopedObjective(string objective, string role) =>
@@ -182,4 +235,7 @@ internal sealed class AliExternalCodingAgents
         IReadOnlyList<ExternalCodingAgentPassResult> passes,
         string summary) =>
         new(success, mode, projectPath, passes, summary);
+
+    private void ReportProgress(ExternalCodingAgentProgress progress) =>
+        ProgressReported?.Invoke(progress);
 }

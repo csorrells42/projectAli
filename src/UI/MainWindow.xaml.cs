@@ -29,6 +29,8 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         viewModel.Messages.CollectionChanged += (_, _) =>
             Dispatcher.BeginInvoke(new Action(() => MessagesScrollViewer.ScrollToEnd()));
+        viewModel.AgentActivities.CollectionChanged += (_, _) =>
+            Dispatcher.BeginInvoke(new Action(() => AgentActivityScrollViewer.ScrollToEnd()));
         Loaded += MainWindow_OnLoaded;
         Closing += MainWindow_OnClosing;
         PreviewKeyDown += MainWindow_OnPreviewKeyDown;

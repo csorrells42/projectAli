@@ -104,6 +104,18 @@ internal sealed class CoordinatorTurnContext(
 
     public bool PermissionDenied { get; private set; }
 
+    public bool ExternalCodingAgentOwnsTurn { get; private set; }
+
+    public bool RequiresExternalCodingAgent { get; private set; }
+
+    public bool DirectFinalAllowed { get; private set; }
+
+    public string? CodingDispositionBasis { get; private set; }
+
+    public string? ExternalCodingAgentProjectPath { get; private set; }
+
+    public string? ExternalCodingAgentObjective { get; private set; }
+
     public int WebSearchAttempts { get; set; }
 
     public int GoogleSearchAttempts { get; set; }
@@ -148,6 +160,43 @@ internal sealed class CoordinatorTurnContext(
         }
     }
 
+    public ExternalCodingAgentJob ClaimExternalCodingAgentOwnership(
+        string projectPath,
+        string objective)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(objective);
+
+        var isContinuation = ExternalCodingAgentOwnsTurn;
+        ExternalCodingAgentOwnsTurn = true;
+        ExternalCodingAgentProjectPath ??= projectPath;
+        ExternalCodingAgentObjective ??= objective;
+
+        var effectiveObjective = isContinuation
+            ? string.Join(
+                Environment.NewLine,
+                ExternalCodingAgentObjective,
+                string.Empty,
+                "Continuation evidence or unmet behavior from the current turn:",
+                objective)
+            : ExternalCodingAgentObjective;
+        return new ExternalCodingAgentJob(
+            ExternalCodingAgentProjectPath,
+            effectiveObjective);
+    }
+
+    public void SetCodingDisposition(
+        bool requiresExternalCodingAgent,
+        bool directFinalAllowed,
+        string? basis)
+    {
+        RequiresExternalCodingAgent = requiresExternalCodingAgent;
+        DirectFinalAllowed = directFinalAllowed;
+        CodingDispositionBasis = string.IsNullOrWhiteSpace(basis)
+            ? null
+            : basis.Trim();
+    }
+
     public void Report(
         AgentActivityKind kind,
         string title,
@@ -171,6 +220,15 @@ internal sealed class CoordinatorTurnContext(
             ActivityKey: activityKey,
             ExecutionReceipt: executionReceipt));
 }
+
+internal sealed record ExternalCodingAgentJob(
+    string ProjectPath,
+    string Objective);
+
+internal sealed record CodingTurnDisposition(
+    bool IsCodingWork,
+    bool CanAnswerDirectlyWithoutCritic,
+    string Basis);
 
 internal sealed record CoordinatorToolPlan(
     string CallId,

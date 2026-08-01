@@ -9,7 +9,7 @@ namespace Ali.Framework.Tests;
 
 public sealed class DeveloperToolchainIntegrationTests
 {
-    private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    private static readonly string RepositoryRoot = TestRepository.Root;
 
     [Fact]
     public async Task VisualStudioAndGccAreRealAndGccCompilesRunsAndTestsCpp()

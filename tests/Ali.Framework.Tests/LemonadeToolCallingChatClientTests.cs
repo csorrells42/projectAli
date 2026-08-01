@@ -1,8 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Runtime;
 using Ali.Modules.Runtime.Models;
+using Ali.Modules.ToolDiscovery;
 using Ali.UI.ViewModels;
 using Microsoft.Extensions.AI;
 using AIChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -13,18 +15,80 @@ namespace Ali.Framework.Tests;
 public sealed class LemonadeToolCallingChatClientTests
 {
     [Fact]
-    public void GptOssRuntimeOffersLargeJobOutputLimits()
+    public async Task CriticDenial_TriggersFreshSemanticDrawerSelection()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Create the C# project, build it, and verify it runs.",
+            _ => { });
+        var create = AIFunctionFactory.Create(
+            () => "created",
+            "dotnet_create_project",
+            "Create a new C# project.");
+        var build = AIFunctionFactory.Create(
+            () => "built",
+            "dotnet_build_project",
+            "Build and verify the C# project.");
+        var selector = new ExpandingSemanticCatalog(create, build);
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"The project is ready.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "NO\nNo successful build evidence proves the project compiles.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"call\",\"assessment\":\"The project exists but lacks build evidence.\",\"tool\":\"dotnet_build_project\",\"arguments\":{},\"summary\":\"Build the project\",\"next\":\"Use the compiler result to verify or repair it.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn,
+            semanticToolCatalog: selector);
+        using var activeTurn = client.BeginTurn(turn);
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [create, build] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("dotnet_build_project", call.Name);
+        Assert.Equal(2, selector.CallCount);
+        Assert.Single(selector.Selections[0]);
+        Assert.Equal(2, selector.Selections[1].Count);
+        Assert.Contains("No successful build evidence", selector.Needs[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RuntimeOffersTheFullUserSelectedContextAndOutputLadders()
     {
         var choice = Assert.Single(RuntimeModelChoiceCatalog.KnownChoices());
 
         Assert.Contains(4096, choice.OutputTokenLimits);
+        Assert.Contains(1024, choice.ContextTokens);
         Assert.Contains(8192, choice.OutputTokenLimits);
         Assert.Contains(16384, choice.OutputTokenLimits);
+        Assert.Contains(32768, choice.OutputTokenLimits);
         Assert.Contains(65536, choice.ContextTokens);
         Assert.Contains(131072, choice.ContextTokens);
-        Assert.Equal(131072, OllamaRuntimeSafetyPolicy.MaximumContextTokens);
-        Assert.Equal(65536, OllamaRuntimeSafetyPolicy.ClampContextTokens(65536));
-        Assert.Equal(131072, OllamaRuntimeSafetyPolicy.ClampContextTokens(131072));
+        Assert.Contains(262144, choice.ContextTokens);
+        Assert.Equal(65536, OllamaRuntimeSafetyPolicy.ResolveContextTokens(65536));
+        Assert.Equal(131072, OllamaRuntimeSafetyPolicy.ResolveContextTokens(131072));
+        Assert.Equal(262144, OllamaRuntimeSafetyPolicy.ResolveContextTokens(262144));
+        Assert.Equal(524288, OllamaRuntimeSafetyPolicy.ResolveContextTokens(524288));
+
+        var qwen = RuntimeModelChoice.FromModelId(
+            "Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M",
+            "test");
+        Assert.Equal("14B", qwen.Size);
+        Assert.Equal(choice.ContextTokens, qwen.ContextTokens);
+        Assert.Equal(choice.OutputTokenLimits, qwen.OutputTokenLimits);
     }
 
     [Fact]
@@ -99,13 +163,45 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Equal(2, inner.CallCount);
         var auditPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
         Assert.Contains("CURRENT HUMAN TURN", auditPrompt, StringComparison.Ordinal);
-        Assert.Contains("AVAILABLE TOOLS AND ARGUMENT SCHEMAS", auditPrompt, StringComparison.Ordinal);
+        Assert.Contains("AVAILABLE TOOLS:", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("\"fileName\"", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("\"required\"", auditPrompt, StringComparison.Ordinal);
         Assert.Contains("complete requested outcome", auditPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("complete outcome tree", auditPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("recursively split each unsolved part", auditPrompt, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("future-tense", auditPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ModelSelectedDirectFinal_BypassesCriticForOrdinaryConversation()
+    {
+        var activities = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Hey Ali",
+            activities.Add);
+        using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
+            AIChatRole.Assistant,
+            "{\"action\":\"final\",\"answer\":\"Hey Chris!\",\"review\":\"direct\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var discover = AIFunctionFactory.Create(() => "ok", "discover_capabilities", "Open a semantic tool drawer.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [discover] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Hey Chris!", response.Text);
+        Assert.Equal(1, inner.CallCount);
+        Assert.DoesNotContain(activities, activity =>
+            activity.Text.Contains("Critic", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1322,6 +1418,54 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task ReadOnlyStateResult_CannotProveRequestedActionWasExecuted()
+    {
+        const string request = "Read the chess board and make exactly one legal Black move.";
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"action\":\"final\",\"answer\":\"I moved the Black king from e8 to d8.\"}")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "NO\nThe state lookup proves e8d8 is legal but contains no successful chess_make_move result proving it was executed.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The legal move is known but has not been executed.\",\"tool\":\"chess_make_move\",\"arguments\":{\"move\":\"e8d8\"},\"summary\":\"Execute the selected legal move\",\"next\":\"Verify the authoritative board advanced to White.\",\"basis\":\"Only a read-only board result exists; no move result proves execution.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var readState = AIFunctionFactory.Create(
+            () => "state",
+            "chess_get_state",
+            "Read the authoritative board state.");
+        var makeMove = AIFunctionFactory.Create(
+            () => "moved",
+            "chess_make_move",
+            "Execute one legal chess move.");
+        var result = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        result.Contents.Add(new FunctionResultContent(
+            "call-state",
+            new { sideToMove = "Black", legalMoves = new[] { "e8d8", "e8e7" } }));
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, request), result],
+            new ChatOptions { Tools = [readState, makeMove] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("chess_make_move", call.Name);
+        Assert.Equal(3, inner.CallCount);
+        var criticPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
+        Assert.Contains("read-only inspection", criticPrompt, StringComparison.Ordinal);
+        Assert.Contains("action tool that actually performed it", criticPrompt, StringComparison.Ordinal);
+        Assert.Contains("only proves the action is possible or legal", criticPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FailedRouteSearch_CriticCallsMapHandoffInsteadOfAllowingInventedPaperDirections()
     {
         const string request = "Give me directions from home to a Publix, then Waffle House, then a gym, and back home.";
@@ -1425,8 +1569,8 @@ public sealed class LemonadeToolCallingChatClientTests
             .OfType<FunctionCallContent>());
         Assert.Equal("search_current_web", retry.Name);
         Assert.Equal(3, inner.CallCount);
-        Assert.Single(inner.ObservedMessages.Where(messages =>
-            messages.Any(message => message.Text?.Contains("QUALITY CONTROL PASS", StringComparison.Ordinal) == true)));
+        Assert.Single(inner.ObservedMessages, messages =>
+            messages.Any(message => message.Text?.Contains("QUALITY CONTROL PASS", StringComparison.Ordinal) == true));
         Assert.DoesNotContain(inner.ObservedMessages.SelectMany(messages => messages), message =>
             message.Text?.Contains("CURRENT-EVIDENCE GATE", StringComparison.Ordinal) == true);
         var criticPrompt = string.Join("\n", inner.ObservedMessages[1].Select(message => message.Text));
@@ -1732,6 +1876,133 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task CodingTurnClassifier_UsesOneRequiredTypedModelVerdict()
+    {
+        var classification = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        classification.Contents.Add(new FunctionCallContent(
+            "call-classify",
+            "classify_current_turn",
+            new Dictionary<string, object?>
+            {
+                ["isCodingWork"] = true,
+                ["canAnswerDirectlyWithoutCritic"] = false,
+                ["basis"] = "The requested outcome is a new executable software project."
+            }));
+        using var inner = new RecordingChatClient(new ChatResponse(classification));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null);
+
+        var disposition = await client.ClassifyCodingTurnAsync(
+            [new AIChatMessage(AIChatRole.User, "Create and run a WPF Tic-Tac-Toe application.")],
+            TestContext.Current.CancellationToken);
+
+        Assert.True(disposition.IsCodingWork);
+        Assert.False(disposition.CanAnswerDirectlyWithoutCritic);
+        Assert.Contains("software project", disposition.Basis, StringComparison.OrdinalIgnoreCase);
+        var mode = Assert.IsType<RequiredChatToolMode>(Assert.Single(inner.ToolModes));
+        Assert.Equal("classify_current_turn", mode.RequiredFunctionName);
+        Assert.Equal(128, Assert.Single(inner.MaxOutputTokens));
+        Assert.Equal("low", Assert.Single(inner.ReasoningEffortOverrides));
+    }
+
+    [Fact]
+    public async Task RequiredExternalCodingTurn_CannotFinishWithoutExecutorEvidence()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Create and run a WPF Tic-Tac-Toe application.",
+            activity.Add);
+        turn.SetCodingDisposition(
+            true,
+            false,
+            "The model classified the requested executable project as practical coding work.");
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "The application was built and launched successfully.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                "NO\nNo external coding-agent result proves that any source was written, built, or launched.")),
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """
+                {"action":"call","assessment":"The requested application has no authoritative implementation evidence.","tool":"coding_agent_execute","arguments":{"targetPath":"Desktop/TicTacToe","objective":"Create, build, verify, and run the requested WPF Tic-Tac-Toe application."},"summary":"Delegate the complete implementation to the selected coding executor","next":"Evaluate the executor's build and runtime evidence."}
+                """)));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var unrelated = AIFunctionFactory.Create(
+            () => "ok",
+            "read_current_state",
+            "Read current state.");
+        var executor = AIFunctionFactory.Create(
+            (string targetPath, string objective) => new { targetPath, objective },
+            AliCapabilityCatalog.CodingAgentExecuteName,
+            "Run the selected external coding executor.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [unrelated, executor] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal(AliCapabilityCatalog.CodingAgentExecuteName, call.Name);
+        var initialMode = Assert.IsType<RequiredChatToolMode>(inner.ToolModes[0]);
+        Assert.Equal(AliCapabilityCatalog.CodingAgentExecuteName, initialMode.RequiredFunctionName);
+        Assert.Contains(activity, item =>
+            item.IsActivity
+            && item.ActivityKind == AgentActivityKind.Warning
+            && item.Text.Contains("Critic denied", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task OrdinaryNativeGreeting_RemainsDirectWithoutCriticOrRequiredTool()
+    {
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Hello Ali.",
+            _ => { });
+        turn.SetCodingDisposition(
+            false,
+            true,
+            "The model classified the greeting as casual conversation.");
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(AIChatRole.Assistant, "Hello! How can I help?")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var tool = AIFunctionFactory.Create(
+            () => "ok",
+            "read_current_state",
+            "Read current state.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("Hello! How can I help?", response.Text);
+        Assert.Equal(1, inner.CallCount);
+        Assert.Same(ChatToolMode.Auto, Assert.Single(inner.ToolModes));
+    }
+
+    [Fact]
     public async Task EvidenceCritic_RequiresTheSpecificSourceRequestedByTheHuman()
     {
         const string request = "Confirm the target framework from the actual project file, build, and run it.";
@@ -1889,6 +2160,38 @@ public sealed class LemonadeToolCallingChatClientTests
         Assert.Equal("Where is home?", Assert.Single(observed, message => message.Role == AIChatRole.User).Text);
     }
 
+    [Fact]
+    public async Task DuplicateOrEmptyModelArgumentNames_CannotCrashToolDecisionNormalization()
+    {
+        using var inner = new RecordingChatClient(
+            new ChatResponse(new AIChatMessage(
+                AIChatRole.Assistant,
+                """
+                {"action":"call","assessment":"The requested file still needs to be written.","tool":"file_access_write","arguments":{"":"discarded","":"also discarded","fileName":"Desktop/board.txt","content":"stone board"},"summary":"Write the board artifact","next":"Verify the created file."}
+                """)));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+        var write = AIFunctionFactory.Create(
+            (string fileName, string content) => $"wrote {fileName}",
+            "file_access_write",
+            "Write a requested file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Write the stone board artifact.")],
+            new ChatOptions { Tools = [write] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("file_access_write", call.Name);
+        Assert.DoesNotContain(string.Empty, call.Arguments!.Keys);
+        Assert.Equal("Desktop/board.txt", ((JsonElement)call.Arguments["fileName"]!).GetString());
+    }
+
     private sealed class RecordingChatClient(params ChatResponse[] responses) : IChatClient
     {
         private readonly Queue<ChatResponse> _responses = new(responses);
@@ -1903,6 +2206,8 @@ public sealed class LemonadeToolCallingChatClientTests
 
         public List<string?> ReasoningEffortOverrides { get; } = [];
 
+        public List<ChatToolMode?> ToolModes { get; } = [];
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<AIChatMessage> messages,
             ChatOptions? options = null,
@@ -1912,6 +2217,7 @@ public sealed class LemonadeToolCallingChatClientTests
             ObservedMessages.Add(messages.ToList());
             Formats.Add(options?.ResponseFormat);
             MaxOutputTokens.Add(options?.MaxOutputTokens);
+            ToolModes.Add(options?.ToolMode);
             ReasoningEffortOverrides.Add(
                 options?.AdditionalProperties is { } properties
                 && properties.TryGetValue("ali.reasoningEffortOverride", out var value)
@@ -1939,6 +2245,46 @@ public sealed class LemonadeToolCallingChatClientTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class ExpandingSemanticCatalog(
+        AIFunctionDeclaration first,
+        AIFunctionDeclaration second) : ISemanticToolCatalog
+    {
+        public int CallCount { get; private set; }
+
+        public List<string> Needs { get; } = [];
+
+        public List<IReadOnlyList<AIFunctionDeclaration>> Selections { get; } = [];
+
+        public Task<SemanticToolSelection> SelectAsync(
+            string need,
+            IReadOnlyList<AIFunctionDeclaration> liveTools,
+            IReadOnlyCollection<string> retainedToolNames,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            Needs.Add(need);
+            IReadOnlyList<AIFunctionDeclaration> selected = CallCount == 1
+                ? [first]
+                : [first, second];
+            Selections.Add(selected);
+            return Task.FromResult(new SemanticToolSelection(
+                selected,
+                CallCount == 1 ? ["C# project creation"] : ["C# project creation", "C# build verification"],
+                "C# project creation and build verification are available semantic drawers.",
+                true,
+                $"Selected pass {CallCount}."));
+        }
+
+        public Task<SemanticToolDiscoveryResult> DiscoverAsync(
+            string need,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new SemanticToolDiscoveryResult(
+                need,
+                ["C# build verification"],
+                [second.Name],
+                "Build drawer found."));
     }
 
     private sealed class PegFailureThenSuccessChatClient : IChatClient

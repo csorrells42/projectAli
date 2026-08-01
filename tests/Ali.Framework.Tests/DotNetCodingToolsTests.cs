@@ -769,10 +769,7 @@ public sealed class DotNetCodingToolsTests
         }
         finally
         {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
+            await DeleteTemporaryProjectAfterProcessReleaseAsync(root);
         }
     }
 
@@ -797,9 +794,24 @@ public sealed class DotNetCodingToolsTests
         }
         finally
         {
-            if (Directory.Exists(root))
+            await DeleteTemporaryProjectAfterProcessReleaseAsync(root);
+        }
+    }
+
+    private static async Task DeleteTemporaryProjectAfterProcessReleaseAsync(string root)
+    {
+        for (var attempt = 1; Directory.Exists(root); attempt++)
+        {
+            try
             {
                 Directory.Delete(root, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (
+                attempt < 20
+                && ex is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(100);
             }
         }
     }

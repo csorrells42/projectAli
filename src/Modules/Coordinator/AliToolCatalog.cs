@@ -1,4 +1,5 @@
 using Ali.Modules.Coding;
+using Ali.Modules.Coding.Agents;
 using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
@@ -7,6 +8,7 @@ using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 using Ali.Modules.UserMemory;
 using Ali.Modules.WorkstationFiles;
+using Ali.Modules.ToolDiscovery;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -39,7 +41,8 @@ internal sealed class AliToolCatalog
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null,
         Func<AgentOrchestrationSettings>? orchestrationSettings = null,
-        Func<CancellationToken, Task>? waitForPendingMemoryReview = null)
+        Func<CancellationToken, Task>? waitForPendingMemoryReview = null,
+        ISemanticToolCatalog? semanticToolCatalog = null)
     {
         var profile = assistantProfile.Normalize();
         MemoryTools = userMemories is not null && activeUsers is not null && memorySettings is not null
@@ -52,6 +55,22 @@ internal sealed class AliToolCatalog
         var identityTimeTools = new AliIdentityTimeTools(profile);
         var permissionPolicy = new AliToolPermissionPolicy(turnAccessor, () => toolPermissions.CurrentProfile);
         var fileUtilities = new AliWorkstationFileUtilities(fileAccess);
+        semanticToolCatalog ??= new RegistryOnlySemanticToolCatalog();
+        codingModule.ExternalAgents.ProgressReported += progress =>
+        {
+            var kind = progress.Kind switch
+            {
+                ExternalCodingAgentProgressKind.Started => AgentActivityKind.Planning,
+                ExternalCodingAgentProgressKind.Completed => AgentActivityKind.Complete,
+                ExternalCodingAgentProgressKind.Warning => AgentActivityKind.Warning,
+                ExternalCodingAgentProgressKind.Error => AgentActivityKind.Error,
+                _ => AgentActivityKind.ToolResult
+            };
+            turnAccessor()?.Report(
+                kind,
+                progress.Title,
+                progress.Detail);
+        };
 
         Tools =
         [
@@ -61,6 +80,10 @@ internal sealed class AliToolCatalog
                     orchestrationSettings?.Invoke() ?? new AgentOrchestrationSettings())),
                 AliCapabilityCatalog.ListAvailableToolsName,
                 "Return Ali's authoritative current registry of model-callable tools and their sources. Use it when the user asks about the current tool inventory.")),
+            Protect(AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<SemanticToolDiscoveryResult>>)semanticToolCatalog.DiscoverAsync,
+                AliCapabilityCatalog.SemanticDiscoverToolsName,
+                "Describe one unmet capability semantically and retrieve the most relevant live tool drawers. Use this escape hatch whenever the currently loaded schemas do not contain a tool that can perform the next atomic step. The result proposes candidates; you still choose the action.")),
             Protect(AIFunctionFactory.Create(
                 (Func<CoordinatorActiveUserResult>)activeUserTools.GetActiveProfile,
                 AliCapabilityCatalog.GetActiveUserProfileName,
@@ -105,19 +128,23 @@ internal sealed class AliToolCatalog
                 (Func<string>)identityTimeTools.GetCurrentLocalTime,
                 AliCapabilityCatalog.GetCurrentLocalTimeName,
                 "Return the authoritative local computer date, time, and time zone. Use for relative dates, deadlines, schedules, and reminders when an exact clock value matters.")),
-            .. codingModule.CreateFunctions().Select(Protect),
+            .. codingModule.CreateFunctionRegistrations()
+                .Select(registration => Protect(registration.Function, registration.TurnRole)),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationFileMoveResult>>)fileAccess.MoveAsync,
                 AliCapabilityCatalog.FileMoveName,
-                "Rename or move one existing file or folder without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source file name can be resolved automatically. The destination is never overwritten. This changes an existing item and always requires user approval.")),
+                "Rename or move one existing file or folder without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source file name can be resolved automatically. The destination is never overwritten. This changes an existing item and always requires user approval."),
+                AliToolTurnRole.ImplementationMutation),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationFileOperationResult>>)fileUtilities.CopyAsync,
                 AliCapabilityCatalog.FileCopyName,
-                "Copy one existing file or folder to a new path under Ali's approved workstation roots. The destination is never overwritten. This operation is binary-safe.")),
+                "Copy one existing file or folder to a new path under Ali's approved workstation roots. The destination is never overwritten. This operation is binary-safe."),
+                AliToolTurnRole.ImplementationMutation),
             Protect(AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<WorkstationFileOperationResult>>)fileUtilities.CreateDirectoryAsync,
                 AliCapabilityCatalog.FileCreateDirectoryName,
-                "Create a folder beneath an approved workstation root. Existing folders are left unchanged.")),
+                "Create a folder beneath an approved workstation root. Existing folders are left unchanged."),
+                AliToolTurnRole.ImplementationMutation),
             Protect(AIFunctionFactory.Create(
                 (Func<string, bool, CancellationToken, Task<WorkstationFileMetadataResult>>)fileUtilities.GetMetadataAsync,
                 AliCapabilityCatalog.FileMetadataName,
@@ -125,7 +152,8 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, string?, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.CreateArchiveAsync,
                 AliCapabilityCatalog.ArchiveCreateName,
-                "Create one complete archive from one approved file or folder. To include several files, pass their containing folder once; never call this repeatedly to append items. format may be auto, zip, tar, gzip, tar.gz, or 7z. ZIP is the default. Select 7z only when the user explicitly asks for 7z or 7-Zip. The destination is never overwritten.")),
+                "Create one complete archive from one approved file or folder. To include several files, pass their containing folder once; never call this repeatedly to append items. format may be auto, zip, tar, gzip, tar.gz, or 7z. ZIP is the default. Select 7z only when the user explicitly asks for 7z or 7-Zip. The destination is never overwritten."),
+                AliToolTurnRole.ImplementationMutation),
             Protect(AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.ListArchiveAsync,
                 AliCapabilityCatalog.ArchiveListName,
@@ -133,14 +161,18 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.ExtractArchiveAsync,
                 AliCapabilityCatalog.ArchiveExtractName,
-                "Extract a supported archive into a new folder beneath an approved workstation root. Ali rejects traversal, excessive expansion, and existing destinations rather than overwriting files."))
+                "Extract a supported archive into a new folder beneath an approved workstation root. Ali rejects traversal, excessive expansion, and existing destinations rather than overwriting files."),
+                AliToolTurnRole.ImplementationMutation)
         ];
 
         Instructions = BuildInstructions(
             profile.AssistantName,
             orchestrationSettings?.Invoke() ?? new AgentOrchestrationSettings());
 
-        AIFunction Protect(AIFunction function) => permissionPolicy.Apply(function);
+        AIFunction Protect(
+            AIFunction function,
+            AliToolTurnRole turnRole = AliToolTurnRole.Default) =>
+            permissionPolicy.Apply(function, turnRole);
     }
 
     public IReadOnlyList<AITool> Tools { get; }
@@ -155,6 +187,7 @@ internal sealed class AliToolCatalog
         string.Join(
             Environment.NewLine,
             $"You are {assistantName}, a local personal assistant.",
+            "Be warm, personable, and naturally conversational. Match the user's tone, briefly acknowledge humor, excitement, or frustration, use contractions and plain language, and show appropriate enthusiasm. Use the user's name occasionally when it feels natural. Remain concise, truthful, and willing to disagree; never become flattering, sugary, or evasive.",
             "Interpret the user's complete request yourself. No application router classifies English before you receive it.",
             "Treat the newest user message as authoritative. Never carry forward or retry an earlier failed action unless the user explicitly asks to retry it or it remains necessary for the newest request.",
             "When the user asks about the current tool inventory, use list_available_tools as the authoritative registry and answer the question from its result.",
@@ -168,6 +201,7 @@ internal sealed class AliToolCatalog
             "Answer greetings, casual conversation, stable general knowledge, and questions about how you are doing directly without tools.",
             "If the user explicitly asks you not to use tools or not to modify anything, obey that instruction and answer directly. Do not call an Agent Skill, file tool, search tool, or any other tool in that turn.",
             "At the start of each turn, interpret the newest human request using the conversation and registered tool descriptions. No personal memory, identity profile, local document, or web source is queried automatically. If required information is missing, choose the one relevant tool, receive its result, and decide again. Repeat until you can answer or authoritative tool evidence proves the request cannot be completed.",
+            "The currently loaded schemas are a semantic working set, not the limit of your abilities. A compact directory of every live tool drawer accompanies each planning pass. If the next atomic step is not covered, call discover_capabilities with a plain-language description of what that step must accomplish. Its result opens candidate drawers on the next pass. You may repeat discovery whenever the task changes; never claim a capability is absent before checking the directory or discovery tool.",
             "Use get_active_user_profile only when the request depends on the selected user's canonical identity fields such as name, saved home/address, email, or phone number. Use recall_user_memory only when the request depends on learned personal facts. Identity profile data and personal memory are distinct; never substitute one for the other.",
             "For current events or facts that may have changed, use search_current_web promptly and answer from its evidence.",
             "For navigation, routing, or multi-stop directions, obtain any required saved origin with get_active_user_profile, then use maps_create_directions_link and provide its Google Maps URL. Search current sources first only when exact business identities or addresses must be verified. Never invent or reconstruct turn-by-turn steps, road geometry, mileage, travel time, traffic, a nearest-place ranking, or a business address from model knowledge or ordinary search snippets. The map-link tool constructs a handoff URL; Google Maps resolves live places and calculates the route only when the user opens it.",
@@ -188,9 +222,13 @@ internal sealed class AliToolCatalog
             "Use archive_create, archive_list, and archive_extract for archives. archive_create makes one complete archive from one file or folder; for multiple files in a folder, pass the containing folder once and never retry archive_create as an incremental append. ZIP is the standard default. Use TAR, GZip, or TAR.GZ when the user asks for that format or supplies that extension. Use 7z only when the user explicitly asks for 7z or 7-Zip; never silently substitute it for ZIP.",
             "When registered tools can fulfill a request, use them instead of claiming incapability or giving the user shell commands to perform the work manually.",
             "Before claiming that you cannot inspect, create, edit, build, test, run, debug, profile, or integrate code, call coding_list_capabilities and rely on its live provider report. Never describe limitations from model memory when the registry reports the capability.",
-            (orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().AlwaysUseProgrammingAgent
-                ? $"The user requires the selected external coding agent for programming work. For every request that you semantically determine requires creating, modifying, debugging, refactoring, building, testing, running, packaging, or otherwise implementing code, you must call coding_agent_execute before attempting the implementation with lower-level tools. The selected Settings mode is {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. Call coding_agent_status when provider readiness is uncertain. After the external pass, use direct tools to inspect, verify, and repair its result; never treat the worker's claim as proof of completion."
-                : $"For substantial autonomous programming work, coding_agent_execute uses the explicit programming-engine selection from Settings: {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. Call coding_agent_status when provider readiness is uncertain. The external engines are implementation workers, not user-facing personalities; inspect their results and direct build, test, diff, or runtime evidence yourself before claiming completion.",
+            (orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode switch
+            {
+                ProgrammingAgentModes.Off => "Aider and OpenHands are disabled and absent from the live tool registry. Use Ali's native programming, Roslyn, build, test, run, debugger, architecture and delivery tools.",
+                _ when (orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().AlwaysUseProgrammingAgent
+                    => $"The user requires the selected external coding agent for programming work. For every request that you semantically determine requires implementation, call coding_agent_execute with the complete objective and approved project path. The selected mode is {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. That agent owns its architecture, file edits, terminal work, build/test cycle, diagnosis and repairs. Calling coding_agent_execute transfers implementation ownership for the remainder of the turn. After it returns, use Ali's tools only for independent read, build, test, run or inspection evidence; do not edit, replace, move, create or delete project source yourself. If the critic or independent verification rejects the result, call coding_agent_execute again with the original objective plus the exact diagnostics. Ali's implementation-changing tools are unavailable after handoff.",
+                _ => $"The optional external programming engine is {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. It is never required for Ali's native programming work; use it only when the user requests that collaboration. Once invoked, the selected agent owns implementation and repair; Ali independently verifies the result without taking over source edits."
+            },
             "For an existing coding target in any supported language, call coding_inspect_project to detect its provider. Use coding_index_project and coding_search_symbols for bounded repository understanding, then coding_analyze_project, coding_format_project, coding_build_project, or coding_test_project according to the user's request. Provider selection comes from the project manifest, never from guessing or hard-coded English routing.",
             "For a new Arduino sketch that the user asks you to create and compile, call arduino_create_and_compile with the complete source, an approved .ino path whose filename matches its parent folder, and the explicit board FQBN. The path may be virtual such as Desktop/Blink/Blink.ino or absolute when it is already inside an approved root. This one operation creates the missing folder and file, invokes the real compiler, and returns firmware artifacts. Do not split this request into generic file_access_write followed by arduino_compile, and never claim Arduino compilation is unavailable when this registered tool exists.",
             "For a very large project, call coding_build_context with the user's current question instead of trying to load the whole repository into one response. When the user explicitly asks to execute code, call coding_run_project after a successful build. Use coding_probe_http_service only for an explicit external endpoint and coding_inspect_process for live runtime evidence; both require approval.",
@@ -215,5 +253,5 @@ internal sealed class AliToolCatalog
             "When web evidence supports an answer, include concise Markdown links to sources actually used.",
             "Never reveal, quote, speak, or reinsert hidden reasoning or reasoning_content. Operational summaries, plans, tool choices, and results are visible through Ali Activity.",
             "Keep ordinary voice-oriented replies concise unless the user asks for detail.",
-            AliCapabilityCatalog.BuildPromptManifest(orchestrationSettings));
+            "The connector appends the exact schemas loaded for the current pass and a compact directory of every live semantic tool drawer. list_available_tools remains the authoritative full inventory when the user asks to see it.");
 }

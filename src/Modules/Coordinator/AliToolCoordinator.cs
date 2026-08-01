@@ -13,6 +13,7 @@ using Ali.Modules.Permissions;
 using Ali.Modules.Reminders;
 using Ali.Modules.Runtime;
 using Ali.Modules.UserMemory;
+using Ali.Modules.ToolDiscovery;
 using Microsoft.Extensions.AI;
 using RuntimeChatMessage = Ali.Modules.Runtime.ChatMessage;
 
@@ -26,7 +27,7 @@ public sealed class AliToolCoordinator
 {
     private const int MaximumVisibleSources = 5;
     private readonly AliAgentHarnessRunner _harness;
-    private readonly AsyncLocal<CoordinatorTurnContext?> _turn = new();
+    private readonly CoordinatorTurnLease _turn = new();
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<UserMemorySettings>? _memorySettings;
     private readonly AliUserMemoryReviewQueue? _memoryReviewQueue;
@@ -52,7 +53,8 @@ public sealed class AliToolCoordinator
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null,
         string? workflowCheckpointPath = null,
-        Func<AgentOrchestrationSettings>? orchestrationSettings = null)
+        Func<AgentOrchestrationSettings>? orchestrationSettings = null,
+        ISemanticToolCatalog? semanticToolCatalog = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
@@ -70,14 +72,15 @@ public sealed class AliToolCoordinator
             toolPermissions,
             fileAccess,
             codingModule,
-            () => _turn.Value,
+            () => _turn.Current,
             userMemories,
             activeUsers,
             memorySettings,
             orchestrationSettings,
             _memoryReviewQueue is null
                 ? null
-                : cancellationToken => _memoryReviewQueue.DrainAsync(cancellationToken));
+                : cancellationToken => _memoryReviewQueue.DrainAsync(cancellationToken),
+            semanticToolCatalog);
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
@@ -88,9 +91,10 @@ public sealed class AliToolCoordinator
             fileAccess,
             workMemory,
             activeUsers,
-            () => _turn.Value,
+            () => _turn.Current,
             workflowCheckpointPath ?? Path.Combine(Path.GetTempPath(), "ProjectAli", "WorkflowCheckpoints"),
-            orchestrationSettings ?? (() => new AgentOrchestrationSettings()));
+            orchestrationSettings ?? (() => new AgentOrchestrationSettings()),
+            semanticToolCatalog);
     }
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision)
@@ -153,7 +157,7 @@ public sealed class AliToolCoordinator
             assistantMessageId,
             userText,
             chunk => writer.TryWrite(chunk));
-        _turn.Value = turn;
+        using var turnScope = _turn.Enter(turn);
         _memoryReviewQueue?.BeginForegroundTurn();
         try
         {
@@ -196,7 +200,6 @@ public sealed class AliToolCoordinator
         finally
         {
             _memoryReviewQueue?.EndForegroundTurn();
-            _turn.Value = null;
         }
     }
 

@@ -160,7 +160,7 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
             Description = "Private programming checker for Ali's bounded maker/checker workflow.",
             MaximumIterationsPerRequest = 2,
             MaxContextWindowTokens = profile.ContextTokens,
-            MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096),
+            MaxOutputTokens = profile.OutputTokenLimit,
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableTodoProvider = true,
@@ -174,7 +174,7 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
                 Tools = [],
                 ToolMode = ChatToolMode.None,
                 AllowMultipleToolCalls = false,
-                MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096)
+                MaxOutputTokens = profile.OutputTokenLimit
             }
         });
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(reviewer, _turnAccessor, "Programming Reviewer");
@@ -190,7 +190,7 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
             Description = "Private bounded manager for Ali's multi-domain Magentic orchestration.",
             MaximumIterationsPerRequest = 2,
             MaxContextWindowTokens = profile.ContextTokens,
-            MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096),
+            MaxOutputTokens = profile.OutputTokenLimit,
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableTodoProvider = true,
@@ -203,7 +203,7 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
                 Tools = [],
                 ToolMode = ChatToolMode.None,
                 AllowMultipleToolCalls = false,
-                MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096)
+                MaxOutputTokens = profile.OutputTokenLimit
             }
         });
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(manager, _turnAccessor, "Magentic Manager");

@@ -92,7 +92,7 @@ internal sealed class AliSpecialistAgentFactory(
             Description = definition.Description,
             MaximumIterationsPerRequest = MaximumSpecialistIterations,
             MaxContextWindowTokens = profile.ContextTokens,
-            MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096),
+            MaxOutputTokens = profile.OutputTokenLimit,
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableTodoProvider = true,
@@ -106,7 +106,7 @@ internal sealed class AliSpecialistAgentFactory(
                 Tools = selectedTools.ToList(),
                 ToolMode = selectedTools.Count == 0 ? ChatToolMode.None : ChatToolMode.Auto,
                 AllowMultipleToolCalls = false,
-                MaxOutputTokens = Math.Min(profile.OutputTokenLimit, 4096)
+                MaxOutputTokens = profile.OutputTokenLimit
             }
         });
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, turnAccessor, definition.Role);

@@ -115,10 +115,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeQuantizationText = "Installed package default";
     private string _selectedRuntimeModelChoice = string.Empty;
     private string _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort;
+    private string _selectedProgrammingAgentMode = ProgrammingAgentModes.Off;
     private string _runtimeSelectionStatusText = "Runtime model list has not been refreshed yet.";
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
     private bool _runtimeVisionEnabled;
+    private bool _runtimeThinkingEnabled;
     private bool _loadingRuntimeOptions;
     private bool _canActivateRuntime;
     private bool _canRevertToLastKnownGood;
@@ -207,7 +209,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _visionStatus = "Camera off.";
     private string _pendingAssistantName = string.Empty;
     private string _assistantRenameStatus = "Changing the name preserves this assistant profile and takes effect after restart.";
-    private bool _isAgentActivityExpanded;
+    private bool _isAgentActivityExpanded = true;
     private string _agentActivitySummary = "Ready for the next request.";
     private AgentToolApprovalPrompt? _activeBridgeApproval;
     private readonly StackComponentStatusViewModel _memoryStackStatus = new("Memory");
@@ -230,6 +232,14 @@ public sealed class MainWindowViewModel : ObservableObject
         LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
         UserMemorySettings = new UserMemorySettingsViewModel(_services);
         AgentOrchestrationSettings = new AgentOrchestrationSettingsViewModel(_services);
+        _selectedProgrammingAgentMode = AgentOrchestrationSettings.SelectedProgrammingAgentMode;
+        AgentOrchestrationSettings.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(AgentOrchestrationSettings.SelectedProgrammingAgentMode))
+            {
+                SynchronizeCodingExecutorSelection();
+            }
+        };
         AgentToolPermissions = new AgentToolPermissionsViewModel(
             _services.ToolPermissions,
             _services.ActiveUsers,
@@ -250,9 +260,13 @@ public sealed class MainWindowViewModel : ObservableObject
         ConversationBridgeSettings.PropertyChanged += (_, _) => RefreshStackComponentsOnUiThread();
         _services.Orchestrator.BackgroundActivity += OnBackgroundAgentActivity;
 
-        SendCommand = CreateAsyncCommand(SendAsync, () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText));
+        SendCommand = CreateAsyncCommand(
+            SendAsync,
+            () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText),
+            allowExecutionWhileRunning: true);
         StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
         ClearAgentActivityCommand = CreateCommand(_ => ClearAgentActivity());
+        CopyAgentActivityCommand = CreateCommand(_ => CopyAgentActivityLog());
         NewChatCommand = CreateCommand(_ => StartNewChat());
         EraseHistoryCommand = CreateCommand(_ => EraseHistory());
         EraseConversationCommand = CreateCommand(EraseConversation);
@@ -393,8 +407,11 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool>? canExecute = null) =>
-        new(execute, canExecute, HandleCommandException);
+    private AsyncRelayCommand CreateAsyncCommand(
+        Func<Task> execute,
+        Func<bool>? canExecute = null,
+        bool allowExecutionWhileRunning = false) =>
+        new(execute, canExecute, HandleCommandException, allowExecutionWhileRunning);
 
     private RelayCommand CreateCommand(Action<object?> execute, Predicate<object?>? canExecute = null) =>
         new(execute, canExecute, HandleCommandException);
@@ -599,6 +616,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand StopCommand { get; }
 
     public ICommand ClearAgentActivityCommand { get; }
+
+    public ICommand CopyAgentActivityCommand { get; }
 
     public ICommand NewChatCommand { get; }
 
@@ -1101,6 +1120,18 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool RuntimeThinkingEnabled
+    {
+        get => _runtimeThinkingEnabled;
+        set
+        {
+            if (SetProperty(ref _runtimeThinkingEnabled, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
+    }
+
     public bool IsReasoningLow
     {
         get => _selectedReasoningEffort == "low";
@@ -1137,6 +1168,42 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool IsCodingExecutorAli
+    {
+        get => _selectedProgrammingAgentMode == ProgrammingAgentModes.Off;
+        set
+        {
+            if (value)
+            {
+                SelectCodingExecutor(ProgrammingAgentModes.Off);
+            }
+        }
+    }
+
+    public bool IsCodingExecutorAider
+    {
+        get => _selectedProgrammingAgentMode == ProgrammingAgentModes.Aider;
+        set
+        {
+            if (value)
+            {
+                SelectCodingExecutor(ProgrammingAgentModes.Aider);
+            }
+        }
+    }
+
+    public bool IsCodingExecutorOpenHands
+    {
+        get => _selectedProgrammingAgentMode == ProgrammingAgentModes.OpenHands;
+        set
+        {
+            if (value)
+            {
+                SelectCodingExecutor(ProgrammingAgentModes.OpenHands);
+            }
+        }
+    }
+
     public string RuntimeRequestContractText
     {
         get
@@ -1155,12 +1222,11 @@ public sealed class MainWindowViewModel : ObservableObject
                         ? "/api/v1/unload"
                         : "not available";
                 var model = RuntimeModelText.Trim();
-                var reasoningContract = OllamaRuntimeSafetyPolicy.IsGptOssModel(model)
-                    ? $"chat_template_kwargs.reasoning_effort: {_selectedReasoningEffort}"
-                    : model.Contains("qwen", StringComparison.OrdinalIgnoreCase)
-                      || model.Contains("qwq", StringComparison.OrdinalIgnoreCase)
-                        ? "chat_template_kwargs.enable_thinking: false"
-                        : "provider-managed";
+                var reasoningContract = ModelThinkingPolicy.Describe(
+                    model,
+                    CurrentRuntimeModelChoice()?.Family,
+                    RuntimeThinkingEnabled,
+                    _selectedReasoningEffort);
                 return $"Engine: {engine} | Transport: OpenAI-compatible\n"
                     + $"Model: {model} | reasoning: {reasoningContract}\n"
                     + $"Switch barrier: {releaseEndpoint}; release must verify before another engine is checked.\n"
@@ -1170,10 +1236,7 @@ public sealed class MainWindowViewModel : ObservableObject
             var requestedContext = int.TryParse(RuntimeContextText.Trim(), out var parsedContext)
                 ? parsedContext
                 : OllamaRuntimeSafetyPolicy.DefaultContextTokens;
-            var effectiveContext = OllamaRuntimeSafetyPolicy.ClampContextTokens(requestedContext);
-            var contextText = requestedContext == effectiveContext
-                ? effectiveContext.ToString("N0", CultureInfo.InvariantCulture)
-                : $"{effectiveContext:N0} (requested {requestedContext:N0}; safety cap applied)";
+            var contextText = requestedContext.ToString("N0", CultureInfo.InvariantCulture);
             var outputText = int.TryParse(RuntimeOutputLimitText.Trim(), out var output)
                 ? output.ToString("N0", CultureInfo.InvariantCulture)
                 : "invalid";
@@ -1183,7 +1246,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             return $"Engine: {LocalRuntimeEngines.Ollama} | Transport: native Ollama /api/chat\n"
                 + $"Model: {RuntimeModelText.Trim()}\n"
-                + $"num_ctx: {contextText} | hard cap: {OllamaRuntimeSafetyPolicy.MaximumContextTokens:N0}\n"
+                + $"num_ctx: {contextText} | selected value is sent unchanged\n"
                 + $"num_predict: {outputText} | stream: {RuntimeStreamingEnabled.ToString().ToLowerInvariant()}\n"
                 + $"temperature: {RuntimeTemperatureText.Trim()} | top_p: {topPText}\n"
                 + $"think: {(OllamaRuntimeSafetyPolicy.IsGptOssModel(RuntimeModelText) ? _selectedReasoningEffort : "false")} | keep_alive: {OllamaRuntimeSafetyPolicy.KeepAlive}\n"
@@ -2354,8 +2417,6 @@ public sealed class MainWindowViewModel : ObservableObject
         StatusText = "Streaming local response...";
         var previousTurnExecutionReceipts = _currentTurnExecutionReceipts.TakeLast(16).ToArray();
         _currentTurnExecutionReceipts.Clear();
-        ClearAgentActivity();
-        IsAgentActivityExpanded = false;
         EnsureActiveConversationHistoryItem();
         ApplyFirstMessageTitleIfNeeded(text);
 
@@ -2650,6 +2711,48 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         AgentActivities.Clear();
         AgentActivitySummary = "Ready for the next request.";
+    }
+
+    private void CopyAgentActivityLog()
+    {
+        if (AgentActivities.Count == 0)
+        {
+            StatusText = "The activity log is empty.";
+            return;
+        }
+
+        var log = new StringBuilder();
+        log.AppendLine($"{AssistantName} activity log");
+        log.AppendLine($"Copied: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}");
+        log.AppendLine($"Conversation: {_conversationId}");
+        log.AppendLine(new string('-', 72));
+
+        foreach (var activity in AgentActivities)
+        {
+            log.Append(activity.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture));
+            log.Append(" | ");
+            log.Append(activity.Kind);
+            log.Append(" | ");
+            log.Append(activity.Title);
+
+            if (!string.IsNullOrWhiteSpace(activity.Detail))
+            {
+                log.Append(" | ");
+                log.Append(activity.Detail);
+            }
+
+            if (activity.ElapsedMilliseconds is { } elapsed)
+            {
+                log.Append(" | ");
+                log.Append(elapsed.ToString("0.##", CultureInfo.InvariantCulture));
+                log.Append(" ms");
+            }
+
+            log.AppendLine();
+        }
+
+        System.Windows.Clipboard.SetText(log.ToString());
+        StatusText = $"Copied {AgentActivities.Count} activity log entries.";
     }
 
     private static string BuildPreviousTurnExecutionRecord(
@@ -4950,16 +5053,9 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Runtime endpoint must be an absolute URL.");
         }
 
-        if (!int.TryParse(RuntimeContextText.Trim(), out var contextTokens) || contextTokens < 512)
+        if (!int.TryParse(RuntimeContextText.Trim(), out var contextTokens) || contextTokens < 1)
         {
-            throw new InvalidOperationException("Context size must be at least 512 tokens.");
-        }
-
-        if (LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint) == LocalRuntimeEngines.Ollama
-            && contextTokens > OllamaRuntimeSafetyPolicy.MaximumContextTokens)
-        {
-            throw new InvalidOperationException(
-                $"Ollama context cannot exceed the {OllamaRuntimeSafetyPolicy.MaximumContextTokens:N0}-token safety cap.");
+            throw new InvalidOperationException("Context size must be a positive integer.");
         }
 
         if (!int.TryParse(RuntimeOutputLimitText.Trim(), out var outputLimit) || outputLimit < 1)
@@ -5015,7 +5111,8 @@ public sealed class MainWindowViewModel : ObservableObject
             AllowPrivateLanEndpoint: false)
         {
             Engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint),
-            ReasoningEffort = _selectedReasoningEffort
+            ReasoningEffort = _selectedReasoningEffort,
+            ThinkingEnabled = RuntimeThinkingEnabled
         });
     }
 
@@ -6373,6 +6470,52 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private void SelectCodingExecutor(string mode)
+    {
+        var normalized = ProgrammingAgentModes.Normalize(mode);
+        if (string.Equals(_selectedProgrammingAgentMode, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _selectedProgrammingAgentMode = normalized;
+        OnPropertyChanged(nameof(IsCodingExecutorAli));
+        OnPropertyChanged(nameof(IsCodingExecutorAider));
+        OnPropertyChanged(nameof(IsCodingExecutorOpenHands));
+        try
+        {
+            AgentOrchestrationSettings.SelectProgrammingAgentMode(normalized);
+            StatusText = normalized switch
+            {
+                ProgrammingAgentModes.Aider =>
+                    "Coding executor set to Aider. Ali will semantically identify coding work, delegate it to Aider, and verify the result.",
+                ProgrammingAgentModes.OpenHands =>
+                    "Coding executor set to OpenHands. Ali will semantically identify coding work, delegate it to OpenHands, and verify the result.",
+                _ =>
+                    "Coding executor set to Ali. She will use her native programming tools."
+            };
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Coding executor changed for this session, but could not be saved: {ex.Message}";
+        }
+    }
+
+    private void SynchronizeCodingExecutorSelection()
+    {
+        var normalized = ProgrammingAgentModes.Normalize(
+            AgentOrchestrationSettings.SelectedProgrammingAgentMode);
+        if (string.Equals(_selectedProgrammingAgentMode, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _selectedProgrammingAgentMode = normalized;
+        OnPropertyChanged(nameof(IsCodingExecutorAli));
+        OnPropertyChanged(nameof(IsCodingExecutorAider));
+        OnPropertyChanged(nameof(IsCodingExecutorOpenHands));
+    }
+
     private void NotifyReasoningEffortChanged()
     {
         OnPropertyChanged(nameof(IsReasoningLow));
@@ -6406,6 +6549,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeTopPText = topPText;
         RuntimeStreamingEnabled = options.StreamingEnabled;
         RuntimeVisionEnabled = options.SupportsVision;
+        RuntimeThinkingEnabled = options.ThinkingEnabled;
         _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(options.ReasoningEffort);
         NotifyReasoningEffortChanged();
         _services.RuntimeController.SetReasoningEffort(_selectedReasoningEffort);

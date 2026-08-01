@@ -10,6 +10,7 @@ using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Ali.Modules.UserMemory;
+using Ali.Modules.ToolDiscovery;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -42,6 +43,7 @@ internal sealed class AliAgentHarnessRunner
     private readonly AliAgentWorkMemory _workMemory;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
+    private readonly ISemanticToolCatalog _semanticToolCatalog;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
 
     public AliAgentHarnessRunner(
@@ -56,16 +58,19 @@ internal sealed class AliAgentHarnessRunner
         IActiveUserSession? activeUsers,
         Func<CoordinatorTurnContext?> turnAccessor,
         string checkpointPath,
-        Func<AgentOrchestrationSettings> orchestrationSettings)
+        Func<AgentOrchestrationSettings> orchestrationSettings,
+        ISemanticToolCatalog? semanticToolCatalog = null)
     {
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
+        _semanticToolCatalog = semanticToolCatalog ?? new RegistryOnlySemanticToolCatalog();
         _compatibilityClient = new LemonadeToolCallingChatClient(
             chatClient,
             runtime,
             _assistantProfile.AssistantName,
             turnAccessor,
-            fileAccess.NormalizeProviderToolArguments);
+            fileAccess.NormalizeProviderToolArguments,
+            semanticToolCatalog: _semanticToolCatalog);
         var specialistFactory = new AliSpecialistAgentFactory(
             _compatibilityClient,
             runtime,
@@ -116,7 +121,9 @@ internal sealed class AliAgentHarnessRunner
             // unfinished list, so keep that overlapping provider out of the conversation.
             DisableTodoProvider = true,
             FileMemoryStore = _workMemory.Store,
-            FileAccessStore = _fileAccess.Store,
+            FileAccessStore = new ExternalOwnershipFileStore(
+                _fileAccess.Store,
+                () => _turnAccessor()?.ExternalCodingAgentOwnsTurn == true),
             FileAccessProviderOptions = new FileAccessProviderOptions
             {
                 Instructions = _fileAccess.Instructions,
@@ -145,16 +152,21 @@ internal sealed class AliAgentHarnessRunner
     private IReadOnlyList<AITool> BuildPolicyTools(AgentOrchestrationSettings settings)
     {
         var normalized = settings.Normalize();
+        var baseTools = normalized.ProgrammingAgentMode == ProgrammingAgentModes.Off
+            ? _baseTools.Where(tool => tool is not AIFunctionDeclaration function
+                || (function.Name != AliCapabilityCatalog.CodingAgentStatusName
+                    && function.Name != AliCapabilityCatalog.CodingAgentExecuteName)).ToArray()
+            : _baseTools;
         if (normalized.MagenticPolicy == MagenticPolicies.Off)
         {
-            return _baseTools;
+            return baseTools;
         }
 
         var permissionPolicy = new AliToolPermissionPolicy(
             _turnAccessor,
             () => _toolPermissions.CurrentProfile);
         var magentic = _workflowFactory.CreateMagenticTool(_specialistTeam, normalized);
-        return _baseTools
+        return baseTools
             .Append((AITool)permissionPolicy.Apply(
                 magentic,
                 normalized.MagenticPolicy == MagenticPolicies.AskFirst))
@@ -190,6 +202,25 @@ internal sealed class AliAgentHarnessRunner
         }
 
         var orchestrationSettings = _orchestrationSettings().Normalize();
+        var classificationInput = BuildInitialInput(history, userText, attachments);
+        var disposition = await _compatibilityClient
+            .ClassifyCodingTurnAsync(classificationInput, cancellationToken)
+            .ConfigureAwait(false);
+        var requiresExternalCodingAgent = disposition.IsCodingWork
+            && orchestrationSettings.AlwaysUseProgrammingAgent
+            && orchestrationSettings.ProgrammingAgentMode != ProgrammingAgentModes.Off;
+        turn.SetCodingDisposition(
+            requiresExternalCodingAgent,
+            disposition.CanAnswerDirectlyWithoutCritic,
+            disposition.Basis);
+        if (requiresExternalCodingAgent)
+        {
+            turn.Report(
+                AgentActivityKind.Status,
+                $"Coding work assigned to {orchestrationSettings.ProgrammingAgentMode}",
+                disposition.Basis);
+        }
+
         IReadOnlyList<AITool> activeTools = BuildPolicyTools(orchestrationSettings);
         var activeAgent = CreateAgent(activeTools, orchestrationSettings);
         if (mcpSession.Tools.Count > 0)

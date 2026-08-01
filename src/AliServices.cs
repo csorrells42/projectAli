@@ -14,6 +14,7 @@ using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.UserMemory;
 using Ali.Modules.Coding;
 using Ali.Modules.Calendar;
+using Ali.Modules.ToolDiscovery;
 
 namespace Ali;
 
@@ -304,7 +305,8 @@ public sealed class AliServices
             dataRoot,
             qdrant,
             () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+            () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot));
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
@@ -323,6 +325,10 @@ public sealed class AliServices
             AppContext.BaseDirectory);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
+        var semanticToolCatalog = new QdrantSemanticToolCatalog(
+            runtimeHttpClient,
+            qdrant,
+            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot));
         var candidateRuntime = configuredOptions is { Enabled: true }
             ? new OpenAiCompatibleLocalModelRuntime(runtimeHttpClient, configuredOptions, profile)
             : null;
@@ -366,7 +372,8 @@ public sealed class AliServices
             activeUsers,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
             AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot),
-            () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot));
+            () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
+            semanticToolCatalog);
         var orchestrator = new ConversationOrchestrator(
             runtime,
             correctionQueue,

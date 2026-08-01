@@ -8,7 +8,8 @@ namespace Ali.Modules.Coding.Agents;
 internal sealed class OpenHandsCodingAgentProvider(
     Func<AgentOrchestrationSettings> orchestrationSettings,
     Func<OpenAiCompatibleRuntimeOptions> runtimeSettings,
-    IExternalCodingAgentProcessRunner processRunner) : IExternalCodingAgentProvider
+    IExternalCodingAgentProcessRunner processRunner,
+    Action<ExternalCodingAgentProgress>? progress = null) : IExternalCodingAgentProvider
 {
     private static readonly string WslExecutable = Path.Combine(Environment.SystemDirectory, "wsl.exe");
 
@@ -136,13 +137,20 @@ internal sealed class OpenHandsCodingAgentProvider(
             "--exit-without-confirmation",
             "--file", linuxTaskFile
         ]);
+        progress?.Invoke(new ExternalCodingAgentProgress(
+            Name,
+            ExternalCodingAgentProgressKind.Started,
+            "OpenHands accepted the coding job",
+            "OpenHands is inspecting the project and will own its edit, build, test and repair loop."));
+        var progressParser = new OpenHandsProgressParser(progress);
         var result = await processRunner.RunAsync(
             WslExecutable,
             Environment.SystemDirectory,
             arguments,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            outputLine: progressParser.Observe).ConfigureAwait(false);
         var completed = result.Success
-            && result.Output.Contains("\"kind\": \"FinishObservation\"", StringComparison.Ordinal);
+            && OpenHandsProgressParser.ContainsFinishEvent(result.Output);
         return new ExternalCodingAgentPassResult(
             Name,
             completed,

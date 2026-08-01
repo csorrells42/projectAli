@@ -8,58 +8,6 @@ namespace Ali.Framework.Tests;
 public sealed class RuntimeRequestSafetyTests
 {
     [Fact]
-    public void TokenBudget_PreservesRequestedOutputWhenTheTurnFits()
-    {
-        var budget = ModelRequestTokenBudgetCalculator.Calculate(
-            32_768,
-            8_192,
-            ["A short ordinary request."],
-            [],
-            messageCount: 1,
-            toolCount: 0,
-            imageCount: 0);
-
-        Assert.Equal(8_192, budget.EffectiveOutputTokens);
-        Assert.False(budget.WasClamped);
-    }
-
-    [Fact]
-    public void TokenBudget_ClampsOnlyTheOutputAllowanceWhenTheTurnNeedsHeadroom()
-    {
-        var budget = ModelRequestTokenBudgetCalculator.Calculate(
-            4_096,
-            2_048,
-            [new string('x', 6_000)],
-            [],
-            messageCount: 2,
-            toolCount: 0,
-            imageCount: 0);
-
-        Assert.InRange(budget.EffectiveOutputTokens, 128, 2_047);
-        Assert.True(budget.WasClamped);
-        Assert.True(
-            budget.EstimatedInputTokens + budget.SafetyReserveTokens + budget.EffectiveOutputTokens
-            <= budget.ContextTokens);
-    }
-
-    [Fact]
-    public void TokenBudget_RejectsAnInputThatCannotFitBeforeCallingTheModel()
-    {
-        var error = Assert.Throws<ModelContextCapacityException>(() =>
-            ModelRequestTokenBudgetCalculator.Calculate(
-                4_096,
-                1_024,
-                [new string('x', 20_000)],
-                [],
-                messageCount: 2,
-                toolCount: 0,
-                imageCount: 0));
-
-        Assert.Contains("No request was sent to the model", error.Message, StringComparison.Ordinal);
-        Assert.Contains("larger context", error.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public async Task ActivityHeadline_DoesNotLeakRawToolArgumentsOrResults()
     {
         var activity = new List<AssistantStreamChunk>();

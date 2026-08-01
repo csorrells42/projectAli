@@ -18,16 +18,25 @@ public static class MagenticPolicies
 
 public static class ProgrammingAgentModes
 {
+    public const string Off = "off";
     public const string Aider = "aider";
     public const string OpenHands = "openhands";
     public const string Hybrid = "hybrid";
 
-    public static IReadOnlyList<string> All { get; } = [Aider, OpenHands, Hybrid];
+    public static IReadOnlyList<string> All { get; } = [Off, Aider, OpenHands];
 
-    public static string Normalize(string? value) =>
-        All.Contains(value?.Trim(), StringComparer.OrdinalIgnoreCase)
-            ? All.First(item => item.Equals(value?.Trim(), StringComparison.OrdinalIgnoreCase))
-            : Hybrid;
+    public static string Normalize(string? value)
+    {
+        var candidate = value?.Trim();
+        if (string.Equals(candidate, Hybrid, StringComparison.OrdinalIgnoreCase))
+        {
+            return Off;
+        }
+
+        return All.Contains(candidate, StringComparer.OrdinalIgnoreCase)
+            ? All.First(item => item.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+            : Off;
+    }
 }
 
 public sealed record AgentOrchestrationSettings
@@ -36,7 +45,7 @@ public sealed record AgentOrchestrationSettings
 
     public int MagenticMaximumRounds { get; init; } = 6;
 
-    public string ProgrammingAgentMode { get; init; } = ProgrammingAgentModes.Hybrid;
+    public string ProgrammingAgentMode { get; init; } = ProgrammingAgentModes.Off;
 
     public bool AlwaysUseProgrammingAgent { get; init; }
 
@@ -47,6 +56,7 @@ public sealed record AgentOrchestrationSettings
         MagenticPolicy = MagenticPolicies.Normalize(MagenticPolicy),
         MagenticMaximumRounds = Math.Clamp(MagenticMaximumRounds, 2, 12),
         ProgrammingAgentMode = ProgrammingAgentModes.Normalize(ProgrammingAgentMode),
+        AlwaysUseProgrammingAgent = ProgrammingAgentModes.Normalize(ProgrammingAgentMode) != ProgrammingAgentModes.Off,
         OpenHandsWslDistribution = string.IsNullOrWhiteSpace(OpenHandsWslDistribution)
             ? "Ubuntu-24.04"
             : OpenHandsWslDistribution.Trim()

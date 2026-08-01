@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Ali.Modules.RAG;
+using Ali.Modules.Runtime;
 
 namespace Ali.Modules.UserMemory;
 
@@ -11,20 +12,24 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
     private readonly QdrantServiceManager _qdrant;
     private readonly Func<LocalVectorLibrarySettings> _qdrantSettings;
     private readonly Func<UserMemorySettings> _settings;
+    private readonly Func<OpenAiCompatibleRuntimeOptions?> _runtimeSettings;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Queue<string> _stderr = new();
     private Process? _process;
+    private string? _processConfiguration;
 
     public Mem0ProcessClient(
         string dataRoot,
         QdrantServiceManager qdrant,
         Func<LocalVectorLibrarySettings> qdrantSettings,
-        Func<UserMemorySettings> settings)
+        Func<UserMemorySettings> settings,
+        Func<OpenAiCompatibleRuntimeOptions?> runtimeSettings)
     {
         _dataRoot = Path.Combine(dataRoot, "Memory", "Mem0");
         _qdrant = qdrant;
         _qdrantSettings = qdrantSettings;
         _settings = settings;
+        _runtimeSettings = runtimeSettings;
     }
 
     public string LastDiagnostic
@@ -93,23 +98,53 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
         try { process.Dispose(); } catch { }
         _process = null;
+        _processConfiguration = null;
     }
 
     private async Task<Process> EnsureStartedAsync(CancellationToken cancellationToken)
     {
-        if (_process is { HasExited: false } running)
+        var qdrantSettings = _qdrantSettings();
+        var settings = _settings().Normalize();
+        var runtime = _runtimeSettings()
+            ?? throw new InvalidOperationException("Mem0 requires Ali's selected local runtime settings.");
+        if (!runtime.Enabled || string.IsNullOrWhiteSpace(runtime.Model))
+        {
+            throw new InvalidOperationException("Mem0 requires an enabled selected local runtime model.");
+        }
+
+        var thinkingControl = ModelThinkingPolicy.Resolve(runtime.Model, runtime.Family);
+        var processConfiguration = JsonSerializer.Serialize(new
+        {
+            runtime.Endpoint,
+            runtime.Model,
+            runtime.OutputTokenLimit,
+            runtime.ReasoningEffort,
+            runtime.ThinkingEnabled,
+            ThinkingControl = thinkingControl,
+            settings.EmbeddingEndpoint,
+            settings.EmbeddingModel,
+            settings.EmbeddingDimensions,
+            qdrantSettings.QdrantHost,
+            qdrantSettings.QdrantHttpPort,
+            settings.CollectionName
+        }, JsonOptions);
+        if (_process is { HasExited: false } running
+            && string.Equals(_processConfiguration, processConfiguration, StringComparison.Ordinal))
         {
             return running;
         }
 
-        var qdrantSettings = _qdrantSettings();
+        if (_process is { } stale)
+        {
+            ResetProcess(stale);
+        }
+
         await _qdrant.EnsureAvailableAsync(qdrantSettings, cancellationToken).ConfigureAwait(false);
         if (!_qdrant.Status.IsReachable)
         {
             throw new InvalidOperationException(_qdrant.Status.Message);
         }
 
-        var settings = _settings().Normalize();
         var python = Path.Combine(AppContext.BaseDirectory, "runtime", "python", "python.exe");
         var script = Path.Combine(AppContext.BaseDirectory, "lib", "memory", "mem0_service.py");
         if (!File.Exists(python) || !File.Exists(script))
@@ -131,8 +166,9 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         start.ArgumentList.Add(script);
         Add("--data-root", _dataRoot);
         Add("--collection", settings.CollectionName);
-        Add("--llm-endpoint", settings.LemonadeEndpoint);
-        Add("--llm-model", settings.LlmModel);
+        Add("--llm-endpoint", runtime.Endpoint.ToString().TrimEnd('/'));
+        Add("--llm-model", runtime.Model);
+        Add("--llm-output-tokens", runtime.OutputTokenLimit.ToString());
         Add("--embedding-endpoint", settings.EmbeddingEndpoint);
         Add("--embedding-model", settings.EmbeddingModel);
         Add("--embedding-dimensions", settings.EmbeddingDimensions.ToString());
@@ -146,11 +182,15 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         start.Environment["NO_PROXY"] = "127.0.0.1,localhost";
         start.Environment["HTTP_PROXY"] = "http://127.0.0.1:1";
         start.Environment["HTTPS_PROXY"] = "http://127.0.0.1:1";
+        start.Environment["ALI_MEM0_THINKING_CONTROL"] = thinkingControl.ToString();
+        start.Environment["ALI_MEM0_THINKING_ENABLED"] = runtime.ThinkingEnabled.ToString();
+        start.Environment["ALI_MEM0_REASONING_EFFORT"] = runtime.ReasoningEffort ?? string.Empty;
 
         var process = Process.Start(start) ?? throw new InvalidOperationException("Mem0 worker did not start.");
         process.ErrorDataReceived += OnErrorDataReceived;
         process.BeginErrorReadLine();
         _process = process;
+        _processConfiguration = processConfiguration;
         return process;
 
         void Add(string name, string value)

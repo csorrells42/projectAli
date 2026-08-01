@@ -4,7 +4,7 @@ namespace Ali.Framework.Tests;
 
 public sealed class AboutTechnologyInventoryTests
 {
-    private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    private static readonly string RepositoryRoot = TestRepository.Root;
 
     [Fact]
     public void InventoryIsGeneratedFromTheActualBuildGraphAndManifests()

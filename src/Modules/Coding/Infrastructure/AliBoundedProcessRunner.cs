@@ -22,7 +22,8 @@ internal static class AliBoundedProcessRunner
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? environment)
+        IReadOnlyDictionary<string, string>? environment,
+        Action<string, bool>? outputLine = null)
     {
         var started = Stopwatch.StartNew();
         var startInfo = new ProcessStartInfo(executable)
@@ -40,8 +41,23 @@ internal static class AliBoundedProcessRunner
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
         using var process = new Process { StartInfo = startInfo };
         var output = new StringBuilder();
-        process.OutputDataReceived += (_, args) => { if (args.Data is not null) output.AppendLine(args.Data); };
-        process.ErrorDataReceived += (_, args) => { if (args.Data is not null) output.AppendLine(args.Data); };
+        var outputSync = new object();
+        void Capture(string? line, bool isError)
+        {
+            if (line is null)
+            {
+                return;
+            }
+
+            lock (outputSync)
+            {
+                output.AppendLine(line);
+            }
+            outputLine?.Invoke(line, isError);
+        }
+
+        process.OutputDataReceived += (_, args) => Capture(args.Data, isError: false);
+        process.ErrorDataReceived += (_, args) => Capture(args.Data, isError: true);
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -49,7 +65,12 @@ internal static class AliBoundedProcessRunner
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             started.Stop();
-            return new BoundedProcessResult(process.ExitCode == 0, process.ExitCode, Compact(output.ToString()), started.ElapsedMilliseconds, false);
+            string captured;
+            lock (outputSync)
+            {
+                captured = output.ToString();
+            }
+            return new BoundedProcessResult(process.ExitCode == 0, process.ExitCode, Compact(captured), started.ElapsedMilliseconds, false);
         }
         catch (OperationCanceledException)
         {

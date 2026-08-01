@@ -48,7 +48,57 @@ public sealed class LemonadeRuntimeTests
     }
 
     [Fact]
-    public async Task PerCallReasoningOverride_UsesLowWithoutChangingSelectedMainEffort()
+    public async Task ConsecutiveChats_ReuseTheReadyLemonadeModelWithoutReloading()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateLemonadeRuntime(
+            client,
+            "gpt-oss-20b-mxfp4-GGUF",
+            "gpt-oss",
+            thinkingEnabled: false,
+            contextTokens: 8192,
+            outputTokenLimit: 2048);
+
+        _ = await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "first")],
+            cancellationToken: TestContext.Current.CancellationToken);
+        _ = await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "second")],
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, handler.Requests.Count(request => request.Path == "/api/v1/chat/completions"));
+        Assert.Single(handler.Requests, request => request.Path == "/api/v1/load");
+    }
+
+    [Fact]
+    public async Task UserSelectedMaximumContextAndOutput_AreSentUnchanged()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateLemonadeRuntime(
+            client,
+            "Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M",
+            "Qwen",
+            thinkingEnabled: false,
+            contextTokens: 262_144,
+            outputTokenLimit: 32_768);
+
+        _ = await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Return OK")],
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var load = Assert.Single(handler.Requests, request => request.Path == "/api/v1/load");
+        using var loadPayload = JsonDocument.Parse(load.Body);
+        Assert.Equal(262_144, loadPayload.RootElement.GetProperty("ctx_size").GetInt32());
+
+        var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        using var chatPayload = JsonDocument.Parse(chat.Body);
+        Assert.Equal(32_768, chatPayload.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
+    public async Task PerCallReasoningOverride_DoesNotReplaceSelectedMainEffort()
     {
         var handler = new RecordingHandler();
         using var client = new HttpClient(handler);
@@ -88,12 +138,78 @@ public sealed class LemonadeRuntimeTests
         var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
         using var payload = JsonDocument.Parse(chat.Body);
         Assert.Equal(
-            "low",
+            "high",
             payload.RootElement
                 .GetProperty("chat_template_kwargs")
                 .GetProperty("reasoning_effort")
                 .GetString());
         Assert.Equal("high", runtime.ReasoningEffort);
+    }
+
+    [Fact]
+    public async Task Qwen25Coder_OmitsUnsupportedThinkingFields()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateLemonadeRuntime(
+            client,
+            "Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M",
+            "Qwen",
+            thinkingEnabled: true);
+
+        _ = await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Return OK")],
+            new ChatOptions { MaxOutputTokens = 32 },
+            TestContext.Current.CancellationToken);
+
+        var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        using var payload = JsonDocument.Parse(chat.Body);
+        Assert.False(payload.RootElement.TryGetProperty("chat_template_kwargs", out _));
+        Assert.False(payload.RootElement.TryGetProperty("think", out _));
+        var identity = payload.RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
+        Assert.Contains("created by Chris Sorrells", identity, StringComparison.Ordinal);
+        Assert.Contains("Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M", identity, StringComparison.Ordinal);
+        Assert.Contains("configured family is Qwen", identity, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GemmaThinkingCheckbox_AddsOnlyTheRequiredSystemToken()
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateLemonadeRuntime(
+            client,
+            "gemma-4-26B-A4B-it-qat-q4_0-gguf-Q4_0",
+            "Gemma",
+            thinkingEnabled: true);
+
+        _ = await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Return OK")],
+            new ChatOptions { MaxOutputTokens = 32 },
+            TestContext.Current.CancellationToken);
+
+        var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        using var payload = JsonDocument.Parse(chat.Body);
+        var firstSystemMessage = payload.RootElement
+            .GetProperty("messages")[0]
+            .GetProperty("content")
+            .GetString();
+        Assert.StartsWith("<|think|>\n", firstSystemMessage, StringComparison.Ordinal);
+        Assert.False(payload.RootElement.TryGetProperty("chat_template_kwargs", out _));
+        Assert.False(payload.RootElement.TryGetProperty("think", out _));
+    }
+
+    [Theory]
+    [InlineData("Qwen3-14B", "Qwen", ModelThinkingControl.QwenTemplateToggle)]
+    [InlineData("Qwen3-Coder-30B-A3B-Instruct-GGUF", "Qwen", ModelThinkingControl.None)]
+    [InlineData("Qwen3.6-27B-A3B-Coder", "Qwen", ModelThinkingControl.None)]
+    [InlineData("Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M", "Qwen", ModelThinkingControl.None)]
+    public void ThinkingProtocol_IsSelectedFromModelCapability(
+        string model,
+        string family,
+        ModelThinkingControl expected)
+    {
+        Assert.Equal(expected, ModelThinkingPolicy.Resolve(model, family));
     }
 
     [Fact]
@@ -136,7 +252,7 @@ public sealed class LemonadeRuntimeTests
     }
 
     [Fact]
-    public async Task LargeTurn_ClampsOutputInsideSelectedContextBeforeGeneration()
+    public async Task LargeTurn_ForwardsSelectedOutputWithoutLocalClamping()
     {
         var handler = new RecordingHandler();
         using var client = new HttpClient(handler);
@@ -169,11 +285,11 @@ public sealed class LemonadeRuntimeTests
 
         var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
         using var payload = JsonDocument.Parse(chat.Body);
-        Assert.InRange(payload.RootElement.GetProperty("max_tokens").GetInt32(), 128, 2047);
+        Assert.Equal(2048, payload.RootElement.GetProperty("max_tokens").GetInt32());
     }
 
     [Fact]
-    public async Task OversizedTurn_IsRejectedBeforeGenerationWithReadableCapacityError()
+    public async Task OversizedTurn_IsForwardedWithoutLocalCapacityRejection()
     {
         var handler = new RecordingHandler();
         using var client = new HttpClient(handler);
@@ -197,16 +313,16 @@ public sealed class LemonadeRuntimeTests
                 false)
             { Engine = LocalRuntimeEngines.Lemonade, ReasoningEffort = "low" });
 
-        var error = await Assert.ThrowsAsync<ModelContextCapacityException>(() =>
-            runtime.GetResponseAsync(
-                [new Microsoft.Extensions.AI.ChatMessage(
-                    Microsoft.Extensions.AI.ChatRole.User,
-                    new string('x', 20_000))],
-                new ChatOptions { MaxOutputTokens = 2048 },
-                TestContext.Current.CancellationToken));
+        await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(
+                Microsoft.Extensions.AI.ChatRole.User,
+                new string('x', 20_000))],
+            new ChatOptions { MaxOutputTokens = 2048 },
+            TestContext.Current.CancellationToken);
 
-        Assert.Contains("No request was sent to the model", error.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        var chat = Assert.Single(handler.Requests, request => request.Path == "/api/v1/chat/completions");
+        using var payload = JsonDocument.Parse(chat.Body);
+        Assert.Equal(2048, payload.RootElement.GetProperty("max_tokens").GetInt32());
     }
 
     [Fact]
@@ -297,11 +413,44 @@ public sealed class LemonadeRuntimeTests
         Assert.Equal(candidate.ActiveProfile, controller.ActiveProfile);
     }
 
+    private static OpenAiCompatibleLocalModelRuntime CreateLemonadeRuntime(
+        HttpClient client,
+        string model,
+        string family,
+        bool thinkingEnabled,
+        int contextTokens = 8192,
+        int outputTokenLimit = 2048) =>
+        new(
+            client,
+            new OpenAiCompatibleRuntimeOptions(
+                true,
+                new Uri("http://127.0.0.1:13305/api/v1/"),
+                model,
+                model,
+                family,
+                "unknown",
+                "Installed package default",
+                contextTokens,
+                outputTokenLimit,
+                0.2,
+                0.9,
+                true,
+                false,
+                false,
+                false)
+            {
+                Engine = LocalRuntimeEngines.Lemonade,
+                ReasoningEffort = "low",
+                ThinkingEnabled = thinkingEnabled
+            });
+
     private sealed class RecordingHandler(
         HttpStatusCode chatStatus = HttpStatusCode.OK,
         string? chatResponseBody = null) : HttpMessageHandler
     {
         private bool _loaded;
+        private string _loadedModel = "gpt-oss-20b-mxfp4-GGUF";
+        private int _loadedContext = 8192;
 
         public List<RecordedRequest> Requests { get; } = [];
 
@@ -319,11 +468,28 @@ public sealed class LemonadeRuntimeTests
             if (request.RequestUri!.AbsolutePath == "/api/v1/load")
             {
                 _loaded = true;
+                using var load = JsonDocument.Parse(body);
+                _loadedModel = load.RootElement.GetProperty("model_name").GetString() ?? _loadedModel;
+                _loadedContext = load.RootElement.GetProperty("ctx_size").GetInt32();
             }
 
             var json = request.RequestUri!.AbsolutePath switch
             {
-                "/api/v1/health" when _loaded => "{\"status\":\"ok\",\"all_models_loaded\":[{\"model_name\":\"gpt-oss-20b-mxfp4-GGUF\",\"loaded\":true,\"status\":\"ready\",\"backend_health\":\"ready\",\"recipe_options\":{\"ctx_size\":8192}}]}",
+                "/api/v1/health" when _loaded => JsonSerializer.Serialize(new
+                {
+                    status = "ok",
+                    all_models_loaded = new[]
+                    {
+                        new
+                        {
+                            model_name = _loadedModel,
+                            loaded = true,
+                            status = "ready",
+                            backend_health = "ready",
+                            recipe_options = new { ctx_size = _loadedContext }
+                        }
+                    }
+                }),
                 "/api/v1/health" => "{\"status\":\"ok\",\"all_models_loaded\":[]}",
                 "/api/v1/load" => "{\"status\":\"ok\"}",
                 "/api/v1/chat/completions" => chatResponseBody

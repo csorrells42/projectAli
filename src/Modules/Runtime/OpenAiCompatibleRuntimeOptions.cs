@@ -23,6 +23,8 @@ public sealed record OpenAiCompatibleRuntimeOptions(
 
     public string? ReasoningEffort { get; init; }
 
+    public bool ThinkingEnabled { get; init; }
+
     public ModelProfile ToModelProfile(bool isLastKnownGood) =>
         new(
             ProfileId: $"openai-compatible-{Model}-{Quantization}-{ContextTokens}",
@@ -96,14 +98,13 @@ public static class LocalRuntimeEngines
 public static class OllamaRuntimeSafetyPolicy
 {
     public const int DefaultContextTokens = 8192;
-    public const int MaximumContextTokens = 131072;
     public const string KeepAlive = "30m";
     public const string DefaultGptOssReasoningEffort = "low";
 
     public static bool IsNativeOllamaEndpoint(Uri endpoint) => endpoint.Port == 11434;
 
-    public static int ClampContextTokens(int configured) =>
-        Math.Clamp(configured > 0 ? configured : DefaultContextTokens, 512, MaximumContextTokens);
+    public static int ResolveContextTokens(int configured) =>
+        configured > 0 ? configured : DefaultContextTokens;
 
     public static bool IsGptOssModel(string? model) =>
         !string.IsNullOrWhiteSpace(model)
@@ -132,7 +133,7 @@ public static class OllamaRuntimeSafetyPolicy
             ? options with
             {
                 Engine = LocalRuntimeEngines.Ollama,
-                ContextTokens = ClampContextTokens(options.ContextTokens),
+                ContextTokens = ResolveContextTokens(options.ContextTokens),
                 ReasoningEffort = IsGptOssModel(options.Model) || IsGptOssModel(options.Family)
                     ? ResolveReasoningEffort(options)
                     : null

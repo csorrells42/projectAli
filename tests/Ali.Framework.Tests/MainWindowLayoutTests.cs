@@ -45,9 +45,15 @@ public sealed class MainWindowLayoutTests
         var normalizedXaml = xaml.Replace("\r\n", "\n", StringComparison.Ordinal);
 
         Assert.Contains("AutomationProperties.AutomationId=\"MainChatReasoningEffort\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MainChatCodingExecutor\"", xaml, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment=\"Bottom\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Grid.RowSpan=\"2\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"1\"\n                      AutomationProperties.AutomationId=\"MainChatReasoningEffort\"", normalizedXaml, StringComparison.Ordinal);
+        Assert.Contains("Grid.Column=\"1\"\n                            Orientation=\"Horizontal\"", normalizedXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Coding\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Ali\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Aider\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"OpenHands\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Hybrid\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"Effort\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<Grid.RowDefinitions>", xaml, StringComparison.Ordinal);
@@ -77,6 +83,26 @@ public sealed class MainWindowLayoutTests
         Assert.Contains("_services.Qdrant.Status", viewModel, StringComparison.Ordinal);
         Assert.Contains("McpServerSettings.IsRunning", viewModel, StringComparison.Ordinal);
         Assert.Contains("ConversationBridgeSettings.IsRunning", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ActivityLog_RemainsExpanded_AutoScrolls_AndCanCopyCompleteHistory()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));
+        var codeBehind = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml.cs"));
+        var viewModel = File.ReadAllText(FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
+
+        Assert.Contains("AutomationProperties.AutomationId=\"MainChatCopyActivityLog\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding CopyAgentActivityCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AgentActivityScrollViewer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AgentActivities.CollectionChanged", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("AgentActivityScrollViewer.ScrollToEnd()", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("private bool _isAgentActivityExpanded = true;", viewModel, StringComparison.Ordinal);
+        Assert.Contains("System.Windows.Clipboard.SetText(log.ToString())", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ClearAgentActivity();\r\n        IsAgentActivityExpanded = false;",
+            viewModel,
+            StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(params string[] segments)

@@ -35,10 +35,6 @@ public sealed record UserMemorySettings
 
     public string CollectionName { get; init; } = "ali_user_memories";
 
-    public string LemonadeEndpoint { get; init; } = "http://127.0.0.1:13305/api/v1";
-
-    public string LlmModel { get; init; } = "gpt-oss-20b-mxfp4-GGUF";
-
     public string EmbeddingEndpoint { get; init; } = "http://127.0.0.1:13305/api/v1";
 
     public string EmbeddingModel { get; init; } = "nomic-embed-text-v1-GGUF";
@@ -60,9 +56,7 @@ public sealed record UserMemorySettings
         RecallSemanticOnlyMinimumLead = Math.Clamp(RecallSemanticOnlyMinimumLead, 0, 1),
         RecallMinimumKeywordScore = Math.Clamp(RecallMinimumKeywordScore, 0, 1),
         CollectionName = string.IsNullOrWhiteSpace(CollectionName) ? "ali_user_memories" : CollectionName.Trim(),
-        LemonadeEndpoint = RequireLoopback(LemonadeEndpoint, nameof(LemonadeEndpoint)),
         EmbeddingEndpoint = RequireLoopback(EmbeddingEndpoint, nameof(EmbeddingEndpoint)),
-        LlmModel = string.IsNullOrWhiteSpace(LlmModel) ? "gpt-oss-20b-mxfp4-GGUF" : LlmModel.Trim(),
         EmbeddingModel = string.IsNullOrWhiteSpace(EmbeddingModel) ? "nomic-embed-text-v1-GGUF" : EmbeddingModel.Trim(),
         EmbeddingDimensions = Math.Clamp(EmbeddingDimensions, 1, 8192),
         QdrantHost = QdrantHost.Trim() is "localhost" or "::1" ? QdrantHost.Trim() : "127.0.0.1",

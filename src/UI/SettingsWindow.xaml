@@ -536,11 +536,14 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="12" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="Context" Style="{StaticResource FieldLabel}" />
                                         <ComboBox ItemsSource="{Binding RuntimeContextChoices}"
                                                   SelectedItem="{Binding RuntimeContextText}"
+                                                  AutomationProperties.AutomationId="RuntimeContextSelector"
                                                   Margin="0,2,0,2" />
                                         <TextBlock Text="Memory window; higher uses more RAM."
                                                    TextWrapping="Wrap"
@@ -551,6 +554,7 @@
                                         <TextBlock Text="Output" Style="{StaticResource FieldLabel}" />
                                         <ComboBox ItemsSource="{Binding RuntimeOutputLimitChoices}"
                                                   SelectedItem="{Binding RuntimeOutputLimitText}"
+                                                  AutomationProperties.AutomationId="RuntimeOutputSelector"
                                                   Margin="0,2,0,2" />
                                         <TextBlock Text="Max reply length in tokens."
                                                    TextWrapping="Wrap"
@@ -575,6 +579,17 @@
                                                   Margin="0,2,0,2"
                                                   ToolTip="Optional nucleus sampling value. Use model default unless tuning is needed." />
                                         <TextBlock Text="Sampling cutoff; default is usually best."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="8">
+                                        <CheckBox Content="Enable model thinking"
+                                                  IsChecked="{Binding RuntimeThinkingEnabled}"
+                                                  AutomationProperties.AutomationId="RuntimeThinkingEnabled"
+                                                  Margin="0,0,0,2"
+                                                  ToolTip="Sent only when the selected model has a supported thinking control." />
+                                        <TextBlock Text="Unsupported models receive no thinking field."
                                                    TextWrapping="Wrap"
                                                    FontSize="11"
                                                    Foreground="{StaticResource SubtleTextBrush}" />
@@ -1845,29 +1860,14 @@
                                            FontSize="16"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Text="Ali stays in charge and remains the only user-facing personality. Choose which external engineering engine handles substantial coding work."
+                                <TextBlock Text="Ali stays in charge and remains the only user-facing personality. Choose Ali, Aider, or OpenHands from the Coding selector beside Effort in the main chat. This page reports provider readiness and configures OpenHands."
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,5,0,0" />
-                                <TextBlock Text="Programming mode"
-                                           Style="{StaticResource FieldLabel}"
-                                           Margin="0,12,0,0" />
-                                <ComboBox ItemsSource="{Binding ProgrammingAgentModeChoices}"
-                                          SelectedItem="{Binding SelectedProgrammingAgentMode, Mode=TwoWay}"
-                                          DisplayMemberPath="DisplayName"
-                                          AutomationProperties.AutomationId="SettingsProgrammingAgentMode" />
-                                <TextBlock Text="{Binding SelectedProgrammingAgentMode.Summary}"
-                                           Foreground="#8DDDF0"
-                                           TextWrapping="Wrap"
-                                           Margin="0,5,0,0" />
-                                <CheckBox Content="Always use the selected coding agent for programming work"
-                                          IsChecked="{Binding AlwaysUseProgrammingAgent, Mode=TwoWay}"
-                                          Margin="0,10,0,0"
-                                          AutomationProperties.AutomationId="SettingsAlwaysUseProgrammingAgent" />
-                                <TextBlock Text="When enabled, Ali must hand every semantically identified code implementation, modification, debugging, build, or test request to the selected engine before using her direct tools to verify the result."
+                                <TextBlock Text="Ali semantically decides whether the request is coding work. Ali uses her native programming tools when selected; Aider or OpenHands receives the implementation objective when selected. Ali then verifies direct evidence before claiming completion."
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextWrapping="Wrap"
-                                           Margin="22,3,0,0" />
+                                           Margin="0,8,0,0" />
                                 <TextBlock Text="OpenHands WSL distribution"
                                            Style="{StaticResource FieldLabel}"
                                            Margin="0,12,0,0" />

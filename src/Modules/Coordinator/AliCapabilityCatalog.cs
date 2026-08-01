@@ -7,6 +7,7 @@ namespace Ali.Modules.Coordinator;
 public static class AliCapabilityCatalog
 {
     public const string ListAvailableToolsName = "list_available_tools";
+    public const string SemanticDiscoverToolsName = "discover_capabilities";
     public const string GetActiveUserProfileName = "get_active_user_profile";
     public const string RecallUserMemoryName = "recall_user_memory";
     public const string RememberCurrentUserName = "remember_for_current_user";
@@ -135,6 +136,7 @@ public static class AliCapabilityCatalog
     public static IReadOnlyList<CoordinatorCapability> Tools { get; } =
     [
         new(ListAvailableToolsName, "Return Ali's exact currently registered model-callable tool catalog."),
+        new(SemanticDiscoverToolsName, "Semantically retrieve the most relevant live tool drawers for a described unmet need without interpreting the user's request by keyword."),
         new(GetActiveUserProfileName, "Return the explicitly selected local user's identity profile as authoritative data."),
         new(RecallUserMemoryName, "Recall relevant long-term memories for the active identity profile. The active user is resolved internally."),
         new(ForgetCurrentUserMemoryName, "Forget exactly one durable memory belonging to the active identity profile by its exact memory ID after confirmation."),
@@ -173,8 +175,8 @@ public static class AliCapabilityCatalog
         new(ReadAgentSkillResourceName, "Read one exact resource referenced by a loaded Agent Skill.", "Microsoft Agent Framework Agent Skills"),
         new(RunAgentSkillScriptName, "Run one exact script referenced by a loaded Agent Skill, subject to approval.", "Microsoft Agent Framework Agent Skills"),
         new(CodingListCapabilitiesName, "Return the live registered coding providers, toolchains, and shared execution/intelligence infrastructure.", "Ali multi-language coding foundation"),
-        new(CodingAgentStatusName, "Report the selected Aider, OpenHands, or Hybrid programming engine and readiness of both providers.", "Ali external coding agents"),
-        new(CodingAgentExecuteName, "Execute a substantial approved programming objective through Aider, OpenHands, or their Hybrid collaboration.", "Ali external coding agents"),
+        new(CodingAgentStatusName, "Report the selected external coding executor and readiness of Aider and OpenHands.", "Ali external coding agents"),
+        new(CodingAgentExecuteName, "Execute a substantial approved programming objective through the selected Aider or OpenHands executor.", "Ali external coding agents"),
         new(CodingInspectProjectName, "Detect an approved project's language, manifest, provider, capabilities, and toolchains.", "Ali multi-language coding foundation"),
         new(CodingIndexProjectName, "Build a bounded cross-language structural source index.", "Ali multi-language coding foundation"),
         new(CodingSearchSymbolsName, "Search the local cross-language source index for symbols.", "Ali multi-language coding foundation"),
@@ -296,10 +298,9 @@ public static class AliCapabilityCatalog
         IReadOnlyList<CoordinatorCapability> additionalTools,
         AgentOrchestrationSettings orchestrationSettings)
     {
-        var policy = orchestrationSettings.Normalize().MagenticPolicy;
-        var nativeTools = policy == MagenticPolicies.Off
-            ? Tools.Where(tool => tool.Name != RunMagenticOrchestrationName)
-            : Tools;
+        var normalized = orchestrationSettings.Normalize();
+        var policy = normalized.MagenticPolicy;
+        var nativeTools = VisibleNativeTools(normalized);
         var allTools = nativeTools.Concat(additionalTools).ToList();
         return
         new(
@@ -310,9 +311,7 @@ public static class AliCapabilityCatalog
     public static string BuildPromptManifest(AgentOrchestrationSettings? orchestrationSettings = null)
     {
         var settings = (orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize();
-        var visibleTools = settings.MagenticPolicy == MagenticPolicies.Off
-            ? Tools.Where(tool => tool.Name != RunMagenticOrchestrationName)
-            : Tools;
+        var visibleTools = VisibleNativeTools(settings);
         var manifest = new StringBuilder()
             .AppendLine("REGISTERED MODEL-CALLABLE TOOLS (authoritative; these are the only tools you may claim to have):");
         foreach (var tool in visibleTools)
@@ -330,5 +329,15 @@ public static class AliCapabilityCatalog
             + "Never resume an interrupted workflow automatically; use list_recoverable_workflows when continuity matters and call resume_workflow_checkpoint only after the user explicitly asks to continue that saved run. "
             + "Never claim calendar, email, arbitrary file-system, shell, camera, or generic browser-control access unless an enabled tool with that exact capability appears in the current turn.");
         return manifest.ToString();
+    }
+
+    internal static IEnumerable<CoordinatorCapability> VisibleNativeTools(AgentOrchestrationSettings settings)
+    {
+        var normalized = settings.Normalize();
+        return Tools.Where(tool =>
+            (normalized.MagenticPolicy != MagenticPolicies.Off
+                || tool.Name != RunMagenticOrchestrationName)
+            && (normalized.ProgrammingAgentMode != ProgrammingAgentModes.Off
+                || (tool.Name != CodingAgentStatusName && tool.Name != CodingAgentExecuteName)));
     }
 }

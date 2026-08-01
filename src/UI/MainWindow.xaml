@@ -924,14 +924,26 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Button Content="Clear"
-                                Command="{Binding ClearAgentActivityCommand}"
-                                HorizontalAlignment="Right"
-                                MinHeight="24"
-                                Height="24"
-                                Padding="8,0"
-                                Margin="0,0,0,4" />
-                        <ScrollViewer Grid.Row="1" MaxHeight="170" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,0,0,4">
+                            <Button Content="Copy log"
+                                    AutomationProperties.AutomationId="MainChatCopyActivityLog"
+                                    Command="{Binding CopyAgentActivityCommand}"
+                                    MinHeight="24"
+                                    Height="24"
+                                    Padding="8,0"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Clear"
+                                    Command="{Binding ClearAgentActivityCommand}"
+                                    MinHeight="24"
+                                    Height="24"
+                                    Padding="8,0" />
+                        </StackPanel>
+                        <ScrollViewer x:Name="AgentActivityScrollViewer"
+                                      Grid.Row="1"
+                                      MaxHeight="170"
+                                      VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding AgentActivities}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type vm:AgentActivityItemViewModel}">
@@ -1032,44 +1044,80 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="1"
-                      Grid.RowSpan="2"
-                      Grid.Column="1"
-                      AutomationProperties.AutomationId="MainChatReasoningEffort"
-                      HorizontalAlignment="Right"
-                      VerticalAlignment="Bottom"
-                      Margin="0,0,8,8"
-                      ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <TextBlock Text="Effort"
-                               Foreground="{StaticResource MutedTextBrush}"
-                               FontSize="10"
-                               FontWeight="SemiBold"
-                               HorizontalAlignment="Center"
-                               Margin="0,0,0,2" />
-                    <RadioButton Grid.Row="1"
-                                 Content="Low"
-                                 GroupName="ReasoningEffort"
-                                 IsChecked="{Binding IsReasoningLow}"
-                                 Foreground="{StaticResource TextBrush}"
-                                 Margin="0,0,0,2" />
-                    <RadioButton Grid.Row="2"
-                                 Content="Medium"
-                                 GroupName="ReasoningEffort"
-                                 IsChecked="{Binding IsReasoningMedium}"
-                                 Foreground="{StaticResource TextBrush}"
-                                 Margin="0,0,0,2" />
-                    <RadioButton Grid.Row="3"
-                                 Content="High"
-                                 GroupName="ReasoningEffort"
-                                 IsChecked="{Binding IsReasoningHigh}"
-                                 Foreground="{StaticResource TextBrush}" />
-                </Grid>
+                <StackPanel Grid.Row="1"
+                            Grid.RowSpan="2"
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Margin="0,0,8,8">
+                    <Grid AutomationProperties.AutomationId="MainChatCodingExecutor"
+                          Margin="0,0,18,0"
+                          ToolTip="When Ali semantically identifies a coding task, this selected executor handles the implementation. Ali verifies the result.">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Coding"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,2" />
+                        <RadioButton Grid.Row="1"
+                                     Content="Ali"
+                                     GroupName="CodingExecutor"
+                                     IsChecked="{Binding IsCodingExecutorAli}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,0,2" />
+                        <RadioButton Grid.Row="2"
+                                     Content="Aider"
+                                     GroupName="CodingExecutor"
+                                     IsChecked="{Binding IsCodingExecutorAider}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,0,2" />
+                        <RadioButton Grid.Row="3"
+                                     Content="OpenHands"
+                                     GroupName="CodingExecutor"
+                                     IsChecked="{Binding IsCodingExecutorOpenHands}"
+                                     Foreground="{StaticResource TextBrush}" />
+                    </Grid>
+
+                    <Grid AutomationProperties.AutomationId="MainChatReasoningEffort"
+                          ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Effort"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,2" />
+                        <RadioButton Grid.Row="1"
+                                     Content="Low"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningLow}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,0,2" />
+                        <RadioButton Grid.Row="2"
+                                     Content="Medium"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningMedium}"
+                                     Foreground="{StaticResource TextBrush}"
+                                     Margin="0,0,0,2" />
+                        <RadioButton Grid.Row="3"
+                                     Content="High"
+                                     GroupName="ReasoningEffort"
+                                     IsChecked="{Binding IsReasoningHigh}"
+                                     Foreground="{StaticResource TextBrush}" />
+                    </Grid>
+                </StackPanel>
 
                 <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="6,8,6,0">
                     <Grid.ColumnDefinitions>

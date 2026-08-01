@@ -2,7 +2,7 @@ namespace Ali.Framework.Tests;
 
 public sealed class AgentFrameworkFoundationTests
 {
-    private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    private static readonly string RepositoryRoot = TestRepository.Root;
 
     [Fact]
     public void ReviewedSkillsAreShippedWithProgressiveDisclosureMetadata()
@@ -35,10 +35,13 @@ public sealed class AgentFrameworkFoundationTests
     public void AuthoritativeInventoryIncludesFrameworkModeAndSkillTools()
     {
         var inventory = Ali.Modules.Coordinator.AliCapabilityCatalog.ListAvailableTools(
-            new Ali.Modules.Coordinator.AgentOrchestrationSettings());
+            new Ali.Modules.Coordinator.AgentOrchestrationSettings
+            {
+                ProgrammingAgentMode = Ali.Modules.Coordinator.ProgrammingAgentModes.Aider
+            });
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(123, names.Length);
+        Assert.Equal(124, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName, names);

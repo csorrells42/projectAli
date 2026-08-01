@@ -95,9 +95,7 @@ class Worker:
                         "api_key": "ali-local-only",
                         "openai_base_url": llm_endpoint,
                         "temperature": 0.1,
-                        "max_tokens": 512,
-                        "reasoning_effort": "low",
-                        "is_reasoning_model": True,
+                        "max_tokens": args.llm_output_tokens,
                     },
                 },
                 "embedder": {
@@ -241,6 +239,7 @@ def main() -> int:
     parser.add_argument("--collection", required=True)
     parser.add_argument("--llm-endpoint", required=True)
     parser.add_argument("--llm-model", required=True)
+    parser.add_argument("--llm-output-tokens", type=int, required=True)
     parser.add_argument("--embedding-endpoint", required=True)
     parser.add_argument("--embedding-model", required=True)
     parser.add_argument("--embedding-dimensions", type=int, required=True)

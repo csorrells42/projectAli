@@ -8,8 +8,7 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     private readonly AliServices _services;
     private MagenticPolicyChoice _selectedMagenticPolicy = MagenticPolicyChoice.AskFirst;
     private int _magenticMaximumRounds = 6;
-    private ProgrammingAgentModeChoice _selectedProgrammingAgentMode = ProgrammingAgentModeChoice.Hybrid;
-    private bool _alwaysUseProgrammingAgent;
+    private string _selectedProgrammingAgentMode = ProgrammingAgentModes.Off;
     private string _openHandsWslDistribution = "Ubuntu-24.04";
     private string _aiderStatusText = "Aider readiness has not been checked yet.";
     private string _openHandsStatusText = "OpenHands readiness has not been checked yet.";
@@ -35,13 +34,6 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
 
     public IReadOnlyList<int> MaximumRoundChoices { get; } = Enumerable.Range(2, 11).ToArray();
 
-    public IReadOnlyList<ProgrammingAgentModeChoice> ProgrammingAgentModeChoices { get; } =
-    [
-        ProgrammingAgentModeChoice.Aider,
-        ProgrammingAgentModeChoice.OpenHands,
-        ProgrammingAgentModeChoice.Hybrid
-    ];
-
     public MagenticPolicyChoice SelectedMagenticPolicy
     {
         get => _selectedMagenticPolicy;
@@ -54,16 +46,10 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         set => SetProperty(ref _magenticMaximumRounds, Math.Clamp(value, 2, 12));
     }
 
-    public ProgrammingAgentModeChoice SelectedProgrammingAgentMode
+    public string SelectedProgrammingAgentMode
     {
         get => _selectedProgrammingAgentMode;
-        set => SetProperty(ref _selectedProgrammingAgentMode, value ?? ProgrammingAgentModeChoice.Hybrid);
-    }
-
-    public bool AlwaysUseProgrammingAgent
-    {
-        get => _alwaysUseProgrammingAgent;
-        set => SetProperty(ref _alwaysUseProgrammingAgent, value);
+        private set => SetProperty(ref _selectedProgrammingAgentMode, ProgrammingAgentModes.Normalize(value));
     }
 
     public string OpenHandsWslDistribution
@@ -108,15 +94,19 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
 
     public ICommand RefreshProgrammingAgentsCommand { get; }
 
+    public void SelectProgrammingAgentMode(string mode)
+    {
+        SelectedProgrammingAgentMode = mode;
+        Save();
+    }
+
     public void Reload()
     {
         var settings = _services.LoadAgentOrchestrationSettings();
         SelectedMagenticPolicy = MagenticPolicyChoices.First(choice =>
             choice.Value == settings.MagenticPolicy);
         MagenticMaximumRounds = settings.MagenticMaximumRounds;
-        SelectedProgrammingAgentMode = ProgrammingAgentModeChoices.First(choice =>
-            choice.Value == settings.ProgrammingAgentMode);
-        AlwaysUseProgrammingAgent = settings.AlwaysUseProgrammingAgent;
+        SelectedProgrammingAgentMode = settings.ProgrammingAgentMode;
         OpenHandsWslDistribution = settings.OpenHandsWslDistribution;
         RefreshCheckpointSummary();
         _ = RefreshProgrammingAgentsAsync();
@@ -129,13 +119,13 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         {
             MagenticPolicy = SelectedMagenticPolicy.Value,
             MagenticMaximumRounds = MagenticMaximumRounds,
-            ProgrammingAgentMode = SelectedProgrammingAgentMode.Value,
-            AlwaysUseProgrammingAgent = AlwaysUseProgrammingAgent,
+            ProgrammingAgentMode = SelectedProgrammingAgentMode,
+            AlwaysUseProgrammingAgent = SelectedProgrammingAgentMode != ProgrammingAgentModes.Off,
             OpenHandsWslDistribution = OpenHandsWslDistribution
         });
         RefreshCheckpointSummary();
         _ = RefreshProgrammingAgentsAsync();
-        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}; programming engine: {SelectedProgrammingAgentMode.DisplayName}; required for programming work: {(AlwaysUseProgrammingAgent ? "yes" : "no")}. Changes apply on Ali's next turn.";
+        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}; coding executor: {DisplayProgrammingAgentMode(SelectedProgrammingAgentMode)}. Ali will semantically identify coding work and use that executor on the next turn.";
     }
 
     private void ArchiveCheckpoints()
@@ -172,6 +162,14 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     private void HandleError(Exception ex) =>
         StatusText = $"Agent orchestration settings failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}";
 
+    private static string DisplayProgrammingAgentMode(string mode) =>
+        ProgrammingAgentModes.Normalize(mode) switch
+        {
+            ProgrammingAgentModes.Aider => "Aider",
+            ProgrammingAgentModes.OpenHands => "OpenHands",
+            _ => "Ali"
+        };
+
     private async Task RefreshProgrammingAgentsAsync()
     {
         try
@@ -188,24 +186,6 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
             OpenHandsStatusText = $"Provider readiness check failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}";
         }
     }
-}
-
-public sealed record ProgrammingAgentModeChoice(string Value, string DisplayName, string Summary)
-{
-    public static ProgrammingAgentModeChoice Aider { get; } = new(
-        ProgrammingAgentModes.Aider,
-        "Aider",
-        "Architect and refinement first. Best when design quality, repo-map context, and precise edits matter most.");
-
-    public static ProgrammingAgentModeChoice OpenHands { get; } = new(
-        ProgrammingAgentModes.OpenHands,
-        "OpenHands",
-        "Autonomous implementation first. Best for grinding through complete multi-step coding work.");
-
-    public static ProgrammingAgentModeChoice Hybrid { get; } = new(
-        ProgrammingAgentModes.Hybrid,
-        "Hybrid",
-        "OpenHands implements, Aider reviews and refines, then Ali checks direct evidence before claiming completion.");
 }
 
 public sealed record MagenticPolicyChoice(string Value, string DisplayName, string Summary)

@@ -143,8 +143,8 @@ internal sealed record RuntimeModelChoice(
             ?? (normalizedModel.Contains("vl", StringComparison.OrdinalIgnoreCase)
                 || normalizedModel.Contains("vision", StringComparison.OrdinalIgnoreCase)
                 || normalizedModel.Contains("visual", StringComparison.OrdinalIgnoreCase));
-        var contextChoices = BuildContextChoices(normalizedModel, contextTokens);
-        var outputChoices = BuildOutputChoices(normalizedModel, outputTokenLimit);
+        var contextChoices = BuildContextChoices(contextTokens);
+        var outputChoices = BuildOutputChoices(outputTokenLimit);
         var quantizationChoices = new[]
         {
             string.IsNullOrWhiteSpace(quantization) ? "Installed package default" : quantization.Trim()
@@ -163,29 +163,35 @@ internal sealed record RuntimeModelChoice(
             source);
     }
 
-    private static IReadOnlyList<int> BuildContextChoices(string model, int? preferred)
-    {
-        var lower = model.ToLowerInvariant();
-        var values = lower.Contains("gpt-oss", StringComparison.Ordinal)
-            ? new[] { 4096, 8192, 16384, 32768, 65536, 131072 }
-            : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("26b", StringComparison.Ordinal)
-            ? new[] { 4096, 8192, 16384 }
-            : lower.Contains("gemma4", StringComparison.Ordinal) && lower.Contains("12b", StringComparison.Ordinal)
-                ? new[] { 2048, 4096, 8192, 16384 }
-                : lower.Contains("32b", StringComparison.Ordinal)
-            ? new[] { 2048, 4096 }
-            : lower.Contains("1.7b", StringComparison.Ordinal) || lower.Contains("4b", StringComparison.Ordinal)
-                ? new[] { 1024, 2048, 4096, 8192 }
-                : new[] { 2048, 4096, 8192 };
-
-        return AddPreferred(values, preferred, minimum: 512);
-    }
-
-    private static IReadOnlyList<int> BuildOutputChoices(string model, int? preferred) =>
+    private static IReadOnlyList<int> BuildContextChoices(int? preferred) =>
         AddPreferred(
-            model.Contains("gpt-oss", StringComparison.OrdinalIgnoreCase)
-                ? [512, 1024, 2048, 3072, 4096, 8192, 16384]
-                : [128, 256, 512],
+            [
+                1_024,
+                2_048,
+                4_096,
+                8_192,
+                16_384,
+                32_768,
+                65_536,
+                131_072,
+                262_144
+            ],
+            preferred,
+            minimum: 512);
+
+    private static IReadOnlyList<int> BuildOutputChoices(int? preferred) =>
+        AddPreferred(
+            [
+                128,
+                256,
+                512,
+                1_024,
+                2_048,
+                4_096,
+                8_192,
+                16_384,
+                32_768
+            ],
             preferred,
             minimum: 1);
 
@@ -259,7 +265,7 @@ internal sealed record RuntimeModelChoice(
 
     private static string InferSize(string model)
     {
-        foreach (var size in new[] { "1.7B", "4B", "8B", "12B", "14B", "16B", "20B", "26B", "27B", "32B", "120B" })
+        foreach (var size in new[] { "120B", "32B", "27B", "26B", "20B", "16B", "14B", "12B", "8B", "4B", "1.7B" })
         {
             if (model.Contains(size, StringComparison.OrdinalIgnoreCase))
             {
