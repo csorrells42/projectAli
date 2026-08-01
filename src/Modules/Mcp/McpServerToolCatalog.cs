@@ -5,6 +5,7 @@ using Ali.Modules.Internet;
 using Ali.Modules.Memory;
 using Ali.Modules.Reminders;
 using Ali.Modules.UserMemory;
+using Ali.Modules.WorkstationFiles;
 using Microsoft.Extensions.AI;
 using ModelContextProtocol.Server;
 
@@ -28,6 +29,9 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.CreateCalendarEventName, "Create a persistent iCalendar event with a Windows scheduled notification.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.GetAssistantIdentityName, "Return Ali's configured assistant identity.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.GetCurrentLocalTimeName, "Return the computer's current local time and time zone."),
+        Policy(AliCapabilityCatalog.FileReadName, "Read an exact text file from an approved workstation root.", readsPrivateData: true),
+        Policy(AliCapabilityCatalog.FileWriteName, "Create or explicitly overwrite an exact text file under an approved workstation root.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.FileReplaceName, "Replace exact text in an existing file under an approved workstation root.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingListCapabilitiesName, "List live coding providers and shared infrastructure."),
         Policy(AliCapabilityCatalog.CodingInspectProjectName, "Detect an approved project's language and provider.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingIndexProjectName, "Build a bounded local source index.", readsPrivateData: true),
@@ -164,6 +168,7 @@ internal sealed class AliMcpServerToolFactory
     private readonly AliReminderTools _reminderTools;
     private readonly AliIdentityTimeTools _identityTimeTools;
     private readonly AliCodingModule? _codingModule;
+    private readonly McpSourceFileTools? _sourceFileTools;
 
     public AliMcpServerToolFactory(
         ISourceRetriever localLibrary,
@@ -172,7 +177,8 @@ internal sealed class AliMcpServerToolFactory
         IMemoryStore memories,
         IReminderStore reminders,
         AssistantProfile assistantProfile,
-        AliCodingModule? codingModule = null)
+        AliCodingModule? codingModule = null,
+        AliWorkstationFileAccess? fileAccess = null)
     {
         _activeUserTools = new AliActiveUserTools(null, static () => null);
         _memoryTools = new AliMemoryTools(memories, static () => null);
@@ -181,6 +187,7 @@ internal sealed class AliMcpServerToolFactory
         _reminderTools = new AliReminderTools(reminders, static () => null);
         _identityTimeTools = new AliIdentityTimeTools(assistantProfile);
         _codingModule = codingModule;
+        _sourceFileTools = fileAccess is null ? null : new McpSourceFileTools(fileAccess);
     }
 
     public AliMcpServerToolFactory(
@@ -193,7 +200,8 @@ internal sealed class AliMcpServerToolFactory
         IUserMemoryService userMemories,
         IActiveUserSession activeUsers,
         Func<UserMemorySettings> memorySettings,
-        AliCodingModule? codingModule = null)
+        AliCodingModule? codingModule = null,
+        AliWorkstationFileAccess? fileAccess = null)
     {
         _activeUserTools = new AliActiveUserTools(activeUsers, static () => null);
         _memoryTools = new AliMemoryTools(userMemories, activeUsers, memorySettings, static () => null);
@@ -202,6 +210,7 @@ internal sealed class AliMcpServerToolFactory
         _reminderTools = new AliReminderTools(reminders, static () => null);
         _identityTimeTools = new AliIdentityTimeTools(assistantProfile);
         _codingModule = codingModule;
+        _sourceFileTools = fileAccess is null ? null : new McpSourceFileTools(fileAccess);
     }
 
     public IReadOnlyList<McpServerTool> CreateTools(McpServerSettings settings)
@@ -281,6 +290,22 @@ internal sealed class AliMcpServerToolFactory
             {
                 functions[function.Name] = function;
             }
+        }
+
+        if (_sourceFileTools is not null)
+        {
+            functions[AliCapabilityCatalog.FileReadName] = AIFunctionFactory.Create(
+                (Func<string, CancellationToken, Task<McpSourceFileResult>>)_sourceFileTools.ReadAsync,
+                AliCapabilityCatalog.FileReadName,
+                "Read one UTF-8 text file. fileName may be an approved absolute path or a virtual path beginning with Workspace, Desktop, Documents, Downloads, or Exports.");
+            functions[AliCapabilityCatalog.FileWriteName] = AIFunctionFactory.Create(
+                (Func<string, string, bool, CancellationToken, Task<McpSourceFileResult>>)_sourceFileTools.WriteAsync,
+                AliCapabilityCatalog.FileWriteName,
+                "Create or overwrite one UTF-8 text file without shell quoting. Use overwrite=false for a new file. Use overwrite=true only when replacing the entire existing file is intended and approved.");
+            functions[AliCapabilityCatalog.FileReplaceName] = AIFunctionFactory.Create(
+                (Func<string, string, string, bool, CancellationToken, Task<McpSourceFileResult>>)_sourceFileTools.ReplaceAsync,
+                AliCapabilityCatalog.FileReplaceName,
+                "Replace exact ordinal text in one existing file without shell quoting. Set replaceAll=false for the first exact occurrence or true for every exact occurrence.");
         }
 
         return settings.Tools

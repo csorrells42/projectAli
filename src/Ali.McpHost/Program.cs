@@ -16,7 +16,8 @@ internal static class Program
             await using var tools = HeadlessMcpToolRuntime.Create(
                 configuration.DataRoot,
                 AppContext.BaseDirectory,
-                configuration.ServerSettings);
+                configuration.ServerSettings,
+                configuration.WorkspaceRoot);
 
             var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
             {

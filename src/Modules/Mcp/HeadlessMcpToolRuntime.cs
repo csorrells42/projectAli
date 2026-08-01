@@ -47,7 +47,8 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
     public static HeadlessMcpToolRuntime Create(
         string dataRoot,
         string applicationBaseDirectory,
-        McpServerSettings settings)
+        McpServerSettings settings,
+        string? workspaceRoot = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationBaseDirectory);
@@ -95,11 +96,12 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
-        var fileAccess = AliWorkstationFileAccess.CreateDefault(
+        var fileAccess = CreateFileAccess(
             userDataRoot,
             profileDataRoot,
             toolPermissions,
-            activeUsers);
+            activeUsers,
+            workspaceRoot);
         var codingModule = new AliCodingModule(
             fileAccess,
             () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
@@ -125,7 +127,8 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             userMemories,
             activeUsers,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-            codingModule);
+            codingModule,
+            fileAccess);
 
         return new HeadlessMcpToolRuntime(
             toolFactory.CreateTools(settings),
@@ -134,6 +137,34 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             qdrant,
             userMemories,
             codingModule);
+    }
+
+    internal static AliWorkstationFileAccess CreateFileAccess(
+        string userDataRoot,
+        string profileDataRoot,
+        AgentToolPermissionStore permissions,
+        IActiveUserSession? activeUsers,
+        string? workspaceRoot)
+    {
+        var defaultAccess = AliWorkstationFileAccess.CreateDefault(
+            userDataRoot,
+            profileDataRoot,
+            permissions,
+            activeUsers);
+        if (string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            return defaultAccess;
+        }
+
+        var resolvedWorkspaceRoot = Path.GetFullPath(
+            Environment.ExpandEnvironmentVariables(workspaceRoot));
+        var mounts = defaultAccess.Mounts
+            .Select(mount => mount.Name.Equals("Workspace", StringComparison.OrdinalIgnoreCase)
+                ? new AliWorkstationFileMount("Workspace", resolvedWorkspaceRoot)
+                : mount)
+            .ToArray();
+        var store = new AliWorkstationFileStore(mounts, defaultAccess.RecoverableTrashPath);
+        return new AliWorkstationFileAccess(store, defaultAccess.Audit, permissions);
     }
 
     public async ValueTask DisposeAsync()

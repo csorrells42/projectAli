@@ -7,6 +7,7 @@ namespace Ali.McpHost;
 internal sealed record AliMcpHostConfiguration(
     string Path,
     string DataRoot,
+    string? WorkspaceRoot,
     McpServerSettings ServerSettings)
 {
     public static AliMcpHostConfiguration LoadOrCreate(string path)
@@ -32,6 +33,10 @@ internal sealed record AliMcpHostConfiguration(
                 ? "%LOCALAPPDATA%\\AliFiles"
                 : dataRootText,
             System.IO.Path.GetDirectoryName(path)!);
+        var workspaceRootText = root.Element("WorkspaceRoot")?.Value.Trim();
+        var workspaceRoot = string.IsNullOrWhiteSpace(workspaceRootText)
+            ? null
+            : ResolvePath(workspaceRootText, System.IO.Path.GetDirectoryName(path)!);
 
         var toolsElement = root.Element("Tools");
         var defaultEnabled = ParseBoolean(
@@ -77,6 +82,7 @@ internal sealed record AliMcpHostConfiguration(
         return new AliMcpHostConfiguration(
             path,
             dataRoot,
+            workspaceRoot,
             new McpServerSettings
             {
                 Enabled = true,
@@ -107,6 +113,8 @@ internal sealed record AliMcpHostConfiguration(
             new XElement("AliMcpHost",
                 new XComment("Open Interpreter starts this process through MCP standard I/O."),
                 new XElement("DataRoot", "%LOCALAPPDATA%\\AliFiles"),
+                new XComment("Set WorkspaceRoot to the exact Open Interpreter workspace. Leave it empty to use Ali's private workspace."),
+                new XElement("WorkspaceRoot"),
                 new XElement("Tools",
                     new XAttribute("DefaultEnabled", true),
                     new XComment("Set Enabled to false to hide a tool. New Ali tools follow DefaultEnabled."),

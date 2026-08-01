@@ -166,6 +166,8 @@ public sealed class McpServerTests
         var localSources = new RecordingSourceRetriever("local");
         var memories = new FileMemoryStore(root);
         var reminders = new FileReminderStore(root);
+        var fileAccess = CreateFileAccess(root);
+        await using var codingModule = new AliCodingModule(fileAccess);
         var codingRoot = Path.Combine(root, "workspace", "McpCode");
         Directory.CreateDirectory(codingRoot);
         await File.WriteAllTextAsync(
@@ -183,7 +185,8 @@ public sealed class McpServerTests
             memories,
             reminders,
             AssistantProfile.Create("Ali"),
-            CreateCodingModule(root));
+            codingModule,
+            fileAccess);
         await using var host = new McpServerHost(root, toolFactory);
         host.SaveSettings(new McpServerSettings
         {
@@ -268,6 +271,23 @@ public sealed class McpServerTests
             });
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.GetAssistantIdentityName, []);
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.GetCurrentLocalTimeName, []);
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.FileWriteName, new()
+            {
+                ["fileName"] = "Workspace/McpCode/editor-test.txt",
+                ["content"] = "alpha beta",
+                ["overwrite"] = false
+            });
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.FileReplaceName, new()
+            {
+                ["fileName"] = "Workspace/McpCode/editor-test.txt",
+                ["oldText"] = "beta",
+                ["newText"] = "gamma",
+                ["replaceAll"] = false
+            });
+            await CallSuccessfullyAsync(client, AliCapabilityCatalog.FileReadName, new()
+            {
+                ["fileName"] = "Workspace/McpCode/editor-test.txt"
+            });
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.RoslynInspectSolutionName, new()
             {
                 ["targetPath"] = "Workspace/McpCode/McpCode.csproj"
@@ -277,10 +297,47 @@ public sealed class McpServerTests
             Assert.Single(reminders.List().Reminders);
             Assert.Equal(1, webSources.CallCount);
             Assert.Equal(1, localSources.CallCount);
+            Assert.Equal("alpha gamma", await File.ReadAllTextAsync(
+                Path.Combine(codingRoot, "editor-test.txt"),
+                TestContext.Current.CancellationToken));
         }
         finally
         {
             await host.StopAsync(TestContext.Current.CancellationToken);
+            DeleteTemporaryRoot(root);
+        }
+    }
+
+    [Fact]
+    public async Task HeadlessFileAccess_ConfiguredWorkspaceMountTargetsInterpreterWorkspace()
+    {
+        var root = CreateTemporaryRoot();
+        var workspace = Path.Combine(root, "interpreter-workspace");
+        Directory.CreateDirectory(workspace);
+        try
+        {
+            var permissions = new AgentToolPermissionStore(root);
+            var access = HeadlessMcpToolRuntime.CreateFileAccess(
+                Path.Combine(root, "data"),
+                Path.Combine(root, "profile"),
+                permissions,
+                activeUsers: null,
+                workspace);
+
+            await access.Store.WriteAsync(
+                "Workspace/GothicTicTacToe/MainWindow.xaml",
+                "<Window />",
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                "<Window />",
+                await File.ReadAllTextAsync(
+                    Path.Combine(workspace, "GothicTicTacToe", "MainWindow.xaml"),
+                    TestContext.Current.CancellationToken));
+            Assert.False(File.Exists(Path.Combine(root, "data", "Workspace", "GothicTicTacToe", "MainWindow.xaml")));
+        }
+        finally
+        {
             DeleteTemporaryRoot(root);
         }
     }
@@ -373,7 +430,7 @@ public sealed class McpServerTests
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    private static AliCodingModule CreateCodingModule(string root)
+    private static AliWorkstationFileAccess CreateFileAccess(string root)
     {
         var permissions = new AgentToolPermissionStore(root);
         var store = new AliWorkstationFileStore(
@@ -381,7 +438,7 @@ public sealed class McpServerTests
             new AliWorkstationFileMount("Workspace", Path.Combine(root, "workspace"))
         ], Path.Combine(root, "trash"));
         var audit = new AgentFileActionAuditStore(root, activeUsers: null);
-        return new AliCodingModule(new AliWorkstationFileAccess(store, audit, permissions));
+        return new AliWorkstationFileAccess(store, audit, permissions);
     }
 
     private static string CreateTemporaryRoot()
