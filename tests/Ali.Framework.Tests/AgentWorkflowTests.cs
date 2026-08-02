@@ -35,7 +35,7 @@ public sealed class AgentWorkflowTests
     }
 
     [Fact]
-    public void Catalog_RegistersOfficialSequentialAndGroupChatWorkflows()
+    public void CompatibilityCatalog_KeepsDormantWorkflowDefinitionsOutOfProduction()
     {
         var workflows = AliCapabilityCatalog.Tools
             .Where(item => item.Source == "Microsoft Agent Framework workflow")
@@ -46,8 +46,11 @@ public sealed class AgentWorkflowTests
         Assert.Contains(workflows, item => item.Name == AliCapabilityCatalog.RunProgrammingGroupChatName);
         Assert.Contains(workflows, item => item.Name == AliCapabilityCatalog.RunMagenticOrchestrationName);
         Assert.Equal(4, AliAgentWorkflowFactory.ProgrammingMaximumTurns);
-        Assert.True(AliToolPermissionPolicy.RequiresApproval(
-            AliCapabilityCatalog.RunMagenticOrchestrationName));
+        Assert.All(workflows, item => Assert.True(
+            AliProductionCapabilityCatalog.IsRetiredToolName(item.Name)));
+        Assert.DoesNotContain(
+            AliCapabilityCatalog.RunMagenticOrchestrationName,
+            AliToolPermissionPolicy.ProtectedTools.Select(policy => policy.ToolName));
     }
 
     [Fact]

@@ -32,7 +32,26 @@ public sealed class AgentFrameworkFoundationTests
     }
 
     [Fact]
-    public void AuthoritativeInventoryIncludesFrameworkToolsAndRetiresExternalCodingTools()
+    public void ProductionComposition_ConstructsNoRetiredSecondaryAgentGraph()
+    {
+        var runner = File.ReadAllText(Path.Combine(RepositoryRoot, "src", "Modules", "Coordinator", "AliAgentHarnessRunner.cs"));
+        var coding = File.ReadAllText(Path.Combine(RepositoryRoot, "src", "Modules", "Coding", "AliCodingModule.cs"));
+        var catalog = File.ReadAllText(Path.Combine(RepositoryRoot, "src", "Modules", "Coordinator", "AliToolCatalog.cs"));
+        var services = File.ReadAllText(Path.Combine(RepositoryRoot, "src", "AliServices.cs"));
+        var headless = File.ReadAllText(Path.Combine(RepositoryRoot, "src", "Modules", "Mcp", "HeadlessMcpToolRuntime.cs"));
+
+        Assert.DoesNotContain("new AliSpecialistAgentFactory", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("new AliAgentWorkflowFactory", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateStandardTools(", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateMagenticTool(", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("new AliExternalCodingAgents", coding, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProgressReported +=", catalog, StringComparison.Ordinal);
+        Assert.Contains("new AliCodingModule(fileAccess)", services, StringComparison.Ordinal);
+        Assert.Contains("new AliCodingModule(fileAccess)", headless, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuthoritativeInventoryIncludesFrameworkToolsAndRetiresNestedOrchestration()
     {
         var inventory = Ali.Modules.Coordinator.AliCapabilityCatalog.ListAvailableTools(
             new Ali.Modules.Coordinator.AgentOrchestrationSettings
@@ -41,10 +60,22 @@ public sealed class AgentFrameworkFoundationTests
             });
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(122, names.Length);
+        Assert.Equal(114, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
-        Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName, names);
-        Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName, names);
+        var retiredNames = new[]
+        {
+            Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.ConsultSoftwareEngineerName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.ConsultResearcherName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.ConsultOfficeSpecialistName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.RunResearchArtifactWorkflowName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.RunProgrammingGroupChatName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.RunMagenticOrchestrationName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.ListRecoverableWorkflowsName,
+            Ali.Modules.Coordinator.AliCapabilityCatalog.ResumeWorkflowCheckpointName
+        };
+        Assert.All(retiredNames, retiredName => Assert.DoesNotContain(retiredName, names));
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.GetActiveUserProfileName, names);
         Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.RememberCurrentUserName, names);
@@ -54,18 +85,17 @@ public sealed class AgentFrameworkFoundationTests
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.LoadAgentSkillName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.ReadAgentSkillResourceName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.RunAgentSkillScriptName, names);
-        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.ListRecoverableWorkflowsName, names);
-        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.ResumeWorkflowCheckpointName, names);
     }
 
     [Fact]
-    public void ArchitectureKeepsOnePersonalityAndBoundsMagenticMode()
+    public void ArchitectureDocumentsOneAuthoritativePlannerAndInertLegacyCheckpoints()
     {
         var path = Path.Combine(RepositoryRoot, "docs", "AgentFrameworkArchitecture.md");
         var text = File.ReadAllText(path);
-        Assert.Contains("Ali is the only user-facing identity", text, StringComparison.Ordinal);
-        Assert.Contains("Concurrent/background agents:** disabled", text, StringComparison.Ordinal);
-        Assert.Contains("Magentic is never used for greetings", text, StringComparison.Ordinal);
-        Assert.Contains("Hidden reasoning is never", text, StringComparison.Ordinal);
+        Assert.Contains("one production Agent Framework Harness agent", text, StringComparison.Ordinal);
+        Assert.Contains("does not construct or register private specialist agents", text, StringComparison.Ordinal);
+        Assert.Contains("Legacy nested-workflow checkpoint files", text, StringComparison.Ordinal);
+        Assert.Contains("does not open, modify, delete, offer, or resume them", text, StringComparison.Ordinal);
+        Assert.Contains("Activity reports the visible lifecycle", text, StringComparison.Ordinal);
     }
 }

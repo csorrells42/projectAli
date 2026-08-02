@@ -94,28 +94,43 @@ public sealed class SemanticToolCatalogTests
     }
 
     [Fact]
-    public async Task LiveSemanticDirectory_OmitsRetiredExternalCodingAgentDrawer()
+    public async Task LiveSemanticDirectory_OmitsRetiredSingleLoopSurfaces()
     {
-        var tools = AliCapabilityCatalog.Tools
+        var allTools = AliCapabilityCatalog.Tools
             .Select(capability => (AIFunctionDeclaration)AIFunctionFactory.Create(
                 () => capability.Name,
                 capability.Name,
                 capability.Description))
             .ToArray();
+        var liveTools = allTools
+            .Where(tool => !RetiredSingleLoopSurfaceCanary.ToolNames.Contains(tool.Name))
+            .ToArray();
         var catalog = new RegistryOnlySemanticToolCatalog();
 
         var selection = await catalog.SelectAsync(
             "inspect the available coding tools",
-            tools,
+            liveTools,
             [],
             TestContext.Current.CancellationToken);
+        var defensiveBuckets = LiveSemanticToolDirectory.CreateBuckets(allTools);
+        var visibleAssignments = defensiveBuckets
+            .SelectMany(bucket => bucket.ToolNames)
+            .ToArray();
 
         Assert.DoesNotContain("External coding executor", selection.Directory, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Specialists and checkpointed workflows", selection.Directory, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Aider", selection.Directory, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("OpenHands", selection.Directory, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(
-            LiveSemanticToolDirectory.CreateBuckets(tools),
-            bucket => bucket.Id == "external-coding-agents");
+        Assert.DoesNotContain("Magentic", selection.Directory, StringComparison.OrdinalIgnoreCase);
+        Assert.All(
+            RetiredSingleLoopSurfaceCanary.BucketIds,
+            bucketId => Assert.DoesNotContain(defensiveBuckets, bucket => bucket.Id == bucketId));
+        Assert.All(
+            RetiredSingleLoopSurfaceCanary.ToolNames,
+            toolName => Assert.DoesNotContain(toolName, visibleAssignments));
+        Assert.All(
+            RetiredSingleLoopSurfaceCanary.ToolNames,
+            toolName => Assert.DoesNotContain(selection.Tools, tool => tool.Name == toolName));
     }
 
     [Fact]
@@ -220,4 +235,27 @@ public sealed class SemanticToolCatalogTests
         }
         throw new FileNotFoundException(Path.Combine(segments));
     }
+}
+
+internal static class RetiredSingleLoopSurfaceCanary
+{
+    public static IReadOnlyList<string> ToolNames { get; } =
+    [
+        AliCapabilityCatalog.CodingAgentStatusName,
+        AliCapabilityCatalog.CodingAgentExecuteName,
+        AliCapabilityCatalog.ConsultSoftwareEngineerName,
+        AliCapabilityCatalog.ConsultResearcherName,
+        AliCapabilityCatalog.ConsultOfficeSpecialistName,
+        AliCapabilityCatalog.RunResearchArtifactWorkflowName,
+        AliCapabilityCatalog.RunProgrammingGroupChatName,
+        AliCapabilityCatalog.RunMagenticOrchestrationName,
+        AliCapabilityCatalog.ListRecoverableWorkflowsName,
+        AliCapabilityCatalog.ResumeWorkflowCheckpointName
+    ];
+
+    public static IReadOnlyList<string> BucketIds { get; } =
+    [
+        "external-coding-agents",
+        "specialists-workflows"
+    ];
 }

@@ -1833,64 +1833,22 @@
                                 BorderThickness="1"
                                 Padding="14">
                             <StackPanel>
-                                <TextBlock Text="Agent Framework orchestration"
+                                <TextBlock Text="One orchestration loop"
                                            FontSize="18"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Text="Ali remains the only user-facing personality. Specialist agents and workflows run synchronously on the same local-model path; concurrent and background agents are disabled."
+                                <TextBlock Text="{Binding StatusText}"
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextWrapping="Wrap"
                                            Margin="0,6,0,0" />
-                                <TextBlock Text="Magentic activation"
-                                           Style="{StaticResource FieldLabel}"
-                                           Margin="0,14,0,0" />
-                                <ComboBox ItemsSource="{Binding MagenticPolicyChoices}"
-                                          SelectedItem="{Binding SelectedMagenticPolicy, Mode=TwoWay}"
-                                          DisplayMemberPath="DisplayName"
-                                          AutomationProperties.AutomationId="SettingsMagenticPolicy" />
-                                <TextBlock Text="{Binding SelectedMagenticPolicy.Summary}"
-                                           Foreground="#F6C85F"
+                                <TextBlock Text="Installed Agent Skills provide software-engineering, evidence-research, and office-artifact guidance to that same planner. Skills supply instructions and resources; they do not start another agent."
+                                           Foreground="#8DDDF0"
                                            TextWrapping="Wrap"
-                                           Margin="0,5,0,0" />
-                                <TextBlock Text="Maximum Magentic coordination rounds"
-                                           Style="{StaticResource FieldLabel}"
-                                           Margin="0,14,0,0" />
-                                <ComboBox ItemsSource="{Binding MaximumRoundChoices}"
-                                          SelectedItem="{Binding MagenticMaximumRounds, Mode=TwoWay}"
-                                          Width="120"
-                                          HorizontalAlignment="Left"
-                                          AutomationProperties.AutomationId="SettingsMagenticMaximumRounds" />
-                                <TextBlock Text="Magentic is eligible only for open-ended multi-domain work that one specialist or an established workflow cannot handle. It is never selected merely because High effort is active."
+                                           Margin="0,10,0,0" />
+                                <TextBlock Text="Reasoning effort remains available beside the chat input and applies to Ali's one planner."
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextWrapping="Wrap"
-                                           Margin="0,6,0,0" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Background="{StaticResource PanelBrush}"
-                                BorderBrush="{StaticResource BorderBrushDark}"
-                                BorderThickness="1"
-                                Padding="14"
-                                Margin="0,12,0,0">
-                            <StackPanel>
-                                <TextBlock Text="Durable workflow checkpoints"
-                                           FontSize="16"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Text="{Binding CheckpointSummary}"
-                                           Foreground="{StaticResource MutedTextBrush}"
-                                           TextWrapping="Wrap"
-                                           Margin="0,5,0,0" />
-                                <TextBlock Text="Checkpoint folder"
-                                           Style="{StaticResource FieldLabel}"
-                                           Margin="0,10,0,0" />
-                                <TextBox Text="{Binding CheckpointPath, Mode=OneWay}"
-                                         IsReadOnly="True" />
-                                <TextBlock Text="Settings file"
-                                           Style="{StaticResource FieldLabel}"
-                                           Margin="0,10,0,0" />
-                                <TextBox Text="{Binding SettingsPath, Mode=OneWay}"
-                                         IsReadOnly="True" />
+                                           Margin="0,8,0,0" />
                             </StackPanel>
                         </Border>
 
@@ -1974,24 +1932,6 @@
                             </StackPanel>
                         </Border>
 
-                        <TextBlock Text="{Binding StatusText}"
-                                   Foreground="#F6C85F"
-                                   TextWrapping="Wrap"
-                                   Margin="0,10,0,0"
-                                   AutomationProperties.AutomationId="SettingsAgentOrchestrationStatus" />
-                        <StackPanel Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
-                                    Margin="0,10,0,0">
-                            <Button Content="Reload"
-                                    Command="{Binding ReloadCommand}"
-                                    Margin="0,0,8,0" />
-                            <Button Content="Archive Checkpoints"
-                                    Command="{Binding ArchiveCheckpointsCommand}"
-                                    Margin="0,0,8,0" />
-                            <Button Content="Save"
-                                    Command="{Binding SaveCommand}"
-                                    AutomationProperties.AutomationId="SettingsSaveAgentOrchestration" />
-                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

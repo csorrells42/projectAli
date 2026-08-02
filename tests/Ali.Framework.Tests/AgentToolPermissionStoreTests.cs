@@ -130,6 +130,37 @@ public sealed class AgentToolPermissionStoreTests
     }
 
     [Fact]
+    public void PermissionInventory_OmitsTheExactRetiredSingleLoopToolSet()
+    {
+        var retiredProductionNames = AliCapabilityCatalog.Tools
+            .Select(tool => tool.Name)
+            .Where(AliProductionCapabilityCatalog.IsRetiredToolName)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var expectedRetiredNames = RetiredSingleLoopSurfaceCanary.ToolNames
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var trustedNames = AliToolPermissionPolicy
+            .ProtectedToolsFor(AgentPermissionProfile.TrustedWorkstation)
+            .Select(policy => policy.ToolName)
+            .ToArray();
+        var lockedDownNames = AliToolPermissionPolicy
+            .ProtectedToolsFor(AgentPermissionProfile.LockedDown)
+            .Select(policy => policy.ToolName)
+            .ToArray();
+
+        Assert.Equal(expectedRetiredNames, retiredProductionNames);
+        Assert.All(
+            expectedRetiredNames,
+            toolName => Assert.DoesNotContain(toolName, trustedNames));
+        Assert.All(
+            expectedRetiredNames,
+            toolName => Assert.DoesNotContain(toolName, lockedDownNames));
+        Assert.Contains(AliCapabilityCatalog.FileWriteName, trustedNames);
+        Assert.Contains(AliCapabilityCatalog.FileReadName, lockedDownNames);
+    }
+
+    [Fact]
     public void PermissionProfile_DefaultsToTrustedWorkstationAndPersistsLockedDown()
     {
         WithStore((root, store) =>

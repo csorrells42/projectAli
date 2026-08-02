@@ -8,6 +8,20 @@ namespace Ali.Framework.Tests.Capabilities;
 
 public sealed class AliProductionCapabilityCatalogTests
 {
+    private static readonly string[] RetiredToolNames =
+    [
+        AliCapabilityCatalog.CodingAgentStatusName,
+        AliCapabilityCatalog.CodingAgentExecuteName,
+        AliCapabilityCatalog.ConsultSoftwareEngineerName,
+        AliCapabilityCatalog.ConsultResearcherName,
+        AliCapabilityCatalog.ConsultOfficeSpecialistName,
+        AliCapabilityCatalog.RunResearchArtifactWorkflowName,
+        AliCapabilityCatalog.RunProgrammingGroupChatName,
+        AliCapabilityCatalog.RunMagenticOrchestrationName,
+        AliCapabilityCatalog.ListRecoverableWorkflowsName,
+        AliCapabilityCatalog.ResumeWorkflowCheckpointName
+    ];
+
     [Fact]
     public void KnownMetadata_CoversTheExactActiveOrdinaryCatalogOnce()
     {
@@ -20,14 +34,9 @@ public sealed class AliProductionCapabilityCatalogTests
             .ToArray();
 
         Assert.Equal(catalogNames.Length, catalogNames.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(122, activeCatalogNames.Length);
-        Assert.Equal(
-            new[]
-            {
-                AliCapabilityCatalog.CodingAgentExecuteName,
-                AliCapabilityCatalog.CodingAgentStatusName
-            },
-            retiredCatalogNames.Order(StringComparer.Ordinal));
+        Assert.Equal(114, activeCatalogNames.Length);
+        Assert.True(RetiredToolNames.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(retiredCatalogNames));
         Assert.Equal(activeCatalogNames.Length, AliProductionCapabilityCatalog.KnownToolNames.Count);
         Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionCapabilityCatalog.KnownToolNames));
@@ -78,15 +87,7 @@ public sealed class AliProductionCapabilityCatalogTests
             AliCapabilityCatalog.LoadAgentSkillName,
             AliCapabilityCatalog.ReadAgentSkillResourceName,
             AliCapabilityCatalog.RunAgentSkillScriptName);
-        AssertGroup(CapabilityGroupIds.SpecialistsAndWorkflows,
-            AliCapabilityCatalog.ConsultSoftwareEngineerName,
-            AliCapabilityCatalog.ConsultResearcherName,
-            AliCapabilityCatalog.ConsultOfficeSpecialistName,
-            AliCapabilityCatalog.RunResearchArtifactWorkflowName,
-            AliCapabilityCatalog.RunProgrammingGroupChatName,
-            AliCapabilityCatalog.RunMagenticOrchestrationName,
-            AliCapabilityCatalog.ListRecoverableWorkflowsName,
-            AliCapabilityCatalog.ResumeWorkflowCheckpointName);
+        AssertGroup(CapabilityGroupIds.ExternalMcp);
     }
 
     [Fact]
@@ -206,7 +207,7 @@ public sealed class AliProductionCapabilityCatalogTests
         var result = AliProductionCapabilityCatalog.Build(actualFunctions);
 
         Assert.Empty(result.QuarantinedToolNames);
-        Assert.Equal(122, actualFunctions.Length);
+        Assert.Equal(114, actualFunctions.Length);
         Assert.Equal(actualFunctions.Length, result.Registry.Descriptors.Count);
         Assert.Equal(
             new[]
@@ -293,7 +294,7 @@ public sealed class AliProductionCapabilityCatalogTests
         Assert.Equal(CapabilityRegistrationKind.AgentSkill, byName[AliCapabilityCatalog.RunAgentSkillScriptName].RegistrationKind);
         Assert.Equal(CapabilityRegistrationKind.Native, byName[AliCapabilityCatalog.FileMoveName].RegistrationKind);
         Assert.Equal(CapabilityRegistrationKind.Native, byName[AliCapabilityCatalog.RoslynInspectDocumentName].RegistrationKind);
-        Assert.Equal(CapabilityRegistrationKind.Native, byName[AliCapabilityCatalog.RunProgrammingGroupChatName].RegistrationKind);
+        Assert.All(RetiredToolNames, retiredName => Assert.DoesNotContain(retiredName, byName.Keys));
         Assert.Equal(CapabilityRegistrationKind.LanguageProvider, byName[AliCapabilityCatalog.CodingAnalyzeProjectName].RegistrationKind);
         Assert.Equal(CapabilityRegistrationKind.LanguageProvider, byName[AliCapabilityCatalog.CodingFormatProjectName].RegistrationKind);
         Assert.Equal(CapabilityRegistrationKind.LanguageProvider, byName[AliCapabilityCatalog.CodingBuildProjectName].RegistrationKind);
@@ -414,18 +415,15 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void RetiredExternalCodingTools_HaveNoProductionDescriptorsKnownNamesOrGroups()
+    public void RetiredNestedOrchestrationTools_HaveNoProductionDescriptorsKnownNamesOrGroups()
     {
-        var retiredNames = new[]
-        {
-            AliCapabilityCatalog.CodingAgentExecuteName,
-            AliCapabilityCatalog.CodingAgentStatusName
-        };
+        var retiredNames = RetiredToolNames;
 
         var result = AliProductionCapabilityCatalog.Build(retiredNames.Select(name => Function(name)));
 
         Assert.Empty(result.Registry.Descriptors);
-        Assert.Equal(retiredNames, result.QuarantinedToolNames);
+        Assert.True(retiredNames.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(result.QuarantinedToolNames));
         Assert.All(retiredNames, name =>
         {
             Assert.True(AliProductionCapabilityCatalog.IsRetiredToolName(name));
@@ -627,12 +625,11 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void DescriptorApprovalMetadata_PreservesTrustedWorkstationPolicyAndDynamicMagenticChoice()
+    public void DescriptorApprovalMetadata_PreservesTrustedWorkstationPolicy()
     {
         var byName = CreateDescriptorsByName();
         var expected = AliToolPermissionPolicy.ProtectedTools
             .Select(tool => tool.ToolName)
-            .Where(toolName => toolName != AliCapabilityCatalog.RunMagenticOrchestrationName)
             .Where(AliProductionCapabilityCatalog.KnownToolNames.Contains)
             .ToHashSet(StringComparer.Ordinal);
         var actual = byName.Values
@@ -641,7 +638,6 @@ public sealed class AliProductionCapabilityCatalogTests
             .ToHashSet(StringComparer.Ordinal);
 
         Assert.True(expected.SetEquals(actual));
-        Assert.False(byName[AliCapabilityCatalog.RunMagenticOrchestrationName].Permission.RequiresApproval);
     }
 
     [Fact]
@@ -675,16 +671,14 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void SkillWorkflowAndStopMetadata_ReflectsTheirActualLocalEffects()
+    public void SkillAndStopMetadata_ReflectsTheirActualLocalEffects()
     {
         var byName = CreateDescriptorsByName();
 
         foreach (var toolName in new[]
                  {
                      AliCapabilityCatalog.LoadAgentSkillName,
-                     AliCapabilityCatalog.ReadAgentSkillResourceName,
-                     AliCapabilityCatalog.ListRecoverableWorkflowsName,
-                     AliCapabilityCatalog.ResumeWorkflowCheckpointName
+                     AliCapabilityCatalog.ReadAgentSkillResourceName
                  })
         {
             Assert.True(byName[toolName].Effect.ReadsLocalData, toolName);
@@ -721,7 +715,7 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void ToolchainInspectionAndLocalAgentCalls_DeclareTheirDataBoundaries()
+    public void ToolchainInspectionCalls_DeclareTheirDataBoundaries()
     {
         var byName = CreateDescriptorsByName();
 
@@ -736,32 +730,6 @@ public sealed class AliProductionCapabilityCatalogTests
                  })
         {
             Assert.True(byName[toolName].Effect.ReadsLocalData, toolName);
-        }
-
-        foreach (var toolName in new[]
-                 {
-                     AliCapabilityCatalog.ConsultSoftwareEngineerName,
-                     AliCapabilityCatalog.ConsultResearcherName,
-                     AliCapabilityCatalog.ConsultOfficeSpecialistName,
-                     AliCapabilityCatalog.RunResearchArtifactWorkflowName,
-                     AliCapabilityCatalog.RunProgrammingGroupChatName,
-                     AliCapabilityCatalog.RunMagenticOrchestrationName,
-                     AliCapabilityCatalog.ResumeWorkflowCheckpointName
-                 })
-        {
-            Assert.True(byName[toolName].Effect.UsesNetwork, toolName);
-        }
-
-        Assert.True(byName[AliCapabilityCatalog.RunProgrammingGroupChatName].Effect.WritesLocalData);
-
-        foreach (var toolName in new[]
-                 {
-                     AliCapabilityCatalog.ConsultSoftwareEngineerName,
-                     AliCapabilityCatalog.ConsultResearcherName,
-                     AliCapabilityCatalog.ConsultOfficeSpecialistName
-                 })
-        {
-            Assert.False(byName[toolName].Effect.SupportsIdempotency, toolName);
         }
 
         var dependencyApply = byName[AliCapabilityCatalog.DotNetDependencyApplyName];

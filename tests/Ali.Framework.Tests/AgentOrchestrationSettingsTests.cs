@@ -8,7 +8,8 @@ public sealed class AgentOrchestrationSettingsTests
     [InlineData(MagenticPolicies.Off)]
     [InlineData(MagenticPolicies.AskFirst)]
     [InlineData(MagenticPolicies.Automatic)]
-    public void Settings_RoundTripMagenticPolicyWithoutRetiredProgrammingFields(string policy)
+    [InlineData("retired-policy")]
+    public void LegacyOrchestrationSelections_AreInertAndOmittedFromJson(string policy)
     {
         var root = Path.Combine(Path.GetTempPath(), "AliAgentOrchestrationSettingsTests", Guid.NewGuid().ToString("N"));
         try
@@ -25,10 +26,12 @@ public sealed class AgentOrchestrationSettingsTests
             var loaded = AgentOrchestrationSettingsStore.LoadOrDefault(root);
             var persisted = File.ReadAllText(AgentOrchestrationSettingsStore.GetPath(root));
 
-            Assert.Equal(policy, loaded.MagenticPolicy);
-            Assert.Equal(7, loaded.MagenticMaximumRounds);
+            Assert.Equal(MagenticPolicies.Off, loaded.MagenticPolicy);
+            Assert.Equal(6, loaded.MagenticMaximumRounds);
             Assert.Equal(ProgrammingAgentModes.Off, loaded.ProgrammingAgentMode);
             Assert.False(loaded.AlwaysUseProgrammingAgent);
+            Assert.DoesNotContain("magenticPolicy", persisted, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("magenticMaximumRounds", persisted, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("programmingAgentMode", persisted, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("alwaysUseProgrammingAgent", persisted, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("openHandsWslDistribution", persisted, StringComparison.OrdinalIgnoreCase);
@@ -43,7 +46,7 @@ public sealed class AgentOrchestrationSettingsTests
     }
 
     [Fact]
-    public void LegacySerializedProgrammingSelection_IsIgnoredAndScrubbedOnNextSave()
+    public void LegacySerializedOrchestrationSelection_IsIgnoredAndScrubbedOnNextSave()
     {
         var root = Path.Combine(Path.GetTempPath(), "AliAgentOrchestrationLegacyTests", Guid.NewGuid().ToString("N"));
         try
@@ -63,13 +66,15 @@ public sealed class AgentOrchestrationSettingsTests
 
             var loaded = AgentOrchestrationSettingsStore.LoadOrDefault(root);
 
-            Assert.Equal(MagenticPolicies.Automatic, loaded.MagenticPolicy);
-            Assert.Equal(9, loaded.MagenticMaximumRounds);
+            Assert.Equal(MagenticPolicies.Off, loaded.MagenticPolicy);
+            Assert.Equal(6, loaded.MagenticMaximumRounds);
             Assert.Equal(ProgrammingAgentModes.Off, loaded.ProgrammingAgentMode);
             Assert.False(loaded.AlwaysUseProgrammingAgent);
 
             AgentOrchestrationSettingsStore.Save(root, loaded);
             var rewritten = File.ReadAllText(AgentOrchestrationSettingsStore.GetPath(root));
+            Assert.DoesNotContain("magenticPolicy", rewritten, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("magenticMaximumRounds", rewritten, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("programmingAgentMode", rewritten, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("alwaysUseProgrammingAgent", rewritten, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("openHandsWslDistribution", rewritten, StringComparison.OrdinalIgnoreCase);
@@ -83,44 +88,72 @@ public sealed class AgentOrchestrationSettingsTests
         }
     }
 
-    [Fact]
-    public void OffPolicy_RemovesMagenticFromAuthoritativeInventoryAndPrompt()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(MagenticPolicies.Off)]
+    [InlineData(MagenticPolicies.AskFirst)]
+    [InlineData(MagenticPolicies.Automatic)]
+    [InlineData(" future-policy ")]
+    public void MagenticPolicy_NormalizesEveryLegacyValueToOff(string? policy)
     {
-        var settings = new AgentOrchestrationSettings { MagenticPolicy = MagenticPolicies.Off };
-
-        var inventory = AliCapabilityCatalog.ListAvailableTools(settings);
-        var prompt = AliCapabilityCatalog.BuildPromptManifest(settings);
-
-        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.RunMagenticOrchestrationName);
-        Assert.DoesNotContain(AliCapabilityCatalog.RunMagenticOrchestrationName, prompt, StringComparison.Ordinal);
-        Assert.Contains("Magentic activation policy is off", prompt, StringComparison.Ordinal);
+        Assert.Equal([MagenticPolicies.Off], MagenticPolicies.All);
+        Assert.Equal(MagenticPolicies.Off, MagenticPolicies.Normalize(policy));
     }
 
     [Fact]
-    public void MagenticBoundary_IsDocumentedAndBounded()
+    public void SavingSettings_DoesNotMoveOrDeleteLegacyCheckpointData()
     {
-        var instructions = AliToolCatalog.BuildInstructions(
-            "Charlie",
-            new AgentOrchestrationSettings
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "AliAgentOrchestrationCheckpointPreservationTests",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var checkpointPath = AgentOrchestrationSettingsStore.GetCheckpointPath(root);
+            Directory.CreateDirectory(checkpointPath);
+            var markerPath = Path.Combine(checkpointPath, "legacy-checkpoint.json");
+            const string marker = "legacy checkpoint data stays untouched";
+            File.WriteAllText(markerPath, marker);
+
+            AgentOrchestrationSettingsStore.Save(root, new AgentOrchestrationSettings
             {
                 MagenticPolicy = MagenticPolicies.Automatic,
-                MagenticMaximumRounds = 6
+                MagenticMaximumRounds = 12
             });
 
-        Assert.Contains(AliCapabilityCatalog.RunMagenticOrchestrationName, instructions);
-        Assert.Contains("Use run_magentic_orchestration automatically only", instructions);
-        Assert.Contains("Automatic for complex work", File.ReadAllText(FindArchitectureDocument()));
+            Assert.True(File.Exists(markerPath));
+            Assert.Equal(marker, File.ReadAllText(markerPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
-    public void SettingsTab_ExposesPolicyBoundAndCheckpointControls()
+    public void AgentsTab_ShowsOneLoopAndLiveBridgeWithoutLegacyOrchestrationControls()
     {
         var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "SettingsWindow.xaml"));
 
         Assert.Contains("SettingsAgentOrchestrationTab", xaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsMagenticPolicy", xaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsMagenticMaximumRounds", xaml, StringComparison.Ordinal);
-        Assert.Contains("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
+        Assert.Contains("One orchestration loop", xaml, StringComparison.Ordinal);
+        Assert.Contains("Installed Agent Skills", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsConversationBridgeEnabled", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsConversationBridgeApprovalControl", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsSaveConversationBridge", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsMagenticPolicy", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsMagenticMaximumRounds", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Magentic", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Durable workflow checkpoints", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CheckpointSummary", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CheckpointPath", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsSaveAgentOrchestration", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsAgentOrchestrationStatus", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsAlwaysUseProgrammingAgent", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Programming engines", xaml, StringComparison.Ordinal);
@@ -128,12 +161,16 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.DoesNotContain("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenHands", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Aider", xaml, StringComparison.Ordinal);
-        Assert.Contains("concurrent and background agents are disabled", xaml, StringComparison.OrdinalIgnoreCase);
 
         var viewModel = File.ReadAllText(FindRepositoryFile(
             "src", "UI", "ViewModels", "AgentOrchestrationSettingsViewModel.cs"));
-        Assert.DoesNotContain("RefreshProgrammingAgents", viewModel, StringComparison.Ordinal);
-        Assert.DoesNotContain("ExternalAgents.GetStatusAsync", viewModel, StringComparison.Ordinal);
+        Assert.Contains("one Agent Framework execution loop", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("Magentic", viewModel, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MaximumRoundChoices", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("CheckpointPath", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("CheckpointSummary", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("ArchiveCheckpointsCommand", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("Directory.Move", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -193,11 +230,6 @@ public sealed class AgentOrchestrationSettingsTests
             "Ali is the sole coding executor",
             AliToolCatalog.BuildInstructions("Ali", settings),
             StringComparison.Ordinal);
-    }
-
-    private static string FindArchitectureDocument()
-    {
-        return FindRepositoryFile("docs", "AgentFrameworkArchitecture.md");
     }
 
     private static string FindRepositoryFile(params string[] segments)

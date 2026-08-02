@@ -102,11 +102,7 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             toolPermissions,
             activeUsers,
             workspaceRoot);
-        var codingModule = new AliCodingModule(
-            fileAccess,
-            () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
-            () => RuntimeSettingsStore.LoadOrDefault(dataRoot),
-            applicationBaseDirectory);
+        var codingModule = new AliCodingModule(fileAccess);
         var localLibrary = new LocalVectorLibraryRetriever(
             dataRoot,
             runtimeHttpClient,

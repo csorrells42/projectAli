@@ -15,7 +15,9 @@ public static class CapabilityGroupIds
     public const string RemindersAndCalendar = "reminders-and-calendar";
     public const string WorkMemory = "work-memory";
     public const string AgentModesAndSkills = "agent-modes-and-skills";
-    public const string SpecialistsAndWorkflows = "specialists-and-workflows";
+    // Keep the persisted group ID stable while retiring the former nested-agent surface.
+    public const string ExternalMcp = "specialists-and-workflows";
+    public const string SpecialistsAndWorkflows = ExternalMcp;
     public const string FilesAndArchives = "files-and-archives";
     public const string ProgrammingCore = "programming-core";
     public const string CSharpDotNetRoslyn = "csharp-dotnet-roslyn";
@@ -36,7 +38,7 @@ public static class CapabilityGroupIds
         RemindersAndCalendar,
         WorkMemory,
         AgentModesAndSkills,
-        SpecialistsAndWorkflows,
+        ExternalMcp,
         FilesAndArchives,
         ProgrammingCore,
         CSharpDotNetRoslyn,

@@ -3,18 +3,19 @@ using System.Text.Json.Serialization;
 
 namespace Ali.Modules.Coordinator;
 
+/// <summary>
+/// Legacy names retained for source and settings-file compatibility only.
+/// No saved value can enable the retired secondary orchestration path.
+/// </summary>
 public static class MagenticPolicies
 {
     public const string Off = "off";
     public const string AskFirst = "ask-first";
     public const string Automatic = "automatic-complex";
 
-    public static IReadOnlyList<string> All { get; } = [Off, AskFirst, Automatic];
+    public static IReadOnlyList<string> All { get; } = [Off];
 
-    public static string Normalize(string? value) =>
-        All.Contains(value?.Trim(), StringComparer.OrdinalIgnoreCase)
-            ? All.First(item => item.Equals(value?.Trim(), StringComparison.OrdinalIgnoreCase))
-            : AskFirst;
+    public static string Normalize(string? _) => Off;
 }
 
 public static class ProgrammingAgentModes
@@ -31,8 +32,12 @@ public static class ProgrammingAgentModes
 
 public sealed record AgentOrchestrationSettings
 {
-    public string MagenticPolicy { get; init; } = MagenticPolicies.AskFirst;
+    // These two members keep dormant callers source-compatible while the single-loop
+    // cut is completed. They are fixed, ignored on read, and omitted on write.
+    [JsonIgnore]
+    public string MagenticPolicy { get; init; } = MagenticPolicies.Off;
 
+    [JsonIgnore]
     public int MagenticMaximumRounds { get; init; } = 6;
 
     [JsonIgnore]
@@ -46,8 +51,8 @@ public sealed record AgentOrchestrationSettings
 
     public AgentOrchestrationSettings Normalize() => this with
     {
-        MagenticPolicy = MagenticPolicies.Normalize(MagenticPolicy),
-        MagenticMaximumRounds = Math.Clamp(MagenticMaximumRounds, 2, 12),
+        MagenticPolicy = MagenticPolicies.Off,
+        MagenticMaximumRounds = 6,
         ProgrammingAgentMode = ProgrammingAgentModes.Off,
         AlwaysUseProgrammingAgent = false,
         OpenHandsWslDistribution = string.IsNullOrWhiteSpace(OpenHandsWslDistribution)

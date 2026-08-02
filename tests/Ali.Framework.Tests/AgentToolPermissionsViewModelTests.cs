@@ -10,7 +10,7 @@ namespace Ali.Framework.Tests;
 public sealed class AgentToolPermissionsViewModelTests
 {
     [Fact]
-    public void PermissionRows_OmitRetiredExternalCodingAgentTools()
+    public void PermissionRows_OmitEveryRetiredSingleLoopTool()
     {
         var root = Path.Combine(
             Path.GetTempPath(),
@@ -23,16 +23,14 @@ public sealed class AgentToolPermissionsViewModelTests
             var activeUsers = new FixedActiveUserSession(user);
             var store = new AgentToolPermissionStore(root);
             store.SetProfile(AgentPermissionProfile.LockedDown);
-            store.Save(
-                user,
-                AliCapabilityCatalog.CodingAgentExecuteName,
-                AgentToolPermissionScope.Tool,
-                arguments: null);
-            store.Save(
-                user,
-                AliCapabilityCatalog.CodingAgentStatusName,
-                AgentToolPermissionScope.Tool,
-                arguments: null);
+            foreach (var retiredToolName in RetiredSingleLoopSurfaceCanary.ToolNames)
+            {
+                store.Save(
+                    user,
+                    retiredToolName,
+                    AgentToolPermissionScope.Tool,
+                    arguments: null);
+            }
             store.Save(
                 user,
                 AliCapabilityCatalog.FileWriteName,
@@ -52,6 +50,12 @@ public sealed class AgentToolPermissionsViewModelTests
                 fileAccess,
                 new AliAgentWorkMemory(root));
 
+            var persistedNames = store.ListForUser(user.StableId)
+                .Select(grant => grant.ToolName)
+                .ToArray();
+            Assert.All(
+                RetiredSingleLoopSurfaceCanary.ToolNames,
+                toolName => Assert.Contains(toolName, persistedNames));
             Assert.Contains(
                 viewModel.Grants,
                 grant => grant.RawToolName == AliCapabilityCatalog.FileWriteName);
@@ -60,12 +64,10 @@ public sealed class AgentToolPermissionsViewModelTests
                 policy => policy.RawToolName == AliCapabilityCatalog.FileWriteName);
             Assert.DoesNotContain(
                 viewModel.Grants,
-                grant => grant.RawToolName is AliCapabilityCatalog.CodingAgentExecuteName
-                    or AliCapabilityCatalog.CodingAgentStatusName);
+                grant => RetiredSingleLoopSurfaceCanary.ToolNames.Contains(grant.RawToolName));
             Assert.DoesNotContain(
                 viewModel.ProtectedTools,
-                policy => policy.RawToolName is AliCapabilityCatalog.CodingAgentExecuteName
-                    or AliCapabilityCatalog.CodingAgentStatusName);
+                policy => RetiredSingleLoopSurfaceCanary.ToolNames.Contains(policy.RawToolName));
         }
         finally
         {

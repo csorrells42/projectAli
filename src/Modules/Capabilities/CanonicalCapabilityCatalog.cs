@@ -11,7 +11,7 @@ public static class CanonicalCapabilityCatalog
         new(CapabilityGroupIds.RemindersAndCalendar, "Reminders and calendar", "Create durable local calendar events and operating-system notifications.", true),
         new(CapabilityGroupIds.WorkMemory, "Private task work memory", "Use conversation-scoped private notes and drafts for long multi-step work.", true),
         new(CapabilityGroupIds.AgentModesAndSkills, "Agent modes and skills", "Inspect or explicitly change the Framework operating mode and load exact installed Agent Skills, resources, and scripts.", true),
-        new(CapabilityGroupIds.SpecialistsAndWorkflows, "Specialists and workflows", "Use private specialist advisers, external coding executors, bounded workflows, and explicit checkpoint recovery.", true),
+        new(CapabilityGroupIds.ExternalMcp, "External MCP tools", "Use enabled incoming MCP tools whose saved server policy, schema, permissions, and live availability pass Ali's canonical capability boundary.", true),
         new(CapabilityGroupIds.FilesAndArchives, "Files and archives", "Read, create, organize, compare, hash, and archive files and folders.", true),
         new(CapabilityGroupIds.ProgrammingCore, "Programming core", "Shared project inspection, source navigation, editing, build, run, and verification foundations.", true),
         new(CapabilityGroupIds.CSharpDotNetRoslyn, "C# / .NET / Roslyn", "C# and .NET engineering with Roslyn semantic inspection, transformations, builds, tests, debugging, and delivery.", true),

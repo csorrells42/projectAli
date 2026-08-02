@@ -2023,7 +2023,7 @@ public sealed class AliToolCallingChatClientTests
     }
 
     [Fact]
-    public async Task ExternalCodingTool_IsOptionalAndCanBeSelectedAfterCriticReview()
+    public async Task NativeCodingTool_IsOptionalAndCanBeSelectedAfterCriticReview()
     {
         var activity = new List<AssistantStreamChunk>();
         var turn = new CoordinatorTurnContext(
@@ -2041,11 +2041,11 @@ public sealed class AliToolCallingChatClientTests
                 "The application was built and launched successfully.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
-                "NO\nNo external coding-agent result proves that any source was written, built, or launched.")),
+                "NO\nNo authoritative native build result proves that any source was written, built, or launched.")),
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 """
-                {"action":"call","assessment":"The requested application has no authoritative implementation evidence.","tool":"coding_agent_execute","arguments":{"targetPath":"Desktop/TicTacToe","objective":"Create, build, verify, and run the requested WPF Tic-Tac-Toe application."},"summary":"Delegate the complete implementation to the selected coding executor","next":"Evaluate the executor's build and runtime evidence."}
+                {"action":"call","assessment":"The requested application has no authoritative implementation evidence.","tool":"coding_build_project","arguments":{"targetPath":"Desktop/TicTacToe","objective":"Create, build, verify, and run the requested WPF Tic-Tac-Toe application."},"summary":"Run Ali's native project build tool","next":"Evaluate the build and runtime evidence."}
                 """)));
         using var client = new AliToolCallingChatClient(
             inner,
@@ -2059,8 +2059,8 @@ public sealed class AliToolCallingChatClientTests
             "Read current state.");
         var executor = AIFunctionFactory.Create(
             (string targetPath, string objective) => new { targetPath, objective },
-            AliCapabilityCatalog.CodingAgentExecuteName,
-            "Run the selected external coding executor.");
+            AliCapabilityCatalog.CodingBuildProjectName,
+            "Run Ali's native project build provider.");
 
         var response = await client.GetResponseAsync(
             [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
@@ -2070,7 +2070,7 @@ public sealed class AliToolCallingChatClientTests
         var call = Assert.Single(response.Messages
             .SelectMany(message => message.Contents)
             .OfType<FunctionCallContent>());
-        Assert.Equal(AliCapabilityCatalog.CodingAgentExecuteName, call.Name);
+        Assert.Equal(AliCapabilityCatalog.CodingBuildProjectName, call.Name);
         Assert.IsNotType<RequiredChatToolMode>(inner.ToolModes[0]);
         Assert.Contains(activity, item =>
             item.IsActivity

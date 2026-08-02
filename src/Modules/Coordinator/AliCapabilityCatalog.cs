@@ -284,13 +284,11 @@ public static class AliCapabilityCatalog
         IReadOnlyList<CoordinatorCapability> additionalTools,
         AgentOrchestrationSettings orchestrationSettings)
     {
-        var normalized = orchestrationSettings.Normalize();
-        var policy = normalized.MagenticPolicy;
-        var nativeTools = VisibleNativeTools(normalized);
+        var nativeTools = VisibleNativeTools(orchestrationSettings);
         var allTools = nativeTools.Concat(additionalTools).ToList();
         return
         new(
-            $"Ali has {allTools.Count} configured model-callable tools. This structured inventory is authoritative. Magentic policy: {policy}. Incoming MCP tools remain withheld until canonical registration is available.",
+            $"Ali has {allTools.Count} configured model-callable tools. This structured inventory is authoritative. Incoming MCP tools become model-callable only after they pass Ali's canonical registration, saved-policy, schema, permission, and live-availability boundary.",
             allTools);
     }
 
@@ -308,21 +306,15 @@ public static class AliCapabilityCatalog
                 .AppendLine(tool.Description);
         }
 
-        manifest.Append($"Magentic activation policy is {settings.MagenticPolicy}. "
-            + "Incoming external MCP tools are not model-callable until Ali can publish canonical metadata and approval semantics for them; never claim that a configured mcp_ tool is available merely because it appears in MCP settings. "
+        manifest.Append("Incoming external MCP tools are not model-callable until Ali can publish canonical metadata, approval semantics, and live availability for them; never claim that a configured mcp_ tool is available merely because it appears in MCP settings. "
             + "Voice playback is an application output setting, not a model-callable tool. "
-            + "Never resume an interrupted workflow automatically; use list_recoverable_workflows when continuity matters and call resume_workflow_checkpoint only after the user explicitly asks to continue that saved run. "
             + "Never claim calendar, email, arbitrary file-system, shell, camera, or generic browser-control access unless an enabled tool with that exact capability appears in the current turn.");
         return manifest.ToString();
     }
 
     internal static IEnumerable<CoordinatorCapability> VisibleNativeTools(AgentOrchestrationSettings settings)
     {
-        var normalized = settings.Normalize();
-        return Tools.Where(tool =>
-            (normalized.MagenticPolicy != MagenticPolicies.Off
-                || tool.Name != RunMagenticOrchestrationName)
-            && (normalized.ProgrammingAgentMode != ProgrammingAgentModes.Off
-                || (tool.Name != CodingAgentStatusName && tool.Name != CodingAgentExecuteName)));
+        ArgumentNullException.ThrowIfNull(settings);
+        return Tools.Where(tool => !AliProductionCapabilityCatalog.IsRetiredToolName(tool.Name));
     }
 }

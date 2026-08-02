@@ -1,69 +1,50 @@
 # Project Ali Agent Framework architecture
 
-`programming-knowledge-stable-v1` is the rollback boundary for this upgrade.
+## One harness and one Ali planning loop
 
-## One personality, private specialists
+Ali has one user-facing identity, one production Agent Framework Harness agent, and one model-controlled planning/execution loop. The desktop conversation enters `ConversationOrchestrator`, crosses the thin `AliToolCoordinator` boundary, and runs through `AliAgentHarnessRunner`. A fresh Harness session is created for each visible user turn while the same session is retained across that turn's tool calls and approval responses.
 
-Ali is the only user-facing identity and owns every final answer. Private Software Engineer, Researcher, and Office/Artifact agents may be invoked as bounded tools. They do not introduce additional assistant identities into the conversation and do not receive authority beyond their assigned tool sets.
+The production runner does not construct or register private specialist agents, sequential workflows, programming group chat, a Magentic manager, or external coding agents. It also does not inspect, advertise, or resume checkpoints created by those retired nested graphs. Every callable action remains in Ali's one effective tool inventory and returns to the same planner.
 
-The first implementation registers exactly three synchronous Agent Framework agents as tools: `consult_software_engineer`, `consult_researcher`, and `consult_office_artifact_specialist`. Each invocation uses a fresh private session. Specialists receive only domain-relevant, non-approval tools; Ali retains all mutating and approval-requiring operations so the existing permission window remains authoritative.
+The compatibility connector still performs bounded transport repair, completion review, and a temporary semantic classification call used to decide whether a proposed direct answer needs critic review. Those calls do not own tools, retain a private work graph, or start another Agent Framework agent. The state-backed planning-client migration will replace that temporary classifier and the remaining compatibility repair chains; until then, one planning loop does not mean one model request per turn.
 
-## Orchestration policy
+## Reusable expertise is guidance, not another brain
 
-- **Direct Ali:** greetings, casual conversation, stable knowledge, simple questions, and one-step tool actions.
-- **Agent skill:** focused domain work where the model should adapt a trusted playbook.
-- **Specialist as tool:** a substantial subtask needs a narrow instruction set and tool inventory; control returns to Ali.
-- **Sequential workflow:** required stages have a meaningful order and should be observable and repeatable.
-- **Programming group chat:** substantial software creation or repair benefits from a bounded maker/checker loop. It is never the default for explanations or small edits.
-- **Magentic:** open-ended, multi-domain objectives whose useful plan cannot be expressed as one established workflow. It remains bounded by iteration, time, tool permissions, and user policy.
-- **Concurrent/background agents:** disabled. This deployment uses one local inference path and will not spend latency pretending that queued model calls are parallel.
+Reviewed Agent Skills preserve the useful expertise that previously lived in nested agents and workflows:
 
-## Magentic activation
+- `software-engineering-delivery` guides substantial implementation, inspection, build, test, debugging, review, and delivery work.
+- `evidence-research` guides current, comparative, source-sensitive, and local-document research.
+- `office-artifact-delivery` guides documents, PDFs, charts, spreadsheets, presentations, and polished business artifacts.
+- `engineering-shop-floor-explanation` guides evidence-bound interpretation of engineering documents for practical shop-floor use.
 
-Magentic is eligible only when all of the following are true:
+Skills are loaded progressively from Ali's shipped `skills` directory. A skill can provide instructions and reviewed procedure, but it cannot execute by itself, maintain an independent transcript, claim success, or bypass capability settings, tool permissions, evidence requirements, or activity reporting. Ali's one planner selects every concrete tool call and produces the only final answer.
 
-1. the request is open-ended rather than a known single operation;
-2. it spans at least two specialist domains or requires dynamic replanning;
-3. a direct specialist or established sequential workflow is insufficient; and
-4. the configured policy is **Automatic for complex work**, or the user approves when policy is **Ask first**.
+The current reviewed skills are instruction-only and ship no executable scripts.
 
-Magentic is never used for greetings, ordinary factual answers, a single file edit, a routine build/test, basic web search, or memory recall. High reasoning effort alone does not activate it.
+## Capability and permission boundary
 
-## Shared safety and visibility
+Before each planning pass, the canonical capability boundary intersects the live runtime declarations, enabled capability groups, provider readiness, active user, saved permissions, MCP state, and semantic tool directory. Disabled or retired tools are absent from the callable registry rather than hidden only by prompt wording.
 
-Framework middleware, Ali's permission policy, and activity events surround every agent and workflow. Activity exposes role, step, tool choice, result, elapsed time, approval, and failure state. Hidden reasoning is never quoted, spoken, stored in conversation history, or shown as activity.
+Agent Framework continues to own the outer session, registered-tool invocation, approval suspension and response, file access, file memory, Agent Skills, and lifecycle middleware. Ali's permission policy remains authoritative for file changes, process execution, network or metered operations, private reads, destructive actions, and other consequential tools.
 
-Agent Skills are loaded only from Ali's shipped, reviewed skill directory. The provider exposes its standard resource and script operations, but the current reviewed skills are instruction-only and ship no executable scripts.
+Activity reports the visible lifecycle, selected tool, approval state, result, and elapsed work without exposing hidden reasoning. Tool results and retrieved content remain untrusted data rather than instructions.
 
-## Implemented workflows
+## State and recovery boundary
 
-- `run_research_artifact_workflow` is an official sequential workflow: Researcher then Office/Artifact specialist.
-- `run_programming_group_chat` is an official round-robin group chat: Software Engineer and a workflow-only Programming Reviewer, capped at four participant turns.
+Conversation-scoped Agent Framework file memory remains available beneath Ali's `Data\AgentWorkspaces` area for private notes and drafts. It is separate from personal Mem0 memory, the indexed document library, and user-visible artifacts.
 
-Both workflows are hosted as Agent Framework agents and then exposed as model-callable functions. They use the lockstep in-process execution environment. Ali inspects their result, performs approval-requiring actions, and gives the only user-facing final response.
+Legacy nested-workflow checkpoint files may remain on disk from earlier builds. The single-loop runtime does not open, modify, delete, offer, or resume them. They stay inert until the later journal/recovery cutover establishes the one authoritative state-backed recovery format. Ali never silently restarts old work.
 
-## Bounded Magentic and durable checkpoints
+## External coding-agent boundary
 
-`run_magentic_orchestration` uses the official Agent Framework Magentic builder with the same three private specialists. It runs synchronously in the lockstep environment with a configurable maximum of 2-12 coordination rounds, one reset, two stalls, and no automatic plan-signoff pause. Tool permissions still surround every action; Magentic itself requires the ordinary approval window when the policy is **Ask first**.
+Ali is the sole coding executor. Production composition does not construct Aider or OpenHands ownership, does not register their status or execution functions, and does not subscribe to their progress events. Dormant compatibility providers and packaging assets may remain in source or deployment until final package cleanup, but no desktop or headless MCP production path exposes them.
 
-The **Settings > Agents** tab provides three activation policies:
-
-- **Off:** removes Magentic from Ali's model-callable inventory.
-- **Ask first:** keeps it available but requires explicit activation approval.
-- **Automatic for complex work:** permits model selection only under the eligibility boundary above.
-
-Workflow state uses the Agent Framework JSON checkpoint manager and a file-backed checkpoint store under Ali's local data directory. Every private agent and manager has a stable executor identity so a compatible graph can be reconstructed after the application or computer restarts.
-
-At startup and before each new turn, Ali inspects the latest checkpoint for every session. Only interrupted checkpoints that still contain queued work or an outstanding request and whose executor identities match the current workflow graph are offered. Completed sessions, malformed files, and checkpoints from an incompatible build are not presented as resumable work. The activity panel announces recoverable sessions without running them.
-
-`list_recoverable_workflows` returns the exact local session identifiers and preserved objectives. `resume_workflow_checkpoint` calls Agent Framework's `ResumeAsync` with the saved `CheckpointInfo`; it runs only after the user explicitly asks to resume that exact session. Ali never auto-resumes work at startup, never guesses a session identifier, and never restarts the objective from the beginning. A failed resume leaves the checkpoint intact for inspection or another deliberate attempt.
-
-The Settings tab reports the stored checkpoint count and can archive checkpoints recoverably into a timestamped sibling folder. Checkpointing and recovery do not introduce concurrent or background execution.
+Ali performs software work through her native programming, Roslyn, language-provider, build, test, run, debugger, architecture, source-control, and delivery tools under the ordinary capability and permission boundary.
 
 ## Live conversation debugging bridge
 
 The optional **Settings > Agents > Live Ali debugging bridge** binds Codex and other local test clients to the active desktop conversation without screen automation. `POST /v1/turns` enters text through the same typed-input method used by the Send button. `GET /v1/session` returns the current transcript, parsed render blocks, evidence state, visible Agent Activity, busy/status state, and any permission-wait metadata.
 
-The bridge listens only on `127.0.0.1`, requires a generated bearer token, and is off by default. When the user enables the bridge, authenticated permission decisions are available by default but can be disabled independently. `POST /v1/approvals` can resolve only Ali's exact currently visible request ID as allow-once, allow-exact-arguments, allow-tool, or deny. The request still travels through Ali's normal permission, standing-grant, activity, and audit path; stale or mismatched IDs fail closed. The bridge returns visible/rendered state only and never exports hidden model reasoning.
+The bridge listens only on `127.0.0.1`, requires a generated bearer token, and is off by default. When enabled, authenticated permission decisions can resolve only Ali's exact currently visible request ID. The request still travels through the normal permission, standing-grant, activity, and audit path; stale or mismatched IDs fail closed. The bridge returns visible state only and never exports hidden model reasoning.
 
-Local debugging uses `tools\TalkToAli.ps1 Status` to clone the current visible session or `tools\TalkToAli.ps1 Send "message"` to submit through the live Send pipeline. With trusted-controller decisions enabled, `ApproveOnce`, `ApproveArguments`, `ApproveTool`, and `Deny` resolve the exact pending approval shown by `Status`. The helper discovers Ali's current local data root and token without printing the token.
+Local debugging uses `tools\TalkToAli.ps1 Status` to inspect the visible session or `tools\TalkToAli.ps1 Send "message"` to submit through the live Send pipeline. With trusted-controller decisions enabled, `ApproveOnce`, `ApproveArguments`, `ApproveTool`, and `Deny` resolve the exact pending approval shown by `Status`. The helper discovers Ali's current local data root and token without printing the token.

@@ -9,7 +9,7 @@ namespace Ali.Framework.Tests;
 public sealed class SpecialistAgentTests
 {
     [Fact]
-    public void Catalog_RegistersExactlyThreePrivateSpecialists()
+    public void CompatibilityCatalog_KeepsExactlyThreeDormantSpecialistDefinitions()
     {
         var specialists = AliCapabilityCatalog.Tools
             .Where(tool => tool.Source == "Microsoft Agent Framework agent as tool")
@@ -20,6 +20,8 @@ public sealed class SpecialistAgentTests
         Assert.Contains(specialists, item => item.Name == AliCapabilityCatalog.ConsultResearcherName);
         Assert.Contains(specialists, item => item.Name == AliCapabilityCatalog.ConsultOfficeSpecialistName);
         Assert.All(specialists, item => Assert.Contains("only user-facing personality", item.Description));
+        Assert.All(specialists, item => Assert.True(
+            AliProductionCapabilityCatalog.IsRetiredToolName(item.Name)));
     }
 
     [Fact]
@@ -39,16 +41,14 @@ public sealed class SpecialistAgentTests
     }
 
     [Fact]
-    public void Instructions_KeepAliInControlOfActionsAndFinalReply()
+    public void Instructions_KeepOneAliPlannerInControlOfActionsAndFinalReply()
     {
         var instructions = AliToolCatalog.BuildInstructions("Charlie");
 
-        Assert.Contains("Specialists are synchronous advisers", instructions);
-        Assert.Contains("execute any needed approval-requiring tools yourself", instructions);
-        Assert.Contains("give the final answer in your own voice", instructions);
-        Assert.Contains("pass the user's complete objective", instructions);
-        Assert.Contains("cannot substitute for your direct mutation, build, test, run", instructions);
-        Assert.Contains("a direct tool provides a concrete blocker", instructions);
+        Assert.Contains("one Agent Framework harness and one planning loop", instructions);
+        Assert.Contains("Never start or simulate a private specialist agent", instructions);
+        Assert.Contains("load the exact installed Agent Skill", instructions);
+        Assert.Contains("Continue choosing and executing every concrete tool action through this one Ali planning loop", instructions);
         Assert.Contains("Build success with a nonzero warning count is not a warning-free build", instructions);
         Assert.Contains("Never claim tests or unit-test coverage unless a test tool succeeded", instructions);
         Assert.Contains("the task is incomplete until an appropriate write/edit tool succeeds", instructions);

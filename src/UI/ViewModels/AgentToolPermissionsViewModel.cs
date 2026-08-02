@@ -12,12 +12,6 @@ namespace Ali.UI.ViewModels;
 
 public sealed class AgentToolPermissionsViewModel : ObservableObject
 {
-    private static readonly HashSet<string> RetiredExternalCodingAgentTools =
-    [
-        AliCapabilityCatalog.CodingAgentExecuteName,
-        AliCapabilityCatalog.CodingAgentStatusName
-    ];
-
     private readonly AgentToolPermissionStore _store;
     private readonly IActiveUserSession _activeUsers;
     private readonly AliWorkstationFileAccess _fileAccess;
@@ -136,14 +130,14 @@ public sealed class AgentToolPermissionsViewModel : ObservableObject
         if (!_activeUsers.RequiresSelection)
         {
             foreach (var grant in _store.ListForUser(_activeUsers.Current.StableId)
-                         .Where(grant => !RetiredExternalCodingAgentTools.Contains(grant.ToolName)))
+                         .Where(grant => !AliProductionCapabilityCatalog.IsRetiredToolName(grant.ToolName)))
             {
                 Grants.Add(new AgentToolPermissionGrantViewModel(grant));
             }
         }
 
         foreach (var policy in AliToolPermissionPolicy.ProtectedToolsFor(_store.CurrentProfile)
-                     .Where(policy => !RetiredExternalCodingAgentTools.Contains(policy.ToolName)))
+                     .Where(policy => !AliProductionCapabilityCatalog.IsRetiredToolName(policy.ToolName)))
         {
             var matchingGrants = Grants
                 .Where(grant => grant.RawToolName.Equals(policy.ToolName, StringComparison.Ordinal))

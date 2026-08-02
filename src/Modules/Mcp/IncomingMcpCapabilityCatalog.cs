@@ -293,7 +293,7 @@ internal sealed class IncomingMcpCapabilityCatalog
             baseRegistry.ProviderBindings.Concat(providerIds.Select(providerId =>
                 new CapabilityProviderBinding(
                     providerId,
-                    CapabilityGroupIds.SpecialistsAndWorkflows))));
+                    CapabilityGroupIds.ExternalMcp))));
         var frozenDescriptors = registry.Descriptors.ToDictionary(
             descriptor => descriptor.ToolName,
             StringComparer.Ordinal);
@@ -404,7 +404,7 @@ internal sealed class IncomingMcpCapabilityCatalog
             displayName: $"{tool.ServerName}: {tool.OriginalName}",
             description: tool.Function.Description,
             tier: CapabilityTier.Task,
-            groupId: CapabilityGroupIds.SpecialistsAndWorkflows,
+            groupId: CapabilityGroupIds.ExternalMcp,
             providerId: providerId,
             registrationKind: CapabilityRegistrationKind.Mcp,
             schemaFactoryId: $"ali.incoming-mcp.schema:{stableSuffix}",

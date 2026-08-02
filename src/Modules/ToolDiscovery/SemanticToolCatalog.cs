@@ -42,14 +42,16 @@ internal sealed record ToolBucketDefinition(
 
 internal static class LiveSemanticToolDirectory
 {
-    private const string RetiredExternalCodingAgentBucketId = "external-coding-agents";
+    private static readonly IReadOnlySet<string> RetiredBucketIds = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "external-coding-agents",
+        "specialists-workflows"
+    };
 
     public static IReadOnlyList<ToolBucketDefinition> CreateBuckets(
         IReadOnlyList<AIFunctionDeclaration> liveTools) =>
         SemanticToolBuckets.Create(liveTools)
-            .Where(bucket => !bucket.Id.Equals(
-                RetiredExternalCodingAgentBucketId,
-                StringComparison.Ordinal))
+            .Where(bucket => !RetiredBucketIds.Contains(bucket.Id))
             .ToArray();
 }
 

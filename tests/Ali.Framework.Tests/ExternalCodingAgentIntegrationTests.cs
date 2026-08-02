@@ -42,9 +42,9 @@ public sealed class ExternalCodingAgentIntegrationTests
     [Fact]
     public void RetiredExecuteTool_IsAbsentFromAuthoritativeInventory()
     {
-        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingAgentExecuteName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingAgentExecuteName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingAgentStatusName));
-        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(
             AliCapabilityCatalog.CodingAgentStatusName,
             AgentPermissionProfile.LockedDown));
         var inventory = AliCapabilityCatalog.ListAvailableTools(new AgentOrchestrationSettings

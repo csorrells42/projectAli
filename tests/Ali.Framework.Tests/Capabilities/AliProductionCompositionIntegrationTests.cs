@@ -19,18 +19,14 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class AliProductionCompositionIntegrationTests
 {
     [Fact]
-    public async Task ActualProductionComposition_BuildsTheExact122ActiveCanonicalDescriptors_Offline()
+    public async Task ActualProductionComposition_BuildsTheExact114ActiveCanonicalDescriptors_Offline()
     {
         using var fixture = new CompositionFixture();
         var runtime = new DevelopmentLocalModelRuntime();
         var client = new RejectingChatClient();
         var profile = AssistantProfile.Create("Ali capability integration");
         var mcpClients = new McpClientManager(fixture.Root);
-        await using var codingModule = new AliCodingModule(
-            fixture.FileAccess,
-            () => new AgentOrchestrationSettings(),
-            RuntimeSettingsStore.GetDefaultOptions,
-            AppContext.BaseDirectory);
+        await using var codingModule = new AliCodingModule(fixture.FileAccess);
         var source = new EmptySourceRetriever();
         var webResearch = new McpWebResearchClient(() => new WebSourceBackendSettings());
         var catalog = new AliToolCatalog(
@@ -46,32 +42,8 @@ public sealed class AliProductionCompositionIntegrationTests
             codingModule,
             () => null,
             orchestrationSettings: () => new AgentOrchestrationSettings());
-        var compatibilityClient = new AliToolCallingChatClient(
-            client,
-            runtime,
-            profile.AssistantName,
-            () => null,
-            fixture.FileAccess.NormalizeProviderToolArguments);
-        var specialistTeam = new AliSpecialistAgentFactory(
-            compatibilityClient,
-            runtime,
-            () => null).CreateTeam(catalog.Tools);
-        using var workflowFactory = new AliAgentWorkflowFactory(
-            compatibilityClient,
-            runtime,
-            () => null,
-            Path.Combine(fixture.Root, "WorkflowCheckpoints"),
-            () => ActiveUserSelectionSnapshot.Resolved(
-                new ActiveUser("capability-test-user", "Capability test user", false, "test")));
-        var standardWorkflowTools = workflowFactory.CreateStandardTools(specialistTeam);
-        var magenticTool = workflowFactory.CreateMagenticTool(
-            specialistTeam,
-            new AgentOrchestrationSettings());
         var frameworkTools = AliFrameworkCapabilityProbe.Capture(fixture.FileAccess, () => null);
         var declarations = catalog.Tools
-            .Concat(specialistTeam.Tools)
-            .Concat(standardWorkflowTools)
-            .Append(magenticTool)
             .Concat(frameworkTools)
             .OfType<AIFunctionDeclaration>()
             .ToArray();
@@ -82,10 +54,10 @@ public sealed class AliProductionCompositionIntegrationTests
 
         var production = AliProductionCapabilityCatalog.Build(activeDeclarations);
 
-        Assert.Equal(124, declarations.Length);
-        Assert.Equal(124, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(122, activeDeclarations.Length);
-        Assert.Equal(122, production.Registry.Descriptors.Count);
+        Assert.Equal(114, declarations.Length);
+        Assert.Equal(114, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(114, activeDeclarations.Length);
+        Assert.Equal(114, production.Registry.Descriptors.Count);
         Assert.True(AliProductionCapabilityCatalog.KnownToolNames.SetEquals(
             production.Registry.Descriptors.Select(descriptor => descriptor.ToolName)));
         Assert.DoesNotContain(
@@ -95,7 +67,7 @@ public sealed class AliProductionCompositionIntegrationTests
         Assert.Equal(0, client.CallCount);
 
         var inventory = CapabilityTerminalToolInventory.Create(activeDeclarations, production.Registry);
-        Assert.Equal(122, inventory.FunctionDeclarationCount);
+        Assert.Equal(114, inventory.FunctionDeclarationCount);
         Assert.Empty(inventory.Issues);
         var stagedRuntime = CapabilityRuntimeAvailabilityFactory.Create(
             inventory,
@@ -134,7 +106,7 @@ public sealed class AliProductionCompositionIntegrationTests
     }
 
     [Fact]
-    public async Task CorruptWorkflowKey_KeepsMainCompositionReadyAndMarksDurableWorkflowsUnavailable()
+    public async Task LegacyWorkflowKey_RemainsUntouchedAndAbsentFromSingleLoopComposition()
     {
         using var fixture = new CompositionFixture();
         var checkpointPath = Path.Combine(fixture.Root, "WorkflowCheckpoints");
@@ -145,14 +117,10 @@ public sealed class AliProductionCompositionIntegrationTests
             corruptKey);
         var runtime = new DevelopmentLocalModelRuntime();
         var client = new RejectingChatClient();
-        var profile = AssistantProfile.Create("Ali degraded workflow integration");
+        var profile = AssistantProfile.Create("Ali legacy workflow isolation integration");
         var source = new EmptySourceRetriever();
         var webResearch = new McpWebResearchClient(() => new WebSourceBackendSettings());
-        await using var codingModule = new AliCodingModule(
-            fixture.FileAccess,
-            () => new AgentOrchestrationSettings(),
-            RuntimeSettingsStore.GetDefaultOptions,
-            AppContext.BaseDirectory);
+        await using var codingModule = new AliCodingModule(fixture.FileAccess);
         using var coordinator = new AliToolCoordinator(
             runtime,
             client,
@@ -187,33 +155,36 @@ public sealed class AliProductionCompositionIntegrationTests
         var capabilityRowReasons = settingsEnvelope.Rows
             .SelectMany(row => row.Reasons)
             .ToArray();
-        var specialistsAndWorkflowsRow = Assert.Single(
+        var externalMcpRow = Assert.Single(
             settingsEnvelope.Rows,
-            row => row.GroupId == CapabilityGroupIds.SpecialistsAndWorkflows);
-        Assert.Equal(122, settingsEnvelope.DeclaredTaskToolCount);
-        Assert.Equal(8, specialistsAndWorkflowsRow.DeclaredToolCount);
+            row => row.GroupId == CapabilityGroupIds.ExternalMcp);
+        Assert.Equal(114, settingsEnvelope.DeclaredTaskToolCount);
+        Assert.Equal(0, externalMcpRow.DeclaredToolCount);
         Assert.DoesNotContain(
             resolvedToolNames,
             AliProductionCapabilityCatalog.IsRetiredToolName);
         Assert.DoesNotContain(
             capabilityRowReasons,
             reason => AliProductionCapabilityCatalog.IsRetiredToolName(reason.ToolName));
-        var durableWorkflowNames = new[]
+        var retiredNames = new[]
         {
+            AliCapabilityCatalog.CodingAgentStatusName,
+            AliCapabilityCatalog.CodingAgentExecuteName,
+            AliCapabilityCatalog.ConsultSoftwareEngineerName,
+            AliCapabilityCatalog.ConsultResearcherName,
+            AliCapabilityCatalog.ConsultOfficeSpecialistName,
             AliCapabilityCatalog.RunResearchArtifactWorkflowName,
             AliCapabilityCatalog.RunProgrammingGroupChatName,
             AliCapabilityCatalog.RunMagenticOrchestrationName,
             AliCapabilityCatalog.ListRecoverableWorkflowsName,
             AliCapabilityCatalog.ResumeWorkflowCheckpointName
         };
-        foreach (var toolName in durableWorkflowNames)
+        foreach (var toolName in retiredNames)
         {
-            Assert.Contains(
-                resolution.UnavailableDescriptors,
-                item => item.Descriptor.ToolName == toolName
-                    && item.Reasons.Any(reason =>
-                        reason.Code == CapabilityAvailabilityReasonCode.RuntimeToolMissing));
             Assert.False(resolution.TryGetTool(toolName, out _));
+            Assert.DoesNotContain(
+                resolution.UnavailableDescriptors,
+                item => item.Descriptor.ToolName == toolName);
         }
 
         Assert.True(resolution.TryGetTool(AliCapabilityCatalog.GetCurrentLocalTimeName, out _));

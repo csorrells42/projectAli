@@ -36,7 +36,15 @@ public static class AliProductionCapabilityCatalog
 
     private static readonly IReadOnlySet<string> RetiredToolNames = ToolSet(
         AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName);
+        AliCapabilityCatalog.CodingAgentExecuteName,
+        AliCapabilityCatalog.ConsultSoftwareEngineerName,
+        AliCapabilityCatalog.ConsultResearcherName,
+        AliCapabilityCatalog.ConsultOfficeSpecialistName,
+        AliCapabilityCatalog.RunResearchArtifactWorkflowName,
+        AliCapabilityCatalog.RunProgrammingGroupChatName,
+        AliCapabilityCatalog.RunMagenticOrchestrationName,
+        AliCapabilityCatalog.ListRecoverableWorkflowsName,
+        AliCapabilityCatalog.ResumeWorkflowCheckpointName);
 
     private static readonly IReadOnlySet<string> ResolvedLanguageTargetToolNames = ToolSet(
         AliCapabilityCatalog.CodingAnalyzeProjectName,
@@ -99,10 +107,7 @@ public static class AliProductionCapabilityCatalog
 
     private static readonly IReadOnlySet<string> ExplicitlyNonIdempotentToolNames = ToolSet(
         AliCapabilityCatalog.SearchCurrentWebName,
-        AliCapabilityCatalog.ResearchWebName,
-        AliCapabilityCatalog.ConsultSoftwareEngineerName,
-        AliCapabilityCatalog.ConsultResearcherName,
-        AliCapabilityCatalog.ConsultOfficeSpecialistName);
+        AliCapabilityCatalog.ResearchWebName);
 
     private static readonly IReadOnlySet<string> MsBuildWorkspaceReadOrPreviewToolNames = ToolSet(
         AliCapabilityCatalog.RoslynAnalyzeProjectName,
@@ -226,11 +231,7 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.ArduinoInstallCoreName,
         AliCapabilityCatalog.ArduinoInstallLibraryName,
         AliCapabilityCatalog.GitCreateBranchName,
-        AliCapabilityCatalog.GitCommitName,
-        AliCapabilityCatalog.RunResearchArtifactWorkflowName,
-        AliCapabilityCatalog.RunProgrammingGroupChatName,
-        AliCapabilityCatalog.RunMagenticOrchestrationName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName);
+        AliCapabilityCatalog.GitCommitName);
 
     private static readonly IReadOnlySet<string> ExplicitExternalReadToolNames = ToolSet(
         AliCapabilityCatalog.SearchCurrentWebName,
@@ -255,9 +256,7 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.DotNetDebugBreakpointsName,
         AliCapabilityCatalog.DotNetDebugControlName,
         AliCapabilityCatalog.DotNetDebugStopName,
-        AliCapabilityCatalog.DotNetStopProjectName,
-        AliCapabilityCatalog.RunMagenticOrchestrationName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName);
+        AliCapabilityCatalog.DotNetStopProjectName);
 
     private static readonly IReadOnlySet<string> AdditionalProcessStartingToolNames = ToolSet(
         AliCapabilityCatalog.CreateCalendarEventName,
@@ -303,8 +302,6 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.GnuNativeInspectName,
         AliCapabilityCatalog.LoadAgentSkillName,
         AliCapabilityCatalog.ReadAgentSkillResourceName,
-        AliCapabilityCatalog.ListRecoverableWorkflowsName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName,
         AliCapabilityCatalog.ArduinoSearchLibrariesName,
         AliCapabilityCatalog.ArduinoInstallCoreName,
         AliCapabilityCatalog.ArduinoInstallLibraryName,
@@ -323,14 +320,7 @@ public static class AliProductionCapabilityCatalog
     private static readonly IReadOnlySet<string> AdditionalNetworkUsingToolNames = ToolSet(
         AliCapabilityCatalog.RecallUserMemoryName,
         AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-        AliCapabilityCatalog.ListCurrentUserMemoriesName,
-        AliCapabilityCatalog.ConsultSoftwareEngineerName,
-        AliCapabilityCatalog.ConsultResearcherName,
-        AliCapabilityCatalog.ConsultOfficeSpecialistName,
-        AliCapabilityCatalog.RunResearchArtifactWorkflowName,
-        AliCapabilityCatalog.RunProgrammingGroupChatName,
-        AliCapabilityCatalog.RunMagenticOrchestrationName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName);
+        AliCapabilityCatalog.ListCurrentUserMemoriesName);
 
     public static IReadOnlySet<string> KnownToolNames { get; } =
         Definitions.Keys.ToFrozenSet(StringComparer.Ordinal);
@@ -443,8 +433,7 @@ public static class AliProductionCapabilityCatalog
             presetIds: presetIds,
             permission: new CapabilityPermissionDescriptor(
                 "ali-tool-permission-v1",
-                function.Name != AliCapabilityCatalog.RunMagenticOrchestrationName
-                    && AliToolPermissionPolicy.RequiresApproval(function.Name),
+                AliToolPermissionPolicy.RequiresApproval(function.Name),
                 RiskFor(effect.Kind)),
             semanticSearchText: $"{function.Name} {description} {CanonicalCapabilityCatalog.GetGroup(definition.GroupId).DisplayName}",
             semanticMetadata: new Dictionary<string, string>(StringComparer.Ordinal)
@@ -687,16 +676,6 @@ public static class AliProductionCapabilityCatalog
             AliCapabilityCatalog.VisualStudioInspectName,
             AliCapabilityCatalog.VisualStudioBuildName,
             AliCapabilityCatalog.VisualStudioOpenName);
-        AddGroup(groups, CapabilityGroupIds.SpecialistsAndWorkflows,
-            AliCapabilityCatalog.ConsultSoftwareEngineerName,
-            AliCapabilityCatalog.ConsultResearcherName,
-            AliCapabilityCatalog.ConsultOfficeSpecialistName,
-            AliCapabilityCatalog.RunResearchArtifactWorkflowName,
-            AliCapabilityCatalog.RunProgrammingGroupChatName,
-            AliCapabilityCatalog.RunMagenticOrchestrationName,
-            AliCapabilityCatalog.ListRecoverableWorkflowsName,
-            AliCapabilityCatalog.ResumeWorkflowCheckpointName);
-
         var catalogByName = AliCapabilityCatalog.Tools
             .Where(tool => !IsRetiredToolName(tool.Name))
             .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
