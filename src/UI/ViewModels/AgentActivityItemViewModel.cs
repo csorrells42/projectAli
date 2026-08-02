@@ -7,7 +7,6 @@ namespace Ali.UI.ViewModels;
 public sealed class AgentActivityItemViewModel
 {
     private const string TechnicalPayloadOmission = "Technical payload omitted from the human activity view.";
-    private const string FormattingFallback = "Activity update available; technical formatting was omitted safely.";
     private const int MaximumDisplayCharacters = 320;
     private const int MaximumPathFormattingInputCharacters = 2_048;
     private static readonly TimeSpan PathRegexTimeout = TimeSpan.FromMilliseconds(25);
@@ -195,9 +194,12 @@ public sealed class AgentActivityItemViewModel
             return string.Empty;
         }
 
+        var boundedInput = value.Length <= MaximumPathFormattingInputCharacters
+            ? value
+            : value[..MaximumPathFormattingInputCharacters];
         var normalized = string.Join(
             " ",
-            value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            boundedInput.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         return normalized.Length <= maximumCharacters
             ? normalized
             : normalized[..maximumCharacters] + "...";
@@ -346,9 +348,194 @@ public sealed class AgentActivityItemViewModel
         }
         catch (RegexMatchTimeoutException)
         {
-            return FormattingFallback;
+            return ShortenFilePathsDeterministically(value);
         }
     }
+
+    internal static string ShortenFilePathsDeterministically(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var boundedValue = value.Length <= MaximumPathFormattingInputCharacters
+            ? value
+            : value[..MaximumPathFormattingInputCharacters];
+        StringBuilder? shortened = null;
+        var copyStart = 0;
+        var index = 0;
+        while (index < boundedValue.Length)
+        {
+            if (IsFallbackBoundary(boundedValue, index)
+                && IsHttpUrlStart(boundedValue, index))
+            {
+                index = FindFallbackCandidateEnd(boundedValue, index, isUrl: true);
+                continue;
+            }
+
+            var character = boundedValue[index];
+            if (IsPathQuote(character)
+                && IsFallbackBoundary(boundedValue, index))
+            {
+                var quoteEnd = boundedValue.IndexOf(character, index + 1);
+                if (quoteEnd >= 0)
+                {
+                    var candidateStart = index + 1;
+                    var candidate = boundedValue[candidateStart..quoteEnd];
+                    if (TryGetFallbackReplacement(candidate, out var replacement))
+                    {
+                        shortened ??= new StringBuilder(boundedValue.Length);
+                        shortened.Append(boundedValue.AsSpan(copyStart, candidateStart - copyStart));
+                        shortened.Append(replacement);
+                        copyStart = quoteEnd;
+                    }
+
+                    index = quoteEnd + 1;
+                    continue;
+                }
+
+                // Preserve an unmatched opening quote and scan its bounded remainder normally.
+                index++;
+                continue;
+            }
+
+            if (!IsFallbackBoundary(boundedValue, index)
+                || !IsPotentialFallbackPathStart(character))
+            {
+                index++;
+                continue;
+            }
+
+            var candidateEnd = FindFallbackCandidateEnd(boundedValue, index, isUrl: false);
+            if (candidateEnd <= index)
+            {
+                index++;
+                continue;
+            }
+
+            var pathCandidate = boundedValue[index..candidateEnd];
+            if (TryGetFallbackReplacement(pathCandidate, out var pathReplacement))
+            {
+                shortened ??= new StringBuilder(boundedValue.Length);
+                shortened.Append(boundedValue.AsSpan(copyStart, index - copyStart));
+                shortened.Append(pathReplacement);
+                copyStart = candidateEnd;
+            }
+
+            index = candidateEnd;
+        }
+
+        if (shortened is null)
+        {
+            return boundedValue;
+        }
+
+        shortened.Append(boundedValue.AsSpan(copyStart));
+        return shortened.ToString();
+    }
+
+    private static bool TryGetFallbackReplacement(string candidate, out string replacement)
+    {
+        replacement = string.Empty;
+        var coreLength = candidate.Length;
+        while (coreLength > 0 && TrailingPathPunctuation.Contains(candidate[coreLength - 1]))
+        {
+            coreLength--;
+        }
+
+        if (!TryGetFilenameOnly(candidate[..coreLength], out var filename))
+        {
+            return false;
+        }
+
+        replacement = filename + candidate[coreLength..];
+        return true;
+    }
+
+    private static int FindFallbackCandidateEnd(string value, int start, bool isUrl)
+    {
+        var isDrivePath = !isUrl
+            && start + 2 < value.Length
+            && char.IsAsciiLetter(value[start])
+            && value[start + 1] == ':'
+            && value[start + 2] is '\\' or '/';
+        var isUncPath = !isUrl
+            && start + 1 < value.Length
+            && value[start] == '\\'
+            && value[start + 1] == '\\';
+        var index = start;
+        while (index < value.Length)
+        {
+            var character = value[index];
+            if (char.IsWhiteSpace(character))
+            {
+                if (!isUrl
+                    && (isDrivePath || isUncPath)
+                    && !LooksLikeFilePathEndingAt(value, start, index)
+                    && !StartsWithFallbackConnector(value, index))
+                {
+                    index++;
+                    continue;
+                }
+
+                break;
+            }
+
+            if (IsPathQuote(character)
+                || (!isUrl && IsFallbackHardDelimiter(character))
+                || (!isUrl && character == ':' && !(isDrivePath && index == start + 1)))
+            {
+                break;
+            }
+
+            index++;
+        }
+
+        return index;
+    }
+
+    private static bool LooksLikeFilePathEndingAt(string value, int start, int end)
+    {
+        var extensionLength = 0;
+        var index = end - 1;
+        while (index >= start
+            && extensionLength < 16
+            && char.IsAsciiLetterOrDigit(value[index]))
+        {
+            extensionLength++;
+            index--;
+        }
+
+        return extensionLength > 0
+            && index > start
+            && value[index] == '.'
+            && value[index - 1] is not '\\' and not '/';
+    }
+
+    private static bool StartsWithFallbackConnector(string value, int index) =>
+        value.AsSpan(index).StartsWith(" to ", StringComparison.OrdinalIgnoreCase)
+        || value.AsSpan(index).StartsWith(" from ", StringComparison.OrdinalIgnoreCase)
+        || value.AsSpan(index).StartsWith(" and ", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHttpUrlStart(string value, int index) =>
+        value.AsSpan(index).StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+        || value.AsSpan(index).StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFallbackBoundary(string value, int index) =>
+        index == 0
+        || char.IsWhiteSpace(value[index - 1])
+        || value[index - 1] is '"' or '\'' or '`' or '(' or '[' or '{' or '<'
+            or '=' or ':' or ',' or ';' or '!' or '?';
+
+    private static bool IsPotentialFallbackPathStart(char character) =>
+        char.IsLetterOrDigit(character)
+        || character is '/' or '\\' or '.' or '_';
+
+    private static bool IsPathQuote(char character) => character is '"' or '\'' or '`';
+
+    private static bool IsFallbackHardDelimiter(char character) =>
+        character is ',' or ';' or '!' or '?' or ')' or ']' or '}' or '<' or '>' or '=' or '|';
 
     private static string ShortenFilePathsSegment(string value)
     {

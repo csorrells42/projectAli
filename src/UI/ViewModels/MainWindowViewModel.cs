@@ -116,7 +116,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeQuantizationText = "Installed package default";
     private string _selectedRuntimeModelChoice = string.Empty;
     private string _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort;
-    private string _selectedProgrammingAgentMode = ProgrammingAgentModes.Off;
     private string _runtimeSelectionStatusText = "Runtime model list has not been refreshed yet.";
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
@@ -239,14 +238,6 @@ public sealed class MainWindowViewModel : ObservableObject
             _services.CapabilitySettingsPath,
             McpServerSettings.RefreshPublishedCapabilitiesIfRunningAsync);
         _services.ActiveUsers.Changed += OnActiveUserChanged;
-        _selectedProgrammingAgentMode = AgentOrchestrationSettings.SelectedProgrammingAgentMode;
-        AgentOrchestrationSettings.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(AgentOrchestrationSettings.SelectedProgrammingAgentMode))
-            {
-                SynchronizeCodingExecutorSelection();
-            }
-        };
         AgentToolPermissions = new AgentToolPermissionsViewModel(
             _services.ToolPermissions,
             _services.ActiveUsers,
@@ -1215,42 +1206,6 @@ public sealed class MainWindowViewModel : ObservableObject
             if (value)
             {
                 SelectReasoningEffort("high");
-            }
-        }
-    }
-
-    public bool IsCodingExecutorAli
-    {
-        get => _selectedProgrammingAgentMode == ProgrammingAgentModes.Off;
-        set
-        {
-            if (value)
-            {
-                SelectCodingExecutor(ProgrammingAgentModes.Off);
-            }
-        }
-    }
-
-    public bool IsCodingExecutorAider
-    {
-        get => _selectedProgrammingAgentMode == ProgrammingAgentModes.Aider;
-        set
-        {
-            if (value)
-            {
-                SelectCodingExecutor(ProgrammingAgentModes.Aider);
-            }
-        }
-    }
-
-    public bool IsCodingExecutorOpenHands
-    {
-        get => _selectedProgrammingAgentMode == ProgrammingAgentModes.OpenHands;
-        set
-        {
-            if (value)
-            {
-                SelectCodingExecutor(ProgrammingAgentModes.OpenHands);
             }
         }
     }
@@ -6534,52 +6489,6 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             StatusText = $"Reasoning effort changed for this session, but could not be saved: {ex.Message}";
         }
-    }
-
-    private void SelectCodingExecutor(string mode)
-    {
-        var normalized = ProgrammingAgentModes.Normalize(mode);
-        if (string.Equals(_selectedProgrammingAgentMode, normalized, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _selectedProgrammingAgentMode = normalized;
-        OnPropertyChanged(nameof(IsCodingExecutorAli));
-        OnPropertyChanged(nameof(IsCodingExecutorAider));
-        OnPropertyChanged(nameof(IsCodingExecutorOpenHands));
-        try
-        {
-            AgentOrchestrationSettings.SelectProgrammingAgentMode(normalized);
-            StatusText = normalized switch
-            {
-                ProgrammingAgentModes.Aider =>
-                    "Coding executor set to Aider. Ali will semantically identify coding work, delegate it to Aider, and verify the result.",
-                ProgrammingAgentModes.OpenHands =>
-                    "Coding executor set to OpenHands. Ali will semantically identify coding work, delegate it to OpenHands, and verify the result.",
-                _ =>
-                    "Coding executor set to Ali. She will use her native programming tools."
-            };
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"Coding executor changed for this session, but could not be saved: {ex.Message}";
-        }
-    }
-
-    private void SynchronizeCodingExecutorSelection()
-    {
-        var normalized = ProgrammingAgentModes.Normalize(
-            AgentOrchestrationSettings.SelectedProgrammingAgentMode);
-        if (string.Equals(_selectedProgrammingAgentMode, normalized, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _selectedProgrammingAgentMode = normalized;
-        OnPropertyChanged(nameof(IsCodingExecutorAli));
-        OnPropertyChanged(nameof(IsCodingExecutorAider));
-        OnPropertyChanged(nameof(IsCodingExecutorOpenHands));
     }
 
     private void NotifyReasoningEffortChanged()

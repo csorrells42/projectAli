@@ -83,7 +83,7 @@ public sealed class ExternalCodingAgentOwnershipTests
     }
 
     [Fact]
-    public void Instructions_NeverTransferImplementationOwnership()
+    public void LegacyExternalSelection_CannotChangeAliImplementationOwnership()
     {
         var instructions = AliToolCatalog.BuildInstructions(
             "Ali",
@@ -93,8 +93,8 @@ public sealed class ExternalCodingAgentOwnershipTests
                 AlwaysUseProgrammingAgent = true
             });
 
-        Assert.Contains("optional", instructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("never owns the turn", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Ali is the sole coding executor", instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("optional external programming engine", instructions, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("transfers implementation ownership", instructions, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("implementation-changing tools are unavailable", instructions, StringComparison.OrdinalIgnoreCase);
     }

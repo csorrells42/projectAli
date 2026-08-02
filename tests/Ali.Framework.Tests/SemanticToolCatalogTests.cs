@@ -94,6 +94,31 @@ public sealed class SemanticToolCatalogTests
     }
 
     [Fact]
+    public async Task LiveSemanticDirectory_OmitsRetiredExternalCodingAgentDrawer()
+    {
+        var tools = AliCapabilityCatalog.Tools
+            .Select(capability => (AIFunctionDeclaration)AIFunctionFactory.Create(
+                () => capability.Name,
+                capability.Name,
+                capability.Description))
+            .ToArray();
+        var catalog = new RegistryOnlySemanticToolCatalog();
+
+        var selection = await catalog.SelectAsync(
+            "inspect the available coding tools",
+            tools,
+            [],
+            TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("External coding executor", selection.Directory, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Aider", selection.Directory, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OpenHands", selection.Directory, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            LiveSemanticToolDirectory.CreateBuckets(tools),
+            bucket => bucket.Id == "external-coding-agents");
+    }
+
+    [Fact]
     public async Task RegistryOnlyDiscovery_NeverLeaksAnotherConcurrentTurnsInventory()
     {
         var catalog = new RegistryOnlySemanticToolCatalog();

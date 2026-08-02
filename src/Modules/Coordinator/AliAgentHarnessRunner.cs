@@ -139,7 +139,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 .Concat(_frameworkCapabilityTools)
                 .OfType<AIFunctionDeclaration>()
                 .ToArray();
-            var productionCatalog = AliProductionCapabilityCatalog.Build(allDeclarations);
+            var productionDeclarations = allDeclarations
+                .Where(declaration =>
+                    !AliProductionCapabilityCatalog.IsRetiredToolName(declaration.Name))
+                .ToArray();
+            var productionCatalog = AliProductionCapabilityCatalog.Build(productionDeclarations);
             if (productionCatalog.QuarantinedToolNames.Count > 0
                 || productionCatalog.Registry.Descriptors.Count
                 != AliProductionCapabilityCatalog.KnownToolNames.Count)

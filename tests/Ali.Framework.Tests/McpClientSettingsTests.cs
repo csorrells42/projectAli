@@ -89,6 +89,55 @@ public sealed class McpClientSettingsTests
     }
 
     [Fact]
+    public async Task DisabledServer_IsEntirelyInertWhenGlobalMcpAndItsToolPolicyAreEnabled()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "AliMcpTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var manager = new McpClientManager(root);
+            manager.SaveSettings(new McpClientSettings
+            {
+                Enabled = true,
+                Servers =
+                [
+                    new McpServerProfile
+                    {
+                        Name = "Disabled unavailable server",
+                        Enabled = false,
+                        Transport = McpTransportKinds.Stdio,
+                        Command = "ali-disabled-mcp-command-that-must-not-start-42.exe",
+                        Tools =
+                        [
+                            new McpToolPolicy
+                            {
+                                Name = "read",
+                                Enabled = true,
+                                RequiresApproval = false,
+                                ReadOnlyHint = true
+                            }
+                        ]
+                    }
+                ]
+            });
+
+            Assert.Equal(0, manager.CountEnabledConfiguredToolPolicies());
+
+            await using var session = await manager.CreateEnabledToolSessionAsync(
+                TestContext.Current.CancellationToken);
+
+            Assert.Empty(session.Tools);
+            Assert.Empty(session.Warnings);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void MissingServerId_RemainsDeterministicallyWithheldUntilExplicitSavePersistsOne()
     {
         var root = Path.Combine(Path.GetTempPath(), "AliMcpTests", Guid.NewGuid().ToString("N"));

@@ -34,6 +34,10 @@ public static class AliProductionCapabilityCatalog
             .Concat(LanguageProviderBindings.Select(binding => binding.ProviderId))
             .ToArray());
 
+    private static readonly IReadOnlySet<string> RetiredToolNames = ToolSet(
+        AliCapabilityCatalog.CodingAgentStatusName,
+        AliCapabilityCatalog.CodingAgentExecuteName);
+
     private static readonly IReadOnlySet<string> ResolvedLanguageTargetToolNames = ToolSet(
         AliCapabilityCatalog.CodingAnalyzeProjectName,
         AliCapabilityCatalog.CodingFormatProjectName,
@@ -85,7 +89,6 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.FileCreateDirectoryName,
         AliCapabilityCatalog.ArchiveCreateName,
         AliCapabilityCatalog.ArchiveExtractName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.RunAgentSkillScriptName,
         AliCapabilityCatalog.CodingFormatProjectName,
         AliCapabilityCatalog.ArduinoCreateCompileName,
@@ -121,7 +124,6 @@ public static class AliProductionCapabilityCatalog
             .ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly IReadOnlySet<string> ProjectControlledExecutionToolNames = ToolSet(
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.CodingAnalyzeProjectName,
         AliCapabilityCatalog.CodingFormatProjectName,
         AliCapabilityCatalog.CodingBuildProjectName,
@@ -172,8 +174,6 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.SearchLocalLibraryName,
         AliCapabilityCatalog.RecallUserMemoryName,
         AliCapabilityCatalog.ListCurrentUserMemoriesName,
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.CodingAnalyzeProjectName,
         AliCapabilityCatalog.RunAgentSkillScriptName,
         AliCapabilityCatalog.CodingBuildProjectName,
@@ -245,8 +245,6 @@ public static class AliProductionCapabilityCatalog
     private static readonly IReadOnlySet<string> ChangesSystemStateToolNames = ToolSet(
         AliCapabilityCatalog.CreateCalendarEventName,
         AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.SetAgentModeName,
         AliCapabilityCatalog.ArduinoInstallCoreName,
         AliCapabilityCatalog.ArduinoInstallLibraryName,
@@ -305,8 +303,6 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.GnuNativeInspectName,
         AliCapabilityCatalog.LoadAgentSkillName,
         AliCapabilityCatalog.ReadAgentSkillResourceName,
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.ListRecoverableWorkflowsName,
         AliCapabilityCatalog.ResumeWorkflowCheckpointName,
         AliCapabilityCatalog.ArduinoSearchLibrariesName,
@@ -321,8 +317,6 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.SearchLocalLibraryName,
         AliCapabilityCatalog.RecallUserMemoryName,
         AliCapabilityCatalog.ListCurrentUserMemoriesName,
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.CodingAnalyzeProjectName,
         AliCapabilityCatalog.RunAgentSkillScriptName);
 
@@ -330,8 +324,6 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.RecallUserMemoryName,
         AliCapabilityCatalog.ForgetCurrentUserMemoryName,
         AliCapabilityCatalog.ListCurrentUserMemoriesName,
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.ConsultSoftwareEngineerName,
         AliCapabilityCatalog.ConsultResearcherName,
         AliCapabilityCatalog.ConsultOfficeSpecialistName,
@@ -342,6 +334,12 @@ public static class AliProductionCapabilityCatalog
 
     public static IReadOnlySet<string> KnownToolNames { get; } =
         Definitions.Keys.ToFrozenSet(StringComparer.Ordinal);
+
+    internal static bool IsRetiredToolName(string toolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
+        return RetiredToolNames.Contains(toolName);
+    }
 
     public static bool TryGetGroupId(string toolName, out string? groupId)
     {
@@ -690,8 +688,6 @@ public static class AliProductionCapabilityCatalog
             AliCapabilityCatalog.VisualStudioBuildName,
             AliCapabilityCatalog.VisualStudioOpenName);
         AddGroup(groups, CapabilityGroupIds.SpecialistsAndWorkflows,
-            AliCapabilityCatalog.CodingAgentStatusName,
-            AliCapabilityCatalog.CodingAgentExecuteName,
             AliCapabilityCatalog.ConsultSoftwareEngineerName,
             AliCapabilityCatalog.ConsultResearcherName,
             AliCapabilityCatalog.ConsultOfficeSpecialistName,
@@ -702,6 +698,7 @@ public static class AliProductionCapabilityCatalog
             AliCapabilityCatalog.ResumeWorkflowCheckpointName);
 
         var catalogByName = AliCapabilityCatalog.Tools
+            .Where(tool => !IsRetiredToolName(tool.Name))
             .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         var catalogNames = catalogByName.Keys.ToHashSet(StringComparer.Ordinal);
         if (!catalogNames.SetEquals(groups.Keys))

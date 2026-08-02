@@ -1068,40 +1068,6 @@
                             HorizontalAlignment="Right"
                             VerticalAlignment="Bottom"
                             Margin="0,0,8,8">
-                    <Grid AutomationProperties.AutomationId="MainChatCodingExecutor"
-                          Margin="0,0,18,0"
-                          ToolTip="When Ali semantically identifies a coding task, this selected executor handles the implementation. Ali verifies the result.">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="Coding"
-                                   Foreground="{StaticResource MutedTextBrush}"
-                                   FontSize="10"
-                                   FontWeight="SemiBold"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,0,0,2" />
-                        <RadioButton Grid.Row="1"
-                                     Content="Ali"
-                                     GroupName="CodingExecutor"
-                                     IsChecked="{Binding IsCodingExecutorAli}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     Margin="0,0,0,2" />
-                        <RadioButton Grid.Row="2"
-                                     Content="Aider"
-                                     GroupName="CodingExecutor"
-                                     IsChecked="{Binding IsCodingExecutorAider}"
-                                     Foreground="{StaticResource TextBrush}"
-                                     Margin="0,0,0,2" />
-                        <RadioButton Grid.Row="3"
-                                     Content="OpenHands"
-                                     GroupName="CodingExecutor"
-                                     IsChecked="{Binding IsCodingExecutorOpenHands}"
-                                     Foreground="{StaticResource TextBrush}" />
-                    </Grid>
-
                     <Grid AutomationProperties.AutomationId="MainChatReasoningEffort"
                           ToolTip="GPT-OSS reasoning effort. Changes apply to the next request without reloading the model.">
                         <Grid.RowDefinitions>

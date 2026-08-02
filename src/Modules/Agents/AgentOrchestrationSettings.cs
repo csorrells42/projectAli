@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Ali.Modules.Coordinator;
 
@@ -23,20 +24,9 @@ public static class ProgrammingAgentModes
     public const string OpenHands = "openhands";
     public const string Hybrid = "hybrid";
 
-    public static IReadOnlyList<string> All { get; } = [Off, Aider, OpenHands];
+    public static IReadOnlyList<string> All { get; } = [Off];
 
-    public static string Normalize(string? value)
-    {
-        var candidate = value?.Trim();
-        if (string.Equals(candidate, Hybrid, StringComparison.OrdinalIgnoreCase))
-        {
-            return Off;
-        }
-
-        return All.Contains(candidate, StringComparer.OrdinalIgnoreCase)
-            ? All.First(item => item.Equals(candidate, StringComparison.OrdinalIgnoreCase))
-            : Off;
-    }
+    public static string Normalize(string? _) => Off;
 }
 
 public sealed record AgentOrchestrationSettings
@@ -45,18 +35,21 @@ public sealed record AgentOrchestrationSettings
 
     public int MagenticMaximumRounds { get; init; } = 6;
 
+    [JsonIgnore]
     public string ProgrammingAgentMode { get; init; } = ProgrammingAgentModes.Off;
 
+    [JsonIgnore]
     public bool AlwaysUseProgrammingAgent { get; init; }
 
+    [JsonIgnore]
     public string OpenHandsWslDistribution { get; init; } = "Ubuntu-24.04";
 
     public AgentOrchestrationSettings Normalize() => this with
     {
         MagenticPolicy = MagenticPolicies.Normalize(MagenticPolicy),
         MagenticMaximumRounds = Math.Clamp(MagenticMaximumRounds, 2, 12),
-        ProgrammingAgentMode = ProgrammingAgentModes.Normalize(ProgrammingAgentMode),
-        AlwaysUseProgrammingAgent = ProgrammingAgentModes.Normalize(ProgrammingAgentMode) != ProgrammingAgentModes.Off,
+        ProgrammingAgentMode = ProgrammingAgentModes.Off,
+        AlwaysUseProgrammingAgent = false,
         OpenHandsWslDistribution = string.IsNullOrWhiteSpace(OpenHandsWslDistribution)
             ? "Ubuntu-24.04"
             : OpenHandsWslDistribution.Trim()

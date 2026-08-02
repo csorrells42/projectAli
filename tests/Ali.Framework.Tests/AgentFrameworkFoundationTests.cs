@@ -32,7 +32,7 @@ public sealed class AgentFrameworkFoundationTests
     }
 
     [Fact]
-    public void AuthoritativeInventoryIncludesFrameworkModeAndSkillTools()
+    public void AuthoritativeInventoryIncludesFrameworkToolsAndRetiresExternalCodingTools()
     {
         var inventory = Ali.Modules.Coordinator.AliCapabilityCatalog.ListAvailableTools(
             new Ali.Modules.Coordinator.AgentOrchestrationSettings
@@ -41,10 +41,10 @@ public sealed class AgentFrameworkFoundationTests
             });
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(124, names.Length);
+        Assert.Equal(122, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
-        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName, names);
-        Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName, names);
+        Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName, names);
+        Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, names);
         Assert.Contains(Ali.Modules.Coordinator.AliCapabilityCatalog.GetActiveUserProfileName, names);
         Assert.DoesNotContain(Ali.Modules.Coordinator.AliCapabilityCatalog.RememberCurrentUserName, names);

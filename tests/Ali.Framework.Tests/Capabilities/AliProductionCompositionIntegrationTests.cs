@@ -19,7 +19,7 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class AliProductionCompositionIntegrationTests
 {
     [Fact]
-    public async Task ActualProductionComposition_BuildsTheExact124CanonicalDescriptors_Offline()
+    public async Task ActualProductionComposition_BuildsTheExact122ActiveCanonicalDescriptors_Offline()
     {
         using var fixture = new CompositionFixture();
         var runtime = new DevelopmentLocalModelRuntime();
@@ -75,18 +75,28 @@ public sealed class AliProductionCompositionIntegrationTests
             .Concat(frameworkTools)
             .OfType<AIFunctionDeclaration>()
             .ToArray();
+        var activeDeclarations = declarations
+            .Where(declaration =>
+                !AliProductionCapabilityCatalog.IsRetiredToolName(declaration.Name))
+            .ToArray();
 
-        var production = AliProductionCapabilityCatalog.Build(declarations);
+        var production = AliProductionCapabilityCatalog.Build(activeDeclarations);
 
         Assert.Equal(124, declarations.Length);
         Assert.Equal(124, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(124, production.Registry.Descriptors.Count);
+        Assert.Equal(122, activeDeclarations.Length);
+        Assert.Equal(122, production.Registry.Descriptors.Count);
         Assert.True(AliProductionCapabilityCatalog.KnownToolNames.SetEquals(
             production.Registry.Descriptors.Select(descriptor => descriptor.ToolName)));
+        Assert.DoesNotContain(
+            production.Registry.Descriptors,
+            descriptor => AliProductionCapabilityCatalog.IsRetiredToolName(descriptor.ToolName));
         Assert.Empty(production.QuarantinedToolNames);
         Assert.Equal(0, client.CallCount);
 
-        var inventory = CapabilityTerminalToolInventory.Create(declarations, production.Registry);
+        var inventory = CapabilityTerminalToolInventory.Create(activeDeclarations, production.Registry);
+        Assert.Equal(122, inventory.FunctionDeclarationCount);
+        Assert.Empty(inventory.Issues);
         var stagedRuntime = CapabilityRuntimeAvailabilityFactory.Create(
             inventory,
             new CapabilityRuntimeStateSnapshot(
@@ -166,10 +176,28 @@ public sealed class AliProductionCompositionIntegrationTests
             shadowObserver: null,
             capabilitySettingsDataRoot: fixture.Root);
 
-        var resolution = Assert.IsType<CapabilitySettingsSnapshotOwner>(
-                coordinator.CapabilitySettings)
-            .CapturePlanning()
-            .Resolution;
+        var settingsOwner = Assert.IsType<CapabilitySettingsSnapshotOwner>(
+            coordinator.CapabilitySettings);
+        var resolution = settingsOwner.CapturePlanning().Resolution;
+        var settingsEnvelope = settingsOwner.CaptureSettings();
+        var resolvedToolNames = resolution.EffectiveDescriptors
+            .Select(descriptor => descriptor.ToolName)
+            .Concat(resolution.UnavailableDescriptors.Select(item => item.Descriptor.ToolName))
+            .ToHashSet(StringComparer.Ordinal);
+        var capabilityRowReasons = settingsEnvelope.Rows
+            .SelectMany(row => row.Reasons)
+            .ToArray();
+        var specialistsAndWorkflowsRow = Assert.Single(
+            settingsEnvelope.Rows,
+            row => row.GroupId == CapabilityGroupIds.SpecialistsAndWorkflows);
+        Assert.Equal(122, settingsEnvelope.DeclaredTaskToolCount);
+        Assert.Equal(8, specialistsAndWorkflowsRow.DeclaredToolCount);
+        Assert.DoesNotContain(
+            resolvedToolNames,
+            AliProductionCapabilityCatalog.IsRetiredToolName);
+        Assert.DoesNotContain(
+            capabilityRowReasons,
+            reason => AliProductionCapabilityCatalog.IsRetiredToolName(reason.ToolName));
         var durableWorkflowNames = new[]
         {
             AliCapabilityCatalog.RunResearchArtifactWorkflowName,

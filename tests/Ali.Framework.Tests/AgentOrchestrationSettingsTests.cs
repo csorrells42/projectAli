@@ -8,7 +8,7 @@ public sealed class AgentOrchestrationSettingsTests
     [InlineData(MagenticPolicies.Off)]
     [InlineData(MagenticPolicies.AskFirst)]
     [InlineData(MagenticPolicies.Automatic)]
-    public void Settings_RoundTripSupportedMagenticPolicies(string policy)
+    public void Settings_RoundTripMagenticPolicyWithoutRetiredProgrammingFields(string policy)
     {
         var root = Path.Combine(Path.GetTempPath(), "AliAgentOrchestrationSettingsTests", Guid.NewGuid().ToString("N"));
         try
@@ -19,16 +19,60 @@ public sealed class AgentOrchestrationSettingsTests
                 MagenticMaximumRounds = 7,
                 ProgrammingAgentMode = ProgrammingAgentModes.Aider,
                 AlwaysUseProgrammingAgent = true,
-                OpenHandsWslDistribution = "Ubuntu-24.04"
+                OpenHandsWslDistribution = "Legacy-Distro"
             });
 
             var loaded = AgentOrchestrationSettingsStore.LoadOrDefault(root);
+            var persisted = File.ReadAllText(AgentOrchestrationSettingsStore.GetPath(root));
 
             Assert.Equal(policy, loaded.MagenticPolicy);
             Assert.Equal(7, loaded.MagenticMaximumRounds);
-            Assert.Equal(ProgrammingAgentModes.Aider, loaded.ProgrammingAgentMode);
-            Assert.True(loaded.AlwaysUseProgrammingAgent);
-            Assert.Equal("Ubuntu-24.04", loaded.OpenHandsWslDistribution);
+            Assert.Equal(ProgrammingAgentModes.Off, loaded.ProgrammingAgentMode);
+            Assert.False(loaded.AlwaysUseProgrammingAgent);
+            Assert.DoesNotContain("programmingAgentMode", persisted, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("alwaysUseProgrammingAgent", persisted, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("openHandsWslDistribution", persisted, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void LegacySerializedProgrammingSelection_IsIgnoredAndScrubbedOnNextSave()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "AliAgentOrchestrationLegacyTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(
+                AgentOrchestrationSettingsStore.GetPath(root),
+                """
+                {
+                  "magenticPolicy": "automatic-complex",
+                  "magenticMaximumRounds": 9,
+                  "programmingAgentMode": "aider",
+                  "alwaysUseProgrammingAgent": true,
+                  "openHandsWslDistribution": "Legacy-Distro"
+                }
+                """);
+
+            var loaded = AgentOrchestrationSettingsStore.LoadOrDefault(root);
+
+            Assert.Equal(MagenticPolicies.Automatic, loaded.MagenticPolicy);
+            Assert.Equal(9, loaded.MagenticMaximumRounds);
+            Assert.Equal(ProgrammingAgentModes.Off, loaded.ProgrammingAgentMode);
+            Assert.False(loaded.AlwaysUseProgrammingAgent);
+
+            AgentOrchestrationSettingsStore.Save(root, loaded);
+            var rewritten = File.ReadAllText(AgentOrchestrationSettingsStore.GetPath(root));
+            Assert.DoesNotContain("programmingAgentMode", rewritten, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("alwaysUseProgrammingAgent", rewritten, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("openHandsWslDistribution", rewritten, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -79,47 +123,51 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.Contains("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsAlwaysUseProgrammingAgent", xaml, StringComparison.Ordinal);
-        Assert.Contains("Coding selector beside Effort", xaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsOpenHandsWslDistribution", xaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Programming engines", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsOpenHandsWslDistribution", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenHands", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Aider", xaml, StringComparison.Ordinal);
         Assert.Contains("concurrent and background agents are disabled", xaml, StringComparison.OrdinalIgnoreCase);
+
+        var viewModel = File.ReadAllText(FindRepositoryFile(
+            "src", "UI", "ViewModels", "AgentOrchestrationSettingsViewModel.cs"));
+        Assert.DoesNotContain("RefreshProgrammingAgents", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("ExternalAgents.GetStatusAsync", viewModel, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AlwaysUseProgrammingAgent_PrefersButDoesNotTransferControlToConfiguredEngine()
+    public void LegacyExternalSelection_NormalizesToAliAndRemovesExternalTools()
     {
+        var settings = new AgentOrchestrationSettings
+        {
+            ProgrammingAgentMode = ProgrammingAgentModes.OpenHands,
+            AlwaysUseProgrammingAgent = true
+        }.Normalize();
         var instructions = AliToolCatalog.BuildInstructions(
             "Ali",
-            new AgentOrchestrationSettings
-            {
-                ProgrammingAgentMode = ProgrammingAgentModes.OpenHands,
-                AlwaysUseProgrammingAgent = true
-            });
+            settings);
+        var inventory = AliCapabilityCatalog.ListAvailableTools(settings);
 
-        Assert.Contains("prefer the selected external programming engine", instructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("optional, approval-bearing collaborator", instructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("never owns the turn", instructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("continue with Ali's effective native tools", instructions, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("do not edit, replace, move, create or delete project source yourself", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ProgrammingAgentModes.Off, settings.ProgrammingAgentMode);
+        Assert.False(settings.AlwaysUseProgrammingAgent);
+        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentStatusName);
+        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentExecuteName);
+        Assert.Contains("Ali is the sole coding executor", instructions, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData(ProgrammingAgentModes.Off)]
     [InlineData(ProgrammingAgentModes.Aider)]
     [InlineData(ProgrammingAgentModes.OpenHands)]
-    public void ProgrammingAgentMode_NormalizesSupportedSelections(string mode)
-    {
-        Assert.Equal(mode, new AgentOrchestrationSettings { ProgrammingAgentMode = mode }.Normalize().ProgrammingAgentMode);
-        Assert.Equal(ProgrammingAgentModes.Off,
-            new AgentOrchestrationSettings { ProgrammingAgentMode = "retired-provider" }.Normalize().ProgrammingAgentMode);
-    }
-
-    [Fact]
-    public void LegacyHybridSelection_FallsBackToAliInsteadOfRunningTwoAgents()
+    [InlineData(ProgrammingAgentModes.Hybrid)]
+    [InlineData("retired-provider")]
+    [InlineData(" AIDER ")]
+    public void ProgrammingAgentMode_NormalizesEveryLegacySelectionToOff(string mode)
     {
         var settings = new AgentOrchestrationSettings
         {
-            ProgrammingAgentMode = ProgrammingAgentModes.Hybrid,
+            ProgrammingAgentMode = mode,
             AlwaysUseProgrammingAgent = true
         }.Normalize();
 
@@ -141,7 +189,10 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.False(settings.AlwaysUseProgrammingAgent);
         Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentStatusName);
         Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentExecuteName);
-        Assert.Contains("Aider and OpenHands are disabled", AliToolCatalog.BuildInstructions("Ali", settings));
+        Assert.Contains(
+            "Ali is the sole coding executor",
+            AliToolCatalog.BuildInstructions("Ali", settings),
+            StringComparison.Ordinal);
     }
 
     private static string FindArchitectureDocument()

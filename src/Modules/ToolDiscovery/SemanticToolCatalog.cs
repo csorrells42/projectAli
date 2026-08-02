@@ -40,6 +40,19 @@ internal sealed record ToolBucketDefinition(
     IReadOnlyList<string>? Requires = null,
     bool AlwaysVisible = false);
 
+internal static class LiveSemanticToolDirectory
+{
+    private const string RetiredExternalCodingAgentBucketId = "external-coding-agents";
+
+    public static IReadOnlyList<ToolBucketDefinition> CreateBuckets(
+        IReadOnlyList<AIFunctionDeclaration> liveTools) =>
+        SemanticToolBuckets.Create(liveTools)
+            .Where(bucket => !bucket.Id.Equals(
+                RetiredExternalCodingAgentBucketId,
+                StringComparison.Ordinal))
+            .ToArray();
+}
+
 internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
 {
     public Task<SemanticToolSelection> SelectAsync(
@@ -48,7 +61,7 @@ internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
         IReadOnlyCollection<string> retainedToolNames,
         CancellationToken cancellationToken)
     {
-        var buckets = SemanticToolBuckets.Create(liveTools);
+        var buckets = LiveSemanticToolDirectory.CreateBuckets(liveTools);
         return Task.FromResult(new SemanticToolSelection(
             liveTools.ToArray(),
             ["Complete live registry"],
@@ -100,7 +113,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         CancellationToken cancellationToken)
     {
         _latestTools = liveTools.ToArray();
-        var buckets = SemanticToolBuckets.Create(liveTools);
+        var buckets = LiveSemanticToolDirectory.CreateBuckets(liveTools);
         var directory = SemanticToolBuckets.BuildDirectory(buckets);
         if (liveTools.Count == 0)
         {

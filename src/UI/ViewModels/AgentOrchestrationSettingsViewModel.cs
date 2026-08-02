@@ -8,10 +8,6 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     private readonly AliServices _services;
     private MagenticPolicyChoice _selectedMagenticPolicy = MagenticPolicyChoice.AskFirst;
     private int _magenticMaximumRounds = 6;
-    private string _selectedProgrammingAgentMode = ProgrammingAgentModes.Off;
-    private string _openHandsWslDistribution = "Ubuntu-24.04";
-    private string _aiderStatusText = "Aider readiness has not been checked yet.";
-    private string _openHandsStatusText = "OpenHands readiness has not been checked yet.";
     private string _statusText = "Agent orchestration settings have not been loaded yet.";
     private string _checkpointSummary = "Checking workflow checkpoints...";
 
@@ -21,7 +17,6 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         SaveCommand = new RelayCommand(_ => Save(), onException: HandleError);
         ReloadCommand = new RelayCommand(_ => Reload(), onException: HandleError);
         ArchiveCheckpointsCommand = new RelayCommand(_ => ArchiveCheckpoints(), onException: HandleError);
-        RefreshProgrammingAgentsCommand = new RelayCommand(_ => _ = RefreshProgrammingAgentsAsync(), onException: HandleError);
         Reload();
     }
 
@@ -46,30 +41,6 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         set => SetProperty(ref _magenticMaximumRounds, Math.Clamp(value, 2, 12));
     }
 
-    public string SelectedProgrammingAgentMode
-    {
-        get => _selectedProgrammingAgentMode;
-        private set => SetProperty(ref _selectedProgrammingAgentMode, ProgrammingAgentModes.Normalize(value));
-    }
-
-    public string OpenHandsWslDistribution
-    {
-        get => _openHandsWslDistribution;
-        set => SetProperty(ref _openHandsWslDistribution, value);
-    }
-
-    public string AiderStatusText
-    {
-        get => _aiderStatusText;
-        private set => SetProperty(ref _aiderStatusText, value);
-    }
-
-    public string OpenHandsStatusText
-    {
-        get => _openHandsStatusText;
-        private set => SetProperty(ref _openHandsStatusText, value);
-    }
-
     public string SettingsPath => _services.AgentOrchestrationSettingsPath;
 
     public string CheckpointPath => _services.WorkflowCheckpointPath;
@@ -92,24 +63,13 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
 
     public ICommand ArchiveCheckpointsCommand { get; }
 
-    public ICommand RefreshProgrammingAgentsCommand { get; }
-
-    public void SelectProgrammingAgentMode(string mode)
-    {
-        SelectedProgrammingAgentMode = mode;
-        Save();
-    }
-
     public void Reload()
     {
         var settings = _services.LoadAgentOrchestrationSettings();
         SelectedMagenticPolicy = MagenticPolicyChoices.First(choice =>
             choice.Value == settings.MagenticPolicy);
         MagenticMaximumRounds = settings.MagenticMaximumRounds;
-        SelectedProgrammingAgentMode = settings.ProgrammingAgentMode;
-        OpenHandsWslDistribution = settings.OpenHandsWslDistribution;
         RefreshCheckpointSummary();
-        _ = RefreshProgrammingAgentsAsync();
         StatusText = "Loaded Agent Framework orchestration policy. Changes apply on Ali's next turn.";
     }
 
@@ -118,14 +78,10 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
         _services.SaveAgentOrchestrationSettings(new AgentOrchestrationSettings
         {
             MagenticPolicy = SelectedMagenticPolicy.Value,
-            MagenticMaximumRounds = MagenticMaximumRounds,
-            ProgrammingAgentMode = SelectedProgrammingAgentMode,
-            AlwaysUseProgrammingAgent = SelectedProgrammingAgentMode != ProgrammingAgentModes.Off,
-            OpenHandsWslDistribution = OpenHandsWslDistribution
+            MagenticMaximumRounds = MagenticMaximumRounds
         });
         RefreshCheckpointSummary();
-        _ = RefreshProgrammingAgentsAsync();
-        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}; coding executor: {DisplayProgrammingAgentMode(SelectedProgrammingAgentMode)}. Ali will semantically identify coding work and use that executor on the next turn.";
+        StatusText = $"Saved Magentic policy: {SelectedMagenticPolicy.DisplayName}. Ali remains the only coding assistant.";
     }
 
     private void ArchiveCheckpoints()
@@ -162,30 +118,6 @@ public sealed class AgentOrchestrationSettingsViewModel : ObservableObject
     private void HandleError(Exception ex) =>
         StatusText = $"Agent orchestration settings failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}";
 
-    private static string DisplayProgrammingAgentMode(string mode) =>
-        ProgrammingAgentModes.Normalize(mode) switch
-        {
-            ProgrammingAgentModes.Aider => "Aider",
-            ProgrammingAgentModes.OpenHands => "OpenHands",
-            _ => "Ali"
-        };
-
-    private async Task RefreshProgrammingAgentsAsync()
-    {
-        try
-        {
-            AiderStatusText = "Checking Aider...";
-            OpenHandsStatusText = "Checking OpenHands...";
-            var status = await _services.CodingModule.ExternalAgents.GetStatusAsync(CancellationToken.None);
-            AiderStatusText = $"{(status.Aider.Ready ? "Ready" : "Unavailable")}: {status.Aider.Summary}";
-            OpenHandsStatusText = $"{(status.OpenHands.Ready ? "Ready" : "Unavailable")}: {status.OpenHands.Summary}";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            AiderStatusText = "Aider readiness check failed safely.";
-            OpenHandsStatusText = $"Provider readiness check failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}";
-        }
-    }
 }
 
 public sealed record MagenticPolicyChoice(string Value, string DisplayName, string Summary)

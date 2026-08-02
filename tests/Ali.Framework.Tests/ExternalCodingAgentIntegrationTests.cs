@@ -9,14 +9,19 @@ namespace Ali.Framework.Tests;
 
 public sealed class ExternalCodingAgentIntegrationTests
 {
-    [Fact]
-    public async Task LegacyHybridSelection_DoesNotStartEitherExternalProvider()
+    [Theory]
+    [InlineData(ProgrammingAgentModes.Off)]
+    [InlineData(ProgrammingAgentModes.Aider)]
+    [InlineData(ProgrammingAgentModes.OpenHands)]
+    [InlineData(ProgrammingAgentModes.Hybrid)]
+    [InlineData("retired-provider")]
+    public async Task EveryRetiredExternalSelection_DoesNotStartEitherProvider(string mode)
     {
         var calls = new List<string>();
         var openHands = new FakeProvider("OpenHands", calls);
         var aider = new FakeProvider("Aider", calls);
         await WithAgentsAsync(
-            ProgrammingAgentModes.Hybrid,
+            mode,
             aider,
             openHands,
             async agents =>
@@ -30,75 +35,12 @@ public sealed class ExternalCodingAgentIntegrationTests
                 Assert.Empty(calls);
                 Assert.Empty(result.Passes);
                 Assert.Contains("Ali is the selected coding executor", result.Summary, StringComparison.Ordinal);
-            });
-    }
-
-    [Theory]
-    [InlineData(ProgrammingAgentModes.Aider, "Aider")]
-    [InlineData(ProgrammingAgentModes.OpenHands, "OpenHands")]
-    public async Task SingleMode_RunsOnlySelectedProvider(string mode, string expected)
-    {
-        var calls = new List<string>();
-        await WithAgentsAsync(
-            mode,
-            new FakeProvider("Aider", calls),
-            new FakeProvider("OpenHands", calls),
-            async agents =>
-            {
-                var result = await agents.ExecuteAsync(
-                    "Workspace/sample/sample.csproj",
-                    "Implement the objective.",
-                    TestContext.Current.CancellationToken);
-
-                Assert.True(result.Success);
-                Assert.Equal([expected], calls);
+                Assert.Contains("No external coding agent was started", result.Summary, StringComparison.Ordinal);
             });
     }
 
     [Fact]
-    public async Task SelectedProvider_CanCreateANewProjectDirectoryInsideAnApprovedMount()
-    {
-        var calls = new List<string>();
-        await WithAgentsAsync(
-            ProgrammingAgentModes.Aider,
-            new FakeProvider("Aider", calls),
-            new FakeProvider("OpenHands", calls),
-            async agents =>
-            {
-                var result = await agents.ExecuteAsync(
-                    "Workspace/new-project",
-                    "Implement the objective.",
-                    TestContext.Current.CancellationToken);
-
-                Assert.True(result.Success);
-                Assert.Equal(["Aider"], calls);
-            },
-            createExistingProject: false);
-    }
-
-    [Fact]
-    public async Task OffMode_DoesNotStartEitherExternalProvider()
-    {
-        var calls = new List<string>();
-        await WithAgentsAsync(
-            ProgrammingAgentModes.Off,
-            new FakeProvider("Aider", calls),
-            new FakeProvider("OpenHands", calls, succeeds: false),
-            async agents =>
-            {
-                var result = await agents.ExecuteAsync(
-                    "Workspace/sample/sample.csproj",
-                    "Implement the objective.",
-                    TestContext.Current.CancellationToken);
-
-                Assert.False(result.Success);
-                Assert.Empty(calls);
-                Assert.Contains("No external coding agent was started", result.Summary, StringComparison.OrdinalIgnoreCase);
-            });
-    }
-
-    [Fact]
-    public void ExecuteTool_UsesSharedPermissionAndMcpCatalogPath()
+    public void RetiredExecuteTool_IsAbsentFromAuthoritativeInventory()
     {
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingAgentExecuteName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.CodingAgentStatusName));
@@ -109,8 +51,8 @@ public sealed class ExternalCodingAgentIntegrationTests
         {
             ProgrammingAgentMode = ProgrammingAgentModes.Aider
         });
-        Assert.Contains(inventory.Tools, tool => tool.Name == AliCapabilityCatalog.CodingAgentExecuteName);
-        Assert.Contains(inventory.Tools, tool => tool.Name == AliCapabilityCatalog.CodingAgentStatusName);
+        Assert.DoesNotContain(inventory.Tools, tool => tool.Name == AliCapabilityCatalog.CodingAgentExecuteName);
+        Assert.DoesNotContain(inventory.Tools, tool => tool.Name == AliCapabilityCatalog.CodingAgentStatusName);
     }
 
     [Fact]

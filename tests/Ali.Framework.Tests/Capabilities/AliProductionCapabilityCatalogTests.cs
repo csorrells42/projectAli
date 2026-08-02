@@ -9,18 +9,38 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class AliProductionCapabilityCatalogTests
 {
     [Fact]
-    public void KnownMetadata_CoversTheExactOrdinaryCatalogOnce()
+    public void KnownMetadata_CoversTheExactActiveOrdinaryCatalogOnce()
     {
         var catalogNames = AliCapabilityCatalog.Tools.Select(tool => tool.Name).ToArray();
+        var activeCatalogNames = catalogNames
+            .Where(name => !AliProductionCapabilityCatalog.IsRetiredToolName(name))
+            .ToArray();
+        var retiredCatalogNames = catalogNames
+            .Where(AliProductionCapabilityCatalog.IsRetiredToolName)
+            .ToArray();
 
         Assert.Equal(catalogNames.Length, catalogNames.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(catalogNames.Length, AliProductionCapabilityCatalog.KnownToolNames.Count);
-        Assert.True(catalogNames.ToHashSet(StringComparer.Ordinal)
+        Assert.Equal(122, activeCatalogNames.Length);
+        Assert.Equal(
+            new[]
+            {
+                AliCapabilityCatalog.CodingAgentExecuteName,
+                AliCapabilityCatalog.CodingAgentStatusName
+            },
+            retiredCatalogNames.Order(StringComparer.Ordinal));
+        Assert.Equal(activeCatalogNames.Length, AliProductionCapabilityCatalog.KnownToolNames.Count);
+        Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionCapabilityCatalog.KnownToolNames));
-        Assert.All(catalogNames, name =>
+        Assert.All(activeCatalogNames, name =>
         {
             Assert.True(AliProductionCapabilityCatalog.TryGetGroupId(name, out var groupId));
             Assert.Contains(groupId, CapabilityGroupIds.All);
+        });
+        Assert.All(retiredCatalogNames, name =>
+        {
+            Assert.DoesNotContain(name, AliProductionCapabilityCatalog.KnownToolNames);
+            Assert.False(AliProductionCapabilityCatalog.TryGetGroupId(name, out var groupId));
+            Assert.Null(groupId);
         });
     }
 
@@ -59,8 +79,6 @@ public sealed class AliProductionCapabilityCatalogTests
             AliCapabilityCatalog.ReadAgentSkillResourceName,
             AliCapabilityCatalog.RunAgentSkillScriptName);
         AssertGroup(CapabilityGroupIds.SpecialistsAndWorkflows,
-            AliCapabilityCatalog.CodingAgentStatusName,
-            AliCapabilityCatalog.CodingAgentExecuteName,
             AliCapabilityCatalog.ConsultSoftwareEngineerName,
             AliCapabilityCatalog.ConsultResearcherName,
             AliCapabilityCatalog.ConsultOfficeSpecialistName,
@@ -180,6 +198,7 @@ public sealed class AliProductionCapabilityCatalogTests
     public void Build_UsesEverySuppliedKnownActualSchemaAndValidatesTheRegistry()
     {
         var actualFunctions = AliCapabilityCatalog.Tools
+            .Where(tool => !AliProductionCapabilityCatalog.IsRetiredToolName(tool.Name))
             .Select(tool => Function(tool.Name, $"actual schema for {tool.Name}"))
             .ToArray();
         var actualByName = actualFunctions.ToDictionary(function => function.Name, StringComparer.Ordinal);
@@ -187,6 +206,7 @@ public sealed class AliProductionCapabilityCatalogTests
         var result = AliProductionCapabilityCatalog.Build(actualFunctions);
 
         Assert.Empty(result.QuarantinedToolNames);
+        Assert.Equal(122, actualFunctions.Length);
         Assert.Equal(actualFunctions.Length, result.Registry.Descriptors.Count);
         Assert.Equal(
             new[]
@@ -394,27 +414,27 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void ExternalCodingAgents_DeclareStatusAndSourceMutationBoundaries()
+    public void RetiredExternalCodingTools_HaveNoProductionDescriptorsKnownNamesOrGroups()
     {
-        var byName = CreateDescriptorsByName();
+        var retiredNames = new[]
+        {
+            AliCapabilityCatalog.CodingAgentExecuteName,
+            AliCapabilityCatalog.CodingAgentStatusName
+        };
 
-        var status = byName[AliCapabilityCatalog.CodingAgentStatusName];
-        AssertPermissionGuardedProcess(status);
-        Assert.True(status.Effect.ReadsLocalData);
-        Assert.True(status.Effect.WritesLocalData);
-        Assert.True(status.Effect.UsesNetwork);
-        Assert.True(status.Effect.ChangesSystemState);
+        var result = AliProductionCapabilityCatalog.Build(retiredNames.Select(name => Function(name)));
 
-        var execute = byName[AliCapabilityCatalog.CodingAgentExecuteName];
-        Assert.Equal(CapabilityEffectKind.SourceMutation, execute.Effect.Kind);
-        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, execute.Effect.MutationBoundary);
-        Assert.False(execute.Effect.SupportsIdempotency);
-        Assert.True(execute.Effect.StartsProcesses);
-        Assert.True(execute.Effect.ReadsLocalData);
-        Assert.True(execute.Effect.WritesLocalData);
-        Assert.True(execute.Effect.UsesNetwork);
-        Assert.True(execute.Effect.ChangesSystemState);
-        Assert.NotEqual(CapabilityMutationBoundary.StagedWorkspace, execute.Effect.MutationBoundary);
+        Assert.Empty(result.Registry.Descriptors);
+        Assert.Equal(retiredNames, result.QuarantinedToolNames);
+        Assert.All(retiredNames, name =>
+        {
+            Assert.True(AliProductionCapabilityCatalog.IsRetiredToolName(name));
+            Assert.DoesNotContain(name, AliProductionCapabilityCatalog.KnownToolNames);
+            Assert.False(AliProductionCapabilityCatalog.TryGetGroupId(name, out var groupId));
+            Assert.Null(groupId);
+            Assert.Throws<KeyNotFoundException>(() =>
+                AliProductionCapabilityCatalog.GetSchemaFactoryId(name));
+        });
     }
 
     [Fact]
@@ -592,7 +612,6 @@ public sealed class AliProductionCapabilityCatalogTests
             AliCapabilityCatalog.FileCreateDirectoryName,
             AliCapabilityCatalog.ArchiveCreateName,
             AliCapabilityCatalog.ArchiveExtractName,
-            AliCapabilityCatalog.CodingAgentExecuteName,
             AliCapabilityCatalog.RunAgentSkillScriptName
         };
 
@@ -614,6 +633,7 @@ public sealed class AliProductionCapabilityCatalogTests
         var expected = AliToolPermissionPolicy.ProtectedTools
             .Select(tool => tool.ToolName)
             .Where(toolName => toolName != AliCapabilityCatalog.RunMagenticOrchestrationName)
+            .Where(AliProductionCapabilityCatalog.KnownToolNames.Contains)
             .ToHashSet(StringComparer.Ordinal);
         var actual = byName.Values
             .Where(descriptor => descriptor.Permission.RequiresApproval)
@@ -671,7 +691,6 @@ public sealed class AliProductionCapabilityCatalogTests
         }
 
         Assert.True(byName[AliCapabilityCatalog.DotNetStopProjectName].Effect.ChangesSystemState);
-        Assert.True(byName[AliCapabilityCatalog.CodingAgentStatusName].Effect.UsesNetwork);
     }
 
     [Fact]

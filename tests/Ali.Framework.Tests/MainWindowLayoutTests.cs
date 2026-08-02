@@ -42,18 +42,23 @@ public sealed class MainWindowLayoutTests
     public void ReasoningEffort_HasCompactHeadingAboveButtonsAndStaysPinned()
     {
         var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));
+        var viewModel = File.ReadAllText(FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
         var normalizedXaml = xaml.Replace("\r\n", "\n", StringComparison.Ordinal);
 
         Assert.Contains("AutomationProperties.AutomationId=\"MainChatReasoningEffort\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("AutomationProperties.AutomationId=\"MainChatCodingExecutor\"", xaml, StringComparison.Ordinal);
         Assert.Contains("VerticalAlignment=\"Bottom\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Grid.RowSpan=\"2\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Grid.Column=\"1\"\n                            Orientation=\"Horizontal\"", normalizedXaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"Coding\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Ali\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"Aider\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Content=\"OpenHands\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Content=\"Hybrid\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MainChatCodingExecutor", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("GroupName=\"CodingExecutor\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsCodingExecutorAli", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsCodingExecutorAider", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsCodingExecutorOpenHands", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsCodingExecutorAli", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsCodingExecutorAider", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsCodingExecutorOpenHands", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("_selectedProgrammingAgentMode", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("SynchronizeCodingExecutorSelection", viewModel, StringComparison.Ordinal);
         Assert.Contains("Text=\"Effort\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<Grid.RowDefinitions>", xaml, StringComparison.Ordinal);

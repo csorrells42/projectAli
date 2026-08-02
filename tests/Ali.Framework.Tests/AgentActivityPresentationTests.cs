@@ -269,14 +269,52 @@ public sealed class AgentActivityPresentationTests
     public void HostileUnterminatedQuotedPath_IsBoundedBeforeFormatting()
     {
         _ = new AgentActivityItemViewModel(CreateChunk("Warmup src/UI/Main.cs", AgentActivityKind.ToolCall));
-        var hostile = "\"" + string.Join('/', Enumerable.Repeat("segment", 5_000));
+        var segments = Enumerable.Repeat("s", 1_000).ToArray();
+        segments[0] = new string('a', 37);
+        var hostile = "\"" + string.Join('/', segments) + "/Target.cs).";
+        Assert.Equal(2_048, hostile.Length);
         var stopwatch = Stopwatch.StartNew();
 
         var item = new AgentActivityItemViewModel(CreateChunk(hostile, AgentActivityKind.ToolCall));
+        var fallback = AgentActivityItemViewModel.ShortenFilePathsDeterministically(hostile);
 
         stopwatch.Stop();
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Formatting took {stopwatch.Elapsed}.");
+        Assert.Equal("\"Target.cs).", item.DisplayTitle);
+        Assert.Equal("\"Target.cs).", fallback);
         Assert.True(item.DisplayTitle.Length <= 323);
+    }
+
+    [Theory]
+    [InlineData(
+        "Processing \"C:\\deep\\source\\Main.cs\", \\\\server\\share\\settings.json; /opt/ali/run.py! src/UI/App.xaml.cs?",
+        "Processing \"Main.cs\", settings.json; run.py! App.xaml.cs?")]
+    [InlineData(
+        "Reading `C:/mixed\\separators/deep/Worker.cs` and './relative/path/config.json'.",
+        "Reading `Worker.cs` and 'config.json'.")]
+    [InlineData(
+        "Copied C:\\Project One\\source to D:\\Backup Sets\\destination",
+        "Copied source to destination")]
+    public void DeterministicPathFallback_HandlesPathKindsQuotesPunctuationAndMultiplePaths(
+        string source,
+        string expected)
+    {
+        var display = AgentActivityItemViewModel.ShortenFilePathsDeterministically(source);
+
+        Assert.Equal(expected, display);
+    }
+
+    [Fact]
+    public void DeterministicPathFallback_LeavesMixedHttpUrlsUnchanged()
+    {
+        const string source =
+            "Checking https://example.com/src/server.cs?next=/api/data.json then src/UI/Main.cs and http://127.0.0.1:1234/a/b.json.";
+
+        var display = AgentActivityItemViewModel.ShortenFilePathsDeterministically(source);
+
+        Assert.Equal(
+            "Checking https://example.com/src/server.cs?next=/api/data.json then Main.cs and http://127.0.0.1:1234/a/b.json.",
+            display);
     }
 
     private static AssistantStreamChunk CreateChunk(
