@@ -26,7 +26,7 @@ internal sealed class OpenHandsCodingAgentProvider(
         var result = await processRunner.RunAsync(
             WslExecutable,
             Environment.SystemDirectory,
-            ["-d", distro, "--exec", "bash", "-lc", "OPENHANDS_SUPPRESS_BANNER=1 PYTHONWARNINGS=ignore::DeprecationWarning \"$HOME/.local/bin/openhands\" --version"],
+            ["-d", distro, "--exec", "sh", "-c", "OPENHANDS_SUPPRESS_BANNER=1 PYTHONWARNINGS=ignore::DeprecationWarning \"$HOME/.local/bin/openhands\" --version"],
             cancellationToken).ConfigureAwait(false);
         return new ExternalCodingAgentProviderStatus(
             Name,
@@ -126,8 +126,8 @@ internal sealed class OpenHandsCodingAgentProvider(
         arguments.AddRange(environment);
         arguments.AddRange(
         [
-            "bash",
-            "-lc",
+            "sh",
+            "-c",
             "exec \"$HOME/.local/share/ali-openhands-tools/openhands/bin/python\" \"$@\"",
             "ali-openhands-python",
             linuxLauncherPath,
@@ -141,7 +141,7 @@ internal sealed class OpenHandsCodingAgentProvider(
             Name,
             ExternalCodingAgentProgressKind.Started,
             "OpenHands accepted the coding job",
-            "OpenHands is inspecting the project and will own its edit, build, test and repair loop."));
+            "OpenHands is inspecting the project and performing its bounded approved collaboration pass."));
         var progressParser = new OpenHandsProgressParser(progress);
         var result = await processRunner.RunAsync(
             WslExecutable,

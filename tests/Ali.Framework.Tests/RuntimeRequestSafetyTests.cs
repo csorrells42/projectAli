@@ -1,4 +1,7 @@
 using Ali.Modules.Coordinator;
+using System.Text.Json;
+using Ali.Modules.Mcp;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
@@ -119,6 +122,156 @@ public sealed class RuntimeRequestSafetyTests
 
         Assert.Same(result, observer.Result);
         Assert.Equal("returned", observer.Terminal);
+    }
+
+    [Fact]
+    public async Task McpPostDispatchFailure_ProducesWarningAndFailedReceiptWithoutChangingResult()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = CreateObservedTurn("call-mcp-timeout", "mcp_server_tool", activity.Add);
+        var failure = new McpToolInvocationTimedOutResult(
+            "mcp_server_tool",
+            "timed-out",
+            "The external MCP tool timed out. Its target-side outcome is unknown; do not retry automatically.");
+        var inner = new FixedResultAIFunction(
+            AIFunctionFactory.Create(
+                () => "unused",
+                "mcp_server_tool",
+                "Invoke an external MCP tool."),
+            failure);
+        var observer = new RecordingShadowObserver();
+        var wrapped = new ActivityReportingAIFunction(inner, () => turn, observer);
+
+        var result = await wrapped.InvokeAsync(
+            new AIFunctionArguments(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(failure, result);
+        Assert.Same(failure, observer.Result);
+        Assert.Equal("returned", observer.Terminal);
+        Assert.Contains(activity, item =>
+            item.ActivityKind == AgentActivityKind.Warning
+            && item.ExecutionReceipt?.Outcome == AgentToolExecutionOutcome.Failed
+            && item.ExecutionReceipt.Summary.Contains("outcome is unknown", StringComparison.Ordinal));
+        Assert.DoesNotContain(activity, item =>
+            item.ExecutionReceipt?.Outcome == AgentToolExecutionOutcome.Completed);
+        Assert.DoesNotContain(activity, item =>
+            item.Text.Contains("completed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GenericFrameworkResultStatus_IsSuppressedForBlockedAndUncertainResults()
+    {
+        var blocked = new FunctionResultContent(
+            "call-blocked",
+            new CapabilityInvocationBlockedResult(
+                "test_tool",
+                "revision",
+                [new CapabilityAvailabilityReason(
+                    CapabilityAvailabilityReasonCode.McpUnavailable,
+                    "test-provider",
+                    "The capability is unavailable.")]));
+        var uncertain = new FunctionResultContent(
+            "call-uncertain",
+            new McpToolInvocationTimedOutResult(
+                "test_tool",
+                "timed-out",
+                "The external outcome is unknown."));
+        var serializedBlocked = new FunctionResultContent(
+            "call-blocked-json",
+            JsonSerializer.SerializeToElement(new
+            {
+                success = false,
+                invoked = false,
+                status = "blocked"
+            }));
+        var serializedUncertain = new FunctionResultContent(
+            "call-uncertain-text",
+            "{\"success\":false,\"invoked\":true,\"outcomeUnknown\":true,\"retrySafe\":false}");
+        var dictionaryUncertain = new FunctionResultContent(
+            "call-uncertain-dictionary",
+            new Dictionary<string, object?>
+            {
+                ["success"] = false,
+                ["invoked"] = true,
+                ["outcomeUnknown"] = true,
+                ["retrySafe"] = false
+            });
+        var threw = new FunctionResultContent("call-threw", null)
+        {
+            Exception = new InvalidOperationException("private exception canary")
+        };
+        var domainBlockedStatus = new FunctionResultContent(
+            "call-domain-blocked",
+            JsonSerializer.SerializeToElement(new
+            {
+                success = true,
+                invoked = true,
+                status = "blocked"
+            }));
+        var completed = new FunctionResultContent("call-completed", new { success = true });
+
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(blocked));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(uncertain));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(serializedBlocked));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(serializedUncertain));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(dictionaryUncertain));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(threw));
+        Assert.True(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(domainBlockedStatus));
+        Assert.True(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(completed));
+    }
+
+    [Fact]
+    public async Task UserFacingToolDisplayName_HidesStableInternalHashesFromActivityAndReceipt()
+    {
+        const string internalName = "mcp_server_0123456789abcdef_tool_fedcba9876543210";
+        const string displayName = "Build Server: inspect solution";
+        var activity = new List<AssistantStreamChunk>();
+        var turn = CreateObservedTurn("call-mcp-display", internalName, activity.Add);
+        var inner = AIFunctionFactory.Create(
+            () => "inspected",
+            internalName,
+            "Inspect an external solution.");
+        var wrapped = new ActivityReportingAIFunction(
+            inner,
+            () => turn,
+            userFacingDisplayName: displayName);
+
+        await wrapped.InvokeAsync(
+            new AIFunctionArguments(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(displayName, wrapped.UserFacingDisplayName);
+        Assert.Contains(activity, item => item.Text.Contains(displayName, StringComparison.Ordinal));
+        Assert.All(activity, item =>
+            Assert.DoesNotContain("0123456789abcdef", item.Text, StringComparison.Ordinal));
+        var receipt = Assert.Single(activity, item => item.ExecutionReceipt is not null).ExecutionReceipt!;
+        Assert.Equal(internalName, receipt.ToolName);
+        Assert.Equal(displayName, receipt.DisplayName);
+    }
+
+    [Fact]
+    public void CapabilityIssueDisplay_UsesRegisteredDisplayNameAndGenericUnknownFallback()
+    {
+        const string internalName = "mcp_server_0123456789abcdef_tool_fedcba9876543210";
+        const string displayName = "Build Server: inspect solution";
+        var raw = AIFunctionFactory.Create(
+            () => "inspected",
+            internalName,
+            "Inspect an external solution.");
+        AITool displayed = new ActivityReportingAIFunction(
+            raw,
+            () => null,
+            userFacingDisplayName: displayName);
+
+        Assert.Equal(
+            displayName,
+            AliAgentHarnessRunner.ResolveCapabilityIssueDisplayName([displayed], internalName));
+        Assert.Equal(
+            "unavailable capability",
+            AliAgentHarnessRunner.ResolveCapabilityIssueDisplayName(
+                [displayed],
+                "mcp_unknown_deadbeefdeadbeef"));
     }
 
     [Fact]
@@ -381,6 +534,16 @@ public sealed class RuntimeRequestSafetyTests
                 throw new ApplicationException("shadow observer failed");
             }
         }
+    }
+
+    private sealed class FixedResultAIFunction(
+        AIFunction inner,
+        object? result) : DelegatingAIFunction(inner)
+    {
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(result);
     }
 
     private sealed class CyclicResult

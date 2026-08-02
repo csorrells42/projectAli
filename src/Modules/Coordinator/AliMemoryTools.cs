@@ -82,6 +82,26 @@ internal sealed class AliMemoryTools
         return SearchAsync(query, cancellationToken);
     }
 
+    internal Task<CoordinatorMemoryResult> SearchForSelectionAsync(
+        ActiveUserSelectionSnapshot selection,
+        string query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_userMemories is null)
+        {
+            return SearchAsync(query, cancellationToken);
+        }
+
+        return selection.IsResolved
+            ? SearchPerUserAsync(selection.SelectedUser!, query, cancellationToken)
+            : Task.FromResult(new CoordinatorMemoryResult(
+                "Select the active user profile before Ali accesses personal memory.",
+                [],
+                ["Personal memory was skipped because more than one identity profile is available and none was explicitly selected."]));
+    }
+
     public Task<CoordinatorMemoryWriteResult> RememberAsync(
         [Description("The exact fact the user explicitly asked Ali to remember.")] string fact,
         [Description("A short category such as person, preference, location, project, or general.")] string? category,
@@ -147,6 +167,29 @@ internal sealed class AliMemoryTools
         return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
     }
 
+    internal async Task<CoordinatorMemoryWriteResult> ForgetForSelectionAsync(
+        ActiveUserSelectionSnapshot selection,
+        string memoryId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        MarkAuthoritativeToolUsed();
+        if (_userMemories is null)
+        {
+            return await ForgetAsync(memoryId, cancellationToken).ConfigureAwait(false);
+        }
+        if (!selection.IsResolved)
+        {
+            return new(false, "Select the active user profile before forgetting personal memory.");
+        }
+
+        var result = await _userMemories.DeleteAsync(
+            selection.SelectedUser!,
+            memoryId,
+            cancellationToken).ConfigureAwait(false);
+        return new(result.Success, result.Message, result.Memories.FirstOrDefault()?.MemoryId);
+    }
+
     public async Task<CoordinatorMemoryResult> ListCurrentAsync(CancellationToken cancellationToken)
     {
         MarkAuthoritativeToolUsed();
@@ -155,6 +198,31 @@ internal sealed class AliMemoryTools
         if (!TryGetTurnUser(out var activeUser))
             return new("Select the active user profile before listing personal memory.", [], ["No personal memory was read."]);
         var values = await _userMemories.ListAsync(activeUser, null, cancellationToken).ConfigureAwait(false);
+        return ToCoordinatorResult(values, "Loaded current-user memories.");
+    }
+
+    internal async Task<CoordinatorMemoryResult> ListForSelectionAsync(
+        ActiveUserSelectionSnapshot selection,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        MarkAuthoritativeToolUsed();
+        if (_userMemories is null)
+        {
+            return await ListCurrentAsync(cancellationToken).ConfigureAwait(false);
+        }
+        if (!selection.IsResolved)
+        {
+            return new(
+                "Select the active user profile before listing personal memory.",
+                [],
+                ["No personal memory was read."]);
+        }
+
+        var values = await _userMemories.ListAsync(
+            selection.SelectedUser!,
+            null,
+            cancellationToken).ConfigureAwait(false);
         return ToCoordinatorResult(values, "Loaded current-user memories.");
     }
 

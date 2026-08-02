@@ -221,7 +221,7 @@ public sealed class CapabilityResolverTests
         var planning = new CapabilityResolver().ResolvePlanning(
             registry.Freeze(settings),
             Runtime([generic]));
-        var lease = planning.CreateInvocationLease(generic.ToolName);
+        var lease = planning.CreateInvocationLease(generic.ToolName, "test-publication-1");
 
         var pythonValidation = new CapabilityResolver().ValidateInvocation(
             registry.Freeze(settings),
@@ -275,7 +275,7 @@ public sealed class CapabilityResolverTests
             planning.EligibleProviderIdsByToolName[generic.ToolName]);
         Assert.DoesNotContain(generic.ToolName, planning.RequiresTargetResolutionToolNames);
 
-        var lease = planning.CreateInvocationLease(generic.ToolName);
+        var lease = planning.CreateInvocationLease(generic.ToolName, "test-publication-1");
         var validation = resolver.ValidateInvocation(
             registry.Freeze(settings),
             runtime,
@@ -311,6 +311,31 @@ public sealed class CapabilityResolverTests
     }
 
     [Fact]
+    public void ResolvedTargetMetadata_PreservesLegacyInvocationUntilExactBindingCutover()
+    {
+        var generic = GenericResolvedTargetDescriptor();
+        var registry = GenericRegistry(generic);
+        var frozen = registry.Freeze(CapabilityAvailabilitySettings.CreateDefault());
+        var runtime = Runtime(
+            [generic],
+            enforceResolvedTargetBinding: false);
+        var resolver = new CapabilityResolver();
+        var planning = resolver.ResolvePlanning(frozen, runtime);
+        var lease = planning.CreateInvocationLease(generic.ToolName, "compatibility-publication");
+
+        var validation = resolver.ValidateInvocation(
+            frozen,
+            runtime,
+            lease,
+            boundTargetBindingId: null);
+
+        Assert.True(planning.TryGetTool(generic.ToolName, out _));
+        Assert.True(lease.RequiresTargetResolution);
+        Assert.True(validation.Success);
+        Assert.Empty(validation.Reasons);
+    }
+
+    [Fact]
     public void ResolvedTargetLease_RejectsMissingMismatchedUnsupportedAndStaleTargets()
     {
         var generic = GenericResolvedTargetDescriptor();
@@ -318,7 +343,7 @@ public sealed class CapabilityResolverTests
         var frozen = registry.Freeze(CapabilityAvailabilitySettings.CreateDefault());
         var lease = new CapabilityResolver()
             .ResolvePlanning(frozen, Runtime([generic]))
-            .CreateInvocationLease(generic.ToolName);
+            .CreateInvocationLease(generic.ToolName, "test-publication-1");
 
         var missing = new CapabilityResolver().ValidateInvocation(
             frozen,
@@ -389,7 +414,7 @@ public sealed class CapabilityResolverTests
         var planning = resolver.ResolvePlanning(
             registry.Freeze(settings),
             Runtime([descriptor]));
-        var lease = planning.CreateInvocationLease(descriptor.ToolName);
+        var lease = planning.CreateInvocationLease(descriptor.ToolName, "test-publication-1");
         var currentRegistry = registry.Freeze(settings);
         var currentRuntime = Runtime([descriptor]);
 
@@ -523,7 +548,9 @@ public sealed class CapabilityResolverTests
             Array.Empty<string>(),
             Array.Empty<string>(),
             "reconcilers-1",
-            Array.Empty<string>());
+            Array.Empty<string>(),
+            enforceReconcilerAvailability: true,
+            enforceResolvedTargetBinding: true);
 
     private static CapabilityRuntimeAvailability Runtime(
         IReadOnlyList<CapabilityDescriptor> descriptors,
@@ -539,7 +566,9 @@ public sealed class CapabilityResolverTests
         IReadOnlyList<string>? allowedPermissionPolicyIds = null,
         string mcpRevision = "mcp-1",
         string reconcilerRevision = "reconcilers-1",
-        IReadOnlyList<string>? availableReconcilerIds = null) =>
+        IReadOnlyList<string>? availableReconcilerIds = null,
+        bool enforceReconcilerAvailability = true,
+        bool enforceResolvedTargetBinding = true) =>
         new(
             activeUserId,
             runtimeRevision,
@@ -575,5 +604,7 @@ public sealed class CapabilityResolverTests
             ?? descriptors
                 .Where(item => item.Effect.ReconcilerId is not null)
                 .Select(item => item.Effect.ReconcilerId!)
-                .Distinct(StringComparer.Ordinal));
+                .Distinct(StringComparer.Ordinal),
+            enforceReconcilerAvailability,
+            enforceResolvedTargetBinding);
 }

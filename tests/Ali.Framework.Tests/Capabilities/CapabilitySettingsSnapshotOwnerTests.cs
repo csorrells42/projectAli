@@ -571,6 +571,7 @@ public sealed class CapabilitySettingsSnapshotOwnerTests
     {
         var envelope = owner.CaptureSettings();
         var planning = owner.CapturePlanning();
+        Assert.Equal(envelope.PublicationRevision, planning.PublicationRevision);
         Assert.Equal(planning.Settings.Revision, planning.Registry.SettingsRevision);
         Assert.Equal(planning.Registry.RegistryRevision, planning.Resolution.RegistryRevision);
         Assert.Equal(planning.Registry.SettingsRevision, planning.Resolution.SettingsRevision);

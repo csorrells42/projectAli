@@ -29,7 +29,7 @@ internal static class CapabilitySettingsProjection
             .Select(group => group.Id)
             .ToHashSet(StringComparer.Ordinal);
         var rows = registry.Groups
-            .Select(group => CreateRow(group, registry, callableIds, unavailableById))
+            .Select(group => CreateRow(group, registry, resolution, callableIds, unavailableById))
             .ToArray();
         var presets = registry.Presets
             .Select(preset => CreatePreset(preset, registry.GroupSelections))
@@ -41,9 +41,12 @@ internal static class CapabilitySettingsProjection
             .ToArray();
 
         var enabledGroupCount = rows.Count(row => row.Enabled);
-        var declaredTaskToolCount = rows.Sum(row => row.DeclaredToolCount);
-        var callableTaskToolCount = rows.Sum(row => row.CallableToolCount);
-        var unavailableTaskToolCount = rows.Sum(row => row.UnavailableToolCount);
+        var taskDescriptors = registry.Descriptors
+            .Where(descriptor => descriptor.Tier == CapabilityTier.Task)
+            .ToArray();
+        var declaredTaskToolCount = taskDescriptors.Length;
+        var callableTaskToolCount = taskDescriptors.Count(descriptor => callableIds.Contains(descriptor.Id));
+        var unavailableTaskToolCount = taskDescriptors.Count(descriptor => unavailableById.ContainsKey(descriptor.Id));
         var protocolDescriptors = registry.Descriptors
             .Where(descriptor => descriptor.Tier == CapabilityTier.Protocol)
             .ToArray();
@@ -90,34 +93,49 @@ internal static class CapabilitySettingsProjection
     private static CapabilitySettingsRow CreateRow(
         CapabilityGroupDescriptor group,
         CapabilityRegistryRevisionSnapshot registry,
+        CapabilityResolutionSnapshot resolution,
         IReadOnlySet<string> callableIds,
         IReadOnlyDictionary<string, UnavailableCapability> unavailableById)
     {
+        var groupProviderIds = registry.ProviderBindings
+            .Where(binding => string.Equals(binding.GroupId, group.Id, StringComparison.Ordinal))
+            .Select(binding => binding.ProviderId)
+            .ToHashSet(StringComparer.Ordinal);
         var descriptors = registry.Descriptors
             .Where(descriptor => descriptor.Tier == CapabilityTier.Task)
-            .Where(descriptor => string.Equals(descriptor.GroupId, group.Id, StringComparison.Ordinal))
+            .Where(descriptor =>
+                string.Equals(descriptor.GroupId, group.Id, StringComparison.Ordinal)
+                || descriptor.ProviderGate.SupportedProviderIds.Any(groupProviderIds.Contains))
             .OrderBy(descriptor => descriptor.Id, StringComparer.Ordinal)
             .ToArray();
-        var callableToolCount = descriptors.Count(descriptor => callableIds.Contains(descriptor.Id));
-        var unavailableToolCount = descriptors.Count(
-            descriptor => unavailableById.ContainsKey(descriptor.Id));
+        var enabled = registry.GroupSelections.TryGetValue(group.Id, out var selected) && selected;
+        var callableDescriptorIds = descriptors
+            .Where(descriptor => IsCallableForRow(
+                descriptor,
+                group.Id,
+                groupProviderIds,
+                enabled,
+                resolution,
+                callableIds))
+            .Select(descriptor => descriptor.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var callableToolCount = callableDescriptorIds.Count;
+        var unavailableToolCount = descriptors.Length - callableToolCount;
         if (callableToolCount + unavailableToolCount != descriptors.Length)
         {
             throw new InvalidOperationException(
                 $"Capability group '{group.Id}' does not have a complete resolution partition.");
         }
 
-        var enabled = registry.GroupSelections.TryGetValue(group.Id, out var selected) && selected;
         var reasons = descriptors
-            .Where(descriptor => unavailableById.ContainsKey(descriptor.Id))
-            .SelectMany(
-                descriptor => unavailableById[descriptor.Id].Reasons.Select(
-                    reason => new CapabilitySettingsReason(
-                        descriptor.Id,
-                        descriptor.ToolName,
-                        reason.Code,
-                        reason.DependencyId,
-                        reason.Message)))
+            .Where(descriptor => !callableDescriptorIds.Contains(descriptor.Id))
+            .SelectMany(descriptor => CreateRowReasons(
+                descriptor,
+                group,
+                groupProviderIds,
+                enabled,
+                resolution,
+                unavailableById))
             .ToArray();
 
         return new CapabilitySettingsRow(
@@ -130,6 +148,72 @@ internal static class CapabilitySettingsProjection
             callableToolCount,
             unavailableToolCount,
             reasons);
+    }
+
+    private static bool IsCallableForRow(
+        CapabilityDescriptor descriptor,
+        string groupId,
+        IReadOnlySet<string> groupProviderIds,
+        bool enabled,
+        CapabilityResolutionSnapshot resolution,
+        IReadOnlySet<string> callableIds)
+    {
+        if (string.Equals(descriptor.GroupId, groupId, StringComparison.Ordinal))
+        {
+            return callableIds.Contains(descriptor.Id);
+        }
+
+        return enabled
+            && callableIds.Contains(descriptor.Id)
+            && resolution.EligibleProviderIdsByToolName.TryGetValue(descriptor.ToolName, out var eligible)
+            && eligible.Any(groupProviderIds.Contains);
+    }
+
+    private static IEnumerable<CapabilitySettingsReason> CreateRowReasons(
+        CapabilityDescriptor descriptor,
+        CapabilityGroupDescriptor group,
+        IReadOnlySet<string> groupProviderIds,
+        bool enabled,
+        CapabilityResolutionSnapshot resolution,
+        IReadOnlyDictionary<string, UnavailableCapability> unavailableById)
+    {
+        if (unavailableById.TryGetValue(descriptor.Id, out var unavailable))
+        {
+            return unavailable.Reasons.Select(reason => new CapabilitySettingsReason(
+                descriptor.Id,
+                descriptor.ToolName,
+                reason.Code,
+                reason.DependencyId,
+                reason.Message));
+        }
+
+        if (!enabled)
+        {
+            return
+            [
+                new CapabilitySettingsReason(
+                    descriptor.Id,
+                    descriptor.ToolName,
+                    CapabilityAvailabilityReasonCode.PrerequisiteGroupDisabled,
+                    group.Id,
+                    $"Provider capability group '{group.Id}' is disabled.")
+            ];
+        }
+
+        var eligible = resolution.EligibleProviderIdsByToolName.TryGetValue(
+            descriptor.ToolName,
+            out var providerIds)
+            ? providerIds
+            : [];
+        return groupProviderIds
+            .Where(providerId => !eligible.Contains(providerId, StringComparer.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .Select(providerId => new CapabilitySettingsReason(
+                descriptor.Id,
+                descriptor.ToolName,
+                CapabilityAvailabilityReasonCode.ProviderUnavailable,
+                providerId,
+                $"Provider '{providerId}' is unavailable for '{group.DisplayName}'."));
     }
 
     private static CapabilitySettingsPreset CreatePreset(

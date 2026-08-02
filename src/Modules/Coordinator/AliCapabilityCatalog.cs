@@ -277,21 +277,7 @@ public static class AliCapabilityCatalog
     {
         ArgumentNullException.ThrowIfNull(mcpClients);
         ArgumentNullException.ThrowIfNull(orchestrationSettings);
-        var settings = mcpClients.LoadSettings();
-        var additionalTools = settings.Enabled
-            ? settings.Servers
-                .Where(server => server.Enabled)
-                .SelectMany(server => server.Tools
-                    .Where(tool => tool.Enabled)
-                    .Select(tool => new CoordinatorCapability(
-                        McpClientManager.BuildModelToolName(server, tool.Name),
-                        string.IsNullOrWhiteSpace(tool.Description)
-                            ? $"Run {tool.Name} through the {server.Name} MCP integration."
-                            : $"{tool.Description} (MCP server: {server.Name})",
-                        $"External MCP: {server.Name}")))
-                .ToList()
-            : [];
-        return ListAvailableTools(additionalTools, orchestrationSettings);
+        return ListAvailableTools(additionalTools: [], orchestrationSettings);
     }
 
     private static CoordinatorCapabilityResult ListAvailableTools(
@@ -304,7 +290,7 @@ public static class AliCapabilityCatalog
         var allTools = nativeTools.Concat(additionalTools).ToList();
         return
         new(
-            $"Ali has {allTools.Count} configured model-callable tools. This structured inventory is authoritative. Magentic policy: {policy}. MCP connection warnings reported in Ali Activity remain authoritative for current availability.",
+            $"Ali has {allTools.Count} configured model-callable tools. This structured inventory is authoritative. Magentic policy: {policy}. Incoming MCP tools remain withheld until canonical registration is available.",
             allTools);
     }
 
@@ -323,8 +309,7 @@ public static class AliCapabilityCatalog
         }
 
         manifest.Append($"Magentic activation policy is {settings.MagenticPolicy}. "
-            + "Additional tools whose names begin with mcp_ are external MCP integrations explicitly enabled by the user. "
-            + "Use list_available_tools for their configured catalog and obey approval requests. "
+            + "Incoming external MCP tools are not model-callable until Ali can publish canonical metadata and approval semantics for them; never claim that a configured mcp_ tool is available merely because it appears in MCP settings. "
             + "Voice playback is an application output setting, not a model-callable tool. "
             + "Never resume an interrupted workflow automatically; use list_recoverable_workflows when continuity matters and call resume_workflow_checkpoint only after the user explicitly asks to continue that saved run. "
             + "Never claim calendar, email, arbitrary file-system, shell, camera, or generic browser-control access unless an enabled tool with that exact capability appears in the current turn.");

@@ -17,7 +17,8 @@ internal static class Program
                 configuration.DataRoot,
                 AppContext.BaseDirectory,
                 configuration.ServerSettings,
-                configuration.WorkspaceRoot);
+                configuration.WorkspaceRoot,
+                configuration.Path);
 
             var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
             {

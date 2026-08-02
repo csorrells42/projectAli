@@ -9,6 +9,13 @@ namespace Ali.Modules.Capabilities;
 
 public static class CapabilityGroupIds
 {
+    public const string CapabilityDiscovery = "capability-discovery";
+    public const string PersonalContextAndMemory = "personal-context-and-memory";
+    public const string WebResearchAndNavigation = "web-research-and-navigation";
+    public const string RemindersAndCalendar = "reminders-and-calendar";
+    public const string WorkMemory = "work-memory";
+    public const string AgentModesAndSkills = "agent-modes-and-skills";
+    public const string SpecialistsAndWorkflows = "specialists-and-workflows";
     public const string FilesAndArchives = "files-and-archives";
     public const string ProgrammingCore = "programming-core";
     public const string CSharpDotNetRoslyn = "csharp-dotnet-roslyn";
@@ -23,6 +30,13 @@ public static class CapabilityGroupIds
 
     public static IReadOnlyList<string> All { get; } = Array.AsReadOnly<string>(
     [
+        CapabilityDiscovery,
+        PersonalContextAndMemory,
+        WebResearchAndNavigation,
+        RemindersAndCalendar,
+        WorkMemory,
+        AgentModesAndSkills,
+        SpecialistsAndWorkflows,
         FilesAndArchives,
         ProgrammingCore,
         CSharpDotNetRoslyn,
@@ -190,6 +204,11 @@ public sealed record CapabilityMcpExposure(
     bool Exposed,
     string? PublishedName);
 
+/// <summary>
+/// Describes the task-domain effect of invoking a capability. Infrastructure-only
+/// receipts, audit records, metrics, and traces are deliberately excluded: they may
+/// record an invocation but must not alter its target-domain outcome or authority.
+/// </summary>
 public sealed record CapabilityEffectDescriptor(
     CapabilityEffectKind Kind,
     string Summary,

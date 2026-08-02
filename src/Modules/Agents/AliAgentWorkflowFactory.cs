@@ -1,4 +1,5 @@
 using Ali.Modules.Runtime;
+using Ali.Modules.UserMemory;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.Checkpointing;
@@ -20,36 +21,92 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
     private const string ResearchArtifactKind = "research-artifact";
     private const string ProgrammingReviewKind = "programming-review";
     private const string MagenticKind = "magentic";
+    private const string CheckpointUnavailablePrefix =
+        "Durable workflow checkpoints are unavailable because their protected owner binding could not be opened safely.";
 
     private readonly IChatClient _chatClient;
     private readonly ILocalModelRuntime _runtime;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
-    private readonly FileSystemJsonCheckpointStore _checkpointStore;
-    private readonly CheckpointManager _checkpointManager;
-    private readonly IWorkflowExecutionEnvironment _executionEnvironment;
-    private readonly AliWorkflowRecoveryCatalog _recoveryCatalog;
+    private readonly Func<ActiveUserSelectionSnapshot> _activeUserAccessor;
+    private readonly AliWorkflowCheckpointOwnership? _checkpointOwnership;
+    private readonly AliUserBoundJsonCheckpointStore? _checkpointStore;
+    private readonly IWorkflowExecutionEnvironment? _executionEnvironment;
+    private readonly AliWorkflowRecoveryCatalog? _recoveryCatalog;
+    private readonly string? _checkpointFailure;
     private readonly Dictionary<string, AliWorkflowRegistration> _workflows = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _resumeGate = new(1, 1);
+    private int _disposed;
 
     public AliAgentWorkflowFactory(
         IChatClient chatClient,
         ILocalModelRuntime runtime,
         Func<CoordinatorTurnContext?> turnAccessor,
-        string checkpointPath)
+        string checkpointPath,
+        Func<ActiveUserSelectionSnapshot> activeUserAccessor)
     {
         ArgumentNullException.ThrowIfNull(chatClient);
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(turnAccessor);
+        ArgumentNullException.ThrowIfNull(activeUserAccessor);
         ArgumentException.ThrowIfNullOrWhiteSpace(checkpointPath);
         _chatClient = chatClient;
         _runtime = runtime;
         _turnAccessor = turnAccessor;
+        _activeUserAccessor = activeUserAccessor;
         var fullPath = Path.GetFullPath(checkpointPath);
-        _checkpointStore = new FileSystemJsonCheckpointStore(Directory.CreateDirectory(fullPath));
-        _checkpointManager = CheckpointManager.CreateJson(_checkpointStore);
-        _executionEnvironment = InProcessExecution.Lockstep.WithCheckpointing(_checkpointManager);
-        _recoveryCatalog = new AliWorkflowRecoveryCatalog(fullPath);
+        AliWorkflowCheckpointOwnership? ownership = null;
+        AliUserBoundJsonCheckpointStore? store = null;
+        IWorkflowExecutionEnvironment? environment = null;
+        AliWorkflowRecoveryCatalog? recoveryCatalog = null;
+        string? checkpointFailure = null;
+        try
+        {
+            ownership = new AliWorkflowCheckpointOwnership(fullPath);
+            store = new AliUserBoundJsonCheckpointStore(ownership);
+            var manager = CheckpointManager.CreateJson(store);
+            environment = InProcessExecution.Lockstep.WithCheckpointing(manager);
+            recoveryCatalog = new AliWorkflowRecoveryCatalog(ownership);
+        }
+        catch (Exception ex) when (ex is IOException
+                                   or UnauthorizedAccessException
+                                   or InvalidDataException
+                                   or System.Security.Cryptography.CryptographicException
+                                   or NotSupportedException
+                                   or System.Security.SecurityException)
+        {
+            store?.Dispose();
+            ownership?.Dispose();
+            store = null;
+            ownership = null;
+            environment = null;
+            recoveryCatalog = null;
+            checkpointFailure =
+                $"{CheckpointUnavailablePrefix} Existing checkpoints were left untouched ({ex.GetType().Name}).";
+        }
+
+        _checkpointOwnership = ownership;
+        _checkpointStore = store;
+        _executionEnvironment = environment;
+        _recoveryCatalog = recoveryCatalog;
+        _checkpointFailure = checkpointFailure;
     }
+
+    internal bool IsCheckpointingAvailable =>
+        _checkpointFailure is null
+        && _checkpointOwnership is not null
+        && _checkpointStore is not null
+        && _executionEnvironment is not null
+        && _recoveryCatalog is not null;
+
+    internal string CheckpointStatus =>
+        _checkpointFailure ?? "Durable workflow checkpoints are ready.";
+
+    internal static bool IsDurableWorkflowToolName(string toolName) =>
+        toolName is AliCapabilityCatalog.RunResearchArtifactWorkflowName
+            or AliCapabilityCatalog.RunProgrammingGroupChatName
+            or AliCapabilityCatalog.RunMagenticOrchestrationName
+            or AliCapabilityCatalog.ListRecoverableWorkflowsName
+            or AliCapabilityCatalog.ResumeWorkflowCheckpointName;
 
     public IReadOnlyList<AITool> CreateStandardTools(AliSpecialistTeam team)
     {
@@ -121,7 +178,7 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
             workflow,
             AliCapabilityCatalog.RunMagenticOrchestrationName,
             "Magentic Orchestration",
-            $"Run bounded synchronous Magentic orchestration for an open-ended multi-domain objective that cannot be handled by one specialist or an established workflow. Maximum coordination rounds: {normalized.MagenticMaximumRounds}. Never use for greetings, factual questions, memory recall, ordinary search, one file edit, or routine build/test work.");
+            "Run bounded synchronous Magentic orchestration for an open-ended multi-domain objective that cannot be handled by one specialist or an established workflow. The configured orchestration settings control the maximum coordination rounds. Never use for greetings, factual questions, memory recall, ordinary search, one file edit, or routine build/test work.");
     }
 
     internal static Workflow CreateResearchArtifactWorkflow(AliSpecialistTeam team) =>
@@ -164,8 +221,10 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableTodoProvider = true,
-            DisableAgentSkillsProvider = false,
-            AgentSkillsSource = new AgentFileSkillsSource(Path.Combine(AppContext.BaseDirectory, "skills")),
+            DisableAgentModeProvider = true,
+            // The reviewer is advisory and must not acquire tools outside the
+            // terminally enforced outer Ali agent.
+            DisableAgentSkillsProvider = true,
             DisableOpenTelemetry = false,
             OpenTelemetrySourceName = "ProjectAli.AgentFramework.Workflows",
             ChatOptions = new ChatOptions
@@ -194,6 +253,7 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
             DisableWebSearch = true,
             DisableFileMemory = true,
             DisableTodoProvider = true,
+            DisableAgentModeProvider = true,
             DisableAgentSkillsProvider = true,
             DisableOpenTelemetry = false,
             OpenTelemetrySourceName = "ProjectAli.AgentFramework.Magentic",
@@ -215,6 +275,14 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
         string role,
         string description)
     {
+        if (_executionEnvironment is null || _checkpointStore is null)
+        {
+            return AIFunctionFactory.Create(
+                (Func<string, string>)(query => ReportCheckpointUnavailable()),
+                toolName,
+                description);
+        }
+
         AIAgent hosted = workflow.AsAIAgent(
             id: toolName,
             name: role.Replace(" ", string.Empty, StringComparison.Ordinal),
@@ -235,6 +303,13 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
 
         async Task<string> InvokeCompactAsync(string query, CancellationToken cancellationToken)
         {
+            var owner = CaptureOwner();
+            if (owner is null)
+            {
+                return "Workflow was not started because an active user must be explicitly selected before durable checkpoints can be written.";
+            }
+
+            using var ownerScope = _checkpointStore.EnterOwnerScope(owner);
             var result = await hostedFunction.InvokeAsync(
                 new AIFunctionArguments { ["query"] = query },
                 cancellationToken).ConfigureAwait(false);
@@ -256,8 +331,33 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
         return normalized[..headLength] + marker + normalized[^(remaining - headLength)..];
     }
 
-    public AliRecoverableWorkflowReport ListRecoverableWorkflows() =>
-        _recoveryCatalog.Inspect(_workflows.Values.ToArray());
+    public AliRecoverableWorkflowReport ListRecoverableWorkflows()
+    {
+        if (_checkpointFailure is not null)
+        {
+            return DisabledRecoveryReport();
+        }
+
+        var owner = CaptureOwner();
+        return owner is null
+            ? EmptyRecoveryReport()
+            : ListRecoverableWorkflows(owner);
+    }
+
+    internal AliRecoverableWorkflowReport ListRecoverableWorkflows(
+        ActiveUserSelectionSnapshot selection)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (_checkpointFailure is not null)
+        {
+            return DisabledRecoveryReport();
+        }
+
+        var owner = CreateOwner(selection);
+        return owner is null
+            ? EmptyRecoveryReport()
+            : ListRecoverableWorkflows(owner);
+    }
 
     public async Task<AliWorkflowResumeResult> ResumeWorkflowAsync(
         string sessionId,
@@ -267,7 +367,30 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
         await _resumeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var report = ListRecoverableWorkflows();
+            if (_checkpointFailure is not null
+                || _checkpointStore is null
+                || _executionEnvironment is null)
+            {
+                return new AliWorkflowResumeResult(
+                    false,
+                    ReportCheckpointUnavailable(),
+                    sessionId.Trim(),
+                    "Unknown workflow",
+                    string.Empty);
+            }
+
+            var owner = CaptureOwner();
+            if (owner is null)
+            {
+                return new AliWorkflowResumeResult(
+                    false,
+                    "Select an active user before resuming a durable workflow checkpoint.",
+                    sessionId.Trim(),
+                    "Unknown workflow",
+                    string.Empty);
+            }
+
+            var report = ListRecoverableWorkflows(owner);
             var recoverable = report.Workflows.FirstOrDefault(item =>
                 string.Equals(item.SessionId, sessionId.Trim(), StringComparison.Ordinal));
             if (recoverable is null)
@@ -295,11 +418,12 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
                 "Resuming interrupted workflow",
                 $"{recoverable.WorkflowName} is continuing from durable step {recoverable.CompletedStep}.");
             var checkpoint = new CheckpointInfo(recoverable.SessionId, recoverable.CheckpointId);
+            using var ownerScope = _checkpointStore.EnterOwnerScope(owner);
             await using var run = await _executionEnvironment
                 .ResumeAsync(registration.Workflow, checkpoint, cancellationToken)
                 .ConfigureAwait(false);
             var output = RenderOutputs(run.NewEvents);
-            var remaining = ListRecoverableWorkflows().Workflows.Any(item =>
+            var remaining = ListRecoverableWorkflows(owner).Workflows.Any(item =>
                 string.Equals(item.SessionId, recoverable.SessionId, StringComparison.Ordinal));
             var summary = remaining
                 ? $"{recoverable.WorkflowName} resumed and advanced, then paused again with a newer recoverable checkpoint."
@@ -337,6 +461,46 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
     private void Register(AliWorkflowRegistration registration) =>
         _workflows[registration.Kind] = registration;
 
+    private AliWorkflowCheckpointOwner? CaptureOwner()
+    {
+        var selection = _turnAccessor()?.CapturedUserSelection
+            ?? _activeUserAccessor();
+        return CreateOwner(selection);
+    }
+
+    private AliWorkflowCheckpointOwner? CreateOwner(
+        ActiveUserSelectionSnapshot selection)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        return selection.IsResolved && _checkpointOwnership is not null
+            ? _checkpointOwnership.CreateOwner(selection.SelectedUser!.StableId)
+            : null;
+    }
+
+    private AliRecoverableWorkflowReport ListRecoverableWorkflows(
+        AliWorkflowCheckpointOwner owner) =>
+        _recoveryCatalog!.Inspect(_workflows.Values.ToArray(), owner);
+
+    private static AliRecoverableWorkflowReport EmptyRecoveryReport() =>
+        new(
+            "No interrupted Agent Framework workflows are waiting for recovery.",
+            []);
+
+    private AliRecoverableWorkflowReport DisabledRecoveryReport() =>
+        new(
+            _checkpointFailure ?? CheckpointUnavailablePrefix,
+            []);
+
+    private string ReportCheckpointUnavailable()
+    {
+        var message = _checkpointFailure ?? CheckpointUnavailablePrefix;
+        _turnAccessor()?.Report(
+            AgentActivityKind.Warning,
+            "Durable workflow checkpoints unavailable",
+            message);
+        return message;
+    }
+
     private static string RenderOutputs(IEnumerable<WorkflowEvent> events)
     {
         var outputs = events
@@ -357,7 +521,13 @@ internal sealed class AliAgentWorkflowFactory : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _resumeGate.Dispose();
-        _checkpointStore.Dispose();
+        _checkpointStore?.Dispose();
+        _checkpointOwnership?.Dispose();
     }
 }

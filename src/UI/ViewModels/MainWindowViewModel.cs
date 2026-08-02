@@ -232,6 +232,11 @@ public sealed class MainWindowViewModel : ObservableObject
         LocalKnowledgeSettings = new LocalKnowledgeSettingsViewModel(_services);
         UserMemorySettings = new UserMemorySettingsViewModel(_services);
         AgentOrchestrationSettings = new AgentOrchestrationSettingsViewModel(_services);
+        CapabilitySettings = new CapabilitySettingsViewModel(
+            _services.CapabilitySettings,
+            _services.CapabilitySettingsPath,
+            McpServerSettings.RefreshPublishedCapabilitiesIfRunningAsync);
+        _services.ActiveUsers.Changed += OnActiveUserChanged;
         _selectedProgrammingAgentMode = AgentOrchestrationSettings.SelectedProgrammingAgentMode;
         AgentOrchestrationSettings.PropertyChanged += (_, args) =>
         {
@@ -407,6 +412,13 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private async void OnActiveUserChanged(object? sender, ActiveUser activeUser)
+    {
+        await McpServerSettings
+            .RefreshPublishedCapabilitiesIfRunningAsync()
+            .ConfigureAwait(true);
+    }
+
     private AsyncRelayCommand CreateAsyncCommand(
         Func<Task> execute,
         Func<bool>? canExecute = null,
@@ -468,6 +480,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public IActiveUserSession ActiveUsers => _services.ActiveUsers;
 
     public AgentOrchestrationSettingsViewModel AgentOrchestrationSettings { get; }
+
+    public CapabilitySettingsViewModel CapabilitySettings { get; }
 
     public AgentToolPermissionsViewModel AgentToolPermissions { get; }
 
@@ -5794,6 +5808,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
             RefreshVoiceSettingsChoices();
             AgentToolPermissions.Reload();
+            if (CapabilitySettings.ReloadCommand.CanExecute(null))
+            {
+                CapabilitySettings.ReloadCommand.Execute(null);
+            }
             RefreshEditorIntegrations();
             await RefreshCorrectionsAsync().ConfigureAwait(true);
             RefreshMemoryReminders();

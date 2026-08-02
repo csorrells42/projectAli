@@ -21,6 +21,7 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.CreateCalendarEventName, "Creates a persistent calendar event and Windows notification"),
         new(AliCapabilityCatalog.ResearchWebName, "Starts metered deep web research"),
         new(AliCapabilityCatalog.RunMagenticOrchestrationName, "Starts bounded multi-agent Magentic orchestration", "Controlled by the Agents tab"),
+        new(AliCapabilityCatalog.RunAgentSkillScriptName, "Executes a script supplied by an installed Agent Skill"),
         new(AliCapabilityCatalog.FileWriteName, "Creates or overwrites a workstation file", "New files allowed; overwrite asks"),
         new(AliCapabilityCatalog.FileDeleteName, "Moves a workstation file or folder to recoverable trash"),
         new(AliCapabilityCatalog.FileReplaceName, "Edits matching text in an existing file"),
@@ -80,9 +81,12 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.RememberCurrentUserName, "Writes personal long-term memory"),
         new(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Changes personal long-term memory"),
         new(AliCapabilityCatalog.GetActiveUserProfileName, "Reads the selected local identity profile"),
+        new(AliCapabilityCatalog.GetAssistantIdentityName, "Reads the configured local assistant identity"),
         new(AliCapabilityCatalog.RecallUserMemoryName, "Reads private personal memory"),
         new(AliCapabilityCatalog.SearchCurrentWebName, "Transmits a query to configured web sources"),
         new(AliCapabilityCatalog.SearchLocalLibraryName, "Reads indexed local documents"),
+        new(AliCapabilityCatalog.LoadAgentSkillName, "Reads an installed Agent Skill definition"),
+        new(AliCapabilityCatalog.ReadAgentSkillResourceName, "Reads a resource supplied by an installed Agent Skill"),
         new(AliCapabilityCatalog.FileReadName, "Reads a workstation file"),
         new(AliCapabilityCatalog.FileListName, "Lists approved workstation folders"),
         new(AliCapabilityCatalog.FileSearchName, "Searches text in approved workstation folders"),
@@ -93,12 +97,33 @@ internal sealed class AliToolPermissionPolicy(
         new(AliCapabilityCatalog.ArchiveListName, "Reads private archive contents"),
         new(AliCapabilityCatalog.ArchiveExtractName, "Extracts an archive into workstation files"),
         new(AliCapabilityCatalog.CodingInspectProjectName, "Reads private project structure and toolchain state"),
+        new(AliCapabilityCatalog.CodingListCapabilitiesName, "Reads installed provider and toolchain locations"),
         new(AliCapabilityCatalog.CodingAgentStatusName, "Reads installed external coding-engine and local runtime readiness"),
         new(AliCapabilityCatalog.CodingIndexProjectName, "Reads and indexes private project source"),
         new(AliCapabilityCatalog.CodingSearchSymbolsName, "Searches a private project source index"),
         new(AliCapabilityCatalog.CodingAnalyzeProjectName, "Reads private source through a semantic analyzer"),
         new(AliCapabilityCatalog.CodingInspectArchitectureName, "Reads private source to build a cross-language dependency graph"),
         new(AliCapabilityCatalog.CodingBuildContextName, "Reads private source to select relevant large-project context"),
+        new(AliCapabilityCatalog.RoslynAnalyzeProjectName, "Reads private C# source through Roslyn analysis"),
+        new(AliCapabilityCatalog.RoslynFindSymbolName, "Searches symbols in private C# source"),
+        new(AliCapabilityCatalog.RoslynGetCompletionsName, "Reads private C# source for semantic completions"),
+        new(AliCapabilityCatalog.RoslynInspectSolutionName, "Reads private solution and project structure"),
+        new(AliCapabilityCatalog.RoslynInspectDocumentName, "Reads a private C# document"),
+        new(AliCapabilityCatalog.RoslynInspectPositionName, "Reads private semantic state at a C# source position"),
+        new(AliCapabilityCatalog.RoslynFindReferencesName, "Searches references in private C# source"),
+        new(AliCapabilityCatalog.RoslynPreviewRenameName, "Reads private C# source to preview a semantic rename"),
+        new(AliCapabilityCatalog.GitStatusName, "Reads private repository status"),
+        new(AliCapabilityCatalog.GitDiffName, "Reads private uncommitted source changes"),
+        new(AliCapabilityCatalog.GitHistoryName, "Reads private repository history"),
+        new(AliCapabilityCatalog.GitBlameName, "Reads private source attribution history"),
+        new(AliCapabilityCatalog.ArchitectureInspectName, "Reads private project architecture"),
+        new(AliCapabilityCatalog.ArchitectureCheckName, "Reads private source to check architecture boundaries"),
+        new(AliCapabilityCatalog.DotNetDependencyPreviewName, "Reads private project dependencies for a change preview"),
+        new(AliCapabilityCatalog.DotNetQualityScanName, "Reads private source for quality analysis"),
+        new(AliCapabilityCatalog.DotNetPerformanceCompareName, "Reads private performance evidence for comparison"),
+        new(AliCapabilityCatalog.DotNetArchitectureReportName, "Reads private source for an architecture report"),
+        new(AliCapabilityCatalog.ListRecoverableWorkflowsName, "Reads private saved workflow checkpoints"),
+        new(AliCapabilityCatalog.ResumeWorkflowCheckpointName, "Reads a private saved workflow checkpoint"),
         new(AliCapabilityCatalog.VisualStudioInspectName, "Reads installed Visual Studio feature state"),
         new(AliCapabilityCatalog.GnuNativeInspectName, "Reads installed GNU toolchain state"),
         new(AliCapabilityCatalog.ArduinoInspectName, "Reads attached board and installed core state"),
@@ -120,15 +145,23 @@ internal sealed class AliToolPermissionPolicy(
             .Select(tool => tool.ToolName)
             .ToHashSet(StringComparer.Ordinal);
 
-    public AIFunction Apply(
-        AIFunction function,
-        AliToolTurnRole turnRole = AliToolTurnRole.Default)
+    public AIFunction Apply(AIFunction function)
         => Apply(
             function,
             RequiresApproval(
                 function.Name,
-                profileAccessor?.Invoke() ?? AgentPermissionProfile.TrustedWorkstation),
-            turnRole);
+                profileAccessor?.Invoke() ?? AgentPermissionProfile.TrustedWorkstation));
+
+    public AIFunction ApplyProfileAware(AIFunction function)
+    {
+        ArgumentNullException.ThrowIfNull(function);
+        var profile = profileAccessor?.Invoke() ?? AgentPermissionProfile.TrustedWorkstation;
+        var initial = Apply(function, RequiresApproval(function.Name, profile));
+        return new CapabilityPermissionProjectionAIFunction(
+            initial,
+            function,
+            this);
+    }
 
     internal static bool RequiresApproval(string toolName) =>
         ApprovalRequiredTools.Contains(toolName);
@@ -141,155 +174,50 @@ internal sealed class AliToolPermissionPolicy(
     public AIFunction Apply(
         AIFunction function,
         bool requiresApproval,
-        AliToolTurnRole turnRole = AliToolTurnRole.Default)
+        string? userFacingDisplayName = null)
     {
-        AIFunction observable = new ActivityReportingAIFunction(
-            function,
-            turnAccessor,
-            shadowObserver,
-            requiresApproval);
-        observable = turnRole switch
-        {
-            AliToolTurnRole.ExternalCodingAgent =>
-                new ExternalCodingOwnershipAIFunction(observable, turnAccessor),
-            AliToolTurnRole.ImplementationMutation =>
-                new ExternalCodingOwnerGuardAIFunction(
-                    observable,
-                    turnAccessor,
-                    shadowObserver),
-            _ => observable
-        };
-        return requiresApproval
-            ? new TurnDenialGuardAIFunction(
-                new ApprovalRequiredAIFunction(observable),
+        AIFunction observable = function.GetService<ActivityReportingAIFunction>() is not null
+            ? function
+            : new ActivityReportingAIFunction(
+                function,
                 turnAccessor,
-                shadowObserver)
-            : observable;
+                shadowObserver,
+                requiresApproval,
+                userFacingDisplayName);
+        if (!requiresApproval)
+        {
+            return observable;
+        }
+
+        AIFunction guarded = observable;
+        if (guarded.GetService<ApprovalRequiredAIFunction>() is null)
+        {
+            guarded = new ApprovalRequiredAIFunction(guarded);
+        }
+        return guarded.GetService<TurnDenialGuardAIFunction>() is not null
+            ? guarded
+            : new TurnDenialGuardAIFunction(guarded, turnAccessor, shadowObserver);
+    }
+
+    internal AIFunction ApplyAdditionalApprovalBoundary(AIFunction function)
+    {
+        ArgumentNullException.ThrowIfNull(function);
+        return Apply(function, requiresApproval: true);
     }
 }
 
-internal enum AliToolTurnRole
+internal sealed class CapabilityPermissionProjectionAIFunction(
+    AIFunction initialFunction,
+    AIFunction rawFunction,
+    AliToolPermissionPolicy policy) : DelegatingAIFunction(initialFunction)
 {
-    Default,
-    ExternalCodingAgent,
-    ImplementationMutation
-}
-
-internal sealed class ExternalCodingOwnershipAIFunction(
-    AIFunction innerFunction,
-    Func<CoordinatorTurnContext?> turnAccessor) : DelegatingAIFunction(innerFunction)
-{
-    protected override ValueTask<object?> InvokeCoreAsync(
-        AIFunctionArguments arguments,
-        CancellationToken cancellationToken)
-    {
-        var turn = turnAccessor();
-        if (turn is not null)
-        {
-            var job = turn.ClaimExternalCodingAgentOwnership(
-                ReadRequiredString(arguments, "targetPath"),
-                ReadRequiredString(arguments, "objective"));
-            arguments["targetPath"] = job.ProjectPath;
-            arguments["objective"] = job.Objective;
-        }
-
-        return InnerFunction.InvokeAsync(arguments, cancellationToken);
-    }
-
-    private static string ReadRequiredString(AIFunctionArguments arguments, string name)
-    {
-        if (!arguments.TryGetValue(name, out var value))
-        {
-            throw new InvalidOperationException($"The external coding tool requires {name}.");
-        }
-
-        var text = value switch
-        {
-            string direct => direct,
-            System.Text.Json.JsonElement element
-                when element.ValueKind == System.Text.Json.JsonValueKind.String => element.GetString(),
-            _ => value?.ToString()
-        };
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            throw new InvalidOperationException(
-                $"The external coding tool requires a non-empty {name}.");
-        }
-
-        return text;
-    }
-}
-
-internal sealed class ExternalCodingOwnerGuardAIFunction(
-    AIFunction innerFunction,
-    Func<CoordinatorTurnContext?> turnAccessor,
-    IShadowToolObserver? shadowObserver = null) : DelegatingAIFunction(innerFunction)
-{
-    protected override ValueTask<object?> InvokeCoreAsync(
-        AIFunctionArguments arguments,
-        CancellationToken cancellationToken)
-    {
-        var turn = turnAccessor();
-        if (turn?.ExternalCodingAgentOwnsTurn == true)
-        {
-            var exception = new InvalidOperationException(
-                "The selected external coding agent owns this programming turn. "
-                + "Ali cannot modify the implementation; return the critic or verification diagnostics "
-                + "to the external coding agent.");
-            TryObservePolicyBlocked(turn, arguments);
-            throw exception;
-        }
-
-        return InnerFunction.InvokeAsync(arguments, cancellationToken);
-    }
-
-    private void TryObservePolicyBlocked(
-        CoordinatorTurnContext turn,
-        AIFunctionArguments arguments)
-    {
-        if (shadowObserver is null)
-        {
-            return;
-        }
-
-        if (!turn.TryGetCurrentToolCallId(Name, out var callId)
-            || string.IsNullOrWhiteSpace(callId)
-            || turn.WasShadowObserved(callId))
-        {
-            return;
-        }
-
-        var observedAtUtc = DateTimeOffset.UtcNow;
-        var permission = new EvidencePermissionMetadata("policy-blocked", "none");
-        turn.RecordPendingExplicitShadowTerminal(new PendingExplicitShadowTerminal(
-            callId,
-            Name,
-            ExplicitShadowTerminalKind.Denied,
-            "external-coding-agent-owns-turn",
-            observedAtUtc,
-            observedAtUtc,
-            permission));
-        try
-        {
-            if (shadowObserver.TryObserveDenied(
-                turn.ObservationIdentity,
-                callId,
-                Name,
-                arguments,
-                "external-coding-agent-owns-turn",
-                observedAtUtc,
-                observedAtUtc,
-                permission))
-            {
-                turn.ClearPendingExplicitShadowTerminal(callId);
-                turn.MarkShadowObserved(callId);
-            }
-        }
-        catch
-        {
-            // External coding ownership remains authoritative if shadow storage fails.
-        }
-    }
+    public AIFunction Project(
+        AgentPermissionProfile profile,
+        bool requireAdditionalApproval = false) =>
+        policy.Apply(
+            rawFunction,
+            requireAdditionalApproval
+            || AliToolPermissionPolicy.RequiresApproval(rawFunction.Name, profile));
 }
 
 internal sealed class TurnDenialGuardAIFunction(
@@ -307,9 +235,10 @@ internal sealed class TurnDenialGuardAIFunction(
             return InnerFunction.InvokeAsync(arguments, cancellationToken);
         }
 
+        var displayName = ResolveUserFacingDisplayName();
         turn.Report(
             AgentActivityKind.Warning,
-            $"Blocked follow-up protected action {Name.Replace('_', ' ')}",
+            $"Blocked follow-up protected action {displayName}",
             "A protected action was denied earlier in this turn. Ali will not retry it through another tool or saved permission.");
         TryObservePolicyBlocked(turn, arguments);
         return ValueTask.FromResult<object?>(new
@@ -318,6 +247,35 @@ internal sealed class TurnDenialGuardAIFunction(
             denied = true,
             message = "A protected action was denied earlier in this turn. Stop the action plan, do not call an alternate tool, and tell the user that no further protected action was performed."
         });
+    }
+
+    private string ResolveUserFacingDisplayName()
+    {
+        const int maximumDisplayNameCharacters = 160;
+        try
+        {
+            var displayName = InnerFunction
+                .GetService<ActivityReportingAIFunction>()?
+                .UserFacingDisplayName;
+            if (!string.IsNullOrWhiteSpace(displayName))
+            {
+                return displayName;
+            }
+        }
+        catch
+        {
+            // Display enrichment cannot change the denial boundary.
+        }
+
+        var fallback = Name.Replace('_', ' ').ReplaceLineEndings(" ").Trim();
+        if (fallback.Length == 0)
+        {
+            return "protected tool";
+        }
+
+        return fallback.Length <= maximumDisplayNameCharacters
+            ? fallback
+            : fallback[..maximumDisplayNameCharacters];
     }
 
     private void TryObservePolicyBlocked(

@@ -172,13 +172,13 @@ internal sealed class AliExternalCodingAgents
         {
             var tractorTask = BuildScopedObjective(
                 objective,
-                "You own the entire implementation and repair loop for this objective. Use your native file, terminal, build, test, run, inspection and debugging tools as needed. Inspect the project, implement the complete result, run authoritative checks, diagnose every failure, and keep repairing until the objective succeeds or your tool evidence proves a concrete terminal blocker. Do not hand intermediate coding work back to Ali. Do not access paths outside the current project directory.");
+                "Perform one bounded collaboration pass for this objective. Use your native file, terminal, build, test, run, inspection and debugging tools as needed within the approved project directory. Inspect the project, implement as much of the requested result as this pass can verify, run authoritative checks, and return exact evidence and remaining diagnostics so Ali can continue through her effective tools. Do not access paths outside the current project directory.");
             var tractor = await _openHands.ExecuteAsync(projectDirectory, tractorTask, cancellationToken).ConfigureAwait(false);
             passes.Add(tractor);
             if (!tractor.Success)
             {
                 return Finish(false, mode, targetPath, passes,
-                    "OpenHands could not complete the implementation pass. Ali must not edit the project. Return the exact critic or verification diagnostics to coding_agent_execute so OpenHands can continue its own repair loop.");
+                    "OpenHands could not complete its bounded collaboration pass. Its exact diagnostics are available for Ali to inspect and continue through her effective native tools or a later approved collaboration pass.");
             }
         }
 
@@ -188,13 +188,13 @@ internal sealed class AliExternalCodingAgents
                 projectDirectory,
                 BuildScopedObjective(
                     objective,
-                    "You own the entire implementation and repair loop for this objective. Act as architect and senior implementer, use Aider's native repository map, file-editing, shell-command, lint and automatic build/test repair capabilities, and keep working until the complete objective succeeds or concrete tool evidence proves a terminal blocker. Do not hand intermediate coding work back to Ali. Do not access paths outside the current project directory."),
+                    "Perform one bounded collaboration pass for this objective. Act as architect and senior implementer, use Aider's native repository map, file-editing, shell-command, lint and automatic build/test repair capabilities within the approved project directory, and return exact evidence and remaining diagnostics so Ali can continue through her effective tools. Do not access paths outside the current project directory."),
                 cancellationToken).ConfigureAwait(false);
             passes.Add(refinement);
             if (!refinement.Success)
             {
                 return Finish(false, mode, targetPath, passes,
-                    "Aider could not complete its architect/refinement pass. Ali must not edit the project. Return the exact critic or verification diagnostics to coding_agent_execute so Aider can continue its own repair loop.");
+                    "Aider could not complete its bounded architect/refinement pass. Its exact diagnostics are available for Ali to inspect and continue through her effective native tools or a later approved collaboration pass.");
             }
         }
 
@@ -203,7 +203,7 @@ internal sealed class AliExternalCodingAgents
             mode,
             targetPath,
             passes,
-            $"{passes[^1].Provider} completed and owns the selected implementation loop. Ali may independently inspect build, test, diff, or runtime evidence, but must not take over source editing.");
+            $"{passes[^1].Provider} completed its bounded collaboration pass. Ali remains responsible for the turn and may continue with any effective native inspection, editing, build, test, or runtime tools.");
     }
 
     private async Task<string> ResolveOrCreateProjectDirectoryAsync(

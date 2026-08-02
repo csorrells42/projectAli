@@ -14,12 +14,23 @@ internal sealed class AliActiveUserTools(
     public CoordinatorActiveUserResult GetActiveProfile()
     {
         var turn = turnAccessor();
+        var selection = turn?.CapturedUserSelection ?? activeUsers?.CaptureSelectionSnapshot();
+        return GetActiveProfile(selection, turn);
+    }
+
+    internal CoordinatorActiveUserResult GetActiveProfile(ActiveUserSelectionSnapshot selection) =>
+        GetActiveProfile(selection, turn: null);
+
+    private static CoordinatorActiveUserResult GetActiveProfile(
+        ActiveUserSelectionSnapshot? selection,
+        CoordinatorTurnContext? turn)
+    {
         turn?.Report(
             AgentActivityKind.ToolCall,
             "Reading selected user profile",
             "Ali requested the active local identity profile as authoritative data.");
 
-        if (activeUsers is null)
+        if (selection is null)
         {
             return new(
                 false,
@@ -31,7 +42,6 @@ internal sealed class AliActiveUserTools(
                 null);
         }
 
-        var selection = turn?.CapturedUserSelection ?? activeUsers.CaptureSelectionSnapshot();
         if (!selection.IsResolved)
         {
             turn?.Report(

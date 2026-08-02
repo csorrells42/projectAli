@@ -1,5 +1,6 @@
 using Ali.Modules.Coding;
 using Ali.Modules.Coding.Architecture;
+using Ali.Modules.Coding.Dependencies;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Permissions;
 using Ali.Modules.WorkstationFiles;
@@ -9,6 +10,42 @@ namespace Ali.Framework.Tests;
 [Collection(ProcessEnvironmentIntegrationCollection.Name)]
 public sealed class DotNetDeliveryFoundationTests
 {
+    [Fact]
+    public void DependencyInspection_DisablesImplicitRestore()
+    {
+        var vulnerabilityArguments = AliDependencyEngineering.BuildVulnerabilityInspectionArguments(
+            @"C:\work\App.csproj");
+        var deprecationArguments = AliDependencyEngineering.BuildDeprecationInspectionArguments(
+            @"C:\work\App.csproj");
+
+        Assert.Equal(
+            new[]
+            {
+                "list",
+                @"C:\work\App.csproj",
+                "package",
+                "--no-restore",
+                "--include-transitive",
+                "--vulnerable",
+                "--format",
+                "json"
+            },
+            vulnerabilityArguments);
+        Assert.Equal(
+            new[]
+            {
+                "list",
+                @"C:\work\App.csproj",
+                "package",
+                "--no-restore",
+                "--include-transitive",
+                "--deprecated",
+                "--format",
+                "json"
+            },
+            deprecationArguments);
+    }
+
     [Fact]
     public async Task DependencyArchitectureQualityAndSourceControl_AreRealModularTools()
     {

@@ -571,10 +571,12 @@ public sealed class CanonicalCapabilityRegistry
                 nameof(descriptors));
         }
         if (effect.Kind == CapabilityEffectKind.SourceMutation
-            && (!effect.WritesLocalData || effect.MutationBoundary != CapabilityMutationBoundary.StagedWorkspace))
+            && (!effect.WritesLocalData
+                || effect.MutationBoundary is not CapabilityMutationBoundary.PermissionGuarded
+                    and not CapabilityMutationBoundary.StagedWorkspace))
         {
             throw new ArgumentException(
-                $"Source mutation capability '{descriptor.Id}' must write locally through a staged workspace.",
+                $"Source mutation capability '{descriptor.Id}' must write locally through a permission-guarded or staged-workspace boundary.",
                 nameof(descriptors));
         }
         if (effect.Kind == CapabilityEffectKind.Destructive
@@ -608,10 +610,12 @@ public sealed class CanonicalCapabilityRegistry
                 nameof(descriptors));
         }
         if (effect.Kind == CapabilityEffectKind.ExternalMutation
-            && (!effect.UsesNetwork || effect.MutationBoundary != CapabilityMutationBoundary.JournaledExternal))
+            && (!effect.UsesNetwork
+                || effect.MutationBoundary is not CapabilityMutationBoundary.PermissionGuarded
+                    and not CapabilityMutationBoundary.JournaledExternal))
         {
             throw new ArgumentException(
-                $"External mutation capability '{descriptor.Id}' must use a journaled network boundary.",
+                $"External mutation capability '{descriptor.Id}' must use a permission-guarded or journaled network boundary.",
                 nameof(descriptors));
         }
 

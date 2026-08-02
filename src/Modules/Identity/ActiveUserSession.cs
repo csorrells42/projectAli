@@ -17,6 +17,7 @@ public sealed class ActiveUserSession : IActiveUserSession
     private List<ActiveUser> _available = [];
     private ActiveUser _current = null!;
     private bool _requiresSelection;
+    private long _selectionRevision;
 
     public ActiveUserSession(string settingsRoot, string identityDataRoot)
         : this(settingsRoot, new StoredPersonIdentityReviewService(identityDataRoot))
@@ -46,6 +47,14 @@ public sealed class ActiveUserSession : IActiveUserSession
         }
     }
 
+    public string CaptureSelectionRevision()
+    {
+        lock (_sync)
+        {
+            return $"active-user-selection-v1:{_selectionRevision}";
+        }
+    }
+
     public event EventHandler<ActiveUser>? Changed;
 
     public void Refresh()
@@ -53,6 +62,8 @@ public sealed class ActiveUserSession : IActiveUserSession
         ActiveUser? changed = null;
         lock (_sync)
         {
+            var previousId = _current?.StableId;
+            var previousRequiresSelection = _current is not null && _requiresSelection;
             var configured = _identityProfiles.GetIdentityReviewItems()
                 .Where(item => item.IsRegisteredUser && !string.IsNullOrWhiteSpace(item.IdentityId))
                 .Select(item => new ActiveUser(
@@ -86,14 +97,15 @@ public sealed class ActiveUserSession : IActiveUserSession
             {
                 selected = selected with { ResolutionMethod = "identity-profile-selection-required" };
             }
-            var previousId = _current?.StableId;
             _current = selected;
             if (!_requiresSelection)
             {
                 SaveState(selected);
             }
-            if (!string.Equals(previousId, selected.StableId, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(previousId, selected.StableId, StringComparison.OrdinalIgnoreCase)
+                || previousRequiresSelection != _requiresSelection)
             {
+                _selectionRevision++;
                 changed = selected;
             }
         }
@@ -119,6 +131,7 @@ public sealed class ActiveUserSession : IActiveUserSession
             _requiresSelection = false;
             _current = selected;
             SaveState(selected);
+            _selectionRevision++;
         }
         Changed?.Invoke(this, selected);
         return selected;

@@ -139,6 +139,18 @@ public interface IActiveUserSession
             ? ActiveUserSelectionSnapshot.SelectionRequired
             : ActiveUserSelectionSnapshot.Resolved(Current);
 
+    /// <summary>
+    /// Returns an in-process selection generation. Production sessions override this
+    /// so selecting A, then B, then A cannot revive a lease captured for the first A.
+    /// </summary>
+    string CaptureSelectionRevision()
+    {
+        var snapshot = CaptureSelectionSnapshot();
+        return snapshot.IsResolved
+            ? $"legacy-active-user:{snapshot.SelectedUser!.StableId}"
+            : "legacy-active-user:selection-required";
+    }
+
     event EventHandler<ActiveUser>? Changed;
 
     ActiveUser Select(string stableId);

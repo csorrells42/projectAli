@@ -35,11 +35,13 @@ internal sealed class FileCapabilityAvailabilitySettingsPersistence :
 internal sealed class CapabilityPlanningPublication
 {
     internal CapabilityPlanningPublication(
+        string publicationRevision,
         CapabilityAvailabilitySettings settings,
         CapabilityRuntimeAvailability runtime,
         CapabilityRegistryRevisionSnapshot registry,
         CapabilityResolutionSnapshot resolution)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(publicationRevision);
         if (!string.Equals(settings.Revision, registry.SettingsRevision, StringComparison.Ordinal)
             || !string.Equals(registry.RegistryRevision, resolution.RegistryRevision, StringComparison.Ordinal)
             || !string.Equals(registry.SettingsRevision, resolution.SettingsRevision, StringComparison.Ordinal))
@@ -49,11 +51,14 @@ internal sealed class CapabilityPlanningPublication
                 nameof(resolution));
         }
 
+        PublicationRevision = publicationRevision;
         Settings = settings;
         Runtime = runtime;
         Registry = registry;
         Resolution = resolution;
     }
+
+    public string PublicationRevision { get; }
 
     public CapabilityAvailabilitySettings Settings { get; }
 
@@ -62,6 +67,9 @@ internal sealed class CapabilityPlanningPublication
     public CapabilityRegistryRevisionSnapshot Registry { get; }
 
     public CapabilityResolutionSnapshot Resolution { get; }
+
+    public CapabilityInvocationLease CreateInvocationLease(string toolName) =>
+        Resolution.CreateInvocationLease(toolName, PublicationRevision);
 }
 
 public sealed class CapabilitySettingsSnapshotOwner
@@ -336,13 +344,19 @@ public sealed class CapabilitySettingsSnapshotOwner
         CapabilityAvailabilityLoadStatus loadStatus,
         string? loadError)
     {
+        var publicationRevision = NextPublicationRevision();
         var registry = _canonicalRegistry.Freeze(settings);
         var resolution = _resolver.ResolvePlanning(registry, runtime);
-        var planning = new CapabilityPlanningPublication(settings, runtime, registry, resolution);
+        var planning = new CapabilityPlanningPublication(
+            publicationRevision,
+            settings,
+            runtime,
+            registry,
+            resolution);
         var envelope = CapabilitySettingsProjection.Create(
             registry,
             resolution,
-            NextPublicationRevision(),
+            publicationRevision,
             loadStatus,
             loadError);
         return new PublishedState(planning, envelope);

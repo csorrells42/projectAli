@@ -81,10 +81,9 @@ public sealed class ShadowPermissionHookTests
     }
 
     [Fact]
-    public async Task ExternalCodingOwnershipBlock_IsDeniedEvidenceAndPreservesTheGuardException()
+    public async Task FormerExternalOwnershipPolicy_DoesNotBlockAliMutation()
     {
         var turn = CreateTurn("call-owner", "implementation_write");
-        turn.ClaimExternalCodingAgentOwnership("C:\\project", "Implement the request.");
         var observer = new RecordingObserver();
         var invocationCount = 0;
         var inner = AIFunctionFactory.Create(
@@ -95,18 +94,15 @@ public sealed class ShadowPermissionHookTests
             () => turn,
             shadowObserver: observer).Apply(
                 inner,
-                requiresApproval: false,
-                AliToolTurnRole.ImplementationMutation);
+                requiresApproval: false);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await guarded.InvokeAsync(
-                new AIFunctionArguments(),
-                TestContext.Current.CancellationToken));
+        var result = await guarded.InvokeAsync(
+            new AIFunctionArguments(),
+            TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, invocationCount);
-        Assert.Contains("external coding agent owns", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("external-coding-agent-owns-turn", observer.FailureCode);
-        Assert.Equal("policy-blocked", observer.Permission?.Decision);
+        Assert.Equal(1, invocationCount);
+        Assert.NotNull(result);
+        Assert.Equal("returned", observer.LastTerminal);
         Assert.True(turn.WasShadowObserved("call-owner"));
     }
 

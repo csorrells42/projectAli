@@ -41,15 +41,12 @@ internal sealed record ToolBucketDefinition(
 
 internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
 {
-    private IReadOnlyList<AIFunctionDeclaration> _latestTools = [];
-
     public Task<SemanticToolSelection> SelectAsync(
         string need,
         IReadOnlyList<AIFunctionDeclaration> liveTools,
         IReadOnlyCollection<string> retainedToolNames,
         CancellationToken cancellationToken)
     {
-        _latestTools = liveTools.ToArray();
         var buckets = SemanticToolBuckets.Create(liveTools);
         return Task.FromResult(new SemanticToolSelection(
             liveTools.ToArray(),
@@ -63,8 +60,8 @@ internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
         Task.FromResult(new SemanticToolDiscoveryResult(
             need,
             ["Complete live registry"],
-            _latestTools.Select(tool => tool.Name).ToArray(),
-            "The complete live registry is already loaded."));
+            [],
+            "The current planning pass already contains its complete effective live registry; no cross-turn tool cache is used."));
 }
 
 /// <summary>

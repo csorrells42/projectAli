@@ -25,13 +25,52 @@ internal sealed partial class AliDependencyEngineering(AliCodingProjectResolver 
                 (string?)element.Attribute("Include") ?? (string?)element.Attribute("Update") ?? "unknown",
                 (string?)element.Attribute("Version") ?? element.Elements().FirstOrDefault(child => child.Name.LocalName == "Version")?.Value,
                 false, null, null)).ToList();
-        var audit = await AliBoundedProcessRunner.RunAsync(ResolveDotNet(), project.ProjectDirectory,
-            ["list", project.PhysicalPath, "package", "--include-transitive", "--vulnerable", "--deprecated", "--format", "json"],
+        var vulnerabilityAudit = await AliBoundedProcessRunner.RunAsync(
+            ResolveDotNet(),
+            project.ProjectDirectory,
+            BuildVulnerabilityInspectionArguments(project.PhysicalPath),
             TimeSpan.FromMinutes(3), cancellationToken).ConfigureAwait(false);
-        return new DependencyInspectionResult(audit.Success,
-            audit.Success ? $"Inspected {packages.Count} direct package reference(s) and completed NuGet vulnerability/deprecation audit."
+        var deprecationAudit = await AliBoundedProcessRunner.RunAsync(
+            ResolveDotNet(),
+            project.ProjectDirectory,
+            BuildDeprecationInspectionArguments(project.PhysicalPath),
+            TimeSpan.FromMinutes(3), cancellationToken).ConfigureAwait(false);
+        var auditSucceeded = vulnerabilityAudit.Success && deprecationAudit.Success;
+        var auditOutput = $"Vulnerability audit:{Environment.NewLine}{vulnerabilityAudit.Output}"
+            + $"{Environment.NewLine}Deprecation audit:{Environment.NewLine}{deprecationAudit.Output}";
+        return new DependencyInspectionResult(auditSucceeded,
+            auditSucceeded ? $"Inspected {packages.Count} direct package reference(s) and completed NuGet vulnerability/deprecation audit."
                 : "Package references were read, but the NuGet audit did not complete.",
-            packages, File.Exists(Path.Combine(project.ProjectDirectory, "packages.lock.json")), audit.Output);
+            packages, File.Exists(Path.Combine(project.ProjectDirectory, "packages.lock.json")), auditOutput);
+    }
+
+    internal static IReadOnlyList<string> BuildVulnerabilityInspectionArguments(string physicalProjectPath) =>
+        BuildInspectionArguments(physicalProjectPath, "--vulnerable");
+
+    internal static IReadOnlyList<string> BuildDeprecationInspectionArguments(string physicalProjectPath) =>
+        BuildInspectionArguments(physicalProjectPath, "--deprecated");
+
+    private static IReadOnlyList<string> BuildInspectionArguments(
+        string physicalProjectPath,
+        string auditOption)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(physicalProjectPath);
+        if (auditOption is not ("--vulnerable" or "--deprecated"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(auditOption));
+        }
+
+        return
+        [
+            "list",
+            physicalProjectPath,
+            "package",
+            "--no-restore",
+            "--include-transitive",
+            auditOption,
+            "--format",
+            "json"
+        ];
     }
 
     public Task<DependencyChangeResult> PreviewChangeAsync(string projectPath, string action, string packageId, string? version, CancellationToken cancellationToken) =>

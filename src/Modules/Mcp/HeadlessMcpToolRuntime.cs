@@ -48,7 +48,8 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
         string dataRoot,
         string applicationBaseDirectory,
         McpServerSettings settings,
-        string? workspaceRoot = null)
+        string? workspaceRoot = null,
+        string? hostConfigurationPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationBaseDirectory);
@@ -129,9 +130,16 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
             codingModule,
             fileAccess);
+        var capabilitySettings = toolFactory.CreateCapabilitySettingsOwner(dataRoot, settings);
+        Func<string> invocationBoundaryRevisionAccessor = () =>
+            McpPersistedSecurityBoundaryRevision.Capture(dataRoot, hostConfigurationPath);
+        var publication = toolFactory.CreateTools(
+            settings,
+            capabilitySettings,
+            invocationBoundaryRevisionAccessor: invocationBoundaryRevisionAccessor);
 
         return new HeadlessMcpToolRuntime(
-            toolFactory.CreateTools(settings),
+            publication.Tools,
             runtimeHttpClient,
             internetHttpClient,
             qdrant,

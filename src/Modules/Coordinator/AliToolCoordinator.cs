@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Ali.Modules.AgentWorkMemory;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Coding;
 using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
@@ -25,7 +26,7 @@ namespace Ali.Modules.Coordinator;
 /// Thin boundary between Ali's conversation stream, immutable capability modules, and the
 /// Agent Framework runner. English interpretation belongs to the model and harness.
 /// </summary>
-public sealed class AliToolCoordinator
+public sealed class AliToolCoordinator : IDisposable
 {
     private const int MaximumVisibleSources = 5;
     private readonly AliAgentHarnessRunner _harness;
@@ -34,6 +35,7 @@ public sealed class AliToolCoordinator
     private readonly Func<UserMemorySettings>? _memorySettings;
     private readonly AliUserMemoryReviewQueue? _memoryReviewQueue;
     private readonly string _assistantName;
+    private int _disposed;
 
     public event Action<AssistantStreamChunk>? BackgroundActivity;
 
@@ -77,7 +79,8 @@ public sealed class AliToolCoordinator
             workflowCheckpointPath,
             orchestrationSettings,
             semanticToolCatalog,
-            shadowObserver: null)
+            shadowObserver: null,
+            capabilitySettingsDataRoot: null)
     {
     }
 
@@ -101,7 +104,8 @@ public sealed class AliToolCoordinator
         string? workflowCheckpointPath,
         Func<AgentOrchestrationSettings>? orchestrationSettings,
         ISemanticToolCatalog? semanticToolCatalog,
-        IShadowToolObserver? shadowObserver)
+        IShadowToolObserver? shadowObserver,
+        string? capabilitySettingsDataRoot)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
@@ -143,8 +147,11 @@ public sealed class AliToolCoordinator
             workflowCheckpointPath ?? Path.Combine(Path.GetTempPath(), "ProjectAli", "WorkflowCheckpoints"),
             orchestrationSettings ?? (() => new AgentOrchestrationSettings()),
             semanticToolCatalog,
-            shadowObserver);
+            shadowObserver,
+            capabilitySettingsDataRoot);
     }
+
+    internal CapabilitySettingsSnapshotOwner? CapabilitySettings => _harness.CapabilitySettings;
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision)
     {
@@ -406,6 +413,14 @@ public sealed class AliToolCoordinator
             appendix.ToString().TrimEnd(),
             EvidenceStatus.Verified,
             finishReason));
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _harness.Dispose();
+        }
     }
 
 }

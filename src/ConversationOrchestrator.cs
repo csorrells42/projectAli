@@ -33,8 +33,10 @@ public sealed record AssistantStreamChunk(
 public sealed class ConversationOrchestrator(
     ILocalModelRuntime runtime,
     CorrectionQueueService correctionQueue,
-    AliToolCoordinator coordinator)
+    AliToolCoordinator coordinator) : IDisposable
 {
+    private int _disposed;
+
     public event Action<AssistantStreamChunk>? BackgroundActivity
     {
         add => coordinator.BackgroundActivity += value;
@@ -68,6 +70,14 @@ public sealed class ConversationOrchestrator(
                            .ConfigureAwait(false))
         {
             yield return chunk;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            coordinator.Dispose();
         }
     }
 }

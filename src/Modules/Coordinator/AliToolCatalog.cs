@@ -134,22 +134,19 @@ internal sealed class AliToolCatalog
                 AliCapabilityCatalog.GetCurrentLocalTimeName,
                 "Return the authoritative local computer date, time, and time zone. Use for relative dates, deadlines, schedules, and reminders when an exact clock value matters.")),
             .. codingModule.CreateFunctionRegistrations()
-                .Select(registration => Protect(registration.Function, registration.TurnRole)),
+                .Select(registration => Protect(registration.Function)),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationFileMoveResult>>)fileAccess.MoveAsync,
                 AliCapabilityCatalog.FileMoveName,
-                "Rename or move one existing file or folder without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source file name can be resolved automatically. The destination is never overwritten. This changes an existing item and always requires user approval."),
-                AliToolTurnRole.ImplementationMutation),
+                "Rename or move one existing file or folder without recreating its contents. sourcePath and destinationPath must use approved virtual roots such as Desktop/old.txt and Desktop/new.cs. A unique existing bare source file name can be resolved automatically. The destination is never overwritten. This changes an existing item and always requires user approval.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationFileOperationResult>>)fileUtilities.CopyAsync,
                 AliCapabilityCatalog.FileCopyName,
-                "Copy one existing file or folder to a new path under Ali's approved workstation roots. The destination is never overwritten. This operation is binary-safe."),
-                AliToolTurnRole.ImplementationMutation),
+                "Copy one existing file or folder to a new path under Ali's approved workstation roots. The destination is never overwritten. This operation is binary-safe.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<WorkstationFileOperationResult>>)fileUtilities.CreateDirectoryAsync,
                 AliCapabilityCatalog.FileCreateDirectoryName,
-                "Create a folder beneath an approved workstation root. Existing folders are left unchanged."),
-                AliToolTurnRole.ImplementationMutation),
+                "Create a folder beneath an approved workstation root. Existing folders are left unchanged.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, bool, CancellationToken, Task<WorkstationFileMetadataResult>>)fileUtilities.GetMetadataAsync,
                 AliCapabilityCatalog.FileMetadataName,
@@ -157,8 +154,7 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, string?, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.CreateArchiveAsync,
                 AliCapabilityCatalog.ArchiveCreateName,
-                "Create one complete archive from one approved file or folder. To include several files, pass their containing folder once; never call this repeatedly to append items. format may be auto, zip, tar, gzip, tar.gz, or 7z. ZIP is the default. Select 7z only when the user explicitly asks for 7z or 7-Zip. The destination is never overwritten."),
-                AliToolTurnRole.ImplementationMutation),
+                "Create one complete archive from one approved file or folder. To include several files, pass their containing folder once; never call this repeatedly to append items. format may be auto, zip, tar, gzip, tar.gz, or 7z. ZIP is the default. Select 7z only when the user explicitly asks for 7z or 7-Zip. The destination is never overwritten.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.ListArchiveAsync,
                 AliCapabilityCatalog.ArchiveListName,
@@ -166,18 +162,15 @@ internal sealed class AliToolCatalog
             Protect(AIFunctionFactory.Create(
                 (Func<string, string, CancellationToken, Task<WorkstationArchiveResult>>)fileUtilities.ExtractArchiveAsync,
                 AliCapabilityCatalog.ArchiveExtractName,
-                "Extract a supported archive into a new folder beneath an approved workstation root. Ali rejects traversal, excessive expansion, and existing destinations rather than overwriting files."),
-                AliToolTurnRole.ImplementationMutation)
+                "Extract a supported archive into a new folder beneath an approved workstation root. Ali rejects traversal, excessive expansion, and existing destinations rather than overwriting files."))
         ];
 
         Instructions = BuildInstructions(
             profile.AssistantName,
             orchestrationSettings?.Invoke() ?? new AgentOrchestrationSettings());
 
-        AIFunction Protect(
-            AIFunction function,
-            AliToolTurnRole turnRole = AliToolTurnRole.Default) =>
-            permissionPolicy.Apply(function, turnRole);
+        AIFunction Protect(AIFunction function) =>
+            permissionPolicy.ApplyProfileAware(function);
     }
 
     public IReadOnlyList<AITool> Tools { get; }
@@ -231,8 +224,8 @@ internal sealed class AliToolCatalog
             {
                 ProgrammingAgentModes.Off => "Aider and OpenHands are disabled and absent from the live tool registry. Use Ali's native programming, Roslyn, build, test, run, debugger, architecture and delivery tools.",
                 _ when (orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().AlwaysUseProgrammingAgent
-                    => $"The user requires the selected external coding agent for programming work. For every request that you semantically determine requires implementation, call coding_agent_execute with the complete objective and approved project path. The selected mode is {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. That agent owns its architecture, file edits, terminal work, build/test cycle, diagnosis and repairs. Calling coding_agent_execute transfers implementation ownership for the remainder of the turn. After it returns, use Ali's tools only for independent read, build, test, run or inspection evidence; do not edit, replace, move, create or delete project source yourself. If the critic or independent verification rejects the result, call coding_agent_execute again with the original objective plus the exact diagnostics. Ali's implementation-changing tools are unavailable after handoff.",
-                _ => $"The optional external programming engine is {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. It is never required for Ali's native programming work; use it only when the user requests that collaboration. Once invoked, the selected agent owns implementation and repair; Ali independently verifies the result without taking over source edits."
+                    => $"Prefer the selected external programming engine, {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}, for substantial implementation when coding_agent_execute is present in the effective tool set. It remains one optional, approval-bearing collaborator: it never owns the turn, blocks Ali's native tools, or authorizes direct project changes outside the capability boundary. If it is unavailable, continue with Ali's effective native tools.",
+                _ => $"The optional external programming engine is {(orchestrationSettings ?? new AgentOrchestrationSettings()).Normalize().ProgrammingAgentMode}. Use it when the user requests that collaboration and coding_agent_execute is present in the effective tool set. It never owns the turn or disables Ali's native tools."
             },
             "For an existing coding target in any supported language, call coding_inspect_project to detect its provider. Use coding_index_project and coding_search_symbols for bounded repository understanding, then coding_analyze_project, coding_format_project, coding_build_project, or coding_test_project according to the user's request. Provider selection comes from the project manifest, never from guessing or hard-coded English routing.",
             "For a new Arduino sketch that the user asks you to create and compile, call arduino_create_and_compile with the complete source, an approved .ino path whose filename matches its parent folder, and the explicit board FQBN. The path may be virtual such as Desktop/Blink/Blink.ino or absolute when it is already inside an approved root. This one operation creates the missing folder and file, invokes the real compiler, and returns firmware artifacts. Do not split this request into generic file_access_write followed by arduino_compile, and never claim Arduino compilation is unavailable when this registered tool exists.",

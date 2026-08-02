@@ -29,18 +29,10 @@ using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coding;
 
-internal sealed record AliCodingFunctionRegistration(
-    AIFunction Function,
-    AliToolTurnRole TurnRole = AliToolTurnRole.Default)
+internal sealed record AliCodingFunctionRegistration(AIFunction Function)
 {
     public static implicit operator AliCodingFunctionRegistration(AIFunction function) =>
         new(function);
-
-    public static AliCodingFunctionRegistration External(AIFunction function) =>
-        new(function, AliToolTurnRole.ExternalCodingAgent);
-
-    public static AliCodingFunctionRegistration Implementation(AIFunction function) =>
-        new(function, AliToolTurnRole.ImplementationMutation);
 }
 
 /// <summary>
@@ -131,10 +123,10 @@ public sealed class AliCodingModule : IAsyncDisposable
             (Func<CancellationToken, Task<ExternalCodingAgentStatus>>)ExternalAgents.GetStatusAsync,
             AliCapabilityCatalog.CodingAgentStatusName,
             "Report the selected external coding executor and truthful readiness of Aider and OpenHands."),
-        AliCodingFunctionRegistration.External(AIFunctionFactory.Create(
+        AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<ExternalCodingAgentRunResult>>)ExternalAgents.ExecuteAsync,
             AliCapabilityCatalog.CodingAgentExecuteName,
-            "Execute one substantial programming objective in the approved existing project using the executor selected in Settings: Aider architect/edit or OpenHands autonomous implementation. This can modify and execute project files and always requires approval.")),
+            "Execute one substantial programming objective in the approved existing project using the executor selected in Settings: Aider architect/edit or OpenHands autonomous implementation. This is an optional collaboration tool, can modify and execute project files, and always requires approval."),
         AIFunctionFactory.Create((Func<AliVisualStudioReport>)VisualStudio.Inspect,
             AliCapabilityCatalog.VisualStudioInspectName,
             "Inspect installed Visual Studio instances and report MSBuild, MSVC, CMake, Ninja, test, formatting, language-server, and debugger features truthfully."),
@@ -209,10 +201,10 @@ public sealed class AliCodingModule : IAsyncDisposable
             (Func<string, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.AnalyzeAsync,
             AliCapabilityCatalog.CodingAnalyzeProjectName,
             "Run the registered language provider's semantic and static analysis for an approved project."),
-        AliCodingFunctionRegistration.Implementation(AIFunctionFactory.Create(
+        AIFunctionFactory.Create(
             (Func<string, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.FormatAsync,
             AliCapabilityCatalog.CodingFormatProjectName,
-            "Format an approved project through its registered language provider after user approval.")),
+            "Format an approved project through its registered language provider after user approval."),
         AIFunctionFactory.Create(
             (Func<string, string?, CancellationToken, Task<AliLanguageOperationResult>>)MultiLanguage.BuildAsync,
             AliCapabilityCatalog.CodingBuildProjectName,
@@ -241,18 +233,18 @@ public sealed class AliCodingModule : IAsyncDisposable
             (Func<string, int, AliRuntimeProcessSnapshot>)Operations.InspectProcess,
             AliCapabilityCatalog.CodingInspectProcessName,
             "Capture a live point-in-time CPU, memory, thread, and responsiveness snapshot for an explicitly identified process after user approval."),
-        AliCodingFunctionRegistration.Implementation(AIFunctionFactory.Create(
+        AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)ProjectScaffolder.CreateAsync,
             AliCapabilityCatalog.DotNetCreateProjectName,
-            "Create a new C# project scaffold in an empty approved folder. projectPath must be a virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj; template must be wpf or console. After success, write the complete requested source before building.")),
+            "Create a new C# project scaffold in an empty approved folder. projectPath must be a virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj; template must be wpf or console. After success, write the complete requested source before building."),
         AIFunctionFactory.Create(
             (Func<string, CancellationToken, Task<RoslynAnalysisResult>>)Tools.AnalyzeAsync,
             AliCapabilityCatalog.RoslynAnalyzeProjectName,
             "Load an approved C# project with Roslyn and return semantic compiler diagnostics with exact source locations."),
-        AliCodingFunctionRegistration.Implementation(AIFunctionFactory.Create(
+        AIFunctionFactory.Create(
             (Func<string, CancellationToken, Task<RoslynFormatResult>>)Tools.FormatAsync,
             AliCapabilityCatalog.RoslynFormatProjectName,
-            "Format every C# document in an approved project with Roslyn.")),
+            "Format every C# document in an approved project with Roslyn."),
         AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<RoslynSymbolResult>>)Tools.FindSymbolAsync,
             AliCapabilityCatalog.RoslynFindSymbolName,
@@ -281,10 +273,10 @@ public sealed class AliCodingModule : IAsyncDisposable
             (Func<string, string, int, int, string, CancellationToken, Task<RoslynRenameResult>>)Tools.PreviewRenameAsync,
             AliCapabilityCatalog.RoslynPreviewRenameName,
             "Preview Roslyn's exact solution-wide semantic rename without writing files."),
-        AliCodingFunctionRegistration.Implementation(AIFunctionFactory.Create(
+        AIFunctionFactory.Create(
             (Func<string, string, int, int, string, CancellationToken, Task<RoslynRenameResult>>)Tools.ApplyRenameAsync,
             AliCapabilityCatalog.RoslynApplyRenameName,
-            "Apply Roslyn's solution-wide semantic rename after user approval.")),
+            "Apply Roslyn's solution-wide semantic rename after user approval."),
         AIFunctionFactory.Create(
             (Func<string, string?, CancellationToken, Task<DotNetBuildResult>>)Tools.BuildAsync,
             AliCapabilityCatalog.DotNetBuildName,
@@ -341,8 +333,8 @@ public sealed class AliCodingModule : IAsyncDisposable
             AliCapabilityCatalog.DotNetDependencyInspectName, "Inspect exact PackageReferences, lock-file state, and NuGet vulnerability/deprecation audit results."),
         AIFunctionFactory.Create((Func<string, string, string, string?, CancellationToken, Task<DependencyChangeResult>>)Dependencies.PreviewChangeAsync,
             AliCapabilityCatalog.DotNetDependencyPreviewName, "Preview an exact add, update, or remove PackageReference edit without writing the project."),
-        AliCodingFunctionRegistration.Implementation(AIFunctionFactory.Create((Func<string, string, string, string?, CancellationToken, Task<DependencyChangeResult>>)Dependencies.ApplyChangeAsync,
-            AliCapabilityCatalog.DotNetDependencyApplyName, "Apply a previously considered exact PackageReference add, update, or remove after approval.")),
+        AIFunctionFactory.Create((Func<string, string, string, string?, CancellationToken, Task<DependencyChangeResult>>)Dependencies.ApplyChangeAsync,
+            AliCapabilityCatalog.DotNetDependencyApplyName, "Apply a previously considered exact PackageReference add, update, or remove after approval."),
         AIFunctionFactory.Create((Func<string, CancellationToken, Task<SourceControlResult>>)SourceControl.StatusAsync,
             AliCapabilityCatalog.GitStatusName, "Return authoritative Git branch and working-tree status for an approved coding target."),
         AIFunctionFactory.Create((Func<string, bool, CancellationToken, Task<SourceControlResult>>)SourceControl.DiffAsync,

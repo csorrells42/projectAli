@@ -1,0 +1,269 @@
+using System.Runtime.CompilerServices;
+using Ali.Modules.AgentWorkMemory;
+using Ali.Modules.Coding;
+using Ali.Modules.Capabilities;
+using Ali.Modules.Coordinator;
+using Ali.Modules.Identity;
+using Ali.Modules.Internet;
+using Ali.Modules.Mcp;
+using Ali.Modules.Permissions;
+using Ali.Modules.Runtime;
+using Ali.Modules.Storage;
+using Ali.Modules.UserMemory;
+using Ali.Modules.WorkstationFiles;
+using Microsoft.Extensions.AI;
+using AIChatMessage = Microsoft.Extensions.AI.ChatMessage;
+
+namespace Ali.Framework.Tests.Capabilities;
+
+public sealed class AliProductionCompositionIntegrationTests
+{
+    [Fact]
+    public async Task ActualProductionComposition_BuildsTheExact124CanonicalDescriptors_Offline()
+    {
+        using var fixture = new CompositionFixture();
+        var runtime = new DevelopmentLocalModelRuntime();
+        var client = new RejectingChatClient();
+        var profile = AssistantProfile.Create("Ali capability integration");
+        var mcpClients = new McpClientManager(fixture.Root);
+        await using var codingModule = new AliCodingModule(
+            fixture.FileAccess,
+            () => new AgentOrchestrationSettings(),
+            RuntimeSettingsStore.GetDefaultOptions,
+            AppContext.BaseDirectory);
+        var source = new EmptySourceRetriever();
+        var webResearch = new McpWebResearchClient(() => new WebSourceBackendSettings());
+        var catalog = new AliToolCatalog(
+            source,
+            source,
+            webResearch,
+            new FileMemoryStore(fixture.Root),
+            new FileReminderStore(fixture.Root),
+            profile,
+            mcpClients,
+            fixture.Permissions,
+            fixture.FileAccess,
+            codingModule,
+            () => null,
+            orchestrationSettings: () => new AgentOrchestrationSettings());
+        var compatibilityClient = new LemonadeToolCallingChatClient(
+            client,
+            runtime,
+            profile.AssistantName,
+            () => null,
+            fixture.FileAccess.NormalizeProviderToolArguments);
+        var specialistTeam = new AliSpecialistAgentFactory(
+            compatibilityClient,
+            runtime,
+            () => null).CreateTeam(catalog.Tools);
+        using var workflowFactory = new AliAgentWorkflowFactory(
+            compatibilityClient,
+            runtime,
+            () => null,
+            Path.Combine(fixture.Root, "WorkflowCheckpoints"),
+            () => ActiveUserSelectionSnapshot.Resolved(
+                new ActiveUser("capability-test-user", "Capability test user", false, "test")));
+        var standardWorkflowTools = workflowFactory.CreateStandardTools(specialistTeam);
+        var magenticTool = workflowFactory.CreateMagenticTool(
+            specialistTeam,
+            new AgentOrchestrationSettings());
+        var frameworkTools = AliFrameworkCapabilityProbe.Capture(fixture.FileAccess, () => null);
+        var declarations = catalog.Tools
+            .Concat(specialistTeam.Tools)
+            .Concat(standardWorkflowTools)
+            .Append(magenticTool)
+            .Concat(frameworkTools)
+            .OfType<AIFunctionDeclaration>()
+            .ToArray();
+
+        var production = AliProductionCapabilityCatalog.Build(declarations);
+
+        Assert.Equal(124, declarations.Length);
+        Assert.Equal(124, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(124, production.Registry.Descriptors.Count);
+        Assert.True(AliProductionCapabilityCatalog.KnownToolNames.SetEquals(
+            production.Registry.Descriptors.Select(descriptor => descriptor.ToolName)));
+        Assert.Empty(production.QuarantinedToolNames);
+        Assert.Equal(0, client.CallCount);
+
+        var inventory = CapabilityTerminalToolInventory.Create(declarations, production.Registry);
+        var stagedRuntime = CapabilityRuntimeAvailabilityFactory.Create(
+            inventory,
+            new CapabilityRuntimeStateSnapshot(
+                "selection-required",
+                "ali-core-provider-v1",
+                AliProductionCapabilityCatalog.RegisteredProviderIds,
+                targetResolution: null,
+                "ali-tool-permission-v1:TrustedWorkstation",
+                ["ali-tool-permission-v1"],
+                "mcp-staged-none",
+                readyIncomingMcpToolNames: [],
+                enabledOutgoingMcpToolNames: [],
+                reconcilerRevision: "ali-reconciler-v1:none",
+                availableReconcilerIds: []));
+        var planning = new CapabilityResolver().ResolvePlanning(
+            production.Registry.Freeze(CapabilityAvailabilitySettings.CreateDefault()),
+            stagedRuntime);
+
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.FileReadName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.FileWriteName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.DotNetBuildName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.CodingAnalyzeProjectName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.CodingFormatProjectName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.CodingBuildProjectName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.CodingTestProjectName, out _));
+        Assert.True(planning.TryGetTool(AliCapabilityCatalog.CodingRunProjectName, out _));
+        Assert.Contains(
+            "python-cpython",
+            planning.EligibleProviderIdsByToolName[AliCapabilityCatalog.CodingBuildProjectName]);
+        Assert.Contains(
+            "java-temurin",
+            planning.EligibleProviderIdsByToolName[AliCapabilityCatalog.CodingBuildProjectName]);
+        Assert.DoesNotContain(planning.UnavailableDescriptors, item =>
+            item.Reasons.Any(reason => reason.Code == CapabilityAvailabilityReasonCode.ReconcilerUnavailable));
+    }
+
+    [Fact]
+    public async Task CorruptWorkflowKey_KeepsMainCompositionReadyAndMarksDurableWorkflowsUnavailable()
+    {
+        using var fixture = new CompositionFixture();
+        var checkpointPath = Path.Combine(fixture.Root, "WorkflowCheckpoints");
+        Directory.CreateDirectory(checkpointPath);
+        var corruptKey = new byte[] { 0x41, 0x6c, 0x69, 0x2d, 0x62, 0x61, 0x64 };
+        File.WriteAllBytes(
+            Path.Combine(checkpointPath, AliWorkflowCheckpointOwnership.KeyFileName),
+            corruptKey);
+        var runtime = new DevelopmentLocalModelRuntime();
+        var client = new RejectingChatClient();
+        var profile = AssistantProfile.Create("Ali degraded workflow integration");
+        var source = new EmptySourceRetriever();
+        var webResearch = new McpWebResearchClient(() => new WebSourceBackendSettings());
+        await using var codingModule = new AliCodingModule(
+            fixture.FileAccess,
+            () => new AgentOrchestrationSettings(),
+            RuntimeSettingsStore.GetDefaultOptions,
+            AppContext.BaseDirectory);
+        using var coordinator = new AliToolCoordinator(
+            runtime,
+            client,
+            source,
+            source,
+            webResearch,
+            new FileMemoryStore(fixture.Root),
+            new FileReminderStore(fixture.Root),
+            profile,
+            new McpClientManager(fixture.Root),
+            fixture.Permissions,
+            fixture.FileAccess,
+            new AliAgentWorkMemory(fixture.Root),
+            codingModule,
+            userMemories: null,
+            activeUsers: null,
+            memorySettings: null,
+            workflowCheckpointPath: checkpointPath,
+            orchestrationSettings: () => new AgentOrchestrationSettings(),
+            semanticToolCatalog: null,
+            shadowObserver: null,
+            capabilitySettingsDataRoot: fixture.Root);
+
+        var resolution = Assert.IsType<CapabilitySettingsSnapshotOwner>(
+                coordinator.CapabilitySettings)
+            .CapturePlanning()
+            .Resolution;
+        var durableWorkflowNames = new[]
+        {
+            AliCapabilityCatalog.RunResearchArtifactWorkflowName,
+            AliCapabilityCatalog.RunProgrammingGroupChatName,
+            AliCapabilityCatalog.RunMagenticOrchestrationName,
+            AliCapabilityCatalog.ListRecoverableWorkflowsName,
+            AliCapabilityCatalog.ResumeWorkflowCheckpointName
+        };
+        foreach (var toolName in durableWorkflowNames)
+        {
+            Assert.Contains(
+                resolution.UnavailableDescriptors,
+                item => item.Descriptor.ToolName == toolName
+                    && item.Reasons.Any(reason =>
+                        reason.Code == CapabilityAvailabilityReasonCode.RuntimeToolMissing));
+            Assert.False(resolution.TryGetTool(toolName, out _));
+        }
+
+        Assert.True(resolution.TryGetTool(AliCapabilityCatalog.GetCurrentLocalTimeName, out _));
+        Assert.Equal(corruptKey, File.ReadAllBytes(
+            Path.Combine(checkpointPath, AliWorkflowCheckpointOwnership.KeyFileName)));
+        Assert.Equal(0, client.CallCount);
+    }
+
+    private sealed class CompositionFixture : IDisposable
+    {
+        public CompositionFixture()
+        {
+            Root = Path.Combine(
+                Path.GetTempPath(),
+                "ProjectAli.ProductionCompositionTests",
+                Guid.NewGuid().ToString("N"));
+            var workspace = Directory.CreateDirectory(Path.Combine(Root, "Workspace")).FullName;
+            Permissions = new AgentToolPermissionStore(Root);
+            var store = new AliWorkstationFileStore(
+                [new AliWorkstationFileMount("Workspace", workspace)],
+                Path.Combine(Root, "RecoverableTrash"));
+            FileAccess = new AliWorkstationFileAccess(
+                store,
+                new AgentFileActionAuditStore(Root, activeUsers: null),
+                Permissions);
+        }
+
+        public string Root { get; }
+
+        public AgentToolPermissionStore Permissions { get; }
+
+        public AliWorkstationFileAccess FileAccess { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Root))
+            {
+                Directory.Delete(Root, recursive: true);
+            }
+        }
+    }
+
+    private sealed class EmptySourceRetriever : ISourceRetriever
+    {
+        public Task<SourceRetrievalResult> RetrieveAsync(
+            string userText,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(SourceRetrievalResult.Empty);
+    }
+
+    private sealed class RejectingChatClient : IChatClient
+    {
+        public int CallCount { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<AIChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromException<ChatResponse>(
+                new InvalidOperationException("Production composition must not call a model."));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<AIChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+}

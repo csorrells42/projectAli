@@ -20,7 +20,9 @@ public sealed class AliWorkstationFileAccess
     [
         AliCapabilityCatalog.FileReadName,
         AliCapabilityCatalog.FileListName,
-        AliCapabilityCatalog.FileSearchName
+        AliCapabilityCatalog.FileSearchName,
+        AliCapabilityCatalog.LoadAgentSkillName,
+        AliCapabilityCatalog.ReadAgentSkillResourceName
     ];
 
     private readonly AliWorkstationFileStore _rawStore;

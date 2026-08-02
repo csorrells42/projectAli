@@ -190,6 +190,18 @@ public sealed class WorkstationFileAccessTests
                 new Dictionary<string, object?> { ["fileName"] = "Workspace/missing.txt" },
                 TestContext.Current.CancellationToken));
             Assert.True(await access.ShouldAutoApproveAsync(
+                AliCapabilityCatalog.LoadAgentSkillName,
+                new Dictionary<string, object?> { ["skillName"] = "example" },
+                TestContext.Current.CancellationToken));
+            Assert.True(await access.ShouldAutoApproveAsync(
+                AliCapabilityCatalog.ReadAgentSkillResourceName,
+                new Dictionary<string, object?> { ["resourcePath"] = "example/reference.md" },
+                TestContext.Current.CancellationToken));
+            Assert.False(await access.ShouldAutoApproveAsync(
+                AliCapabilityCatalog.RunAgentSkillScriptName,
+                new Dictionary<string, object?> { ["scriptPath"] = "example/run.ps1" },
+                TestContext.Current.CancellationToken));
+            Assert.True(await access.ShouldAutoApproveAsync(
                 AliCapabilityCatalog.FileWriteName,
                 new Dictionary<string, object?>
                 {
@@ -229,6 +241,10 @@ public sealed class WorkstationFileAccessTests
             Assert.False(await access.ShouldAutoApproveAsync(
                 AliCapabilityCatalog.FileReadName,
                 new Dictionary<string, object?> { ["fileName"] = "Workspace/new.txt" },
+                TestContext.Current.CancellationToken));
+            Assert.False(await access.ShouldAutoApproveAsync(
+                AliCapabilityCatalog.LoadAgentSkillName,
+                new Dictionary<string, object?> { ["skillName"] = "example" },
                 TestContext.Current.CancellationToken));
         });
     }

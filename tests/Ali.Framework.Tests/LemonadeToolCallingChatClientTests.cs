@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Coordinator;
+using Ali.Modules.Mcp;
 using Ali.Modules.Runtime;
 using Ali.Modules.Runtime.Models;
 using Ali.Modules.ToolDiscovery;
@@ -14,6 +16,118 @@ namespace Ali.Framework.Tests;
 
 public sealed class LemonadeToolCallingChatClientTests
 {
+    [Fact]
+    public async Task BlockedAndUncertainFrameworkResults_AreNotPresentedAsCompletedInvocations()
+    {
+        var tool = AIFunctionFactory.Create(
+            () => "ok",
+            "test_tool",
+            "Run a test tool.");
+        var results = new AIChatMessage(AIChatRole.Tool, string.Empty);
+        results.Contents.Add(new FunctionResultContent(
+            "call-blocked",
+            new CapabilityInvocationBlockedResult(
+                tool.Name,
+                "revision",
+                [new CapabilityAvailabilityReason(
+                    CapabilityAvailabilityReasonCode.McpUnavailable,
+                    "test-provider",
+                    "The capability is unavailable.")])));
+        results.Contents.Add(new FunctionResultContent(
+            "call-uncertain",
+            new McpToolInvocationTimedOutResult(
+                tool.Name,
+                "timed-out",
+                "The target-side outcome is unknown.")));
+        results.Contents.Add(new FunctionResultContent("call-threw", null)
+        {
+            Exception = new InvalidOperationException("private exception canary")
+        });
+        using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
+            AIChatRole.Assistant,
+            "{\"action\":\"call\",\"assessment\":\"A fresh test is needed.\",\"tool\":\"test_tool\",\"arguments\":{},\"summary\":\"Run the test\",\"next\":\"Evaluate the result.\"}")));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => null);
+
+        await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Run the test."), results],
+            new ChatOptions { Tools = [tool] },
+            TestContext.Current.CancellationToken);
+
+        var prompt = string.Join(
+            Environment.NewLine,
+            inner.ObservedMessages[0].Select(message => message.Text));
+        Assert.Contains("FRAMEWORK CAPABILITY BLOCK RESULT", prompt, StringComparison.Ordinal);
+        Assert.Contains("before invoking the requested tool", prompt, StringComparison.Ordinal);
+        Assert.Contains("FRAMEWORK EXTERNAL TOOL OUTCOME UNKNOWN", prompt, StringComparison.Ordinal);
+        Assert.Contains("Do not retry it automatically", prompt, StringComparison.Ordinal);
+        Assert.Contains("FRAMEWORK TOOL INVOCATION FAILED", prompt, StringComparison.Ordinal);
+        Assert.Contains("InvalidOperationException", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("private exception canary", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "produced this result only after resolving any required user approval and invoking the exact suspended tool call",
+            prompt,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PlannedIncomingMcpCall_UsesDisplayNameAndRemovesModelEchoedInternalIdentity()
+    {
+        const string internalName = "mcp_server_0123456789abcdef_tool_fedcba9876543210";
+        const string displayName = "Build Server: inspect solution";
+        var activities = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Inspect the solution through the configured build server.",
+            activities.Add);
+        var raw = AIFunctionFactory.Create(
+            () => "inspected",
+            internalName,
+            "Inspect the external solution.");
+        var displayed = new ActivityReportingAIFunction(
+            raw,
+            () => turn,
+            userFacingDisplayName: displayName);
+        var decision = "{\"action\":\"call\",\"assessment\":\"External inspection is needed.\","
+            + $"\"tool\":\"{internalName}\",\"arguments\":{{}},"
+            + $"\"summary\":\"Run {internalName} now\","
+            + $"\"next\":\"Evaluate {internalName} evidence.\"}}";
+        using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
+            AIChatRole.Assistant,
+            decision)));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new DevelopmentLocalModelRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [displayed] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal(internalName, call.Name);
+        Assert.Contains(activities, item =>
+            item.Text.Contains(displayName, StringComparison.Ordinal));
+        Assert.All(activities, item =>
+        {
+            Assert.DoesNotContain("0123456789abcdef", item.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                "0123456789abcdef",
+                item.ActivityDetail ?? string.Empty,
+                StringComparison.Ordinal);
+        });
+    }
+
     [Fact]
     public async Task CriticDenial_TriggersFreshSemanticDrawerSelection()
     {
@@ -1909,7 +2023,7 @@ public sealed class LemonadeToolCallingChatClientTests
     }
 
     [Fact]
-    public async Task RequiredExternalCodingTurn_CannotFinishWithoutExecutorEvidence()
+    public async Task ExternalCodingTool_IsOptionalAndCanBeSelectedAfterCriticReview()
     {
         var activity = new List<AssistantStreamChunk>();
         var turn = new CoordinatorTurnContext(
@@ -1919,7 +2033,6 @@ public sealed class LemonadeToolCallingChatClientTests
             "Create and run a WPF Tic-Tac-Toe application.",
             activity.Add);
         turn.SetCodingDisposition(
-            true,
             false,
             "The model classified the requested executable project as practical coding work.");
         using var inner = new RecordingChatClient(
@@ -1958,12 +2071,56 @@ public sealed class LemonadeToolCallingChatClientTests
             .SelectMany(message => message.Contents)
             .OfType<FunctionCallContent>());
         Assert.Equal(AliCapabilityCatalog.CodingAgentExecuteName, call.Name);
-        var initialMode = Assert.IsType<RequiredChatToolMode>(inner.ToolModes[0]);
-        Assert.Equal(AliCapabilityCatalog.CodingAgentExecuteName, initialMode.RequiredFunctionName);
+        Assert.IsNotType<RequiredChatToolMode>(inner.ToolModes[0]);
         Assert.Contains(activity, item =>
             item.IsActivity
             && item.ActivityKind == AgentActivityKind.Warning
             && item.Text.Contains("Critic denied", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CodingTurn_WithNoExternalExecutor_RemainsAnAliTurn()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "Inspect the current project.",
+            activity.Add);
+        turn.SetCodingDisposition(
+            false,
+            "The classifier identified coding work.");
+        var toolCall = new AIChatMessage(AIChatRole.Assistant, string.Empty);
+        toolCall.Contents.Add(new FunctionCallContent(
+            "call-read",
+            "read_current_state",
+            new Dictionary<string, object?>()));
+        using var inner = new RecordingChatClient(new ChatResponse(toolCall));
+        using var client = new LemonadeToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => turn);
+        using var activeTurn = client.BeginTurn(turn);
+        var read = AIFunctionFactory.Create(
+            () => "ok",
+            "read_current_state",
+            "Read current project state.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, turn.OriginalUserText)],
+            new ChatOptions { Tools = [read] },
+            TestContext.Current.CancellationToken);
+
+        Assert.IsNotType<RequiredChatToolMode>(Assert.Single(inner.ToolModes));
+        Assert.Contains(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>(), call => call.Name == "read_current_state");
+        Assert.DoesNotContain(activity, item =>
+            item.IsActivity
+            && item.ActivityKind == AgentActivityKind.Warning
+            && item.Text.Contains("executor withheld", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1976,7 +2133,6 @@ public sealed class LemonadeToolCallingChatClientTests
             "Hello Ali.",
             _ => { });
         turn.SetCodingDisposition(
-            false,
             true,
             "The model classified the greeting as casual conversation.");
         using var inner = new RecordingChatClient(

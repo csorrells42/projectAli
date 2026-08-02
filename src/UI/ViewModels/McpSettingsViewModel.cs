@@ -9,6 +9,8 @@ public sealed class McpSettingsViewModel : ObservableObject
     private readonly McpClientManager _manager;
     private McpServerProfileViewModel? _selectedServer;
     private bool _enabled;
+    private bool _settingsWritable = true;
+    private string? _loadedBoundaryRevision;
     private string _statusText = "MCP client settings have not been loaded yet.";
 
     public McpSettingsViewModel(McpClientManager manager)
@@ -18,11 +20,14 @@ public sealed class McpSettingsViewModel : ObservableObject
         RemoveServerCommand = new RelayCommand(
             _ => RemoveSelectedServer(),
             _ => SelectedServer is not null);
-        SaveCommand = new RelayCommand(_ => Save(), onException: HandleError);
+        SaveCommand = new RelayCommand(
+            _ => Save(),
+            _ => _settingsWritable,
+            onException: HandleError);
         ReloadCommand = new RelayCommand(_ => Reload(), onException: HandleError);
         TestAndDiscoverCommand = new AsyncRelayCommand(
             TestAndDiscoverAsync,
-            () => SelectedServer is not null,
+            () => SelectedServer is not null && _settingsWritable,
             HandleError);
         Reload();
     }
@@ -69,7 +74,10 @@ public sealed class McpSettingsViewModel : ObservableObject
 
     public void Reload()
     {
-        var settings = _manager.LoadSettings();
+        var loaded = _manager.LoadSettingsResult();
+        _settingsWritable = loaded.CanPersist;
+        _loadedBoundaryRevision = loaded.CanPersist ? loaded.BoundaryRevision : null;
+        var settings = loaded.Settings;
         Enabled = settings.Enabled;
         Servers.Clear();
         foreach (var server in settings.Servers)
@@ -78,9 +86,12 @@ public sealed class McpSettingsViewModel : ObservableObject
         }
 
         SelectedServer = Servers.FirstOrDefault();
-        StatusText = Servers.Count == 0
+        StatusText = loaded.Status == McpSettingsLoadStatus.FailedClosed
+            ? loaded.Error ?? "mcp-clients.json failed safely. Ali did not overwrite it."
+            : Servers.Count == 0
             ? "MCP is ready. Add a server to begin; nothing is enabled by default."
             : $"Loaded {Servers.Count} MCP server profile(s).";
+        RaiseCommandStates();
     }
 
     private void AddServer()
@@ -109,12 +120,28 @@ public sealed class McpSettingsViewModel : ObservableObject
 
     private void Save()
     {
+        if (!_settingsWritable)
+        {
+            StatusText = "mcp-clients.json failed safely. Save is blocked so Ali cannot overwrite it; fix or replace the file, then Reload.";
+            return;
+        }
+
+        var selectedIndex = SelectedServer is null ? -1 : Servers.IndexOf(SelectedServer);
         var settings = new McpClientSettings
         {
             Enabled = Enabled,
             Servers = Servers.Select(server => server.ToModel()).ToList()
         };
-        _manager.SaveSettings(settings);
+        var saved = _manager.SaveSettings(settings, _loadedBoundaryRevision);
+        _loadedBoundaryRevision = _manager.CaptureSettingsRevision();
+        Servers.Clear();
+        foreach (var server in saved.Servers)
+        {
+            Servers.Add(new McpServerProfileViewModel(server));
+        }
+        SelectedServer = selectedIndex >= 0 && selectedIndex < Servers.Count
+            ? Servers[selectedIndex]
+            : Servers.FirstOrDefault();
         StatusText = Enabled
             ? $"Saved {Servers.Count} MCP server profile(s). Enabled tools become available on Ali's next turn."
             : $"Saved {Servers.Count} MCP server profile(s). MCP remains globally disabled.";
@@ -135,10 +162,9 @@ public sealed class McpSettingsViewModel : ObservableObject
             return;
         }
 
-        SelectedServer.MergeDiscoveredTools(result.Tools, _manager.RequiresApprovalByDefault);
-        Save();
+        SelectedServer.MergeDiscoveredTools(result.Tools);
         StatusText = result.Status
-            + " New tools are disabled and require approval until you explicitly change them.";
+            + " Discovery is a draft: review the retained policies and choose Save. New or changed declarations are disabled and require approval.";
     }
 
     private void RaiseCommandStates()
@@ -177,7 +203,9 @@ public sealed class McpServerProfileViewModel : ObservableObject
 
     public McpServerProfileViewModel(McpServerProfile profile)
     {
-        _id = profile.Id;
+        _id = string.IsNullOrWhiteSpace(profile.Id)
+            ? Guid.NewGuid().ToString("N")
+            : profile.Id;
         _name = profile.Name;
         _enabled = profile.Enabled;
         _transport = McpTransportKinds.Normalize(profile.Transport);
@@ -316,70 +344,140 @@ public sealed class McpServerProfileViewModel : ObservableObject
         Transport = Transport,
         Endpoint = Endpoint,
         Command = Command,
-        Arguments = SplitLines(ArgumentsText),
+        Arguments = ParseArguments(ArgumentsText),
         WorkingDirectory = WorkingDirectory,
         InheritEnvironmentVariables = InheritEnvironmentVariables,
         EnvironmentVariables = ParseEnvironmentBindings(EnvironmentVariableBindingsText),
         AuthenticationHeaderName = AuthenticationHeaderName,
         AuthenticationPrefix = AuthenticationPrefix,
         AuthenticationEnvironmentVariable = AuthenticationEnvironmentVariable,
-        ConnectionTimeoutSeconds = int.TryParse(ConnectionTimeoutText, out var timeout) ? timeout : 30,
+        ConnectionTimeoutSeconds = ParseOperationTimeout(ConnectionTimeoutText),
         Tools = Tools.Select(tool => tool.ToModel()).ToList()
     };
 
-    public void MergeDiscoveredTools(
-        IReadOnlyList<McpDiscoveredTool> discovered,
-        Func<McpDiscoveredTool, bool>? requiresApprovalByDefault = null)
+    public void MergeDiscoveredTools(IReadOnlyList<McpDiscoveredTool> discovered)
     {
         var existing = Tools.ToDictionary(tool => tool.Name, StringComparer.OrdinalIgnoreCase);
-        Tools.Clear();
+        foreach (var saved in existing.Values)
+        {
+            saved.MarkNotAdvertised();
+        }
         foreach (var tool in discovered.OrderBy(tool => tool.Name, StringComparer.OrdinalIgnoreCase))
         {
             if (existing.TryGetValue(tool.Name, out var saved))
             {
-                saved.UpdateDescription(tool.Description, tool.ReadOnlyHint, tool.DestructiveHint);
-                Tools.Add(saved);
+                saved.ApplyDiscovery(tool);
             }
             else
             {
-                Tools.Add(new McpToolPolicyViewModel(new McpToolPolicy
+                var added = new McpToolPolicyViewModel(new McpToolPolicy
                 {
                     Name = tool.Name,
                     Description = tool.Description,
                     Enabled = false,
-                    RequiresApproval = requiresApprovalByDefault?.Invoke(tool) ?? true,
+                    RequiresApproval = true,
                     ReadOnlyHint = tool.ReadOnlyHint,
-                    DestructiveHint = tool.DestructiveHint
-                }));
+                    DestructiveHint = tool.DestructiveHint,
+                    SchemaFingerprint = tool.SchemaFingerprint
+                });
+                added.ApplyDiscovery(tool);
+                Tools.Add(added);
             }
         }
     }
 
-    private static List<string> SplitLines(string value) =>
-        (value ?? string.Empty)
-        .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Where(line => !string.IsNullOrWhiteSpace(line))
-        .ToList();
+    private static int ParseOperationTimeout(string value)
+    {
+        if (!int.TryParse(value, out var timeout) || timeout is < 1 or > 300)
+        {
+            throw new InvalidOperationException(
+                "Enter a server operation timeout from 1 through 300 seconds.");
+        }
+        return timeout;
+    }
+
+    private static List<string> ParseArguments(string value) =>
+        ParseBoundedLines(
+            value,
+            McpClientSettingsStore.MaximumArgumentCount,
+            McpClientSettingsStore.MaximumArgumentCharacters,
+            "MCP argument");
 
     private static List<McpEnvironmentVariableBinding> ParseEnvironmentBindings(string value)
     {
         var bindings = new List<McpEnvironmentVariableBinding>();
-        foreach (var line in SplitLines(value))
+        var destinationNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lines = ParseBoundedLines(
+            value,
+            McpClientSettingsStore.MaximumEnvironmentBindingCount,
+            (McpClientSettingsStore.MaximumEnvironmentNameCharacters * 2) + 1,
+            "Environment binding");
+        for (var index = 0; index < lines.Count; index++)
         {
+            var line = lines[index];
             var separator = line.IndexOf('=');
-            if (separator <= 0 || separator == line.Length - 1)
+            if (separator <= 0
+                || separator == line.Length - 1
+                || line.IndexOf('=', separator + 1) >= 0)
             {
-                continue;
+                throw new InvalidOperationException(
+                    $"Environment binding line {index + 1} must use DESTINATION=SOURCE with both names present.");
+            }
+
+            var destinationName = line[..separator].Trim();
+            var sourceName = line[(separator + 1)..].Trim();
+            if (destinationName.Length == 0 || sourceName.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Environment binding line {index + 1} must use DESTINATION=SOURCE with both names present.");
+            }
+            if (destinationName.Length > McpClientSettingsStore.MaximumEnvironmentNameCharacters
+                || sourceName.Length > McpClientSettingsStore.MaximumEnvironmentNameCharacters)
+            {
+                throw new InvalidOperationException(
+                    $"Environment binding line {index + 1} exceeds Ali's bounded environment-name limit.");
+            }
+            if (!destinationNames.Add(destinationName))
+            {
+                throw new InvalidOperationException(
+                    $"Environment destination '{destinationName}' is listed more than once. Keep exactly one source for each destination.");
             }
 
             bindings.Add(new McpEnvironmentVariableBinding
             {
-                Name = line[..separator].Trim(),
-                SourceEnvironmentVariable = line[(separator + 1)..].Trim()
+                Name = destinationName,
+                SourceEnvironmentVariable = sourceName
             });
         }
 
         return bindings;
+    }
+
+    private static List<string> ParseBoundedLines(
+        string? value,
+        int maximumCount,
+        int maximumLineCharacters,
+        string fieldName)
+    {
+        value ??= string.Empty;
+        var maximumTextCharacters = checked(maximumCount * (maximumLineCharacters + 2));
+        if (value.Length > maximumTextCharacters)
+        {
+            throw new InvalidOperationException(
+                $"{fieldName} text exceeds Ali's bounded settings limit.");
+        }
+
+        var lines = value
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+        if (lines.Count > maximumCount
+            || lines.Any(line => line.Length > maximumLineCharacters))
+        {
+            throw new InvalidOperationException(
+                $"{fieldName} text exceeds Ali's bounded settings limit.");
+        }
+        return lines;
     }
 }
 
@@ -390,6 +488,10 @@ public sealed class McpToolPolicyViewModel : ObservableObject
     private bool _requiresApproval;
     private bool _readOnlyHint;
     private bool _destructiveHint;
+    private string _schemaFingerprint;
+    private bool _wasAdvertisedInLastDiscovery = true;
+    private bool _declarationChanged;
+    private bool _needsDiscovery;
 
     public McpToolPolicyViewModel(McpToolPolicy tool)
     {
@@ -399,6 +501,13 @@ public sealed class McpToolPolicyViewModel : ObservableObject
         _requiresApproval = tool.RequiresApproval;
         _readOnlyHint = tool.ReadOnlyHint;
         _destructiveHint = tool.DestructiveHint;
+        _schemaFingerprint = tool.SchemaFingerprint;
+        _needsDiscovery = string.IsNullOrWhiteSpace(_schemaFingerprint);
+        if (_needsDiscovery)
+        {
+            _enabled = false;
+            _requiresApproval = true;
+        }
     }
 
     public string Name { get; }
@@ -433,11 +542,23 @@ public sealed class McpToolPolicyViewModel : ObservableObject
         private set => SetProperty(ref _destructiveHint, value);
     }
 
-    public string SafetySummary => DestructiveHint
+    public string SafetySummary => _needsDiscovery
+        ? "This saved tool has no pinned declaration. Run discovery before it can be enabled."
+        : !WasAdvertisedInLastDiscovery
+        ? "Not advertised by the latest probe; the saved policy was retained and will be withheld while absent."
+        : _declarationChanged
+            ? "The server declaration changed. Ali reset this tool to disabled and ask-first until you review and save it."
+        : DestructiveHint
         ? "Server marks this tool as potentially destructive."
         : ReadOnlyHint
             ? "Server describes this tool as read-only."
             : "Server did not provide a reliable safety classification.";
+
+    public bool WasAdvertisedInLastDiscovery
+    {
+        get => _wasAdvertisedInLastDiscovery;
+        private set => SetProperty(ref _wasAdvertisedInLastDiscovery, value);
+    }
 
     public McpToolPolicy ToModel() => new()
     {
@@ -446,14 +567,37 @@ public sealed class McpToolPolicyViewModel : ObservableObject
         Enabled = Enabled,
         RequiresApproval = RequiresApproval,
         ReadOnlyHint = ReadOnlyHint,
-        DestructiveHint = DestructiveHint
+        DestructiveHint = DestructiveHint,
+        SchemaFingerprint = _schemaFingerprint
     };
 
-    public void UpdateDescription(string description, bool readOnlyHint, bool destructiveHint)
+    public void MarkNotAdvertised()
     {
-        Description = description;
-        ReadOnlyHint = readOnlyHint;
-        DestructiveHint = destructiveHint;
+        WasAdvertisedInLastDiscovery = false;
+        OnPropertyChanged(nameof(SafetySummary));
+    }
+
+    public void ApplyDiscovery(McpDiscoveredTool discovered)
+    {
+        ArgumentNullException.ThrowIfNull(discovered);
+        var declarationChanged = !string.Equals(
+            _schemaFingerprint,
+            discovered.SchemaFingerprint,
+            StringComparison.Ordinal)
+            || ReadOnlyHint != discovered.ReadOnlyHint
+            || DestructiveHint != discovered.DestructiveHint;
+        Description = discovered.Description;
+        ReadOnlyHint = discovered.ReadOnlyHint;
+        DestructiveHint = discovered.DestructiveHint;
+        _schemaFingerprint = discovered.SchemaFingerprint;
+        _needsDiscovery = string.IsNullOrWhiteSpace(_schemaFingerprint);
+        WasAdvertisedInLastDiscovery = true;
+        _declarationChanged = declarationChanged;
+        if (declarationChanged)
+        {
+            Enabled = false;
+            RequiresApproval = true;
+        }
         OnPropertyChanged(nameof(SafetySummary));
     }
 }

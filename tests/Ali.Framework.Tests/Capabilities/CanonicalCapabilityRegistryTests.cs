@@ -11,6 +11,13 @@ public sealed class CanonicalCapabilityRegistryTests
         Assert.Equal(
             new[]
             {
+                "capability-discovery",
+                "personal-context-and-memory",
+                "web-research-and-navigation",
+                "reminders-and-calendar",
+                "work-memory",
+                "agent-modes-and-skills",
+                "specialists-and-workflows",
                 "files-and-archives",
                 "programming-core",
                 "csharp-dotnet-roslyn",
@@ -295,8 +302,8 @@ public sealed class CanonicalCapabilityRegistryTests
             CapabilityGroupIds.FilesAndArchives,
             effect: new CapabilityEffectDescriptor(
                 CapabilityEffectKind.SourceMutation,
-                "Mutates source without a staged boundary.",
-                CapabilityMutationBoundary.PermissionGuarded,
+                "Mutates source through an unrelated external journal boundary.",
+                CapabilityMutationBoundary.JournaledExternal,
                 false,
                 "filesystem",
                 true,

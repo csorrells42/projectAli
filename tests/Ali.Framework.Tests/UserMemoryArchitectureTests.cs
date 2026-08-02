@@ -210,6 +210,54 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
+    public void ActiveUserSelectionRevision_DetectsAbaSelectionChanges()
+    {
+        var root = TemporaryRoot();
+        try
+        {
+            var profiles = new FakeIdentityProfiles([Person("person-a", "Alice"), Person("person-b", "Bob")]);
+            var session = new ActiveUserSession(root, profiles);
+            session.Select("person-a");
+            var firstA = session.CaptureSelectionRevision();
+            session.Select("person-b");
+            var userB = session.CaptureSelectionRevision();
+            session.Select("person-a");
+            var secondA = session.CaptureSelectionRevision();
+
+            Assert.Equal("person-a", session.Current.StableId);
+            Assert.NotEqual(firstA, userB);
+            Assert.NotEqual(firstA, secondA);
+            Assert.NotEqual(userB, secondA);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void ActiveUserSelectionRevision_DetectsSameUserSelectionRequiredTransitions()
+    {
+        var root = TemporaryRoot();
+        try
+        {
+            var profiles = new FakeIdentityProfiles([Person("person-a", "Alice")]);
+            var session = new ActiveUserSession(root, profiles);
+            var resolved = session.CaptureSelectionRevision();
+            profiles.Items = [Person("person-a", "Alice"), Person("person-b", "Bob")];
+            File.Delete(Path.Combine(root, "active-user-session.json"));
+
+            session.Refresh();
+            var selectionRequired = session.CaptureSelectionRevision();
+            Assert.True(session.RequiresSelection);
+            Assert.Equal("person-a", session.Current.StableId);
+            Assert.NotEqual(resolved, selectionRequired);
+
+            session.Select("person-a");
+            Assert.False(session.RequiresSelection);
+            Assert.NotEqual(selectionRequired, session.CaptureSelectionRevision());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task UserBoundCoordinatorTools_KeepTheUserCapturedAtTurnAdmission()
     {
         var admittedUser = new ActiveUser("person-a", "Alice", false, "explicit-selection");
@@ -664,14 +712,12 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
-    public void McpMemoryPoliciesAreDisabledByDefaultAndClassifiedAsPrivate()
+    public void McpMemoryPoliciesExposeOnlyCanonicalMemoryToolsAndClassifyThemAsPrivate()
     {
         var policies = Ali.Modules.Mcp.McpServerToolCatalog.CreateDefaultPolicies();
         foreach (var name in new[]
         {
             AliCapabilityCatalog.RecallUserMemoryName,
-            AliCapabilityCatalog.RememberCurrentUserName,
-            AliCapabilityCatalog.CorrectCurrentUserMemoryName,
             AliCapabilityCatalog.ForgetCurrentUserMemoryName,
             AliCapabilityCatalog.ListCurrentUserMemoriesName
         })
@@ -680,6 +726,8 @@ public sealed class UserMemoryArchitectureTests
             Assert.False(policy.Enabled);
             Assert.True(policy.ReadsPrivateData);
         }
+        Assert.DoesNotContain(policies, item => item.Name == AliCapabilityCatalog.RememberCurrentUserName);
+        Assert.DoesNotContain(policies, item => item.Name == AliCapabilityCatalog.CorrectCurrentUserMemoryName);
         Assert.True(Assert.Single(policies, item => item.Name == AliCapabilityCatalog.ForgetCurrentUserMemoryName).WritesLocalData);
     }
 

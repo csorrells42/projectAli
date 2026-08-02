@@ -40,6 +40,9 @@ public sealed class AgentActivityPresentationTests
         "Reading 'C:\\Users\\clsor\\OneDrive\\Documents\\Project Ali\\src\\App.xaml.cs'",
         "Reading 'App.xaml.cs'")]
     [InlineData(
+        "Don't inspect 'C:\\Program Files\\Ali\\App.xaml.cs' yet",
+        "Don't inspect 'App.xaml.cs' yet")]
+    [InlineData(
         @"Copied C:\source\folder to D:\destination\folder",
         "Copied folder to folder")]
     [InlineData(
@@ -164,6 +167,30 @@ public sealed class AgentActivityPresentationTests
         Assert.Contains(item.ReceiptText, item.SummaryText, StringComparison.Ordinal);
         Assert.DoesNotContain(item.DisplayDetail, item.SummaryText, StringComparison.Ordinal);
         Assert.True(item.SummaryText.Length <= 323);
+    }
+
+    [Fact]
+    public void ReceiptDisplayName_HidesStableInternalIdentityButPreservesItInTheReceipt()
+    {
+        const string internalName = "mcp_server_0123456789abcdef_tool_fedcba9876543210";
+        const string displayName = "Build Server: inspect solution";
+        var receipt = new AgentToolExecutionReceipt(
+            internalName,
+            AgentToolExecutionOutcome.Completed,
+            "Returned a bounded result.",
+            DateTimeOffset.UtcNow)
+        {
+            DisplayName = displayName
+        };
+
+        var item = new AgentActivityItemViewModel(CreateChunk(
+            $"{displayName} returned; Ali is evaluating the result.",
+            AgentActivityKind.ToolResult,
+            receipt: receipt));
+
+        Assert.Contains(displayName, item.ReceiptText, StringComparison.Ordinal);
+        Assert.DoesNotContain("0123456789abcdef", item.DisplayText, StringComparison.Ordinal);
+        Assert.Equal(internalName, item.ExecutionReceipt!.ToolName);
     }
 
     [Fact]

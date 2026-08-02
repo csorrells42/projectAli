@@ -8,46 +8,125 @@ namespace Ali.Modules.Coordinator;
 /// workflow state format. Only checkpoints whose stable executor identities
 /// match the current workflow graph are offered for recovery.
 /// </summary>
-internal sealed class AliWorkflowRecoveryCatalog(string checkpointPath)
+internal sealed class AliWorkflowRecoveryCatalog(
+    AliWorkflowCheckpointOwnership ownership)
 {
-    private readonly string _checkpointPath = Path.GetFullPath(checkpointPath);
+    internal const int MaximumCheckpointFilesToInspect = 256;
+    internal const int MaximumCheckpointDirectoryEntriesToScan = 1024;
+    internal const int MaximumCheckpointFileBytes = 4 * 1024 * 1024;
+    internal const int MaximumCheckpointBytesToInspect = 32 * 1024 * 1024;
+    internal const int MaximumRecoverableWorkflows = 16;
+
+    private readonly AliWorkflowCheckpointOwnership _ownership =
+        ownership ?? throw new ArgumentNullException(nameof(ownership));
 
     public AliRecoverableWorkflowReport Inspect(
-        IReadOnlyCollection<AliWorkflowRegistration> registrations)
+        IReadOnlyCollection<AliWorkflowRegistration> registrations,
+        AliWorkflowCheckpointOwner owner)
     {
         ArgumentNullException.ThrowIfNull(registrations);
-        Directory.CreateDirectory(_checkpointPath);
+        ArgumentNullException.ThrowIfNull(owner);
+        var checkpointPath = _ownership.GetCheckpointDirectory(owner);
+        if (!Directory.Exists(checkpointPath))
+        {
+            return EmptyReport();
+        }
+
+        var candidates = new SortedSet<CheckpointFileCandidate>(CheckpointFileCandidateComparer.Instance);
+        var boundedSkipCount = 0;
+        var scannedDirectoryEntries = 0;
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(checkpointPath, "*", SearchOption.TopDirectoryOnly))
+            {
+                scannedDirectoryEntries++;
+                if (scannedDirectoryEntries > MaximumCheckpointDirectoryEntriesToScan)
+                {
+                    boundedSkipCount++;
+                    break;
+                }
+
+                if (!TryParseCheckpointFileName(Path.GetFileName(file), out var sessionId, out var checkpointId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var info = new FileInfo(file);
+                    candidates.Add(new CheckpointFileCandidate(
+                        file,
+                        sessionId,
+                        checkpointId,
+                        info.Length,
+                        info.LastWriteTimeUtc));
+                    if (candidates.Count > MaximumCheckpointFilesToInspect)
+                    {
+                        candidates.Remove(candidates.Max!);
+                        boundedSkipCount++;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // A checkpoint can disappear while the bounded candidate set is built.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Keep already collected candidates, but make the bounded inspection visible.
+            boundedSkipCount++;
+        }
 
         var latestBySession = new Dictionary<string, CheckpointSnapshot>(StringComparer.Ordinal);
-        foreach (var file in Directory.EnumerateFiles(_checkpointPath, "*", SearchOption.TopDirectoryOnly))
+        long inspectedBytes = 0;
+        foreach (var candidate in candidates)
         {
-            if (!TryParseCheckpointFileName(Path.GetFileName(file), out var sessionId, out var checkpointId))
+            if (candidate.Length is <= 0 or > MaximumCheckpointFileBytes
+                || inspectedBytes + candidate.Length > MaximumCheckpointBytesToInspect)
             {
+                boundedSkipCount++;
                 continue;
             }
 
+            inspectedBytes += candidate.Length;
             try
             {
-                using var document = JsonDocument.Parse(File.ReadAllText(file));
+                using var document = ReadBoundedCheckpoint(
+                    candidate.Path,
+                    candidate.Length,
+                    out var exceededBound);
+                if (document is null)
+                {
+                    if (exceededBound)
+                    {
+                        boundedSkipCount++;
+                    }
+                    continue;
+                }
                 var root = document.RootElement;
+                if (!_ownership.IsOwnedBy(root, owner))
+                {
+                    continue;
+                }
                 var step = root.TryGetProperty("stepNumber", out var stepElement)
                     && stepElement.TryGetInt32(out var parsedStep)
                     ? parsedStep
                     : -1;
                 var snapshot = new CheckpointSnapshot(
-                    sessionId,
-                    checkpointId,
+                    candidate.SessionId,
+                    candidate.CheckpointId,
                     step,
-                    File.GetLastWriteTimeUtc(file),
+                    candidate.UpdatedAtUtc,
                     IsPending(root),
                     ExtractObjective(root),
                     ExtractExecutorIds(root),
                     ExtractStartExecutorId(root));
-                if (!latestBySession.TryGetValue(sessionId, out var current)
+                if (!latestBySession.TryGetValue(candidate.SessionId, out var current)
                     || snapshot.StepNumber > current.StepNumber
                     || (snapshot.StepNumber == current.StepNumber && snapshot.UpdatedAtUtc > current.UpdatedAtUtc))
                 {
-                    latestBySession[sessionId] = snapshot;
+                    latestBySession[candidate.SessionId] = snapshot;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -57,18 +136,68 @@ internal sealed class AliWorkflowRecoveryCatalog(string checkpointPath)
             }
         }
 
-        var recoverable = latestBySession.Values
+        var allRecoverable = latestBySession.Values
             .Where(snapshot => snapshot.IsPending)
             .Select(snapshot => Match(snapshot, registrations))
             .Where(run => run is not null)
             .Cast<AliRecoverableWorkflowRun>()
             .OrderByDescending(run => run.UpdatedAt)
+            .ThenBy(run => run.SessionId, StringComparer.Ordinal)
             .ToArray();
+        var recoverable = allRecoverable
+            .Take(MaximumRecoverableWorkflows)
+            .ToArray();
+        var isTruncated = boundedSkipCount > 0
+            || allRecoverable.Length > recoverable.Length;
+        var summary = recoverable.Length == 0
+            ? "No interrupted Agent Framework workflows are waiting for recovery."
+            : $"{recoverable.Length} interrupted Agent Framework workflow(s) can be resumed from their latest local checkpoint.";
+        if (isTruncated)
+        {
+            summary += " Recovery inspection was bounded; older, oversized, or excess checkpoint records were left untouched and not exposed.";
+        }
         return new AliRecoverableWorkflowReport(
-            recoverable.Length == 0
-                ? "No interrupted Agent Framework workflows are waiting for recovery."
-                : $"{recoverable.Length} interrupted Agent Framework workflow(s) can be resumed from their latest local checkpoint.",
-            recoverable);
+            summary,
+            recoverable,
+            isTruncated,
+            boundedSkipCount);
+    }
+
+    private static AliRecoverableWorkflowReport EmptyReport() =>
+        new(
+            "No interrupted Agent Framework workflows are waiting for recovery.",
+            []);
+
+    private static JsonDocument? ReadBoundedCheckpoint(
+        string path,
+        long expectedLength,
+        out bool exceededBound)
+    {
+        exceededBound = false;
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var length = stream.Length;
+        if (length is <= 0 or > MaximumCheckpointFileBytes)
+        {
+            exceededBound = true;
+            return null;
+        }
+        if (length != expectedLength)
+        {
+            return null;
+        }
+
+        var bytes = GC.AllocateUninitializedArray<byte>((int)length);
+        stream.ReadExactly(bytes);
+        if (stream.ReadByte() >= 0 || stream.Length != length)
+        {
+            return null;
+        }
+
+        return JsonDocument.Parse(bytes);
     }
 
     private static AliRecoverableWorkflowRun? Match(
@@ -249,7 +378,15 @@ internal sealed class AliWorkflowRecoveryCatalog(string checkpointPath)
     {
         sessionId = string.Empty;
         checkpointId = string.Empty;
-        var decoded = Uri.UnescapeDataString(fileName);
+        string decoded;
+        try
+        {
+            decoded = Uri.UnescapeDataString(fileName);
+        }
+        catch (UriFormatException)
+        {
+            return false;
+        }
         if (!decoded.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -276,6 +413,39 @@ internal sealed class AliWorkflowRecoveryCatalog(string checkpointPath)
         string Objective,
         HashSet<string> ExecutorIds,
         string? StartExecutorId);
+
+    private sealed record CheckpointFileCandidate(
+        string Path,
+        string SessionId,
+        string CheckpointId,
+        long Length,
+        DateTime UpdatedAtUtc);
+
+    private sealed class CheckpointFileCandidateComparer : IComparer<CheckpointFileCandidate>
+    {
+        public static CheckpointFileCandidateComparer Instance { get; } = new();
+
+        public int Compare(CheckpointFileCandidate? left, CheckpointFileCandidate? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+            if (left is null)
+            {
+                return 1;
+            }
+            if (right is null)
+            {
+                return -1;
+            }
+
+            var updated = right.UpdatedAtUtc.CompareTo(left.UpdatedAtUtc);
+            return updated != 0
+                ? updated
+                : StringComparer.Ordinal.Compare(left.Path, right.Path);
+        }
+    }
 }
 
 internal sealed record AliWorkflowRegistration(
@@ -296,7 +466,9 @@ public sealed record AliRecoverableWorkflowRun(
 
 public sealed record AliRecoverableWorkflowReport(
     string Summary,
-    IReadOnlyList<AliRecoverableWorkflowRun> Workflows);
+    IReadOnlyList<AliRecoverableWorkflowRun> Workflows,
+    bool IsTruncated = false,
+    int SkippedCheckpointFiles = 0);
 
 public sealed record AliWorkflowResumeResult(
     bool Success,

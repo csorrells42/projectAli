@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Ali.Modules.Capabilities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -19,24 +20,34 @@ public sealed class McpServerHost : IAsyncDisposable
 {
     private readonly string _dataRoot;
     private readonly AliMcpServerToolFactory _toolFactory;
+    private CapabilitySettingsSnapshotOwner? _capabilitySettings;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private readonly object _statusLock = new();
     private WebApplication? _application;
     private McpServerRuntimeStatus _status;
 
-    internal McpServerHost(string dataRoot, AliMcpServerToolFactory toolFactory)
+    internal McpServerHost(
+        string dataRoot,
+        AliMcpServerToolFactory toolFactory,
+        CapabilitySettingsSnapshotOwner? capabilitySettings = null)
     {
         _dataRoot = dataRoot;
         _toolFactory = toolFactory;
-        var settings = LoadSettings();
+        _capabilitySettings = capabilitySettings;
+        var loaded = LoadSettingsResult();
+        var settings = loaded.Settings;
         _status = new McpServerRuntimeStatus(
             false,
-            settings.Enabled ? "Stopped" : "Disabled",
-            settings.Enabled
+            loaded.Status == McpSettingsLoadStatus.FailedClosed
+                ? "Failed closed"
+                : settings.Enabled ? "Stopped" : "Disabled",
+            loaded.Status == McpSettingsLoadStatus.FailedClosed
+                ? loaded.Error ?? "mcp-server.json failed safely."
+                : settings.Enabled
                 ? "The MCP server is enabled but not currently running."
                 : "The MCP server is off. Ali's current behavior is unchanged.",
             settings.Endpoint,
-            settings.Tools.Count(tool => tool.Enabled));
+            0);
     }
 
     public event EventHandler<McpServerRuntimeStatus>? StatusChanged;
@@ -65,14 +76,24 @@ public sealed class McpServerHost : IAsyncDisposable
         }
     }
 
-    public McpServerSettings LoadSettings() => McpServerSettingsStore.LoadOrDefault(_dataRoot);
+    public McpServerSettingsLoadResult LoadSettingsResult() => McpServerSettingsStore.Load(_dataRoot);
 
-    public McpServerSettings SaveSettings(McpServerSettings settings) =>
-        McpServerSettingsStore.Save(_dataRoot, settings);
+    public McpServerSettings LoadSettings() => LoadSettingsResult().Settings;
+
+    public McpServerSettings SaveSettings(
+        McpServerSettings settings,
+        string? expectedBoundaryRevision = null) =>
+        McpServerSettingsStore.Save(_dataRoot, settings, expectedBoundaryRevision);
 
     public async Task StartIfEnabledAsync(CancellationToken cancellationToken = default)
     {
-        var settings = LoadSettings();
+        var loaded = LoadSettingsResult();
+        if (loaded.Status == McpSettingsLoadStatus.FailedClosed)
+        {
+            PublishLoadFailure(loaded);
+            return;
+        }
+        var settings = loaded.Settings;
         if (!settings.Enabled)
         {
             PublishStatus(new McpServerRuntimeStatus(
@@ -80,7 +101,7 @@ public sealed class McpServerHost : IAsyncDisposable
                 "Disabled",
                 "The MCP server is off. Ali's current behavior is unchanged.",
                 settings.Endpoint,
-                settings.Tools.Count(tool => tool.Enabled)));
+                0));
             return;
         }
 
@@ -92,22 +113,46 @@ public sealed class McpServerHost : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            await StartCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    private async Task<bool> StartCoreAsync(CancellationToken cancellationToken)
+    {
             if (_application is not null)
             {
-                return;
+                return true;
             }
 
-            var settings = LoadSettings();
+            var loaded = LoadSettingsResult();
+            if (loaded.Status == McpSettingsLoadStatus.FailedClosed)
+            {
+                PublishLoadFailure(loaded);
+                return false;
+            }
+            var settings = loaded.Settings;
             Validate(settings);
             var token = ResolveAuthenticationToken(settings);
-            var tools = _toolFactory.CreateTools(settings);
+            var capabilitySettings = _capabilitySettings
+                ??= _toolFactory.CreateCapabilitySettingsOwner(_dataRoot, settings);
+            capabilitySettings.Reload();
+            var publication = _toolFactory.CreateTools(
+                settings,
+                capabilitySettings,
+                cancellationToken,
+                () => McpPersistedSecurityBoundaryRevision.Capture(_dataRoot));
+            var tools = publication.Tools;
 
             PublishStatus(new McpServerRuntimeStatus(
                 false,
                 "Starting",
                 "Starting Ali's local MCP server...",
                 settings.Endpoint,
-                tools.Count));
+                0));
 
             WebApplication? application = null;
             try
@@ -155,9 +200,12 @@ public sealed class McpServerHost : IAsyncDisposable
                 PublishStatus(new McpServerRuntimeStatus(
                     true,
                     "Running",
-                    $"Listening locally with {tools.Count} exposed tool(s).",
+                    publication.Issues.Count == 0
+                        ? $"Listening locally with {tools.Count} exposed tool(s)."
+                        : $"Listening locally with {tools.Count} exposed tool(s); capability policy withheld {publication.Issues.Count} configured tool(s).",
                     settings.Endpoint,
                     tools.Count));
+                return true;
             }
             catch (Exception ex)
             {
@@ -171,14 +219,9 @@ public sealed class McpServerHost : IAsyncDisposable
                     "Failed",
                     ex.Message,
                     settings.Endpoint,
-                    tools.Count));
+                    0));
                 throw;
             }
-        }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -186,12 +229,30 @@ public sealed class McpServerHost : IAsyncDisposable
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    private async Task StopCoreAsync(CancellationToken cancellationToken)
+    {
             var application = _application;
             _application = null;
-            var settings = LoadSettings();
+            var loaded = LoadSettingsResult();
+            var settings = loaded.Settings;
             if (application is null)
             {
-                PublishStoppedStatus(settings);
+                if (loaded.Status == McpSettingsLoadStatus.FailedClosed)
+                {
+                    PublishLoadFailure(loaded);
+                }
+                else
+                {
+                    PublishStoppedStatus(settings);
+                }
                 return;
             }
 
@@ -212,7 +273,23 @@ public sealed class McpServerHost : IAsyncDisposable
                 await application.DisposeAsync().ConfigureAwait(false);
             }
 
-            PublishStoppedStatus(settings);
+            if (loaded.Status == McpSettingsLoadStatus.FailedClosed)
+            {
+                PublishLoadFailure(loaded);
+            }
+            else
+            {
+                PublishStoppedStatus(settings);
+            }
+    }
+
+    public async Task RestartAsync(CancellationToken cancellationToken = default)
+    {
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+            await StartCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -220,10 +297,23 @@ public sealed class McpServerHost : IAsyncDisposable
         }
     }
 
-    public async Task RestartAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> RefreshIfRunningAsync(CancellationToken cancellationToken = default)
     {
-        await StopAsync(cancellationToken).ConfigureAwait(false);
-        await StartAsync(cancellationToken).ConfigureAwait(false);
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_application is null)
+            {
+                return false;
+            }
+
+            await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+            return await StartCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -304,7 +394,15 @@ public sealed class McpServerHost : IAsyncDisposable
                 ? "The MCP server is enabled but not currently running."
                 : "The MCP server is off. Ali's current behavior is unchanged.",
             settings.Endpoint,
-            settings.Tools.Count(tool => tool.Enabled)));
+            0));
+
+    private void PublishLoadFailure(McpServerSettingsLoadResult loaded) =>
+        PublishStatus(new McpServerRuntimeStatus(
+            false,
+            "Failed closed",
+            loaded.Error ?? "mcp-server.json failed safely. Ali did not overwrite it.",
+            loaded.Settings.Endpoint,
+            0));
 
     private void PublishStatus(McpServerRuntimeStatus status)
     {
@@ -313,6 +411,24 @@ public sealed class McpServerHost : IAsyncDisposable
             _status = status;
         }
 
-        StatusChanged?.Invoke(this, status);
+        var subscribers = StatusChanged?.GetInvocationList();
+        if (subscribers is null)
+        {
+            return;
+        }
+
+        foreach (var subscriber in subscribers)
+        {
+            try
+            {
+                ((EventHandler<McpServerRuntimeStatus>)subscriber)(this, status);
+            }
+            catch (Exception)
+            {
+                // Status observers are non-authoritative telemetry. A faulty UI or
+                // diagnostic subscriber must not alter listener lifecycle state, and
+                // must not prevent healthy subscribers from receiving the update.
+            }
+        }
     }
 }

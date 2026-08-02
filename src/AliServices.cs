@@ -14,6 +14,7 @@ using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.UserMemory;
 using Ali.Modules.Coding;
 using Ali.Modules.Calendar;
+using Ali.Modules.Capabilities;
 using Ali.Modules.ToolDiscovery;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
@@ -54,6 +55,7 @@ public sealed class AliServices
         AliWorkstationFileAccess fileAccess,
         AliAgentWorkMemory agentWorkMemory,
         AliCodingModule codingModule,
+        CapabilitySettingsSnapshotOwner capabilitySettings,
         IAsyncDisposable? orchestrationObserver = null)
     {
         DataRoot = dataRoot;
@@ -80,6 +82,7 @@ public sealed class AliServices
         FileAccess = fileAccess;
         AgentWorkMemory = agentWorkMemory;
         CodingModule = codingModule;
+        CapabilitySettings = capabilitySettings ?? throw new ArgumentNullException(nameof(capabilitySettings));
         OrchestrationObserver = orchestrationObserver;
         GoogleBillingGuard = new GoogleBillingSettingsGuard(DataRoot);
     }
@@ -113,6 +116,8 @@ public sealed class AliServices
     public string UserMemorySettingsPath => UserMemorySettingsStore.GetPath(DataRoot);
 
     public string AgentOrchestrationSettingsPath => AgentOrchestrationSettingsStore.GetPath(DataRoot);
+
+    public string CapabilitySettingsPath => CapabilityAvailabilitySettingsStore.GetSettingsPath(DataRoot);
 
     public string WorkflowCheckpointPath => AgentOrchestrationSettingsStore.GetCheckpointPath(UserDataRoot);
 
@@ -151,6 +156,8 @@ public sealed class AliServices
     public AliWorkstationFileAccess FileAccess { get; }
 
     public AliAgentWorkMemory AgentWorkMemory { get; }
+
+    public CapabilitySettingsSnapshotOwner CapabilitySettings { get; }
 
     internal IAsyncDisposable? OrchestrationObserver { get; }
 
@@ -347,10 +354,10 @@ public sealed class AliServices
             AppContext.BaseDirectory);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
-        var semanticToolCatalog = new QdrantSemanticToolCatalog(
-            runtimeHttpClient,
-            qdrant,
-            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot));
+        // Capability Phase 2 uses the live in-memory registry only. Qdrant semantic
+        // indexing creates/deletes collections and may start a process, so it cannot
+        // run inside a model planning pass before a lifecycle reconciler owns it.
+        var semanticToolCatalog = new RegistryOnlySemanticToolCatalog();
         var candidateRuntime = configuredOptions is { Enabled: true }
             ? new OpenAiCompatibleLocalModelRuntime(runtimeHttpClient, configuredOptions, profile)
             : null;
@@ -363,19 +370,17 @@ public sealed class AliServices
         var webResearch = new McpWebResearchClient(
             () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
         var mcpClients = new McpClientManager(dataRoot);
-        var mcpServer = new McpServerHost(
-            dataRoot,
-            new AliMcpServerToolFactory(
-                localLibrary,
-                webSources,
-                webResearch,
-                memories,
-                reminders,
-                profile,
-                userMemories,
-                activeUsers,
-                () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-                codingModule));
+        var mcpServerToolFactory = new AliMcpServerToolFactory(
+            localLibrary,
+            webSources,
+            webResearch,
+            memories,
+            reminders,
+            profile,
+            userMemories,
+            activeUsers,
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+            codingModule);
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(CreateSpeechToTextOptions(dataRoot, voiceSettings));
@@ -407,7 +412,15 @@ public sealed class AliServices
                 AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot),
                 () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
                 semanticToolCatalog,
-                shadowObserver);
+                shadowObserver,
+                dataRoot);
+            var capabilitySettings = coordinator.CapabilitySettings
+                ?? throw new InvalidOperationException(
+                    "Production capability settings were not initialized.");
+            var mcpServer = new McpServerHost(
+                dataRoot,
+                mcpServerToolFactory,
+                capabilitySettings);
             var orchestrator = new ConversationOrchestrator(
                 runtime,
                 correctionQueue,
@@ -438,6 +451,7 @@ public sealed class AliServices
                 fileAccess,
                 agentWorkMemory,
                 codingModule,
+                capabilitySettings,
                 shadowObserver);
         }
         catch

@@ -82,7 +82,10 @@ public sealed record AgentToolExecutionReceipt(
     string ToolName,
     AgentToolExecutionOutcome Outcome,
     string Summary,
-    DateTimeOffset RecordedAt);
+    DateTimeOffset RecordedAt)
+{
+    public string? DisplayName { get; init; }
+}
 
 internal enum ExplicitShadowTerminalKind
 {
@@ -119,6 +122,7 @@ internal sealed class CoordinatorTurnContext(
 
     private readonly long _startedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
     private readonly Dictionary<string, CoordinatorToolPlan> _toolPlans = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _capabilityIssueReports = new(StringComparer.Ordinal);
     private readonly HashSet<string> _shadowObservedCallIds = new(StringComparer.Ordinal);
     private readonly Queue<string> _shadowObservedOldestFirst = new();
     private readonly Dictionary<string, EvidencePermissionMetadata> _shadowPermissions =
@@ -148,17 +152,9 @@ internal sealed class CoordinatorTurnContext(
 
     public bool PermissionDenied { get; private set; }
 
-    public bool ExternalCodingAgentOwnsTurn { get; private set; }
-
-    public bool RequiresExternalCodingAgent { get; private set; }
-
     public bool DirectFinalAllowed { get; private set; }
 
     public string? CodingDispositionBasis { get; private set; }
-
-    public string? ExternalCodingAgentProjectPath { get; private set; }
-
-    public string? ExternalCodingAgentObjective { get; private set; }
 
     public int WebSearchAttempts { get; set; }
 
@@ -173,6 +169,15 @@ internal sealed class CoordinatorTurnContext(
     public List<CoordinatorSourceItem> WebSources { get; } = [];
 
     public CoordinatorToolPlan? CurrentToolPlan { get; private set; }
+
+    public bool TryRegisterCapabilityIssueReport(string reportKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reportKey);
+        lock (_toolPlanSync)
+        {
+            return _capabilityIssueReports.Add(reportKey);
+        }
+    }
 
     public void RegisterToolPlan(CoordinatorToolPlan plan)
     {
@@ -484,37 +489,10 @@ internal sealed class CoordinatorTurnContext(
         }
     }
 
-    public ExternalCodingAgentJob ClaimExternalCodingAgentOwnership(
-        string projectPath,
-        string objective)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(objective);
-
-        var isContinuation = ExternalCodingAgentOwnsTurn;
-        ExternalCodingAgentOwnsTurn = true;
-        ExternalCodingAgentProjectPath ??= projectPath;
-        ExternalCodingAgentObjective ??= objective;
-
-        var effectiveObjective = isContinuation
-            ? string.Join(
-                Environment.NewLine,
-                ExternalCodingAgentObjective,
-                string.Empty,
-                "Continuation evidence or unmet behavior from the current turn:",
-                objective)
-            : ExternalCodingAgentObjective;
-        return new ExternalCodingAgentJob(
-            ExternalCodingAgentProjectPath,
-            effectiveObjective);
-    }
-
     public void SetCodingDisposition(
-        bool requiresExternalCodingAgent,
         bool directFinalAllowed,
         string? basis)
     {
-        RequiresExternalCodingAgent = requiresExternalCodingAgent;
         DirectFinalAllowed = directFinalAllowed;
         CodingDispositionBasis = string.IsNullOrWhiteSpace(basis)
             ? null
@@ -544,10 +522,6 @@ internal sealed class CoordinatorTurnContext(
             ActivityKey: activityKey,
             ExecutionReceipt: executionReceipt));
 }
-
-internal sealed record ExternalCodingAgentJob(
-    string ProjectPath,
-    string Objective);
 
 internal sealed record CodingTurnDisposition(
     bool IsCodingWork,

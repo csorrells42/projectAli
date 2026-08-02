@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Ali.Modules.Mcp;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
 using Microsoft.Extensions.AI;
@@ -10,8 +11,17 @@ internal sealed class ActivityReportingAIFunction(
     AIFunction innerFunction,
     Func<CoordinatorTurnContext?> turnAccessor,
     IShadowToolObserver? shadowObserver = null,
-    bool requiresApproval = false) : DelegatingAIFunction(innerFunction)
+    bool requiresApproval = false,
+    string? userFacingDisplayName = null) : DelegatingAIFunction(innerFunction)
 {
+    private readonly bool _hasUserFacingDisplayName = !string.IsNullOrWhiteSpace(userFacingDisplayName);
+    private readonly string _activityDisplayName = ResolveActivityDisplayName(
+        userFacingDisplayName,
+        innerFunction.Name);
+
+    internal string? UserFacingDisplayName =>
+        _hasUserFacingDisplayName ? _activityDisplayName : null;
+
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
@@ -22,15 +32,18 @@ internal sealed class ActivityReportingAIFunction(
         var startedAtUtc = DateTimeOffset.UtcNow;
         var callId = TryResolveCallId(turn, Name);
         var permission = ResolvePermission(turn, callId, Name, requiresApproval);
+        var usePlanHeadline = !_hasUserFacingDisplayName
+            && plan is not null
+            && string.Equals(plan.ToolName, Name, StringComparison.Ordinal);
         TryReport(
             turn,
             AgentActivityKind.ToolCall,
-            plan is not null && string.Equals(plan.ToolName, Name, StringComparison.Ordinal)
-                ? plan.SelectionHeadline
-                : $"Running {Humanize(Name)}",
-            plan is not null && string.Equals(plan.ToolName, Name, StringComparison.Ordinal)
+            usePlanHeadline
+                ? plan!.SelectionHeadline
+                : $"Running {_activityDisplayName}",
+            usePlanHeadline
                 ? null
-                : $"Selected tool: {Name}");
+                : $"Selected tool: {_activityDisplayName}");
         try
         {
             var result = await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
@@ -44,21 +57,44 @@ internal sealed class ActivityReportingAIFunction(
                 startedAtUtc,
                 DateTimeOffset.UtcNow,
                 permission);
+            if (result is IMcpPostDispatchFailureResult mcpFailure)
+            {
+                var failureSummary = DescribeMcpFailure(mcpFailure);
+                TryReport(
+                    turn,
+                    AgentActivityKind.Warning,
+                    $"{_activityDisplayName} returned an uncertain external result",
+                    failureSummary,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    executionReceipt: new AgentToolExecutionReceipt(
+                        Name,
+                        AgentToolExecutionOutcome.Failed,
+                        failureSummary,
+                        DateTimeOffset.UtcNow)
+                    {
+                        DisplayName = UserFacingDisplayName
+                    });
+                return result;
+            }
+
             TryReport(
                 turn,
                 AgentActivityKind.ToolResult,
-                plan is not null && string.Equals(plan.ToolName, Name, StringComparison.Ordinal)
-                    ? plan.ResultHeadline
-                    : $"{Humanize(Name)} returned; Ali is evaluating the result.",
-                plan is not null && string.Equals(plan.ToolName, Name, StringComparison.Ordinal)
+                usePlanHeadline
+                    ? plan!.ResultHeadline
+                    : $"{_activityDisplayName} returned; Ali is evaluating the result.",
+                usePlanHeadline
                     ? null
-                    : $"{Humanize(Name)} completed; Ali is evaluating the returned evidence.",
+                    : $"{_activityDisplayName} completed; Ali is evaluating the returned evidence.",
                 Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                 executionReceipt: new AgentToolExecutionReceipt(
                     Name,
                     AgentToolExecutionOutcome.Completed,
                     DescribeResult(result),
-                    DateTimeOffset.UtcNow));
+                    DateTimeOffset.UtcNow)
+                {
+                    DisplayName = UserFacingDisplayName
+                });
             return result;
         }
         catch (OperationCanceledException ex)
@@ -78,14 +114,17 @@ internal sealed class ActivityReportingAIFunction(
                 TryReport(
                     turn,
                     AgentActivityKind.Warning,
-                    $"{Humanize(Name)} was cancelled",
+                    $"{_activityDisplayName} was cancelled",
                     "The user or application cancelled the in-flight tool call.",
                     Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                     executionReceipt: new AgentToolExecutionReceipt(
                         Name,
                         AgentToolExecutionOutcome.Cancelled,
                         "The in-flight tool call was cancelled before it returned a result.",
-                        DateTimeOffset.UtcNow));
+                        DateTimeOffset.UtcNow)
+                    {
+                        DisplayName = UserFacingDisplayName
+                    });
             }
             else
             {
@@ -103,14 +142,17 @@ internal sealed class ActivityReportingAIFunction(
                 TryReport(
                     turn,
                     AgentActivityKind.Error,
-                    $"{Humanize(Name)} failed",
+                    $"{_activityDisplayName} failed",
                     failureDetail,
                     Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                     executionReceipt: new AgentToolExecutionReceipt(
                         Name,
                         AgentToolExecutionOutcome.Failed,
                         failureDetail,
-                        DateTimeOffset.UtcNow));
+                        DateTimeOffset.UtcNow)
+                    {
+                        DisplayName = UserFacingDisplayName
+                    });
             }
             throw;
         }
@@ -130,14 +172,17 @@ internal sealed class ActivityReportingAIFunction(
             TryReport(
                 turn,
                 AgentActivityKind.Error,
-                $"{Humanize(Name)} failed",
+                $"{_activityDisplayName} failed",
                 failureDetail,
                 Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                 executionReceipt: new AgentToolExecutionReceipt(
                     Name,
                     AgentToolExecutionOutcome.Failed,
                     failureDetail,
-                    DateTimeOffset.UtcNow));
+                    DateTimeOffset.UtcNow)
+                {
+                    DisplayName = UserFacingDisplayName
+                });
             throw;
         }
     }
@@ -351,6 +396,27 @@ internal sealed class ActivityReportingAIFunction(
         }
     }
 
+    private static string DescribeMcpFailure(IMcpPostDispatchFailureResult failure)
+    {
+        const int maximumSummaryCharacters = 480;
+        try
+        {
+            var message = failure.Message.ReplaceLineEndings(" ").Trim();
+            if (message.Length > maximumSummaryCharacters)
+            {
+                message = message[..maximumSummaryCharacters];
+            }
+
+            return string.IsNullOrWhiteSpace(message)
+                ? "The external MCP call was dispatched, but its result is uncertain and must not be retried automatically."
+                : message;
+        }
+        catch
+        {
+            return "The external MCP call was dispatched, but its result is uncertain and must not be retried automatically.";
+        }
+    }
+
     private static string BoundedTypeName(Type type)
     {
         const int maximumTypeNameCharacters = 120;
@@ -358,6 +424,27 @@ internal sealed class ActivityReportingAIFunction(
         return name.Length <= maximumTypeNameCharacters
             ? name
             : name[..maximumTypeNameCharacters];
+    }
+
+    private static string ResolveActivityDisplayName(
+        string? userFacingDisplayName,
+        string internalToolName)
+    {
+        const int maximumDisplayNameCharacters = 160;
+        var candidate = string.IsNullOrWhiteSpace(userFacingDisplayName)
+            ? Humanize(internalToolName)
+            : userFacingDisplayName;
+        var normalized = string.Join(
+            " ",
+            candidate.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (normalized.Length == 0)
+        {
+            return "tool";
+        }
+
+        return normalized.Length <= maximumDisplayNameCharacters
+            ? normalized
+            : normalized[..maximumDisplayNameCharacters];
     }
 
     private static void TryReport(

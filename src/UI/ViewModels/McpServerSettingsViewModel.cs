@@ -9,6 +9,7 @@ public sealed class McpServerSettingsViewModel : ObservableObject
 {
     private readonly McpServerHost _host;
     private readonly McpClientManager _clientManager;
+    private readonly SemaphoreSlim _publicationRefreshGate = new(1, 1);
     private bool _enabled;
     private string _portText = "8771";
     private string _path = "/mcp";
@@ -19,15 +20,26 @@ public sealed class McpServerSettingsViewModel : ObservableObject
     private string _statusText = "The MCP server is off.";
     private string _endpoint = string.Empty;
     private bool _isRunning;
+    private bool _settingsWritable = true;
+    private string? _loadedBoundaryRevision;
 
     public McpServerSettingsViewModel(McpServerHost host, McpClientManager clientManager)
     {
         _host = host;
         _clientManager = clientManager;
-        SaveAndApplyCommand = new AsyncRelayCommand(SaveAndApplyAsync, onException: HandleError);
-        StartCommand = new AsyncRelayCommand(StartAsync, () => !IsRunning, HandleError);
+        SaveAndApplyCommand = new AsyncRelayCommand(
+            SaveAndApplyAsync,
+            () => _settingsWritable,
+            HandleError);
+        StartCommand = new AsyncRelayCommand(
+            StartAsync,
+            () => !IsRunning && _settingsWritable,
+            HandleError);
         StopCommand = new AsyncRelayCommand(StopAsync, () => IsRunning, HandleError);
-        RestartCommand = new AsyncRelayCommand(RestartAsync, () => IsRunning, HandleError);
+        RestartCommand = new AsyncRelayCommand(
+            RestartAsync,
+            () => IsRunning && _settingsWritable,
+            HandleError);
         TestCommand = new AsyncRelayCommand(TestAsync, () => IsRunning, HandleError);
         ReloadCommand = new RelayCommand(_ => Reload(), onException: HandleError);
         _host.StatusChanged += HostOnStatusChanged;
@@ -142,9 +154,36 @@ public sealed class McpServerSettingsViewModel : ObservableObject
         }
     }
 
+    public async Task<bool> RefreshPublishedCapabilitiesIfRunningAsync()
+    {
+        await _publicationRefreshGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (!await _host.RefreshIfRunningAsync().ConfigureAwait(true))
+            {
+                return false;
+            }
+
+            StatusText = "MCP capability publication refreshed from the current settings and active user.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            HandleError(ex);
+            return false;
+        }
+        finally
+        {
+            _publicationRefreshGate.Release();
+        }
+    }
+
     public void Reload()
     {
-        var settings = _host.LoadSettings();
+        var loaded = _host.LoadSettingsResult();
+        _settingsWritable = loaded.CanPersist;
+        _loadedBoundaryRevision = loaded.CanPersist ? loaded.BoundaryRevision : null;
+        var settings = loaded.Settings;
         Enabled = settings.Enabled;
         PortText = settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         Path = settings.Path;
@@ -158,14 +197,21 @@ public sealed class McpServerSettingsViewModel : ObservableObject
         }
 
         ApplyStatus(_host.Status);
-        StatusText = settings.Enabled
+        StatusText = loaded.Status == McpSettingsLoadStatus.FailedClosed
+            ? loaded.Error ?? "mcp-server.json failed safely. Ali did not overwrite it."
+            : settings.Enabled
             ? StatusText
             : "The server and every exported capability are off by default. Save applies the master switch.";
+        RaiseCommandStates();
     }
 
     private async Task SaveAndApplyAsync()
     {
-        var saved = _host.SaveSettings(BuildSettings());
+        if (!EnsureSettingsWritable())
+        {
+            return;
+        }
+        var saved = SaveDraft();
         Endpoint = saved.Endpoint;
         if (!saved.Enabled)
         {
@@ -188,7 +234,11 @@ public sealed class McpServerSettingsViewModel : ObservableObject
 
     private async Task StartAsync()
     {
-        _host.SaveSettings(BuildSettings());
+        if (!EnsureSettingsWritable())
+        {
+            return;
+        }
+        SaveDraft();
         await _host.StartAsync().ConfigureAwait(true);
     }
 
@@ -196,7 +246,11 @@ public sealed class McpServerSettingsViewModel : ObservableObject
 
     private async Task RestartAsync()
     {
-        _host.SaveSettings(BuildSettings());
+        if (!EnsureSettingsWritable())
+        {
+            return;
+        }
+        SaveDraft();
         await _host.RestartAsync().ConfigureAwait(true);
     }
 
@@ -224,12 +278,36 @@ public sealed class McpServerSettingsViewModel : ObservableObject
             : $"Protocol test failed: {probe.Status}";
     }
 
+    private bool EnsureSettingsWritable()
+    {
+        if (_settingsWritable)
+        {
+            return true;
+        }
+
+        StatusText = "mcp-server.json failed safely. Save and start are blocked so Ali cannot overwrite it; fix or replace the file, then Reload.";
+        return false;
+    }
+
+    private McpServerSettings SaveDraft()
+    {
+        var saved = _host.SaveSettings(BuildSettings(), _loadedBoundaryRevision);
+        var loaded = _host.LoadSettingsResult();
+        if (!loaded.CanPersist)
+        {
+            _settingsWritable = false;
+            _loadedBoundaryRevision = null;
+            RaiseCommandStates();
+            throw new InvalidOperationException(
+                loaded.Error ?? "mcp-server.json failed safely after Save.");
+        }
+        _loadedBoundaryRevision = loaded.BoundaryRevision;
+        return saved;
+    }
+
     private McpServerSettings BuildSettings()
     {
-        if (!int.TryParse(PortText, out var port))
-        {
-            throw new InvalidOperationException("Enter a numeric MCP server port between 1024 and 65535.");
-        }
+        var port = ParsePort(PortText);
 
         return new McpServerSettings
         {
@@ -242,6 +320,15 @@ public sealed class McpServerSettingsViewModel : ObservableObject
             AuthenticationEnvironmentVariable = AuthenticationEnvironmentVariable,
             Tools = Tools.Select(tool => tool.ToModel()).ToArray()
         };
+    }
+
+    internal static int ParsePort(string value)
+    {
+        if (!int.TryParse(value, out var port) || port is < 1024 or > 65535)
+        {
+            throw new InvalidOperationException("Enter a numeric MCP server port between 1024 and 65535.");
+        }
+        return port;
     }
 
     private void HostOnStatusChanged(object? sender, McpServerRuntimeStatus status)
@@ -282,6 +369,7 @@ public sealed class McpServerSettingsViewModel : ObservableObject
 
     private void RaiseCommandStates()
     {
+        (SaveAndApplyCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (StartCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (StopCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
         (RestartCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();

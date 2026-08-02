@@ -87,7 +87,34 @@ public sealed class SemanticToolCatalogTests
 
         Assert.False(selection.UsedSemanticIndex);
         Assert.Equal(tools.Select(tool => tool.Name), selection.Tools.Select(tool => tool.Name));
-        Assert.Equal(tools.Select(tool => tool.Name), discovery.ToolNames);
+        Assert.Empty(discovery.ToolNames);
+        Assert.Contains("no cross-turn tool cache", discovery.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RegistryOnlyDiscovery_NeverLeaksAnotherConcurrentTurnsInventory()
+    {
+        var catalog = new RegistryOnlySemanticToolCatalog();
+        var first = new[]
+        {
+            AIFunctionFactory.Create(() => "first", "first_user_private_tool", "First turn only.")
+        }.Cast<AIFunctionDeclaration>().ToArray();
+        var second = new[]
+        {
+            AIFunctionFactory.Create(() => "second", "second_user_private_tool", "Second turn only.")
+        }.Cast<AIFunctionDeclaration>().ToArray();
+
+        await Task.WhenAll(
+            catalog.SelectAsync("first turn", first, [], TestContext.Current.CancellationToken),
+            catalog.SelectAsync("second turn", second, [], TestContext.Current.CancellationToken));
+
+        var discoveries = await Task.WhenAll(
+            catalog.DiscoverAsync("first follow-up", TestContext.Current.CancellationToken),
+            catalog.DiscoverAsync("second follow-up", TestContext.Current.CancellationToken));
+
+        Assert.All(discoveries, discovery => Assert.Empty(discovery.ToolNames));
+        Assert.DoesNotContain(discoveries.SelectMany(discovery => discovery.ToolNames),
+            name => name is "first_user_private_tool" or "second_user_private_tool");
     }
 
     [Fact]

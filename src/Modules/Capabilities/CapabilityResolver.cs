@@ -96,7 +96,9 @@ public sealed class CapabilityRuntimeAvailability
         IEnumerable<string> readyIncomingMcpToolNames,
         IEnumerable<string> enabledOutgoingMcpToolNames,
         string reconcilerRevision,
-        IEnumerable<string> availableReconcilerIds)
+        IEnumerable<string> availableReconcilerIds,
+        bool enforceReconcilerAvailability = false,
+        bool enforceResolvedTargetBinding = false)
     {
         ActiveUserId = RequireText(activeUserId, nameof(activeUserId));
         RuntimeRevision = RequireText(runtimeRevision, nameof(runtimeRevision));
@@ -119,6 +121,8 @@ public sealed class CapabilityRuntimeAvailability
         AvailableReconcilerIds = FreezeSet(
             availableReconcilerIds,
             nameof(availableReconcilerIds));
+        EnforceReconcilerAvailability = enforceReconcilerAvailability;
+        EnforceResolvedTargetBinding = enforceResolvedTargetBinding;
     }
 
     public string ActiveUserId { get; }
@@ -146,6 +150,18 @@ public sealed class CapabilityRuntimeAvailability
     public string ReconcilerRevision { get; }
 
     public IReadOnlySet<string> AvailableReconcilerIds { get; }
+
+    /// <summary>
+    /// Becomes true only when the journal/reconciliation execution boundary is installed.
+    /// Effect metadata is descriptive before that cutover and must not disable legacy tools.
+    /// </summary>
+    public bool EnforceReconcilerAvailability { get; }
+
+    /// <summary>
+    /// Becomes true only when the planner publishes an exact invocation target binding.
+    /// Provider metadata remains descriptive during the compatibility transition.
+    /// </summary>
+    public bool EnforceResolvedTargetBinding { get; }
 
     private static IReadOnlyDictionary<string, CapabilityRuntimeToolRegistration> FreezeRegistrations(
         IEnumerable<CapabilityRuntimeToolRegistration> registrations)
@@ -209,6 +225,7 @@ public sealed class CapabilityInvocationLease
 {
     internal CapabilityInvocationLease(
         string toolName,
+        string planningPublicationRevision,
         string capabilityId,
         string schemaFactoryId,
         string schemaFingerprint,
@@ -224,7 +241,9 @@ public sealed class CapabilityInvocationLease
         IReadOnlyList<string> eligibleProviderIds,
         bool requiresTargetResolution)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planningPublicationRevision);
         ToolName = toolName;
+        PlanningPublicationRevision = planningPublicationRevision;
         CapabilityId = capabilityId;
         SchemaFactoryId = schemaFactoryId;
         SchemaFingerprint = schemaFingerprint;
@@ -242,6 +261,8 @@ public sealed class CapabilityInvocationLease
     }
 
     public string ToolName { get; }
+
+    public string PlanningPublicationRevision { get; }
 
     public string CapabilityId { get; }
 
@@ -461,7 +482,8 @@ public sealed class CapabilityResolver
                     "The eligible provider set changed after planning.");
             }
 
-            if (descriptor.ProviderGate.Kind == CapabilityProviderGateKind.ResolvedTarget)
+            if (descriptor.ProviderGate.Kind == CapabilityProviderGateKind.ResolvedTarget
+                && runtime.EnforceResolvedTargetBinding)
             {
                 ValidateExactTarget(
                     registry,
@@ -719,7 +741,8 @@ public sealed class CapabilityResolver
         CapabilityRuntimeAvailability runtime,
         ICollection<CapabilityAvailabilityReason> reasons)
     {
-        if (descriptor.Effect.IsMutation
+        if (runtime.EnforceReconcilerAvailability
+            && descriptor.Effect.IsMutation
             && !runtime.AvailableReconcilerIds.Contains(descriptor.Effect.ReconcilerId!))
         {
             AddReason(
@@ -956,8 +979,11 @@ public sealed class CapabilityResolutionSnapshot
     public bool TryGetTool(string toolName, out CapabilityDescriptor descriptor) =>
         ByToolName.TryGetValue(toolName, out descriptor!);
 
-    public CapabilityInvocationLease CreateInvocationLease(string toolName)
+    public CapabilityInvocationLease CreateInvocationLease(
+        string toolName,
+        string planningPublicationRevision)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planningPublicationRevision);
         if (!TryGetTool(toolName, out var descriptor))
         {
             throw new InvalidOperationException($"Tool '{toolName}' is not callable in this planning snapshot.");
@@ -968,6 +994,7 @@ public sealed class CapabilityResolutionSnapshot
             : Array.Empty<string>();
         return new CapabilityInvocationLease(
             toolName,
+            planningPublicationRevision,
             descriptor.Id,
             descriptor.SchemaFactoryId,
             descriptor.SchemaFingerprint,

@@ -3,6 +3,7 @@ using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Permissions;
 using Ali.Modules.UserMemory;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Framework.Tests.OrchestrationV2;
@@ -155,6 +156,58 @@ public sealed class CoordinatorTurnObservationContextTests
             property => property.Name.Contains("Argument", StringComparison.OrdinalIgnoreCase)
                 || property.Name.Contains("Result", StringComparison.OrdinalIgnoreCase)
                 || property.Name.Contains("Exception", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(0, tracker.Count);
+    }
+
+    [Fact]
+    public void StandingAndSavedApprovals_ReturnOneCallResponsesWithoutSessionCaching()
+    {
+        var request = new ToolApprovalRequestContent(
+            "approval-one-call",
+            new FunctionCallContent("call-one-call", "protected-tool"));
+
+        var response = AliAgentHarnessRunner.CreateOneCallApprovalResponse(
+            request,
+            "Approved for this call only.");
+
+        Assert.IsType<ToolApprovalResponseContent>(response);
+        Assert.IsNotType<AlwaysApproveToolApprovalResponseContent>(response);
+    }
+
+    [Fact]
+    public void PendingStandingPermission_CapturesExactArgumentsAndClearsAtTurnBoundary()
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["path"] = "first.txt",
+            ["count"] = 1
+        };
+        var call = new FunctionCallContent(
+            "call-standing-snapshot",
+            "protected-tool",
+            arguments);
+        var tracker = new PendingStandingPermissionTracker();
+
+        Assert.True(tracker.TryQueue(
+            new ActiveUser("user-a", "Alice", false, "test"),
+            AgentToolApprovalChoice.AlwaysAllowArguments,
+            call,
+            out var reason), reason);
+        arguments["path"] = "mutated-after-approval.txt";
+        var completion = tracker.Complete(
+            new FunctionResultContent(call.CallId, new { success = true }));
+        var pending = Assert.IsType<PendingStandingPermission>(completion.Permission);
+
+        Assert.Equal(PendingStandingPermissionCompletionStatus.ReadyToSave, completion.Status);
+        Assert.Equal("first.txt", Assert.IsType<System.Text.Json.JsonElement>(pending.Arguments["path"]).GetString());
+        Assert.Equal(0, tracker.Count);
+
+        Assert.True(tracker.TryQueue(
+            new ActiveUser("user-a", "Alice", false, "test"),
+            AgentToolApprovalChoice.AlwaysAllowTool,
+            new FunctionCallContent("call-clear", "protected-tool"),
+            out reason), reason);
+        tracker.Clear();
         Assert.Equal(0, tracker.Count);
     }
 

@@ -1,5 +1,4 @@
 using Ali.Modules.Coordinator;
-using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -24,7 +23,7 @@ public sealed class SpecialistAgentTests
     }
 
     [Fact]
-    public void SpecialistAssignments_ExcludeApprovalRequiringTools()
+    public void SpecialistAssignments_KeepEveryToolOnTheOuterCapabilityBoundary()
     {
         var tools = AliCapabilityCatalog.Tools
             .Select(item => (AITool)AIFunctionFactory.Create(
@@ -36,12 +35,7 @@ public sealed class SpecialistAgentTests
         var assignments = AliSpecialistAgentFactory.DescribeToolAssignments(tools);
 
         Assert.Equal(3, assignments.Count);
-        Assert.Contains(AliCapabilityCatalog.CodingInspectProjectName, assignments[AliCapabilityCatalog.ConsultSoftwareEngineerName]);
-        Assert.DoesNotContain(AliCapabilityCatalog.DotNetBuildName, assignments[AliCapabilityCatalog.ConsultSoftwareEngineerName]);
-        Assert.Contains(AliCapabilityCatalog.SearchCurrentWebName, assignments[AliCapabilityCatalog.ConsultResearcherName]);
-        Assert.DoesNotContain(AliCapabilityCatalog.ResearchWebName, assignments[AliCapabilityCatalog.ConsultResearcherName]);
-        Assert.All(assignments.SelectMany(item => item.Value), name =>
-            Assert.False(AliToolPermissionPolicy.RequiresApproval(name)));
+        Assert.All(assignments.Values, Assert.Empty);
     }
 
     [Fact]
@@ -88,10 +82,11 @@ public sealed class SpecialistAgentTests
     }
 
     [Fact]
-    public async Task AgentAsTool_InvokesPrivateAgentAndReturnsItsResult()
+    public async Task AgentAsTool_InvokesPrivateAgentWithoutNestedTools()
     {
+        var client = new NoOpChatClient();
         var factory = new AliSpecialistAgentFactory(
-            new NoOpChatClient(),
+            client,
             new DevelopmentLocalModelRuntime(),
             () => null);
         var tool = Assert.Single(
@@ -103,23 +98,39 @@ public sealed class SpecialistAgentTests
             TestContext.Current.CancellationToken);
 
         Assert.Contains("specialist result", result?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(client.ObservedToolNames);
     }
 
     private sealed class NoOpChatClient : IChatClient
     {
+        public IReadOnlyList<string> ObservedToolNames { get; private set; } = [];
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<MeaiChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ChatResponse(new MeaiChatMessage(MeaiChatRole.Assistant, "specialist result")));
+            CancellationToken cancellationToken = default)
+        {
+            CaptureTools(options);
+            return Task.FromResult(
+                new ChatResponse(new MeaiChatMessage(MeaiChatRole.Assistant, "specialist result")));
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<MeaiChatMessage> messages,
             ChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            CaptureTools(options);
             await Task.CompletedTask;
             yield return new ChatResponseUpdate(MeaiChatRole.Assistant, "specialist result");
+        }
+
+        private void CaptureTools(ChatOptions? options)
+        {
+            ObservedToolNames = (options?.Tools ?? [])
+                .OfType<AIFunctionDeclaration>()
+                .Select(tool => tool.Name)
+                .ToArray();
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) =>

@@ -11,8 +11,6 @@ public sealed class AgentActivityItemViewModel
     private const int MaximumDisplayCharacters = 320;
     private const int MaximumPathFormattingInputCharacters = 2_048;
     private static readonly TimeSpan PathRegexTimeout = TimeSpan.FromMilliseconds(25);
-    private static readonly Regex SingleQuotedAbsolutePathPattern = CreatePathRegex(
-        @"(?<![\p{L}\p{N}_])(?<quote>')(?<path>(?:[A-Za-z]:[\\/]|\\\\|/)[^'\r\n]+)\k<quote>(?![\p{L}\p{N}_])");
     private static readonly Regex QuotedPathPattern = CreatePathRegex(
         @"(?<quote>[""`])(?<path>[^""`\r\n]*[\\/][^""`\r\n]+)\k<quote>");
     private static readonly Regex WindowsPathConnectorPattern = CreatePathRegex(
@@ -294,7 +292,9 @@ public sealed class AgentActivityItemViewModel
             return string.Empty;
         }
 
-        var toolName = HumanizeIdentifier(receipt.ToolName);
+        var toolName = string.IsNullOrWhiteSpace(receipt.DisplayName)
+            ? HumanizeIdentifier(receipt.ToolName)
+            : NormalizeHumanDisplayText(receipt.DisplayName, 160);
         var outcome = receipt.Outcome switch
         {
             AgentToolExecutionOutcome.Completed => "returned",
@@ -352,7 +352,7 @@ public sealed class AgentActivityItemViewModel
 
     private static string ShortenFilePathsSegment(string value)
     {
-        var shortened = SingleQuotedAbsolutePathPattern.Replace(value, ReplaceQuotedPath);
+        var shortened = ShortenSingleQuotedAbsolutePaths(value);
         shortened = QuotedPathPattern.Replace(shortened, ReplaceQuotedPath);
         shortened = WindowsAbsoluteFilePathPattern.Replace(shortened, ReplaceUnquotedPath);
         shortened = UnixAbsoluteFilePathPattern.Replace(shortened, ReplaceUnquotedPath);
@@ -360,6 +360,43 @@ public sealed class AgentActivityItemViewModel
         shortened = WindowsAbsolutePathPattern.Replace(shortened, ReplaceUnquotedPath);
         shortened = UnixAbsolutePathPattern.Replace(shortened, ReplaceUnquotedPath);
         return RelativeFilePathPattern.Replace(shortened, ReplaceUnquotedPath);
+    }
+
+    private static string ShortenSingleQuotedAbsolutePaths(string value)
+    {
+        StringBuilder? shortened = null;
+        var copyStart = 0;
+        var quoteStart = value.IndexOf('\'');
+        while (quoteStart >= 0)
+        {
+            var quoteEnd = value.IndexOf('\'', quoteStart + 1);
+            if (quoteEnd < 0)
+            {
+                break;
+            }
+
+            var candidate = value[(quoteStart + 1)..quoteEnd];
+            if (IsAbsoluteFileSystemPath(candidate)
+                && TryGetFilenameOnly(candidate, out var filename))
+            {
+                shortened ??= new StringBuilder(value.Length);
+                shortened.Append(value[copyStart..(quoteStart + 1)]);
+                shortened.Append(filename);
+                copyStart = quoteEnd;
+                quoteStart = value.IndexOf('\'', quoteEnd + 1);
+                continue;
+            }
+
+            quoteStart = value.IndexOf('\'', quoteStart + 1);
+        }
+
+        if (shortened is null)
+        {
+            return value;
+        }
+
+        shortened.Append(value[copyStart..]);
+        return shortened.ToString();
     }
 
     private static string ReplaceQuotedPath(Match match)
@@ -411,12 +448,7 @@ public sealed class AgentActivityItemViewModel
         }
 
         var leaf = withoutTrailingSeparators[(separatorIndex + 1)..];
-        var isAbsolute = candidate.StartsWith("/", StringComparison.Ordinal)
-            || candidate.StartsWith("\\\\", StringComparison.Ordinal)
-            || candidate.Length >= 3
-            && char.IsAsciiLetter(candidate[0])
-            && candidate[1] == ':'
-            && candidate[2] is '\\' or '/';
+        var isAbsolute = IsAbsoluteFileSystemPath(candidate);
         var extensionIndex = leaf.LastIndexOf('.');
         var looksLikeRelativeFile = extensionIndex > 0
             && extensionIndex < leaf.Length - 1
@@ -434,6 +466,14 @@ public sealed class AgentActivityItemViewModel
         filename = leaf;
         return true;
     }
+
+    private static bool IsAbsoluteFileSystemPath(string candidate) =>
+        candidate.StartsWith("/", StringComparison.Ordinal)
+        || candidate.StartsWith("\\\\", StringComparison.Ordinal)
+        || candidate.Length >= 3
+        && char.IsAsciiLetter(candidate[0])
+        && candidate[1] == ':'
+        && candidate[2] is '\\' or '/';
 
     private static string LimitDisplayText(string value, int maximumCharacters) =>
         value.Length <= maximumCharacters

@@ -116,7 +116,7 @@ internal sealed class AiderCodingAgentProvider(
             Name,
             ExternalCodingAgentProgressKind.Started,
             "Aider accepted the coding job",
-            "Aider is inspecting the repository and will own its edit, lint, build and repair loop."));
+            "Aider is inspecting the repository and performing its bounded approved collaboration pass."));
         var result = await processRunner.RunAsync(
             _python,
             projectDirectory,

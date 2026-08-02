@@ -7,6 +7,73 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class CapabilitySettingsProjectionTests
 {
     [Fact]
+    public void ProviderRows_ReportControlledGenericToolsWithoutDoubleCountingEnvelopeTotals()
+    {
+        var generic = CanonicalCapabilityRegistryTests.Descriptor(
+            "coding.build",
+            "coding_build_project",
+            CapabilityGroupIds.ProgrammingCore,
+            providerId: "ali-core",
+            providerGate: new CapabilityProviderGate(
+                CapabilityProviderGateKind.ResolvedTarget,
+                ["dotnet-roslyn", "python-cpython"]));
+        var registry = CanonicalCapabilityRegistryTests.Registry(
+            [generic],
+            [
+                new CapabilityProviderBinding("dotnet-roslyn", CapabilityGroupIds.CSharpDotNetRoslyn),
+                new CapabilityProviderBinding("python-cpython", CapabilityGroupIds.Python)
+            ]);
+        var runtime = new CapabilityRuntimeAvailability(
+            "user-a",
+            "runtime-provider-rows",
+            [CapabilityRuntimeToolRegistration.Create(generic.SchemaFactory(), generic.SchemaFactoryId)],
+            "providers-1",
+            ["ali-core", "dotnet-roslyn", "python-cpython"],
+            targetResolution: null,
+            "permissions-1",
+            [generic.Permission.PolicyId],
+            "mcp-1",
+            [],
+            [],
+            "reconcilers-1",
+            []);
+        var settings = CapabilityAvailabilitySettings.CreateDefault();
+        var frozen = registry.Freeze(settings);
+        var resolution = new CapabilityResolver().ResolvePlanning(frozen, runtime);
+        var enabled = CapabilitySettingsProjection.Create(
+            frozen,
+            resolution,
+            "provider-row-publication-1",
+            CapabilityAvailabilityLoadStatus.Loaded,
+            loadError: null);
+
+        var python = Assert.Single(enabled.Rows, row => row.GroupId == CapabilityGroupIds.Python);
+        Assert.Equal(CapabilitySettingsRowStatus.Ready, python.Status);
+        Assert.Equal(1, python.DeclaredToolCount);
+        Assert.Equal(1, python.CallableToolCount);
+        Assert.Equal(1, enabled.DeclaredTaskToolCount);
+        Assert.Equal(1, enabled.CallableTaskToolCount);
+
+        var disabledSettings = settings.WithGroupSelection(CapabilityGroupIds.Python, false);
+        var disabledFrozen = registry.Freeze(disabledSettings);
+        var disabledResolution = new CapabilityResolver().ResolvePlanning(disabledFrozen, runtime);
+        var disabled = CapabilitySettingsProjection.Create(
+            disabledFrozen,
+            disabledResolution,
+            "provider-row-publication-2",
+            CapabilityAvailabilityLoadStatus.Loaded,
+            loadError: null);
+        var disabledPython = Assert.Single(
+            disabled.Rows,
+            row => row.GroupId == CapabilityGroupIds.Python);
+
+        Assert.Equal(CapabilitySettingsRowStatus.Disabled, disabledPython.Status);
+        Assert.Equal(1, disabledPython.DeclaredToolCount);
+        Assert.Equal(0, disabledPython.CallableToolCount);
+        Assert.Equal(1, disabledPython.UnavailableToolCount);
+    }
+
+    [Fact]
     public void Projection_UsesCanonicalRowsPresetsAndOneResolutionForExactStatusCountsAndReasons()
     {
         var envelope = CreateProjection();
@@ -14,6 +81,13 @@ public sealed class CapabilitySettingsProjectionTests
         Assert.Equal(
             new[]
             {
+                "capability-discovery",
+                "personal-context-and-memory",
+                "web-research-and-navigation",
+                "reminders-and-calendar",
+                "work-memory",
+                "agent-modes-and-skills",
+                "specialists-and-workflows",
                 "files-and-archives",
                 "programming-core",
                 "csharp-dotnet-roslyn",
@@ -27,7 +101,7 @@ public sealed class CapabilitySettingsProjectionTests
                 "visual-studio"
             },
             envelope.Rows.Select(row => row.GroupId));
-        Assert.Equal(11, envelope.KnownGroupCount);
+        Assert.Equal(18, envelope.KnownGroupCount);
         Assert.Equal(
             CanonicalCapabilityCatalog.Groups.Select(group => group.DisplayName),
             envelope.Rows.Select(row => row.Capability));
@@ -85,9 +159,10 @@ public sealed class CapabilitySettingsProjectionTests
             declared: 1,
             callable: 0,
             unavailable: 1);
-        Assert.Equal(
-            Enum.GetValues<CapabilitySettingsRowStatus>(),
-            envelope.Rows.Select(row => row.Status).Distinct());
+        Assert.True(
+            Enum.GetValues<CapabilitySettingsRowStatus>()
+                .ToHashSet()
+                .SetEquals(envelope.Rows.Select(row => row.Status)));
 
         AssertReason(
             Assert.Single(rows[CapabilityGroupIds.FilesAndArchives].Reasons),
@@ -112,7 +187,7 @@ public sealed class CapabilitySettingsProjectionTests
             "web-provider",
             "Provider 'web-provider' is unavailable.");
 
-        Assert.Equal(10, envelope.EnabledGroupCount);
+        Assert.Equal(17, envelope.EnabledGroupCount);
         Assert.Equal(1, envelope.DisabledGroupCount);
         Assert.Equal(6, envelope.DeclaredTaskToolCount);
         Assert.Equal(3, envelope.CallableTaskToolCount);

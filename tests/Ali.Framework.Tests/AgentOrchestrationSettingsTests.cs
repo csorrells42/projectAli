@@ -86,7 +86,7 @@ public sealed class AgentOrchestrationSettingsTests
     }
 
     [Fact]
-    public void AlwaysUseProgrammingAgent_RequiresModelSelectedCodingWorkToUseConfiguredEngine()
+    public void AlwaysUseProgrammingAgent_PrefersButDoesNotTransferControlToConfiguredEngine()
     {
         var instructions = AliToolCatalog.BuildInstructions(
             "Ali",
@@ -96,11 +96,11 @@ public sealed class AgentOrchestrationSettingsTests
                 AlwaysUseProgrammingAgent = true
             });
 
-        Assert.Contains("call coding_agent_execute", instructions, StringComparison.Ordinal);
-        Assert.Contains("semantically determine", instructions, StringComparison.Ordinal);
-        Assert.Contains("selected mode is openhands", instructions, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("owns its architecture, file edits, terminal work, build/test cycle, diagnosis and repairs", instructions, StringComparison.Ordinal);
-        Assert.Contains("do not edit, replace, move, create or delete project source yourself", instructions, StringComparison.Ordinal);
+        Assert.Contains("prefer the selected external programming engine", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("optional, approval-bearing collaborator", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("never owns the turn", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("continue with Ali's effective native tools", instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("do not edit, replace, move, create or delete project source yourself", instructions, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
