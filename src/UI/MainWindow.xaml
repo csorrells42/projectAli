@@ -915,7 +915,8 @@
                             <TextBlock Grid.Column="1"
                                        Text="{Binding AgentActivitySummary}"
                                        Foreground="#E2E8F0"
-                                       TextTrimming="CharacterEllipsis"
+                                       TextWrapping="Wrap"
+                                       TextTrimming="None"
                                        VerticalAlignment="Center" />
                         </Grid>
                     </Expander.Header>
@@ -943,8 +944,10 @@
                         <ScrollViewer x:Name="AgentActivityScrollViewer"
                                       Grid.Row="1"
                                       MaxHeight="170"
+                                      HorizontalScrollBarVisibility="Disabled"
                                       VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding AgentActivities}">
+                            <ItemsControl ItemsSource="{Binding AgentActivities}"
+                                          HorizontalContentAlignment="Stretch">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type vm:AgentActivityItemViewModel}">
                                         <Grid Margin="0,3">
@@ -957,13 +960,27 @@
                                                        FontFamily="Segoe MDL2 Assets"
                                                        Foreground="{Binding Accent}"
                                                        VerticalAlignment="Top" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding DisplayText}"
-                                                       Foreground="{Binding Accent}"
-                                                       Margin="0,0,10,0"
-                                                       TextWrapping="NoWrap"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       VerticalAlignment="Top" />
+                                            <StackPanel Grid.Column="1"
+                                                        Margin="0,0,10,0"
+                                                        VerticalAlignment="Top">
+                                                <TextBlock Text="{Binding Headline}"
+                                                           Foreground="{Binding Accent}"
+                                                           TextWrapping="Wrap"
+                                                           TextTrimming="None" />
+                                                <TextBlock Text="{Binding DisplayDetail}"
+                                                           Visibility="{Binding HasDisplayDetail, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                           Foreground="{StaticResource MutedTextBrush}"
+                                                           Margin="0,2,0,0"
+                                                           TextWrapping="Wrap"
+                                                           TextTrimming="None" />
+                                                <TextBlock Text="{Binding ReceiptText}"
+                                                           Visibility="{Binding HasReceipt, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                           Foreground="{StaticResource SubtleTextBrush}"
+                                                           FontSize="11"
+                                                           Margin="0,2,0,0"
+                                                           TextWrapping="Wrap"
+                                                           TextTrimming="None" />
+                                            </StackPanel>
                                             <TextBlock Grid.Column="2"
                                                        Text="{Binding TimingText}"
                                                        Foreground="{StaticResource SubtleTextBrush}"

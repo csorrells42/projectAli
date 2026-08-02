@@ -2675,7 +2675,7 @@ public sealed class MainWindowViewModel : ObservableObject
                     && string.Equals(existing.AssistantMessageId, item.AssistantMessageId, StringComparison.Ordinal))
                 {
                     AgentActivities[index] = item;
-                    AgentActivitySummary = chunk.Text;
+                    AgentActivitySummary = item.SummaryText;
                     return;
                 }
             }
@@ -2687,7 +2687,7 @@ public sealed class MainWindowViewModel : ObservableObject
             AgentActivities.RemoveAt(0);
         }
 
-        AgentActivitySummary = chunk.Text;
+        AgentActivitySummary = item.SummaryText;
     }
 
     private void OnBackgroundAgentActivity(AssistantStreamChunk chunk)
@@ -2739,6 +2739,12 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 log.Append(" | ");
                 log.Append(activity.Detail);
+            }
+
+            if (!string.IsNullOrWhiteSpace(activity.ReceiptText))
+            {
+                log.Append(" | ");
+                log.Append(activity.ReceiptText);
             }
 
             if (activity.ElapsedMilliseconds is { } elapsed)

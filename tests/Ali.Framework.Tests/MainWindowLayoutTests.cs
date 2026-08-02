@@ -91,14 +91,30 @@ public sealed class MainWindowLayoutTests
         var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));
         var codeBehind = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml.cs"));
         var viewModel = File.ReadAllText(FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
+        var panelStart = xaml.IndexOf(
+            "AutomationProperties.AutomationId=\"AliActivityPanel\"",
+            StringComparison.Ordinal);
+        var panelEnd = xaml.IndexOf("</Expander>", panelStart, StringComparison.Ordinal);
+        Assert.True(panelStart >= 0 && panelEnd > panelStart);
+        var activityPanel = xaml[panelStart..panelEnd];
 
         Assert.Contains("AutomationProperties.AutomationId=\"MainChatCopyActivityLog\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Command=\"{Binding CopyAgentActivityCommand}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AgentActivityScrollViewer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", activityPanel, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding Headline}\"", activityPanel, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding DisplayDetail}\"", activityPanel, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding ReceiptText}\"", activityPanel, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping=\"Wrap\"", activityPanel, StringComparison.Ordinal);
+        Assert.DoesNotContain("TextWrapping=\"NoWrap\"", activityPanel, StringComparison.Ordinal);
+        Assert.DoesNotContain("TextTrimming=\"CharacterEllipsis\"", activityPanel, StringComparison.Ordinal);
         Assert.Contains("AgentActivities.CollectionChanged", codeBehind, StringComparison.Ordinal);
         Assert.Contains("AgentActivityScrollViewer.ScrollToEnd()", codeBehind, StringComparison.Ordinal);
         Assert.Contains("private bool _isAgentActivityExpanded = true;", viewModel, StringComparison.Ordinal);
+        Assert.Contains("AgentActivitySummary = item.SummaryText;", viewModel, StringComparison.Ordinal);
+        Assert.DoesNotContain("AgentActivitySummary = chunk.Text;", viewModel, StringComparison.Ordinal);
         Assert.Contains("System.Windows.Clipboard.SetText(log.ToString())", viewModel, StringComparison.Ordinal);
+        Assert.Contains("log.Append(activity.ReceiptText)", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "ClearAgentActivity();\r\n        IsAgentActivityExpanded = false;",
             viewModel,
