@@ -480,7 +480,7 @@
                                 <ComboBox ItemsSource="{Binding RuntimeEngineChoices}"
                                           SelectedItem="{Binding SelectedRuntimeEngine}"
                                           Margin="0,2,0,2" />
-                                <TextBlock Text="Lemonade uses an unload-and-verify barrier before another model can be checked."
+                                <TextBlock Text="{Binding RuntimeEngineGuidanceText}"
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"
@@ -489,14 +489,14 @@
                                 <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
                                 <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}"
                                          Margin="0,2,0,2" />
-                                <Button Content="Refresh"
+                                <Button Content="Refresh models"
                                         Command="{Binding RefreshRuntimeModelsCommand}"
-                                        Width="86"
+                                        Width="118"
                                         Padding="8,5"
                                         HorizontalAlignment="Right"
                                         Margin="0,4,0,2"
                                         ToolTip="Refresh installed model choices from the endpoint." />
-                                <TextBlock Text="Local OpenAI-compatible URL. Leave this on localhost for owner testing."
+                                <TextBlock Text="LM Studio defaults to http://127.0.0.1:1234/v1/. Custom OpenAI-compatible localhost endpoints remain supported."
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"

@@ -105,7 +105,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private DateTimeOffset _suppressVoiceIngressUntil = DateTimeOffset.MinValue;
     private string _statusText = "Ready. Local runtime is not configured yet.";
     private string _runtimeDisplay;
-    private string _selectedRuntimeEngine = LocalRuntimeEngines.Lemonade;
+    private string _selectedRuntimeEngine = LocalRuntimeEngines.LmStudio;
     private string _runtimeEndpointText = string.Empty;
     private string _runtimeModelText = string.Empty;
     private string _runtimeContextText = "2048";
@@ -986,6 +986,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _selectedRuntimeEngine, value))
             {
                 OnPropertyChanged(nameof(RuntimeRequestContractText));
+                OnPropertyChanged(nameof(RuntimeEngineGuidanceText));
                 if (!_loadingRuntimeOptions)
                 {
                     ApplyRuntimeEngineSelection(value);
@@ -993,6 +994,23 @@ public sealed class MainWindowViewModel : ObservableObject
             }
         }
     }
+
+    public string RuntimeEngineGuidanceText =>
+        LocalRuntimeEngines.Normalize(
+            SelectedRuntimeEngine,
+            Uri.TryCreate(RuntimeEndpointText, UriKind.Absolute, out var endpoint)
+                ? endpoint
+                : LocalRuntimeEngines.DefaultEndpoint(SelectedRuntimeEngine)) switch
+        {
+            LocalRuntimeEngines.LmStudio =>
+                "In LM Studio, start the Local Server on the Developer page. Then press Refresh models; Ali reads the server's OpenAI-compatible /v1/models list.",
+            LocalRuntimeEngines.GenericOpenAi =>
+                "Enter a localhost OpenAI-compatible base URL ending in /v1/. Refresh models works when that server implements GET /v1/models.",
+            LocalRuntimeEngines.Lemonade =>
+                "Lemonade uses its own unload-and-verify barrier before another model can be checked.",
+            _ =>
+                "Use the selected runtime's local OpenAI-compatible endpoint, then refresh its installed model list."
+        };
 
     public string RuntimeEndpointText
     {
@@ -1002,6 +1020,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _runtimeEndpointText, value))
             {
                 OnPropertyChanged(nameof(RuntimeRequestContractText));
+                OnPropertyChanged(nameof(RuntimeEngineGuidanceText));
             }
         }
     }
@@ -1218,6 +1237,8 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 var releaseEndpoint = engine == LocalRuntimeEngines.LlamaCpp
                     ? "/models/unload"
+                    : engine == LocalRuntimeEngines.LmStudio
+                        ? "/api/v1/models/unload"
                     : engine == LocalRuntimeEngines.Lemonade
                         ? "/api/v1/unload"
                         : "not available";
@@ -6542,8 +6563,11 @@ public sealed class MainWindowViewModel : ObservableObject
             _loadingRuntimeOptions = false;
         }
 
-        var selectedModel = RuntimeModelChoice.FromOptions(options);
-        LoadRuntimeModelChoices(RuntimeModelChoiceCatalog.KnownChoices().Append(selectedModel), options.Model);
+        var knownChoices = RuntimeModelChoiceCatalog.KnownChoices();
+        var choices = string.IsNullOrWhiteSpace(options.Model)
+            ? knownChoices
+            : knownChoices.Append(RuntimeModelChoice.FromOptions(options));
+        LoadRuntimeModelChoices(choices, options.Model);
 
         RuntimeEnabled = options.Enabled;
         RuntimeEndpointText = options.Endpoint.ToString();
@@ -6586,7 +6610,9 @@ public sealed class MainWindowViewModel : ObservableObject
         var normalized = LocalRuntimeEngines.Normalize(engine, LocalRuntimeEngines.DefaultEndpoint(engine));
         RuntimeEndpointText = LocalRuntimeEngines.DefaultEndpoint(normalized).ToString();
         CanActivateRuntime = false;
-        RuntimeSelectionStatusText = $"{normalized} selected. Refresh its installed model list, then Check and Activate.";
+        RuntimeSelectionStatusText = normalized == LocalRuntimeEngines.LmStudio
+            ? "LM Studio selected. Start its Local Server, press Refresh models, choose an installed model, then Check and Activate."
+            : $"{normalized} selected. Refresh its installed model list, then Check and Activate.";
         StatusText = $"Runtime engine selected: {normalized}. The current engine remains active until the replacement passes Check.";
     }
 

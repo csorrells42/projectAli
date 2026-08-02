@@ -356,6 +356,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         var engine = LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint);
         switch (engine)
         {
+            case LocalRuntimeEngines.LmStudio:
+                await UnloadLmStudioAsync(cancellationToken).ConfigureAwait(false);
+                break;
             case LocalRuntimeEngines.Ollama:
                 await UnloadOllamaAsync(cancellationToken).ConfigureAwait(false);
                 break;
@@ -368,7 +371,60 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 break;
             default:
                 throw new InvalidOperationException(
-                    $"Ali cannot verify model release for runtime engine '{engine}'. Select Ollama, llama.cpp, or Lemonade before switching engines.");
+                    $"Ali cannot verify model release for runtime engine '{engine}'. Select LM Studio, Ollama, llama.cpp, or Lemonade before switching engines.");
+        }
+    }
+
+    private async Task UnloadLmStudioAsync(CancellationToken cancellationToken)
+    {
+        var modelsUri = BuildServerRootUri("api/v1/models");
+        var instanceIds = await GetLmStudioLoadedInstanceIdsAsync(
+            modelsUri,
+            cancellationToken).ConfigureAwait(false);
+        if (instanceIds.Count == 0)
+        {
+            WriteHealthLog($"LM Studio model release already verified runtime={RuntimeIdentity}");
+            return;
+        }
+
+        var unloadUri = BuildServerRootUri("api/v1/models/unload");
+        foreach (var instanceId in instanceIds)
+        {
+            await PostJsonAndRequireSuccessAsync(
+                unloadUri,
+                new { instance_id = instanceId },
+                "LM Studio model unload",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        await WaitForModelReleaseAsync(
+            modelsUri,
+            body => !LmStudioListsModelAsLoaded(body, _options.Model),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<string>> GetLmStudioLoadedInstanceIdsAsync(
+        Uri modelsUri,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, modelsUri);
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"LM Studio model inventory returned HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
+        }
+
+        try
+        {
+            return FindLmStudioLoadedInstanceIds(body, _options.Model);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"LM Studio model inventory returned invalid JSON: {ex.Message}",
+                ex);
         }
     }
 
@@ -589,6 +645,65 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
         return false;
     }
+
+    internal static bool LmStudioListsModelAsLoaded(string json, string model) =>
+        FindLmStudioLoadedInstanceIds(json, model).Count > 0;
+
+    private static IReadOnlyList<string> FindLmStudioLoadedInstanceIds(string json, string model)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("models", out var models)
+            || models.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("LM Studio model inventory did not contain a models array.");
+        }
+
+        var instanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in models.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException("LM Studio model inventory contained a non-object model entry.");
+            }
+
+            var modelMatches = MatchesModelProperty(item, "key", model)
+                || MatchesModelProperty(item, "id", model)
+                || MatchesModelProperty(item, "selected_variant", model)
+                || JsonArrayContainsString(item, "variants", model);
+            if (!item.TryGetProperty("loaded_instances", out var instances)
+                || instances.ValueKind != JsonValueKind.Array)
+            {
+                throw new JsonException("LM Studio model inventory entry did not contain a loaded_instances array.");
+            }
+
+            foreach (var instance in instances.EnumerateArray())
+            {
+                if (instance.ValueKind != JsonValueKind.Object
+                    || !instance.TryGetProperty("id", out var id)
+                    || id.ValueKind != JsonValueKind.String
+                    || string.IsNullOrWhiteSpace(id.GetString()))
+                {
+                    throw new JsonException("LM Studio loaded instance did not contain a valid ID.");
+                }
+
+                var instanceId = id.GetString()!;
+                if (modelMatches || string.Equals(instanceId, model, StringComparison.OrdinalIgnoreCase))
+                {
+                    instanceIds.Add(instanceId);
+                }
+            }
+        }
+
+        return instanceIds.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static bool JsonArrayContainsString(JsonElement element, string propertyName, string value) =>
+        element.TryGetProperty(propertyName, out var values)
+        && values.ValueKind == JsonValueKind.Array
+        && values.EnumerateArray().Any(item =>
+            item.ValueKind == JsonValueKind.String
+            && string.Equals(item.GetString(), value, StringComparison.OrdinalIgnoreCase));
 
     private static bool LemonadeListsModelAsLoaded(string json, string model)
     {

@@ -47,15 +47,28 @@ public sealed record OpenAiCompatibleRuntimeOptions(
 
 public static class LocalRuntimeEngines
 {
+    public const string LmStudio = "LM Studio";
     public const string Ollama = "Ollama";
     public const string LlamaCpp = "llama.cpp";
     public const string Lemonade = "Lemonade";
     public const string GenericOpenAi = "OpenAI-compatible";
 
-    public static IReadOnlyList<string> Choices { get; } = [Lemonade];
+    public static IReadOnlyList<string> Choices { get; } =
+    [
+        LmStudio,
+        GenericOpenAi,
+        Lemonade
+    ];
 
     public static string Normalize(string? engine, Uri endpoint)
     {
+        if (string.Equals(engine, LmStudio, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(engine, "LMStudio", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(engine, "lm-studio", StringComparison.OrdinalIgnoreCase))
+        {
+            return LmStudio;
+        }
+
         if (string.Equals(engine, Ollama, StringComparison.OrdinalIgnoreCase))
         {
             return Ollama;
@@ -79,6 +92,7 @@ public static class LocalRuntimeEngines
 
         return endpoint.Port switch
         {
+            1234 => LmStudio,
             11434 => Ollama,
             8080 => LlamaCpp,
             13305 => Lemonade,
@@ -88,10 +102,11 @@ public static class LocalRuntimeEngines
 
     public static Uri DefaultEndpoint(string engine) => Normalize(engine, new Uri("http://127.0.0.1")) switch
     {
+        LmStudio => new Uri("http://127.0.0.1:1234/v1/"),
         Ollama => new Uri("http://127.0.0.1:11434/v1/"),
         LlamaCpp => new Uri("http://127.0.0.1:8080/v1/"),
         Lemonade => new Uri("http://127.0.0.1:13305/api/v1/"),
-        _ => new Uri("http://127.0.0.1:13305/api/v1/")
+        _ => new Uri("http://127.0.0.1:1234/v1/")
     };
 }
 

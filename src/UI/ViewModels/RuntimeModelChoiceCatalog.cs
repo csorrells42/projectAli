@@ -6,17 +6,7 @@ namespace Ali.UI.ViewModels;
 internal static class RuntimeModelChoiceCatalog
 {
     public static IReadOnlyList<RuntimeModelChoice> KnownChoices() =>
-    [
-        RuntimeModelChoice.FromModelId(
-            "gpt-oss-20b-mxfp4-GGUF",
-            "Installed Lemonade reasoning model",
-            displayName: "GPT-OSS 20B - Lemonade",
-            family: "GPT-OSS",
-            size: "20B",
-            quantization: "MXFP4",
-            contextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
-            outputTokenLimit: 1024)
-    ];
+        Array.Empty<RuntimeModelChoice>();
 
     public static IReadOnlyList<RuntimeModelChoice> ParseRuntimeModelChoices(string json)
     {

@@ -68,7 +68,7 @@ public sealed class LemonadeToolCallingChatClientTests
     [Fact]
     public void RuntimeOffersTheFullUserSelectedContextAndOutputLadders()
     {
-        var choice = Assert.Single(RuntimeModelChoiceCatalog.KnownChoices());
+        var choice = RuntimeModelChoice.FromModelId("runtime-model", "test");
 
         Assert.Contains(4096, choice.OutputTokenLimits);
         Assert.Contains(1024, choice.ContextTokens);

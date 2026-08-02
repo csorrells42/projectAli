@@ -17,13 +17,13 @@ public static class RuntimeSettingsStore
 
     public static OpenAiCompatibleRuntimeOptions GetDefaultOptions() =>
         new(
-            Enabled: true,
-            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Lemonade),
-            Model: "gpt-oss-20b-mxfp4-GGUF",
-            DisplayName: "GPT-OSS 20B - Lemonade",
-            Family: "GPT-OSS",
-            Size: "20B",
-            Quantization: "MXFP4",
+            Enabled: false,
+            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio),
+            Model: string.Empty,
+            DisplayName: "LM Studio local model",
+            Family: "local",
+            Size: "unknown",
+            Quantization: "Installed package default",
             ContextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
             OutputTokenLimit: 2048,
             Temperature: 1,
@@ -33,8 +33,7 @@ public static class RuntimeSettingsStore
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false)
         {
-            Engine = LocalRuntimeEngines.Lemonade,
-            ReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort
+            Engine = LocalRuntimeEngines.LmStudio
         };
 
     public static OpenAiCompatibleRuntimeOptions LoadOrDefault(string dataDirectory) =>
@@ -158,13 +157,13 @@ public static class RuntimeSettingsStore
         }
 
         var options = new OpenAiCompatibleRuntimeOptions(
-            Enabled: true,
-            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Lemonade),
-            Model: "gpt-oss-20b-mxfp4-GGUF",
-            DisplayName: "GPT-OSS 20B - Lemonade",
-            Family: "GPT-OSS",
-            Size: "20B",
-            Quantization: "MXFP4",
+            Enabled: false,
+            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio),
+            Model: string.Empty,
+            DisplayName: "LM Studio local model",
+            Family: "local",
+            Size: "unknown",
+            Quantization: "Installed package default",
             ContextTokens: OllamaRuntimeSafetyPolicy.DefaultContextTokens,
             OutputTokenLimit: 1024,
             Temperature: 1,
@@ -174,8 +173,7 @@ public static class RuntimeSettingsStore
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false)
         {
-            Engine = LocalRuntimeEngines.Lemonade,
-            ReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort
+            Engine = LocalRuntimeEngines.LmStudio
         };
 
         File.WriteAllText(filePath, JsonSerializer.Serialize(options, JsonOptions));

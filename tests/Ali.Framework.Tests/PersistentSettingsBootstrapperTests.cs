@@ -10,7 +10,7 @@ namespace Ali.Framework.Tests;
 public sealed class PersistentSettingsBootstrapperTests
 {
     [Fact]
-    public void MissingAliFilesTree_IsRecreatedWithReadyToRunSettings()
+    public void MissingAliFilesTree_IsRecreatedWithSafeLmStudioSettings()
     {
         using var location = TemporaryDirectory.Create();
         var settingsRoot = Path.Combine(location.Path, "AliFiles", "Settings");
@@ -34,12 +34,14 @@ public sealed class PersistentSettingsBootstrapperTests
 
         var runtime = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(settingsRoot);
         Assert.NotNull(runtime);
-        Assert.True(runtime.Enabled);
-        Assert.Equal("gpt-oss-20b-mxfp4-GGUF", runtime.Model);
+        Assert.False(runtime.Enabled);
+        Assert.Equal(LocalRuntimeEngines.LmStudio, runtime.Engine);
+        Assert.Equal("http://127.0.0.1:1234/v1/", runtime.Endpoint.ToString());
+        Assert.Empty(runtime.Model);
         Assert.Equal(8192, runtime.ContextTokens);
         Assert.Equal(2048, runtime.OutputTokenLimit);
         Assert.Equal(1, runtime.Temperature);
-        Assert.Equal("low", runtime.ReasoningEffort);
+        Assert.Null(runtime.ReasoningEffort);
     }
 
     [Fact]
