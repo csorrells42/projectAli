@@ -1120,8 +1120,18 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
             foreach (var propertyName in new[] { "error", "details", "response" })
             {
-                if (element.TryGetProperty(propertyName, out var nested)
-                    && FindErrorMessage(nested) is { Length: > 0 } nestedMessage)
+                if (!element.TryGetProperty(propertyName, out var nested))
+                {
+                    continue;
+                }
+
+                if (nested.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(nested.GetString()))
+                {
+                    return nested.GetString();
+                }
+
+                if (FindErrorMessage(nested) is { Length: > 0 } nestedMessage)
                 {
                     return nestedMessage;
                 }
@@ -1157,6 +1167,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private bool IsNativeOllamaEndpoint() =>
         LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.Ollama;
+
+    private bool IsLmStudioEndpoint() =>
+        LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.LmStudio;
 
     private object? ResolveNativeThinkingValue(string? reasoningEffortOverride = null) =>
         ThinkingControl switch

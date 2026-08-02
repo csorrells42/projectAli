@@ -99,7 +99,16 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             && properties.TryGetValue("ali.internalRouting", out var internalRouting)
             && internalRouting is true;
         var serializedMessages = BuildExtensionsAiMessages(messages, suppressPersona, useNativeOllama);
-        var tools = BuildExtensionsAiTools(options).ToArray();
+        var lmStudioRequiredFunctionName = IsLmStudioEndpoint()
+            && options?.ToolMode is RequiredChatToolMode { RequiredFunctionName: { Length: > 0 } requiredName }
+                ? requiredName
+                : null;
+        var tools = BuildExtensionsAiTools(options, lmStudioRequiredFunctionName).ToArray();
+        if (lmStudioRequiredFunctionName is not null && tools.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"LM Studio required tool '{lmStudioRequiredFunctionName}' was not registered exactly once for this request.");
+        }
         var maxTokens = _options.OutputTokenLimit;
         object payload = useNativeOllama
             ? new
@@ -123,7 +132,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 model = _options.Model,
                 messages = serializedMessages,
                 tools = tools.Length == 0 ? null : tools,
-                tool_choice = ResolveToolChoice(options, tools.Length),
+                tool_choice = ResolveToolChoice(
+                    options,
+                    tools.Length,
+                    supportsNamedRequiredToolChoice: !IsLmStudioEndpoint()),
                 parallel_tool_calls = tools.Length == 0
                     ? (bool?)null
                     : options?.AllowMultipleToolCalls ?? false,
@@ -288,7 +300,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         return serialized.ToArray();
     }
 
-    private static IEnumerable<object> BuildExtensionsAiTools(ChatOptions? options)
+    private static IEnumerable<object> BuildExtensionsAiTools(
+        ChatOptions? options,
+        string? requiredFunctionName = null)
     {
         if (options?.Tools is null || options.ToolMode is NoneChatToolMode)
         {
@@ -297,6 +311,12 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
 
         foreach (var function in options.Tools.OfType<AIFunctionDeclaration>())
         {
+            if (requiredFunctionName is not null
+                && !string.Equals(function.Name, requiredFunctionName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             yield return new
             {
                 type = "function",
@@ -310,7 +330,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         }
     }
 
-    private static object? ResolveToolChoice(ChatOptions? options, int toolCount)
+    private static object? ResolveToolChoice(
+        ChatOptions? options,
+        int toolCount,
+        bool supportsNamedRequiredToolChoice)
     {
         if (toolCount == 0)
         {
@@ -320,7 +343,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         return options?.ToolMode switch
         {
             NoneChatToolMode => "none",
-            RequiredChatToolMode { RequiredFunctionName: { Length: > 0 } functionName } => new
+            RequiredChatToolMode { RequiredFunctionName: { Length: > 0 } functionName }
+                when supportsNamedRequiredToolChoice => new
             {
                 type = "function",
                 function = new { name = functionName }
