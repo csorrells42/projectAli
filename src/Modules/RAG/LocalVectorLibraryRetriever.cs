@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ali.Modules.Embeddings;
 using Ali.Modules.Internet;
 using Qdrant.Client;
 using Qdrant.Client.Grpc;
@@ -18,6 +19,13 @@ public sealed record LocalKnowledgeStatus(
     DateTimeOffset LastScanUtc,
     string Message);
 
+internal enum EmbeddingSpaceGuardAction
+{
+    Current,
+    InitializeMarker,
+    ResetAndReindex
+}
+
 public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 {
     private const string LocalDocumentsTopic = "local_documents";
@@ -32,7 +40,8 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     private readonly string _dataRoot;
     private readonly string _scanStatePath;
-    private readonly HttpClient _httpClient;
+    private readonly string _embeddingSpaceMarkerPath;
+    private readonly OpenAiCompatibleEmbeddingClient _embeddingClient;
     private readonly LocalVectorLibrarySettings _settings;
     private readonly QdrantServiceManager _qdrant;
     private readonly IDocumentChunker _chunker;
@@ -49,7 +58,8 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
     {
         _dataRoot = dataRoot;
         _scanStatePath = LocalVectorLibrarySettingsStore.GetScanStatePath(dataRoot);
-        _httpClient = httpClient;
+        _embeddingSpaceMarkerPath = LocalVectorLibrarySettingsStore.GetEmbeddingSpaceMarkerPath(dataRoot);
+        _embeddingClient = new OpenAiCompatibleEmbeddingClient(httpClient);
         _settings = settings ?? LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot);
         _qdrant = qdrant ?? new QdrantServiceManager(dataRoot);
         _chunker = chunker ?? new StructuredDocumentChunker();
@@ -84,6 +94,7 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         }
 
         var warnings = new List<string>();
+        IReadOnlyList<SourceExcerpt> lexical = [];
         try
         {
             var searchText = BuildSearchText(plan);
@@ -95,11 +106,17 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
                 return new([], warnings, plan.RequiresSourceGrounding);
             }
 
-            var lexical = await SearchLexicalSafelyAsync(
+            lexical = await SearchLexicalSafelyAsync(
                 approved ?? _settings.RootDirectory,
                 plan.QueryTerms.Count > 0 ? plan.QueryTerms : Tokenize(searchText),
                 warnings,
                 cancellationToken).ConfigureAwait(false);
+
+            var queryVector = await CreateEmbeddingAsync(searchText, warnings, cancellationToken).ConfigureAwait(false);
+            if (queryVector is null)
+            {
+                return new(lexical, warnings, plan.RequiresSourceGrounding);
+            }
 
             var runtime = await _qdrant.EnsureAvailableAsync(_settings, cancellationToken).ConfigureAwait(false);
             if (!runtime.IsReachable)
@@ -110,17 +127,11 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
             if (directPath is not null)
             {
-                await IndexDocumentAsync(approved!, warnings, cancellationToken).ConfigureAwait(false);
+                await IndexDirectDocumentAsync(approved!, warnings, cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 await EnsureScanAsync(warnings, force: false, cancellationToken).ConfigureAwait(false);
-            }
-
-            var queryVector = await CreateEmbeddingAsync(searchText, warnings, cancellationToken).ConfigureAwait(false);
-            if (queryVector is null)
-            {
-                return new(lexical, warnings, plan.RequiresSourceGrounding);
             }
 
             using var client = _qdrant.CreateClient(_settings);
@@ -171,7 +182,7 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
                                    or InvalidOperationException or Grpc.Core.RpcException or TimeoutException)
         {
             warnings.Add($"Local knowledge failed safely: {ex.Message.ReplaceLineEndings(" ").Trim()}");
-            return new([], warnings, plan.RequiresSourceGrounding);
+            return new(lexical, warnings, plan.RequiresSourceGrounding);
         }
     }
 
@@ -207,6 +218,18 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
     public async Task<LocalKnowledgeStatus> ScanAsync(bool force, CancellationToken cancellationToken = default)
     {
         var warnings = new List<string>();
+        if (!TryGetEmbeddingConfiguration(out _, out var configurationFailure))
+        {
+            var state = LoadScanState();
+            return new(
+                false,
+                false,
+                0,
+                state.Files.Count,
+                state.LastScanUtc,
+                $"Local knowledge embeddings are unavailable: {configurationFailure}");
+        }
+
         var runtime = await _qdrant.EnsureAvailableAsync(_settings, cancellationToken).ConfigureAwait(false);
         if (!runtime.IsReachable)
         {
@@ -220,40 +243,113 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     public async Task<LocalKnowledgeStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
-        var runtime = await _qdrant.ProbeAsync(_settings, cancellationToken).ConfigureAwait(false);
         var state = LoadScanState();
+        if (!TryGetEmbeddingConfiguration(out _, out var configurationFailure))
+        {
+            return new(
+                false,
+                false,
+                0,
+                state.Files.Count,
+                state.LastScanUtc,
+                $"Local knowledge embeddings are unavailable: {configurationFailure}");
+        }
+
+        var runtime = await _qdrant.ProbeAsync(_settings, cancellationToken).ConfigureAwait(false);
         if (!runtime.IsReachable)
         {
             return new(false, false, 0, state.Files.Count, state.LastScanUtc, runtime.Message);
         }
 
-        using var client = _qdrant.CreateClient(_settings);
-        var exists = await client.CollectionExistsAsync(_settings.QdrantCollectionName, cancellationToken).ConfigureAwait(false);
-        var count = exists
-            ? await client.CountAsync(_settings.QdrantCollectionName, exact: true, cancellationToken: cancellationToken).ConfigureAwait(false)
-            : 0;
-        return new(true, exists, count, state.Files.Count, state.LastScanUtc,
-            exists
-                ? $"Qdrant is healthy. {state.Files.Count} document(s), {count} structural/text chunk(s)."
-                : "Qdrant is healthy. Scan the approved folder to create the collection.");
+        await _scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var client = _qdrant.CreateClient(_settings);
+            var exists = await client.CollectionExistsAsync(
+                _settings.QdrantCollectionName,
+                cancellationToken).ConfigureAwait(false);
+            string? observedMarker;
+            try
+            {
+                observedMarker = ReadEmbeddingSpaceMarker();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return PendingEmbeddingSpaceRebuildStatus(
+                    $"the embedding-space marker could not be read: {ex.Message.ReplaceLineEndings(" ").Trim()}");
+            }
+
+            var expectedMarker = CreateEmbeddingSpaceMarker(_settings);
+            var action = DetermineEmbeddingSpaceGuardAction(
+                expectedMarker,
+                observedMarker,
+                File.Exists(_scanStatePath),
+                exists);
+            if (action == EmbeddingSpaceGuardAction.ResetAndReindex)
+            {
+                return PendingEmbeddingSpaceRebuildStatus(
+                    "the configured embedding or Qdrant identity changed");
+            }
+
+            if (action == EmbeddingSpaceGuardAction.InitializeMarker)
+            {
+                try
+                {
+                    WriteEmbeddingSpaceMarkerAtomically(expectedMarker);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return PendingEmbeddingSpaceRebuildStatus(
+                        $"the embedding-space marker could not be initialized: {ex.Message.ReplaceLineEndings(" ").Trim()}");
+                }
+            }
+
+            state = LoadScanState();
+            var count = exists
+                ? await client.CountAsync(_settings.QdrantCollectionName, exact: true, cancellationToken: cancellationToken).ConfigureAwait(false)
+                : 0;
+            return new(true, exists, count, state.Files.Count, state.LastScanUtc,
+                exists
+                    ? $"Qdrant is healthy. {state.Files.Count} document(s), {count} structural/text chunk(s)."
+                    : "Qdrant is healthy. Scan the approved folder to create the collection.");
+        }
+        finally
+        {
+            _scanGate.Release();
+        }
     }
 
     public async Task RebuildAsync(CancellationToken cancellationToken = default)
     {
+        if (!TryGetEmbeddingConfiguration(out _, out var configurationFailure))
+        {
+            throw new InvalidOperationException(
+                $"Local knowledge embeddings are unavailable: {configurationFailure}");
+        }
+
         var runtime = await _qdrant.EnsureAvailableAsync(_settings, cancellationToken).ConfigureAwait(false);
         if (!runtime.IsReachable)
         {
             throw new InvalidOperationException(runtime.Message);
         }
 
-        using var client = _qdrant.CreateClient(_settings);
-        if (await client.CollectionExistsAsync(_settings.QdrantCollectionName, cancellationToken).ConfigureAwait(false))
+        await _scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await client.DeleteCollectionAsync(_settings.QdrantCollectionName, cancellationToken: cancellationToken).ConfigureAwait(false);
-        }
+            using var client = _qdrant.CreateClient(_settings);
+            if (await client.CollectionExistsAsync(_settings.QdrantCollectionName, cancellationToken).ConfigureAwait(false))
+            {
+                await client.DeleteCollectionAsync(_settings.QdrantCollectionName, cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
 
-        SaveScanState(new ScanState());
-        await EnsureScanAsync([], force: true, cancellationToken).ConfigureAwait(false);
+            ClearScanState();
+            WriteEmbeddingSpaceMarkerAtomically(CreateEmbeddingSpaceMarker(_settings));
+            await ScanCoreAsync([], force: true, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _scanGate.Release();
+        }
     }
 
     private async Task EnsureScanAsync(List<string> warnings, bool force, CancellationToken cancellationToken)
@@ -261,56 +357,219 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         await _scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var state = LoadScanState();
-            if (!force && state.LastScanUtc > DateTimeOffset.MinValue
-                && DateTimeOffset.UtcNow - state.LastScanUtc < TimeSpan.FromMinutes(Math.Max(1, _settings.ScanIntervalMinutes)))
-            {
-                return;
-            }
-
-            Directory.CreateDirectory(_settings.RootDirectory);
-            var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var files = Directory.EnumerateFiles(_settings.RootDirectory, "*", SearchOption.AllDirectories)
-                .Where(IsAllowedFile)
-                .Take(Math.Max(1, _settings.MaxFiles))
-                .ToArray();
-            foreach (var file in files)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var path = Path.GetFullPath(file);
-                active.Add(path);
-                var info = new FileInfo(path);
-                if (!force && state.Files.TryGetValue(path, out var fingerprint)
-                           && fingerprint.Length == info.Length
-                           && fingerprint.LastWriteTicks == info.LastWriteTimeUtc.Ticks)
-                {
-                    continue;
-                }
-
-                if (await IndexDocumentAsync(path, warnings, cancellationToken).ConfigureAwait(false))
-                {
-                    state.Files[path] = new FileFingerprint(info.Length, info.LastWriteTimeUtc.Ticks);
-                }
-            }
-
             using var client = _qdrant.CreateClient(_settings);
-            if (await client.CollectionExistsAsync(_settings.QdrantCollectionName, cancellationToken).ConfigureAwait(false))
-            {
-                foreach (var removed in state.Files.Keys.Where(path => !active.Contains(path)).ToArray())
-                {
-                    await client.DeleteAsync(_settings.QdrantCollectionName, MatchKeyword("document_path", removed), cancellationToken: cancellationToken).ConfigureAwait(false);
-                    state.Files.Remove(removed);
-                }
-            }
-
-            state.LastScanUtc = DateTimeOffset.UtcNow;
-            SaveScanState(state);
+            var forceReindex = await ApplyEmbeddingSpaceGuardAsync(client, cancellationToken).ConfigureAwait(false);
+            await ScanCoreAsync(warnings, force || forceReindex, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _scanGate.Release();
         }
     }
+
+    private async Task IndexDirectDocumentAsync(
+        string filePath,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        await _scanGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var client = _qdrant.CreateClient(_settings);
+            var forceReindex = await ApplyEmbeddingSpaceGuardAsync(client, cancellationToken).ConfigureAwait(false);
+            if (forceReindex)
+            {
+                await ScanCoreAsync(warnings, force: true, cancellationToken).ConfigureAwait(false);
+            }
+
+            await IndexDocumentAsync(filePath, warnings, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _scanGate.Release();
+        }
+    }
+
+    private async Task ScanCoreAsync(List<string> warnings, bool force, CancellationToken cancellationToken)
+    {
+        var state = LoadScanState();
+        if (!force && state.LastScanUtc > DateTimeOffset.MinValue
+            && DateTimeOffset.UtcNow - state.LastScanUtc < TimeSpan.FromMinutes(Math.Max(1, _settings.ScanIntervalMinutes)))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_settings.RootDirectory);
+        var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var files = Directory.EnumerateFiles(_settings.RootDirectory, "*", SearchOption.AllDirectories)
+            .Where(IsAllowedFile)
+            .Take(Math.Max(1, _settings.MaxFiles))
+            .ToArray();
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = Path.GetFullPath(file);
+            active.Add(path);
+            var info = new FileInfo(path);
+            if (!force && state.Files.TryGetValue(path, out var fingerprint)
+                       && fingerprint.Length == info.Length
+                       && fingerprint.LastWriteTicks == info.LastWriteTimeUtc.Ticks)
+            {
+                continue;
+            }
+
+            if (await IndexDocumentAsync(path, warnings, cancellationToken).ConfigureAwait(false))
+            {
+                state.Files[path] = new FileFingerprint(info.Length, info.LastWriteTimeUtc.Ticks);
+            }
+        }
+
+        using var client = _qdrant.CreateClient(_settings);
+        if (await client.CollectionExistsAsync(_settings.QdrantCollectionName, cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var removed in state.Files.Keys.Where(path => !active.Contains(path)).ToArray())
+            {
+                await client.DeleteAsync(_settings.QdrantCollectionName, MatchKeyword("document_path", removed), cancellationToken: cancellationToken).ConfigureAwait(false);
+                state.Files.Remove(removed);
+            }
+        }
+
+        state.LastScanUtc = DateTimeOffset.UtcNow;
+        SaveScanState(state);
+    }
+
+    private async Task<bool> ApplyEmbeddingSpaceGuardAsync(
+        QdrantClient client,
+        CancellationToken cancellationToken)
+    {
+        var collectionExists = await client.CollectionExistsAsync(
+            _settings.QdrantCollectionName,
+            cancellationToken).ConfigureAwait(false);
+        var expectedMarker = CreateEmbeddingSpaceMarker(_settings);
+        var action = DetermineEmbeddingSpaceGuardAction(
+            expectedMarker,
+            ReadEmbeddingSpaceMarker(),
+            File.Exists(_scanStatePath),
+            collectionExists);
+        if (action == EmbeddingSpaceGuardAction.Current)
+        {
+            return false;
+        }
+
+        if (action == EmbeddingSpaceGuardAction.ResetAndReindex)
+        {
+            if (collectionExists)
+            {
+                await client.DeleteCollectionAsync(
+                    _settings.QdrantCollectionName,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+
+            ClearScanState();
+        }
+
+        WriteEmbeddingSpaceMarkerAtomically(expectedMarker);
+        return action == EmbeddingSpaceGuardAction.ResetAndReindex;
+    }
+
+    internal static EmbeddingSpaceGuardAction DetermineEmbeddingSpaceGuardAction(
+        string expectedMarker,
+        string? observedMarker,
+        bool scanStateExists,
+        bool collectionExists)
+    {
+        if (string.Equals(expectedMarker, observedMarker, StringComparison.Ordinal))
+        {
+            return scanStateExists == collectionExists
+                ? EmbeddingSpaceGuardAction.Current
+                : EmbeddingSpaceGuardAction.ResetAndReindex;
+        }
+
+        return scanStateExists || collectionExists
+            ? EmbeddingSpaceGuardAction.ResetAndReindex
+            : EmbeddingSpaceGuardAction.InitializeMarker;
+    }
+
+    internal static string CreateEmbeddingSpaceMarker(LocalVectorLibrarySettings settings)
+    {
+        var identity = new StringBuilder();
+        AppendIdentityValue(identity, settings.EmbeddingProvider);
+        AppendIdentityValue(identity, settings.EmbeddingEndpoint);
+        AppendIdentityValue(identity, settings.EmbeddingModel);
+        AppendIdentityValue(identity, settings.EmbeddingDimensions.ToString(CultureInfo.InvariantCulture));
+        AppendIdentityValue(identity, settings.QdrantHost);
+        AppendIdentityValue(identity, settings.QdrantHttpPort.ToString(CultureInfo.InvariantCulture));
+        AppendIdentityValue(identity, settings.QdrantGrpcPort.ToString(CultureInfo.InvariantCulture));
+        AppendIdentityValue(identity, settings.QdrantUseTls ? "true" : "false");
+        AppendIdentityValue(identity, settings.QdrantCollectionName);
+        AppendIdentityValue(identity, Path.GetFullPath(settings.RootDirectory));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString())));
+    }
+
+    private static void AppendIdentityValue(StringBuilder identity, string value)
+    {
+        identity.Append(value.Length.ToString(CultureInfo.InvariantCulture));
+        identity.Append(':');
+        identity.Append(value);
+    }
+
+    private string? ReadEmbeddingSpaceMarker()
+    {
+        if (!File.Exists(_embeddingSpaceMarkerPath))
+        {
+            return null;
+        }
+
+        return File.ReadAllText(_embeddingSpaceMarkerPath, Encoding.UTF8).Trim();
+    }
+
+    private void WriteEmbeddingSpaceMarkerAtomically(string marker)
+    {
+        var directory = Path.GetDirectoryName(_embeddingSpaceMarkerPath)!;
+        Directory.CreateDirectory(directory);
+        var temporaryPath = Path.Combine(
+            directory,
+            $".{Path.GetFileName(_embeddingSpaceMarkerPath)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None))
+            {
+                var bytes = Encoding.UTF8.GetBytes(marker + Environment.NewLine);
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporaryPath, _embeddingSpaceMarkerPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private void ClearScanState()
+    {
+        if (File.Exists(_scanStatePath))
+        {
+            File.Delete(_scanStatePath);
+        }
+    }
+
+    private static LocalKnowledgeStatus PendingEmbeddingSpaceRebuildStatus(string reason) =>
+        new(
+            true,
+            false,
+            0,
+            0,
+            DateTimeOffset.MinValue,
+            $"Qdrant is healthy. Local knowledge is pending an embedding-space rebuild because {reason}; stored vectors will not be queried.");
 
     private async Task<bool> IndexDocumentAsync(string filePath, List<string> warnings, CancellationToken cancellationToken)
     {
@@ -392,7 +651,9 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
                 ["chunk_index"] = index,
                 ["file_length"] = info.Length,
                 ["last_write_ticks"] = info.LastWriteTimeUtc.Ticks,
-                ["embedding_model"] = _settings.EmbeddingModel
+                ["embedding_provider"] = _settings.EmbeddingProvider,
+                ["embedding_model"] = _settings.EmbeddingModel,
+                ["embedding_dimensions"] = _settings.EmbeddingDimensions
             }
         }).ToArray();
         try
@@ -408,63 +669,33 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     private async Task<float[]?> CreateEmbeddingAsync(string input, List<string> warnings, CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(_settings.EmbeddingEndpoint, UriKind.Absolute, out var endpoint))
+        if (!TryGetEmbeddingConfiguration(out var configuration, out var configurationFailure))
         {
-            warnings.Add($"Local knowledge embedding endpoint is invalid: {_settings.EmbeddingEndpoint}");
+            warnings.Add($"Local knowledge embeddings are unavailable: {configurationFailure}");
             return null;
         }
 
-        var errors = new List<string>();
-        var primary = await TryPostEmbeddingAsync(endpoint, input, true, errors, cancellationToken).ConfigureAwait(false);
-        if (primary is not null)
+        var result = await _embeddingClient
+            .CreateEmbeddingAsync(configuration!, input, cancellationToken)
+            .ConfigureAwait(false);
+        if (!result.Success || result.Vector is null)
         {
-            return primary;
+            warnings.Add($"Local knowledge embeddings are unavailable: {result.Message}");
+            return null;
         }
-
-        var legacy = BuildLegacyEmbeddingEndpoint(endpoint);
-        if (legacy is not null && legacy != endpoint)
-        {
-            var fallback = await TryPostEmbeddingAsync(legacy, input, false, errors, cancellationToken).ConfigureAwait(false);
-            if (fallback is not null)
-            {
-                return fallback;
-            }
-        }
-
-        warnings.Add($"Embedding request failed for {_settings.EmbeddingModel}: {string.Join("; ", errors.Take(2))}");
-        return null;
+        return result.Vector;
     }
 
-    private async Task<float[]?> TryPostEmbeddingAsync(Uri endpoint, string input, bool openAi, List<string> errors, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var payload = openAi
-                ? JsonSerializer.Serialize(new { model = _settings.EmbeddingModel, input }, JsonOptions)
-                : JsonSerializer.Serialize(new { model = _settings.EmbeddingModel, prompt = input }, JsonOptions);
-            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-            using var response = await _httpClient.PostAsync(endpoint, content, cancellationToken).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                errors.Add($"{endpoint.AbsolutePath} returned HTTP {(int)response.StatusCode}");
-                return null;
-            }
-
-            var vector = TryReadEmbedding(body);
-            if (vector is { Length: > 0 })
-            {
-                return vector;
-            }
-            errors.Add($"{endpoint.AbsolutePath} returned no vector");
-            return null;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
-        {
-            errors.Add($"{endpoint.AbsolutePath} failed: {ex.Message}");
-            return null;
-        }
-    }
+    private bool TryGetEmbeddingConfiguration(
+        out LocalEmbeddingConfiguration? configuration,
+        out string failure) =>
+        LocalEmbeddingConfiguration.TryCreate(
+            _settings.EmbeddingProvider,
+            _settings.EmbeddingEndpoint,
+            _settings.EmbeddingModel,
+            _settings.EmbeddingDimensions,
+            out configuration,
+            out failure);
 
     private bool ShouldAttempt(SourceQueryPlan plan)
     {
@@ -552,10 +783,6 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
     private static HashSet<string> Tokenize(string text) => text.Split(QuerySeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(token => new string(token.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant()).Where(token => token.Length >= 3).ToHashSet(StringComparer.OrdinalIgnoreCase);
     private static string TrimExcerpt(string text) { var normalized = text.ReplaceLineEndings(Environment.NewLine).Trim(); return normalized.Length <= MaxExcerptCharacters ? normalized : normalized[..MaxExcerptCharacters]; }
     private static string BuildFileUrl(string path) => string.IsNullOrWhiteSpace(path) ? string.Empty : new Uri(path).AbsoluteUri;
-    private static Uri? BuildLegacyEmbeddingEndpoint(Uri endpoint) { var builder = new UriBuilder(endpoint); if (builder.Path.EndsWith("/api/embed", StringComparison.OrdinalIgnoreCase)) builder.Path = builder.Path[..^10] + "/api/embeddings"; else builder.Path = "/api/embeddings"; return builder.Uri; }
-    private static float[]? TryReadEmbedding(string json) { using var doc = JsonDocument.Parse(json); var root = doc.RootElement; if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array) { var first = data.EnumerateArray().FirstOrDefault(); if (first.ValueKind == JsonValueKind.Object && first.TryGetProperty("embedding", out var value)) return ReadFloatArray(value); } if (root.TryGetProperty("embeddings", out var values) && values.ValueKind == JsonValueKind.Array) { var first = values.EnumerateArray().FirstOrDefault(); return first.ValueKind == JsonValueKind.Array ? ReadFloatArray(first) : null; } return root.TryGetProperty("embedding", out var embedding) ? ReadFloatArray(embedding) : null; }
-    private static float[] ReadFloatArray(JsonElement array) => array.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.Number).Select(item => (float)item.GetDouble()).ToArray();
-
     private static string? TryExtractDirectFilePath(string text)
     {
         foreach (var segment in ExtractQuotedSegments(text)) if (LooksLikeWindowsPath(segment)) return segment;

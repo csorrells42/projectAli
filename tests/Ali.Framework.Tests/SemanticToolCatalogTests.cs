@@ -1,4 +1,5 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.RAG;
 using Ali.Modules.ToolDiscovery;
 using Microsoft.Extensions.AI;
 
@@ -86,6 +87,7 @@ public sealed class SemanticToolCatalogTests
             TestContext.Current.CancellationToken);
 
         Assert.False(selection.UsedSemanticIndex);
+        Assert.False(selection.RequiresAttention);
         Assert.Equal(tools.Select(tool => tool.Name), selection.Tools.Select(tool => tool.Name));
         Assert.Empty(discovery.ToolNames);
         Assert.Contains("no cross-turn tool cache", discovery.Status, StringComparison.OrdinalIgnoreCase);
@@ -127,6 +129,56 @@ public sealed class SemanticToolCatalogTests
         Assert.DoesNotContain("need.StartsWith", source, StringComparison.Ordinal);
         Assert.DoesNotContain("need.EndsWith", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Regex", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SemanticImplementation_UsesTheSharedExactEmbeddingClient()
+    {
+        var source = File.ReadAllText(FindRepositoryFile(
+            "src", "Modules", "ToolDiscovery", "SemanticToolCatalog.cs"));
+
+        Assert.Contains("OpenAiCompatibleEmbeddingClient", source, StringComparison.Ordinal);
+        Assert.Contains("settings.EmbeddingEndpoint", source, StringComparison.Ordinal);
+        Assert.Contains("settings.EmbeddingDimensions", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("/api/embeddings", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("prompt = input", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SemanticFingerprint_ChangesForEveryEmbeddingSpaceChoice()
+    {
+        var tools = new[]
+        {
+            AIFunctionFactory.Create(() => "read", "read_tool", "Read evidence.")
+        }.Cast<AIFunctionDeclaration>().ToArray();
+        var buckets = SemanticToolBuckets.Create(tools);
+        var settings = new LocalVectorLibrarySettings();
+        var baseline = QdrantSemanticToolCatalog.BuildFingerprint(tools, buckets, settings);
+
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingProvider = "Custom" }));
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingEndpoint = "http://127.0.0.1:9123/v1/embeddings" }));
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingModel = "other-model" }));
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingDimensions = 1024 }));
     }
 
     private static string FindRepositoryFile(params string[] segments)

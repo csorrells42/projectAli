@@ -6,7 +6,7 @@ Status: implementation blueprint; intentionally not wired into the running appli
 
 Ali needs one durable orchestration loop that can answer small conversational turns quickly and continue very large jobs for as many advancing steps as necessary. The model remains in charge of meaning, decomposition, tool choice, and completion, while model mistakes, invalid drafts, stale edits, and lossy summaries are prevented from becoming the next pass's authoritative truth.
 
-This design replaces the growing responsibilities in `LemonadeToolCallingChatClient` without replacing Microsoft Agent Framework. Agent Framework remains the one outer execution loop and continues to own sessions, approval prompts, registered-tool invocation, Agent Skills, and framework middleware.
+This design replaces the growing responsibilities in `AliToolCallingChatClient` without replacing Microsoft Agent Framework. Agent Framework remains the one outer execution loop and continues to own sessions, approval prompts, registered-tool invocation, Agent Skills, and framework middleware.
 
 ## Required outcomes
 
@@ -483,7 +483,7 @@ Capability modules remain separate. Orchestration does not absorb memory, web, f
 | Multiple native/provider/MCP policy lists | `AliCapabilityRegistry` plus one effective availability intersection |
 | Side effect followed by best-effort receipt | `AliActionJournal` plus idempotent execution and reconciliation |
 
-`LemonadeToolCallingChatClient` is not renamed and allowed to remain a monolith. Its responsibilities migrate behind focused interfaces, the harness switches to the planning client, and the obsolete file is deleted after cutover evidence passes.
+`AliToolCallingChatClient` is not treated as complete merely because it has a provider-neutral name. Its responsibilities migrate behind focused interfaces, the harness switches to the planning client, and the obsolete implementation is deleted after cutover evidence passes.
 
 ## Acceptance scenarios
 

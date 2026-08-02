@@ -35,16 +35,6 @@ public sealed record UserMemorySettings
 
     public string CollectionName { get; init; } = "ali_user_memories";
 
-    public string EmbeddingEndpoint { get; init; } = "http://127.0.0.1:13305/api/v1";
-
-    public string EmbeddingModel { get; init; } = "nomic-embed-text-v1-GGUF";
-
-    public int EmbeddingDimensions { get; init; } = 768;
-
-    public string QdrantHost { get; init; } = "127.0.0.1";
-
-    public int QdrantHttpPort { get; init; } = 6333;
-
     public UserMemorySettings Normalize() => this with
     {
         RecallMaximumResults = Math.Clamp(RecallMaximumResults, 1, 8),
@@ -55,25 +45,8 @@ public sealed record UserMemorySettings
         RecallSemanticOnlyStrongScore = Math.Clamp(RecallSemanticOnlyStrongScore, 0, 1),
         RecallSemanticOnlyMinimumLead = Math.Clamp(RecallSemanticOnlyMinimumLead, 0, 1),
         RecallMinimumKeywordScore = Math.Clamp(RecallMinimumKeywordScore, 0, 1),
-        CollectionName = string.IsNullOrWhiteSpace(CollectionName) ? "ali_user_memories" : CollectionName.Trim(),
-        EmbeddingEndpoint = RequireLoopback(EmbeddingEndpoint, nameof(EmbeddingEndpoint)),
-        EmbeddingModel = string.IsNullOrWhiteSpace(EmbeddingModel) ? "nomic-embed-text-v1-GGUF" : EmbeddingModel.Trim(),
-        EmbeddingDimensions = Math.Clamp(EmbeddingDimensions, 1, 8192),
-        QdrantHost = QdrantHost.Trim() is "localhost" or "::1" ? QdrantHost.Trim() : "127.0.0.1",
-        QdrantHttpPort = Math.Clamp(QdrantHttpPort, 1, 65535)
+        CollectionName = string.IsNullOrWhiteSpace(CollectionName) ? "ali_user_memories" : CollectionName.Trim()
     };
-
-    private static string RequireLoopback(string value, string name)
-    {
-        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)
-            || uri.Scheme != Uri.UriSchemeHttp
-            || !uri.IsLoopback)
-        {
-            throw new InvalidOperationException($"{name} must be a loopback HTTP endpoint.");
-        }
-
-        return uri.ToString().TrimEnd('/');
-    }
 }
 public static class UserMemorySettingsStore
 {

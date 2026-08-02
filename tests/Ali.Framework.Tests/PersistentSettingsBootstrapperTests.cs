@@ -79,6 +79,35 @@ public sealed class PersistentSettingsBootstrapperTests
     }
 
     [Fact]
+    public void RuntimeSettingsRoundTrip_PreservesExplicitEndpointAndModelExactly()
+    {
+        using var location = TemporaryDirectory.Create();
+        var endpoint = new Uri("http://127.0.0.1:49001/custom/v1/");
+        const string model = "Publisher/GPT-OSS-20B@Q4_K_M";
+        var options = RuntimeSettingsStore.GetDefaultOptions() with
+        {
+            Enabled = true,
+            Endpoint = endpoint,
+            Model = model,
+            Engine = LocalRuntimeEngines.LlamaCpp,
+            ContextTokens = 65_536,
+            OutputTokenLimit = 8_192,
+            SupportsToolCalls = true
+        };
+
+        RuntimeSettingsStore.Save(location.Path, options);
+        var loaded = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(location.Path);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(LocalRuntimeEngines.LlamaCpp, loaded.Engine);
+        Assert.Equal(endpoint.ToString(), loaded.Endpoint.ToString());
+        Assert.Equal(model, loaded.Model);
+        Assert.Equal(65_536, loaded.ContextTokens);
+        Assert.Equal(8_192, loaded.OutputTokenLimit);
+        Assert.True(loaded.SupportsToolCalls);
+    }
+
+    [Fact]
     public void InvalidRuntimeSettings_AreBackedUpAndReplaced()
     {
         using var location = TemporaryDirectory.Create();

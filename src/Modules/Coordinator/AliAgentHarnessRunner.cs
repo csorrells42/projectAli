@@ -37,7 +37,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private readonly IReadOnlyList<AITool> _baseTools;
     private readonly AliSpecialistTeam _specialistTeam;
     private readonly AliAgentWorkflowFactory _workflowFactory;
-    private readonly LemonadeToolCallingChatClient _compatibilityClient;
+    private readonly AliToolCallingChatClient _compatibilityClient;
     private readonly ILocalModelRuntime _runtime;
     private readonly AssistantProfile _assistantProfile;
     private readonly Func<AgentOrchestrationSettings> _orchestrationSettings;
@@ -79,7 +79,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
         _semanticToolCatalog = semanticToolCatalog ?? new RegistryOnlySemanticToolCatalog();
-        _compatibilityClient = new LemonadeToolCallingChatClient(
+        _compatibilityClient = new AliToolCallingChatClient(
             chatClient,
             runtime,
             _assistantProfile.AssistantName,
@@ -971,7 +971,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
 
     internal static bool ShouldReportGenericSuccessfulResult(
         FunctionResultContent functionResult) =>
-        LemonadeToolCallingChatClient.RepresentsCompletedInvocation(functionResult);
+        AliToolCallingChatClient.RepresentsCompletedInvocation(functionResult);
 
     private void QueueStandingPermission(
         CoordinatorTurnContext turn,

@@ -80,15 +80,14 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             reminders,
             correctionStore);
 
-        var runtimeHttpClient = new HttpClient();
-        runtimeHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AliMcpHost/1.0");
+        var runtimeHttpClient = LocalOnlyHttpClientFactory.Create("AliMcpHost/1.0");
         var internetHttpClient = InternetHttpClientFactory.CreateClient();
         var qdrant = new QdrantServiceManager(dataRoot);
         var activeUsers = new ActiveUserSession(
             dataRoot,
             Path.Combine(userDataRoot, "Vision"));
         var mem0Client = new Mem0ProcessClient(
-            dataRoot,
+            userDataRoot,
             qdrant,
             () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),

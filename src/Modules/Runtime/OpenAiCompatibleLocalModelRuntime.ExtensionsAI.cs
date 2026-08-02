@@ -79,7 +79,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
 
         return serviceType == typeof(ChatClientMetadata)
             ? new ChatClientMetadata(
-                LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint),
+                LocalRuntimeEngines.Normalize(_options.Engine),
                 _options.Endpoint,
                 _options.Model)
             : null;

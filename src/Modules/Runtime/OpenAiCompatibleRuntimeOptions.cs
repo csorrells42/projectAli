@@ -31,7 +31,7 @@ public sealed record OpenAiCompatibleRuntimeOptions(
             DisplayName: DisplayName,
             RuntimeLocation: AllowPrivateLanEndpoint ? "Private LAN AI Workstation" : "This PC",
             RuntimeEndpoint: Endpoint.ToString(),
-            RuntimeKind: $"{LocalRuntimeEngines.Normalize(Engine, Endpoint)} local HTTP",
+            RuntimeKind: $"{LocalRuntimeEngines.Normalize(Engine)} local HTTP",
             PackageId: Model,
             Family: Family,
             Size: Size,
@@ -51,17 +51,24 @@ public static class LocalRuntimeEngines
     public const string Ollama = "Ollama";
     public const string LlamaCpp = "llama.cpp";
     public const string Lemonade = "Lemonade";
-    public const string GenericOpenAi = "OpenAI-compatible";
+    public const string GenericOpenAi = "OpenAI-compatible/Custom";
 
     public static IReadOnlyList<string> Choices { get; } =
     [
         LmStudio,
-        GenericOpenAi,
-        Lemonade
+        Ollama,
+        LlamaCpp,
+        Lemonade,
+        GenericOpenAi
     ];
 
-    public static string Normalize(string? engine, Uri endpoint)
+    public static string Normalize(string? engine)
     {
+        if (string.IsNullOrWhiteSpace(engine))
+        {
+            return GenericOpenAi;
+        }
+
         if (string.Equals(engine, LmStudio, StringComparison.OrdinalIgnoreCase)
             || string.Equals(engine, "LMStudio", StringComparison.OrdinalIgnoreCase)
             || string.Equals(engine, "lm-studio", StringComparison.OrdinalIgnoreCase))
@@ -85,22 +92,21 @@ public static class LocalRuntimeEngines
             return Lemonade;
         }
 
-        if (string.Equals(engine, GenericOpenAi, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(engine, GenericOpenAi, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(engine, "OpenAI-compatible", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(engine, "OpenAI-compatible / Custom", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(engine, "OpenAI compatible", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(engine, "Custom", StringComparison.OrdinalIgnoreCase))
         {
             return GenericOpenAi;
         }
 
-        return endpoint.Port switch
-        {
-            1234 => LmStudio,
-            11434 => Ollama,
-            8080 => LlamaCpp,
-            13305 => Lemonade,
-            _ => GenericOpenAi
-        };
+        return GenericOpenAi;
     }
 
-    public static Uri DefaultEndpoint(string engine) => Normalize(engine, new Uri("http://127.0.0.1")) switch
+    public static string Normalize(string? engine, Uri endpoint) => Normalize(engine);
+
+    public static Uri DefaultEndpoint(string engine) => Normalize(engine) switch
     {
         LmStudio => new Uri("http://127.0.0.1:1234/v1/"),
         Ollama => new Uri("http://127.0.0.1:11434/v1/"),
@@ -113,10 +119,10 @@ public static class LocalRuntimeEngines
 public static class OllamaRuntimeSafetyPolicy
 {
     public const int DefaultContextTokens = 8192;
+    public const int DefaultGptOssContextTokens = 65_536;
+    public const int DefaultGptOssOutputTokenLimit = 8_192;
     public const string KeepAlive = "30m";
     public const string DefaultGptOssReasoningEffort = "low";
-
-    public static bool IsNativeOllamaEndpoint(Uri endpoint) => endpoint.Port == 11434;
 
     public static int ResolveContextTokens(int configured) =>
         configured > 0 ? configured : DefaultContextTokens;
@@ -144,7 +150,7 @@ public static class OllamaRuntimeSafetyPolicy
     }
 
     public static OpenAiCompatibleRuntimeOptions Normalize(OpenAiCompatibleRuntimeOptions options) =>
-        LocalRuntimeEngines.Normalize(options.Engine, options.Endpoint) == LocalRuntimeEngines.Ollama
+        LocalRuntimeEngines.Normalize(options.Engine) == LocalRuntimeEngines.Ollama
             ? options with
             {
                 Engine = LocalRuntimeEngines.Ollama,
@@ -153,5 +159,5 @@ public static class OllamaRuntimeSafetyPolicy
                     ? ResolveReasoningEffort(options)
                     : null
             }
-            : options with { Engine = LocalRuntimeEngines.Normalize(options.Engine, options.Endpoint) };
+            : options with { Engine = LocalRuntimeEngines.Normalize(options.Engine) };
 }

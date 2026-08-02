@@ -41,6 +41,7 @@ namespace Ali.UI.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private const string RuntimeTopPModelDefault = "Model default";
+    internal const int MaximumRuntimeModelInventoryResponseBytes = LocalRuntimeModelInventory.MaximumResponseBytes;
     private const int StreamingTextFlushCharacters = 32;
     private const int StreamingTextDisplaySliceCharacters = 72;
     private const string PermissionAllowed = "allowed";
@@ -120,6 +121,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
     private bool _runtimeVisionEnabled;
+    private bool _runtimeToolCallsEnabled;
     private bool _runtimeThinkingEnabled;
     private bool _loadingRuntimeOptions;
     private bool _canActivateRuntime;
@@ -1018,6 +1020,10 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             LocalRuntimeEngines.LmStudio =>
                 "In LM Studio, start the Local Server on the Developer page. Then press Refresh models; Ali reads the server's OpenAI-compatible /v1/models list.",
+            LocalRuntimeEngines.Ollama =>
+                "Ollama uses its native local chat API. Ali preserves the selected endpoint and does not unload provider-managed models.",
+            LocalRuntimeEngines.LlamaCpp =>
+                "Start llama.cpp's local server, keep the selected model loaded there, then refresh its OpenAI-compatible /v1/models list.",
             LocalRuntimeEngines.GenericOpenAi =>
                 "Enter a localhost OpenAI-compatible base URL ending in /v1/. Refresh models works when that server implements GET /v1/models.",
             LocalRuntimeEngines.Lemonade =>
@@ -1153,6 +1159,18 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool RuntimeToolCallsEnabled
+    {
+        get => _runtimeToolCallsEnabled;
+        set
+        {
+            if (SetProperty(ref _runtimeToolCallsEnabled, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
+    }
+
     public bool RuntimeThinkingEnabled
     {
         get => _runtimeThinkingEnabled;
@@ -1249,13 +1267,9 @@ public sealed class MainWindowViewModel : ObservableObject
             var engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint);
             if (engine != LocalRuntimeEngines.Ollama)
             {
-                var releaseEndpoint = engine == LocalRuntimeEngines.LlamaCpp
-                    ? "/models/unload"
-                    : engine == LocalRuntimeEngines.LmStudio
-                        ? "/api/v1/models/unload"
-                    : engine == LocalRuntimeEngines.Lemonade
-                        ? "/api/v1/unload"
-                        : "not available";
+                var lifecycle = engine == LocalRuntimeEngines.Lemonade
+                    ? "Ali-owned Lemonade load/unload lifecycle"
+                    : "provider-owned lifecycle; Ali disconnects without unloading models";
                 var model = RuntimeModelText.Trim();
                 var reasoningContract = ModelThinkingPolicy.Describe(
                     model,
@@ -1264,7 +1278,7 @@ public sealed class MainWindowViewModel : ObservableObject
                     _selectedReasoningEffort);
                 return $"Engine: {engine} | Transport: OpenAI-compatible\n"
                     + $"Model: {model} | reasoning: {reasoningContract}\n"
-                    + $"Switch barrier: {releaseEndpoint}; release must verify before another engine is checked.\n"
+                    + $"Tool calls: {(RuntimeToolCallsEnabled ? "enabled" : "disabled")} | Lifecycle: {lifecycle}.\n"
                     + "Context and GPU placement are controlled by the selected engine.";
             }
 
@@ -1285,7 +1299,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 + $"num_predict: {outputText} | stream: {RuntimeStreamingEnabled.ToString().ToLowerInvariant()}\n"
                 + $"temperature: {RuntimeTemperatureText.Trim()} | top_p: {topPText}\n"
                 + $"think: {(OllamaRuntimeSafetyPolicy.IsGptOssModel(RuntimeModelText) ? _selectedReasoningEffort : "false")} | keep_alive: {OllamaRuntimeSafetyPolicy.KeepAlive}\n"
-                + $"vision: {RuntimeVisionEnabled.ToString().ToLowerInvariant()} | model switch: unload old model first\n"
+                + $"vision: {RuntimeVisionEnabled.ToString().ToLowerInvariant()} | tools: {RuntimeToolCallsEnabled.ToString().ToLowerInvariant()}\n"
+                + "model lifecycle: provider-owned; Ali does not send an unload request\n"
                 + "Unspecified Ollama options use the model defaults. Logs contain request metadata, not conversation text.";
         }
     }
@@ -2151,8 +2166,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         _modelStatusTimer.Stop();
         _stackHealthTimer.Stop();
-        SetModelConnectionStatus("command sent, waiting on model to shut down", MediaBrushes.Gold);
-        StatusText = "Shutting down local model...";
+        SetModelConnectionStatus("disconnecting from local model", MediaBrushes.Gold);
+        StatusText = "Disconnecting Ali from the local model runtime...";
         await Task.Yield();
 
         try
@@ -2162,12 +2177,12 @@ public sealed class MainWindowViewModel : ObservableObject
             StopOllamaProcessesStartedByAli();
             UpdateRuntimeStatus();
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
-            StatusText = "Local model shut down.";
+            StatusText = "Ali disconnected from the local model runtime.";
         }
         catch (Exception ex)
         {
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
-            StatusText = $"Local model shutdown did not complete cleanly: {ex.Message}";
+            StatusText = $"Local model disconnect did not complete cleanly: {ex.Message}";
         }
     }
 
@@ -4841,7 +4856,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task RevertToStubAsync()
     {
         IsBusy = true;
-        StatusText = "Unloading the active runtime before reverting to the deterministic stub...";
+        StatusText = "Disconnecting Ali from the active runtime before reverting to the deterministic stub...";
         using var operation = BeginUiOperation(TimeSpan.FromSeconds(45));
         try
         {
@@ -4849,11 +4864,11 @@ public sealed class MainWindowViewModel : ObservableObject
             CanActivateRuntime = _services.RuntimeController.CanActivateCandidate;
             UpdateRuntimeStatus();
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
-            StatusText = "Active runtime unloaded and reverted to deterministic stub.";
+            StatusText = "Ali disconnected from the active runtime and reverted to the deterministic stub.";
         }
         catch (Exception ex)
         {
-            StatusText = $"Runtime revert stopped because release could not be verified: {ex.Message}";
+            StatusText = $"Runtime revert stopped because the runtime transition did not complete: {ex.Message}";
         }
         finally
         {
@@ -4865,7 +4880,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task RevertToLastKnownGoodAsync()
     {
         IsBusy = true;
-        StatusText = "Unloading the active runtime before restoring the last-known-good runtime...";
+        StatusText = "Disconnecting Ali from the active runtime before restoring the last-known-good runtime...";
         using var operation = BeginUiOperation(TimeSpan.FromSeconds(45));
         try
         {
@@ -4877,11 +4892,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
             UpdateRuntimeStatus();
             SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
-            StatusText = "Previous runtime released; last-known-good runtime restored.";
+            StatusText = "Ali disconnected from the previous runtime; the last-known-good runtime was restored.";
         }
         catch (Exception ex)
         {
-            StatusText = $"Last-known-good restore stopped because release could not be verified: {ex.Message}";
+            StatusText = $"Last-known-good restore stopped because the runtime transition did not complete: {ex.Message}";
         }
         finally
         {
@@ -5094,6 +5109,12 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Runtime endpoint must be an absolute URL.");
         }
 
+        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false);
+        if (!endpointPolicy.IsAllowed)
+        {
+            throw new InvalidOperationException(endpointPolicy.Reason);
+        }
+
         if (!int.TryParse(RuntimeContextText.Trim(), out var contextTokens) || contextTokens < 1)
         {
             throw new InvalidOperationException("Context size must be a positive integer.");
@@ -5148,7 +5169,7 @@ public sealed class MainWindowViewModel : ObservableObject
             TopP: topP,
             StreamingEnabled: RuntimeStreamingEnabled,
             SupportsVision: RuntimeVisionEnabled,
-            SupportsToolCalls: false,
+            SupportsToolCalls: RuntimeToolCallsEnabled,
             AllowPrivateLanEndpoint: false)
         {
             Engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint),
@@ -6597,6 +6618,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeTopPText = topPText;
         RuntimeStreamingEnabled = options.StreamingEnabled;
         RuntimeVisionEnabled = options.SupportsVision;
+        RuntimeToolCallsEnabled = options.SupportsToolCalls;
         RuntimeThinkingEnabled = options.ThinkingEnabled;
         _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(options.ReasoningEffort);
         NotifyReasoningEffortChanged();
@@ -6681,6 +6703,10 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeEnabled = !string.IsNullOrWhiteSpace(choice.Model);
         RuntimeStreamingEnabled = choice.StreamingEnabled;
         RuntimeVisionEnabled = choice.SupportsVision;
+        if (resetToSmallest)
+        {
+            RuntimeToolCallsEnabled = choice.SupportsToolCalls;
+        }
 
         var quantizationChoices = string.IsNullOrWhiteSpace(preferredQuantization)
             ? choice.Quantizations
@@ -6691,12 +6717,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var isGptOss = OllamaRuntimeSafetyPolicy.IsGptOssModel(choice.Model)
             || OllamaRuntimeSafetyPolicy.IsGptOssModel(choice.Family);
-        var defaultContext = isGptOss
-            ? OllamaRuntimeSafetyPolicy.DefaultContextTokens.ToString(CultureInfo.InvariantCulture)
-            : choice.ContextTokens.FirstOrDefault().ToString(CultureInfo.InvariantCulture);
-        var defaultOutputLimit = isGptOss
-            ? "1024"
-            : choice.OutputTokenLimits.FirstOrDefault().ToString(CultureInfo.InvariantCulture);
+        var defaultContext = choice.DefaultContextTokens.ToString(CultureInfo.InvariantCulture);
+        var defaultOutputLimit = choice.DefaultOutputTokenLimit.ToString(CultureInfo.InvariantCulture);
 
         RuntimeQuantizationText = PickChoice(RuntimeQuantizationChoices, preferredQuantization, choice.DefaultQuantization, resetToSmallest);
         RuntimeContextText = PickChoice(RuntimeContextChoices, preferredContext, defaultContext, resetToSmallest && !isGptOss);
@@ -6708,7 +6730,7 @@ public sealed class MainWindowViewModel : ObservableObject
             RuntimeTopPText = RuntimeTopPModelDefault;
         }
 
-        RuntimeSelectionStatusText = $"{choice.Source}. Vision: {(choice.SupportsVision ? "yes" : "no")}. Streaming: {(choice.StreamingEnabled ? "yes" : "unknown until health check")}.";
+        RuntimeSelectionStatusText = $"{choice.Source}. Vision: {(choice.SupportsVision ? "yes" : "no")}. Tool calls: {(RuntimeToolCallsEnabled ? "yes" : "no")}. Streaming: {(choice.StreamingEnabled ? "yes" : "unknown until health check")}.";
     }
 
     private void LoadRuntimeModelChoices(IEnumerable<RuntimeModelChoice> choices, string? selectedModel)
@@ -6800,12 +6822,59 @@ public sealed class MainWindowViewModel : ObservableObject
     private static async Task<IReadOnlyList<RuntimeModelChoice>> FetchInstalledRuntimeModelChoicesAsync(
         Uri endpoint,
         CancellationToken cancellationToken)
+        => await FetchInstalledRuntimeModelChoicesAsync(
+            endpoint,
+            allowPrivateLanEndpoint: false,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+    private static async Task<IReadOnlyList<RuntimeModelChoice>> FetchInstalledRuntimeModelChoicesAsync(
+        Uri endpoint,
+        bool allowPrivateLanEndpoint,
+        CancellationToken cancellationToken)
     {
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(endpoint, "models"));
-        using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        using var httpClient = LocalOnlyHttpClientFactory.Create(
+            "AliRuntimeInventory/1.0",
+            TimeSpan.FromSeconds(5));
+        return await FetchInstalledRuntimeModelChoicesAsync(
+            httpClient,
+            endpoint,
+            allowPrivateLanEndpoint,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<IReadOnlyList<RuntimeModelChoice>> FetchInstalledRuntimeModelChoicesAsync(
+        HttpClient httpClient,
+        Uri endpoint,
+        CancellationToken cancellationToken)
+        => await FetchInstalledRuntimeModelChoicesAsync(
+            httpClient,
+            endpoint,
+            allowPrivateLanEndpoint: false,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+    internal static async Task<IReadOnlyList<RuntimeModelChoice>> FetchInstalledRuntimeModelChoicesAsync(
+        HttpClient httpClient,
+        Uri endpoint,
+        bool allowPrivateLanEndpoint,
+        CancellationToken cancellationToken)
+    {
+        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLanEndpoint);
+        if (!endpointPolicy.IsAllowed)
+        {
+            throw new InvalidOperationException(endpointPolicy.Reason);
+        }
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            LocalRuntimeModelInventory.BuildModelsUri(endpoint));
+        using var response = await httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
+        var body = await LocalRuntimeModelInventory
+            .ReadBoundedBodyAsync(response.Content, cancellationToken)
+            .ConfigureAwait(false);
         return RuntimeModelChoiceCatalog.ParseRuntimeModelChoices(body);
     }
 
@@ -6838,6 +6907,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var choices = await FetchInstalledRuntimeModelChoicesAsync(
                 options.Endpoint,
+                options.AllowPrivateLanEndpoint,
                 cancellationToken).ConfigureAwait(false);
 
             if (choices.Any(choice => choice.Model.Equals(options.Model, StringComparison.OrdinalIgnoreCase)))

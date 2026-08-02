@@ -61,7 +61,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     public ModelProfile ActiveProfile { get; private set; }
 
     public string RuntimeIdentity =>
-        $"{LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint)}|{_options.Endpoint}|{_options.Model}";
+        $"{LocalRuntimeEngines.Normalize(_options.Engine)}|{_options.Endpoint}|{_options.Model}";
 
     public string ReasoningEffort => Volatile.Read(ref _reasoningEffort);
 
@@ -342,120 +342,30 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     public async Task ShutdownAsync(CancellationToken cancellationToken)
     {
-        WriteHealthLog($"runtime shutdown runtime={RuntimeIdentity} action=unload-and-verify");
+        var engine = LocalRuntimeEngines.Normalize(_options.Engine);
+        var action = engine == LocalRuntimeEngines.Lemonade
+            ? "lemonade-unload-and-verify"
+            : "external-provider-retains-model";
+        WriteHealthLog($"runtime shutdown runtime={RuntimeIdentity} action={action}");
         await UnloadForModelSwitchAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task UnloadForModelSwitchAsync(CancellationToken cancellationToken)
     {
+        var engine = LocalRuntimeEngines.Normalize(_options.Engine);
+        if (engine != LocalRuntimeEngines.Lemonade)
+        {
+            WriteHealthLog($"runtime transition runtime={RuntimeIdentity} action=external-provider-retains-model");
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_options.Model))
         {
             return;
         }
 
-        var engine = LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint);
-        switch (engine)
-        {
-            case LocalRuntimeEngines.LmStudio:
-                await UnloadLmStudioAsync(cancellationToken).ConfigureAwait(false);
-                break;
-            case LocalRuntimeEngines.Ollama:
-                await UnloadOllamaAsync(cancellationToken).ConfigureAwait(false);
-                break;
-            case LocalRuntimeEngines.LlamaCpp:
-                await UnloadLlamaCppAsync(cancellationToken).ConfigureAwait(false);
-                break;
-            case LocalRuntimeEngines.Lemonade:
-                await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
-                Volatile.Write(ref _lemonadeModelPrepared, 0);
-                break;
-            default:
-                throw new InvalidOperationException(
-                    $"Ali cannot verify model release for runtime engine '{engine}'. Select LM Studio, Ollama, llama.cpp, or Lemonade before switching engines.");
-        }
-    }
-
-    private async Task UnloadLmStudioAsync(CancellationToken cancellationToken)
-    {
-        var modelsUri = BuildServerRootUri("api/v1/models");
-        var instanceIds = await GetLmStudioLoadedInstanceIdsAsync(
-            modelsUri,
-            cancellationToken).ConfigureAwait(false);
-        if (instanceIds.Count == 0)
-        {
-            WriteHealthLog($"LM Studio model release already verified runtime={RuntimeIdentity}");
-            return;
-        }
-
-        var unloadUri = BuildServerRootUri("api/v1/models/unload");
-        foreach (var instanceId in instanceIds)
-        {
-            await PostJsonAndRequireSuccessAsync(
-                unloadUri,
-                new { instance_id = instanceId },
-                "LM Studio model unload",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        await WaitForModelReleaseAsync(
-            modelsUri,
-            body => !LmStudioListsModelAsLoaded(body, _options.Model),
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<IReadOnlyList<string>> GetLmStudioLoadedInstanceIdsAsync(
-        Uri modelsUri,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, modelsUri);
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"LM Studio model inventory returned HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
-        }
-
-        try
-        {
-            return FindLmStudioLoadedInstanceIds(body, _options.Model);
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidOperationException(
-                $"LM Studio model inventory returned invalid JSON: {ex.Message}",
-                ex);
-        }
-    }
-
-    private async Task UnloadOllamaAsync(CancellationToken cancellationToken)
-    {
-        var unloadUri = BuildOllamaApiUri("generate");
-        await PostJsonAndRequireSuccessAsync(
-            unloadUri,
-            new { model = _options.Model, keep_alive = 0, stream = false },
-            "Ollama model unload",
-            cancellationToken).ConfigureAwait(false);
-
-        await WaitForModelReleaseAsync(
-            BuildOllamaApiUri("ps"),
-            body => !OllamaListsModelAsLoaded(body, _options.Model),
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task UnloadLlamaCppAsync(CancellationToken cancellationToken)
-    {
-        var unloadUri = BuildServerRootUri("models/unload");
-        await PostJsonAndRequireSuccessAsync(
-            unloadUri,
-            new { model = _options.Model },
-            "llama.cpp model unload",
-            cancellationToken).ConfigureAwait(false);
-
-        await WaitForModelReleaseAsync(
-            BuildServerRootUri("models"),
-            body => !LlamaCppListsModelAsLoaded(body, _options.Model),
-            cancellationToken).ConfigureAwait(false);
+        await UnloadLemonadeAsync(cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref _lemonadeModelPrepared, 0);
     }
 
     private async Task UnloadLemonadeAsync(CancellationToken cancellationToken)
@@ -475,7 +385,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private async Task EnsureLemonadeModelLoadedAsync(CancellationToken cancellationToken)
     {
-        if (LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) != LocalRuntimeEngines.Lemonade)
+        if (LocalRuntimeEngines.Normalize(_options.Engine) != LocalRuntimeEngines.Lemonade)
         {
             return;
         }
@@ -607,104 +517,6 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     }
 
-    private static bool OllamaListsModelAsLoaded(string json, string model)
-    {
-        using var document = JsonDocument.Parse(json);
-        return document.RootElement.TryGetProperty("models", out var models)
-            && models.ValueKind == JsonValueKind.Array
-            && models.EnumerateArray().Any(item =>
-                MatchesModelProperty(item, "model", model) || MatchesModelProperty(item, "name", model));
-    }
-
-    private static bool LlamaCppListsModelAsLoaded(string json, string model)
-    {
-        using var document = JsonDocument.Parse(json);
-        if (!document.RootElement.TryGetProperty("data", out var models) || models.ValueKind != JsonValueKind.Array)
-        {
-            return false;
-        }
-
-        foreach (var item in models.EnumerateArray())
-        {
-            if (!MatchesModelProperty(item, "id", model))
-            {
-                continue;
-            }
-
-            if (!item.TryGetProperty("status", out var status)
-                || !status.TryGetProperty("value", out var value)
-                || value.ValueKind != JsonValueKind.String)
-            {
-                return true;
-            }
-
-            var statusValue = value.GetString();
-            return !string.Equals(statusValue, "unloaded", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(statusValue, "sleeping", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
-    }
-
-    internal static bool LmStudioListsModelAsLoaded(string json, string model) =>
-        FindLmStudioLoadedInstanceIds(json, model).Count > 0;
-
-    private static IReadOnlyList<string> FindLmStudioLoadedInstanceIds(string json, string model)
-    {
-        using var document = JsonDocument.Parse(json);
-        if (document.RootElement.ValueKind != JsonValueKind.Object
-            || !document.RootElement.TryGetProperty("models", out var models)
-            || models.ValueKind != JsonValueKind.Array)
-        {
-            throw new JsonException("LM Studio model inventory did not contain a models array.");
-        }
-
-        var instanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in models.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object)
-            {
-                throw new JsonException("LM Studio model inventory contained a non-object model entry.");
-            }
-
-            var modelMatches = MatchesModelProperty(item, "key", model)
-                || MatchesModelProperty(item, "id", model)
-                || MatchesModelProperty(item, "selected_variant", model)
-                || JsonArrayContainsString(item, "variants", model);
-            if (!item.TryGetProperty("loaded_instances", out var instances)
-                || instances.ValueKind != JsonValueKind.Array)
-            {
-                throw new JsonException("LM Studio model inventory entry did not contain a loaded_instances array.");
-            }
-
-            foreach (var instance in instances.EnumerateArray())
-            {
-                if (instance.ValueKind != JsonValueKind.Object
-                    || !instance.TryGetProperty("id", out var id)
-                    || id.ValueKind != JsonValueKind.String
-                    || string.IsNullOrWhiteSpace(id.GetString()))
-                {
-                    throw new JsonException("LM Studio loaded instance did not contain a valid ID.");
-                }
-
-                var instanceId = id.GetString()!;
-                if (modelMatches || string.Equals(instanceId, model, StringComparison.OrdinalIgnoreCase))
-                {
-                    instanceIds.Add(instanceId);
-                }
-            }
-        }
-
-        return instanceIds.Order(StringComparer.OrdinalIgnoreCase).ToArray();
-    }
-
-    private static bool JsonArrayContainsString(JsonElement element, string propertyName, string value) =>
-        element.TryGetProperty(propertyName, out var values)
-        && values.ValueKind == JsonValueKind.Array
-        && values.EnumerateArray().Any(item =>
-            item.ValueKind == JsonValueKind.String
-            && string.Equals(item.GetString(), value, StringComparison.OrdinalIgnoreCase));
-
     private static bool LemonadeListsModelAsLoaded(string json, string model)
     {
         using var document = JsonDocument.Parse(json);
@@ -774,11 +586,16 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private async Task<ModelsCheckResult> CheckModelsEndpointAsync(CancellationToken cancellationToken)
     {
-        var uri = BuildUri("models");
+        var uri = LocalRuntimeModelInventory.BuildModelsUri(_options.Endpoint);
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         WriteHealthLog($"request GET {uri}");
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        var body = await LocalRuntimeModelInventory
+            .ReadBoundedBodyAsync(response.Content, cancellationToken)
+            .ConfigureAwait(false);
         WriteHealthLog($"response GET {uri} status={(int)response.StatusCode} body={TrimForUser(body)}");
 
         if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.MethodNotAllowed)
@@ -791,7 +608,17 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             return ModelsCheckResult.Failure($"Models endpoint failed with HTTP {(int)response.StatusCode}. {TrimForUser(body)}");
         }
 
-        if (!body.Contains(_options.Model, StringComparison.OrdinalIgnoreCase))
+        bool listsSelectedModel;
+        try
+        {
+            listsSelectedModel = LocalRuntimeModelInventory.ListsExactModel(body, _options.Model);
+        }
+        catch (JsonException ex)
+        {
+            return ModelsCheckResult.Failure($"Models endpoint returned invalid JSON: {TrimForUser(ex.Message)}");
+        }
+
+        if (!listsSelectedModel)
         {
             return ModelsCheckResult.Failure($"Endpoint responded, but model '{_options.Model}' was not listed.");
         }
@@ -1166,10 +993,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     }
 
     private bool IsNativeOllamaEndpoint() =>
-        LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.Ollama;
+        LocalRuntimeEngines.Normalize(_options.Engine) == LocalRuntimeEngines.Ollama;
 
     private bool IsLmStudioEndpoint() =>
-        LocalRuntimeEngines.Normalize(_options.Engine, _options.Endpoint) == LocalRuntimeEngines.LmStudio;
+        LocalRuntimeEngines.Normalize(_options.Engine) == LocalRuntimeEngines.LmStudio;
 
     private object? ResolveNativeThinkingValue(string? reasoningEffortOverride = null) =>
         ThinkingControl switch

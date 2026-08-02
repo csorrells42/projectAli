@@ -1,11 +1,11 @@
-"""Lemonade provider adapter for Mem0 without modifying the pinned package."""
+"""Provider-neutral local OpenAI-compatible LLM adapter for Mem0."""
 
 import os
 
 from mem0.llms.openai import OpenAILLM
 
 
-class LemonadeLLM(OpenAILLM):
+class LocalOpenAICompatibleLLM(OpenAILLM):
     def generate_response(self, messages, response_format=None, tools=None, tool_choice="auto", **kwargs):
         messages = list(messages)
         params = self._get_supported_params(messages=messages, **kwargs)

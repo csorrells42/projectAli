@@ -338,7 +338,7 @@
     { "source": "src/Modules/Voice/Tools/local_kitten_tts.py", "destination": "lib/voice/local_kitten_tts.py" },
     { "source": "src/Modules/Voice/Tools/local_whisper_stt.py", "destination": "lib/voice/local_whisper_stt.py" },
     { "source": "src/Modules/UserMemory/Tools/mem0_service.py", "destination": "lib/memory/mem0_service.py" },
-    { "source": "src/Modules/UserMemory/Tools/lemonade_llm.py", "destination": "lib/memory/lemonade_llm.py" },
+    { "source": "src/Modules/UserMemory/Tools/openai_compatible_llm.py", "destination": "lib/memory/openai_compatible_llm.py" },
     { "source": "src/Modules/UserMemory/Tools/local_qdrant.py", "destination": "lib/memory/local_qdrant.py" },
     { "source": "tools/runtime-assets/fastembed-bm25-ref-main.txt", "destination": "runtime/fastembed-cache/models--Qdrant--bm25/refs/main" },
     { "source": "tools/runtime-assets/fastembed-bm25-files-metadata.json", "destination": "runtime/fastembed-cache/models--Qdrant--bm25/files_metadata.json" },

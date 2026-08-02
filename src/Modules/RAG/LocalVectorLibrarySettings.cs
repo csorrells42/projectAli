@@ -1,13 +1,18 @@
 using System.Text.Json;
 using Ali;
+using Ali.Modules.Embeddings;
 
 namespace Ali.Modules.RAG;
 
 public sealed record LocalVectorLibrarySettings
 {
-    public const string DefaultEmbeddingEndpoint = "http://127.0.0.1:13305/api/v1/embeddings";
+    public const string DefaultEmbeddingProvider = LocalEmbeddingProviders.LmStudio;
 
-    public const string DefaultEmbeddingModel = "nomic-embed-text-v1-GGUF";
+    public const string DefaultEmbeddingEndpoint = "http://127.0.0.1:1234/v1/embeddings";
+
+    public const string DefaultEmbeddingModel = "text-embedding-nomic-embed-text-v1";
+
+    public const int DefaultEmbeddingDimensions = 768;
 
     public bool Enabled { get; init; } = true;
 
@@ -35,9 +40,13 @@ public sealed record LocalVectorLibrarySettings
 
     public string RootDirectory { get; init; } = DefaultRootDirectory();
 
+    public string EmbeddingProvider { get; init; } = DefaultEmbeddingProvider;
+
     public string EmbeddingEndpoint { get; init; } = DefaultEmbeddingEndpoint;
 
     public string EmbeddingModel { get; init; } = DefaultEmbeddingModel;
+
+    public int EmbeddingDimensions { get; init; } = DefaultEmbeddingDimensions;
 
     public int ScanIntervalMinutes { get; init; } = 10;
 
@@ -105,6 +114,9 @@ public static class LocalVectorLibrarySettingsStore
     public static string GetScanStatePath(string dataRoot) =>
         Path.Combine(ResolveUserDataRoot(dataRoot), "RAG", "local_library_scan_state.json");
 
+    public static string GetEmbeddingSpaceMarkerPath(string dataRoot) =>
+        Path.Combine(ResolveUserDataRoot(dataRoot), "RAG", "local_library_embedding_space.sha256");
+
     public static LocalVectorLibrarySettings LoadOrDefault(string dataRoot)
     {
         var path = GetSettingsPath(dataRoot);
@@ -116,25 +128,69 @@ public static class LocalVectorLibrarySettingsStore
         try
         {
             using var stream = File.OpenRead(path);
-            return JsonSerializer.Deserialize<LocalVectorLibrarySettings>(stream, JsonOptions)
-                   ?? new LocalVectorLibrarySettings();
+            using var document = JsonDocument.Parse(stream);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !HasProperty(root, "embeddingEndpoint")
+                || !HasProperty(root, "embeddingModel"))
+            {
+                return InvalidEmbeddingFallback();
+            }
+
+            var settings = document.RootElement.Deserialize<LocalVectorLibrarySettings>(JsonOptions)
+                           ?? InvalidEmbeddingFallback();
+            return settings with
+            {
+                EmbeddingProvider = HasProperty(root, "embeddingProvider")
+                    ? settings.EmbeddingProvider
+                    : LocalEmbeddingProviders.Custom,
+                EmbeddingDimensions = HasProperty(root, "embeddingDimensions")
+                    ? settings.EmbeddingDimensions
+                    : LocalVectorLibrarySettings.DefaultEmbeddingDimensions
+            };
         }
         catch (JsonException)
         {
-            return new LocalVectorLibrarySettings();
+            return InvalidEmbeddingFallback();
         }
         catch (IOException)
         {
-            return new LocalVectorLibrarySettings();
+            return InvalidEmbeddingFallback();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return InvalidEmbeddingFallback();
         }
     }
 
     public static void Save(string dataRoot, LocalVectorLibrarySettings settings)
     {
         var path = GetSettingsPath(dataRoot);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var stream = File.Create(path);
-        JsonSerializer.Serialize(stream, settings, JsonOptions);
+        var directory = Path.GetDirectoryName(path)!;
+        Directory.CreateDirectory(directory);
+        var temporaryPath = Path.Combine(
+            directory,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, settings, JsonOptions);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
     public static void MoveLegacyDefaultRootIfNeeded(string dataRoot)
@@ -147,16 +203,21 @@ public static class LocalVectorLibrarySettingsStore
 
         try
         {
-            LocalVectorLibrarySettings? settings;
             using (var stream = File.OpenRead(path))
+            using (var document = JsonDocument.Parse(stream))
             {
-                settings = JsonSerializer.Deserialize<LocalVectorLibrarySettings>(stream, JsonOptions);
+                var root = document.RootElement;
+                if (!HasProperty(root, "embeddingProvider")
+                    || !HasProperty(root, "embeddingDimensions"))
+                {
+                    // Loading an older compatible file may synthesize these two
+                    // in memory, but startup must not publish those values back
+                    // until the user explicitly saves the current settings.
+                    return;
+                }
             }
 
-            if (settings is null)
-            {
-                return;
-            }
+            var settings = LoadOrDefault(dataRoot);
 
             var legacyRoot = Path.GetFullPath(LocalVectorLibrarySettings.LegacyDefaultRootDirectory());
             var currentRoot = Path.GetFullPath(settings.RootDirectory);
@@ -195,4 +256,18 @@ public static class LocalVectorLibrarySettingsStore
 
         return fullPath;
     }
+
+    private static bool HasProperty(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.EnumerateObject().Any(property =>
+            string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase));
+
+    private static LocalVectorLibrarySettings InvalidEmbeddingFallback() =>
+        new()
+        {
+            EmbeddingProvider = string.Empty,
+            EmbeddingEndpoint = string.Empty,
+            EmbeddingModel = string.Empty,
+            EmbeddingDimensions = LocalVectorLibrarySettings.DefaultEmbeddingDimensions
+        };
 }

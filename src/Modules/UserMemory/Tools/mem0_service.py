@@ -7,11 +7,13 @@ The worker never listens on a network interface and rejects non-loopback provide
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
@@ -19,7 +21,7 @@ sys.path.insert(0, str(SCRIPT_ROOT))
 os.environ["MEM0_TELEMETRY"] = "false"
 os.environ["POSTHOG_DISABLED"] = "true"
 os.environ["OPENAI_API_KEY"] = "ali-local-only"
-os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
 os.environ["HTTP_PROXY"] = "http://127.0.0.1:1"
 os.environ["HTTPS_PROXY"] = "http://127.0.0.1:1"
 
@@ -41,7 +43,13 @@ requested by Mem0. "Remember that my neighbor is Bill" is durable; "hello" is no
 
 def require_loopback(value: str, name: str) -> str:
     normalized = value.rstrip("/")
-    if not normalized.lower().startswith(("http://127.0.0.1:", "http://localhost:")):
+    parsed = urlsplit(normalized)
+    host = parsed.hostname or ""
+    try:
+        loopback = host.lower() == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if parsed.scheme.lower() != "http" or not loopback or parsed.username or parsed.password:
         raise ValueError(f"{name} must be a loopback HTTP endpoint")
     return normalized
 
@@ -74,15 +82,35 @@ def item(value: dict) -> dict:
 class Worker:
     def __init__(self, args):
         llm_endpoint = require_loopback(args.llm_endpoint, "LLM endpoint")
-        embedding_endpoint = require_loopback(args.embedding_endpoint, "embedding endpoint")
+        embedding_api_base = require_loopback(args.embedding_api_base, "embedding API base")
+        self.embedding_provider = str(args.embedding_provider).strip()
+        if not self.embedding_provider:
+            raise ValueError("An embedding provider is required")
         if args.qdrant_host not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("Qdrant must use a loopback host")
+        qdrant_api_key_environment_variable = str(args.qdrant_api_key_environment_variable).strip()
+        qdrant_api_key = (
+            os.environ.get(qdrant_api_key_environment_variable)
+            if qdrant_api_key_environment_variable
+            else None
+        )
         Path(args.data_root).mkdir(parents=True, exist_ok=True)
         LlmFactory.provider_to_class["openai"] = (
-            "lemonade_llm.LemonadeLLM",
+            "openai_compatible_llm.LocalOpenAICompatibleLLM",
             OpenAIConfig,
         )
         VectorStoreFactory.provider_to_class["qdrant"] = "local_qdrant.LocalQdrant"
+        qdrant_config = {
+            "collection_name": args.collection,
+            "embedding_model_dims": args.embedding_dimensions,
+            "host": args.qdrant_host,
+            "port": args.qdrant_port,
+            "path": None,
+            "https": args.qdrant_use_tls == "true",
+            "on_disk": True,
+        }
+        if qdrant_api_key:
+            qdrant_config["api_key"] = qdrant_api_key
         self.memory = Memory.from_config(
             {
                 "version": "v1.1",
@@ -103,19 +131,12 @@ class Worker:
                     "config": {
                         "model": args.embedding_model,
                         "api_key": "ali-local-only",
-                        "openai_base_url": embedding_endpoint,
+                        "openai_base_url": embedding_api_base,
                     },
                 },
                 "vector_store": {
                     "provider": "qdrant",
-                    "config": {
-                        "collection_name": args.collection,
-                        "embedding_model_dims": args.embedding_dimensions,
-                        "host": args.qdrant_host,
-                        "port": args.qdrant_port,
-                        "path": None,
-                        "on_disk": True,
-                    },
+                    "config": qdrant_config,
                 },
             }
         )
@@ -144,7 +165,8 @@ class Worker:
         if operation == "health":
             memories = self.list_for(stable_id, 500)
             return self.ok(
-                f"Mem0 and Qdrant are ready with hybrid retrieval; backfilled {self.hybrid_backfill_count} memory item(s).",
+                f"Mem0 and Qdrant are ready with {self.embedding_provider} embeddings and hybrid retrieval; "
+                f"backfilled {self.hybrid_backfill_count} memory item(s).",
                 memories=[],
                 count=len(memories),
             )
@@ -240,11 +262,15 @@ def main() -> int:
     parser.add_argument("--llm-endpoint", required=True)
     parser.add_argument("--llm-model", required=True)
     parser.add_argument("--llm-output-tokens", type=int, required=True)
-    parser.add_argument("--embedding-endpoint", required=True)
+    parser.add_argument("--embedding-provider", required=True)
+    parser.add_argument("--embedding-api-base", required=True)
     parser.add_argument("--embedding-model", required=True)
     parser.add_argument("--embedding-dimensions", type=int, required=True)
     parser.add_argument("--qdrant-host", required=True)
     parser.add_argument("--qdrant-port", type=int, required=True)
+    parser.add_argument("--qdrant-grpc-port", type=int, required=True)
+    parser.add_argument("--qdrant-use-tls", choices=("true", "false"), required=True)
+    parser.add_argument("--qdrant-api-key-environment-variable", required=True)
     worker = Worker(parser.parse_args())
     for line in sys.stdin:
         if not line.strip():

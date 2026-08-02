@@ -54,6 +54,97 @@ public sealed class LocalKnowledgeInfrastructureTests
     }
 
     [Fact]
+    public void EmbeddingSpaceMarker_CoversEveryConfiguredVectorSpaceBoundary()
+    {
+        var settings = new LocalVectorLibrarySettings
+        {
+            EmbeddingProvider = "provider-a",
+            EmbeddingEndpoint = "http://127.0.0.1:1234/full/path/embeddings",
+            EmbeddingModel = "model-a",
+            EmbeddingDimensions = 768,
+            QdrantHost = "127.0.0.1",
+            QdrantHttpPort = 6333,
+            QdrantGrpcPort = 6334,
+            QdrantUseTls = false,
+            QdrantCollectionName = "collection-a"
+        };
+        var marker = LocalVectorLibraryRetriever.CreateEmbeddingSpaceMarker(settings);
+        var changedSettings = new[]
+        {
+            settings with { EmbeddingProvider = "provider-b" },
+            settings with { EmbeddingEndpoint = "http://127.0.0.1:1234/other/embeddings" },
+            settings with { EmbeddingModel = "model-b" },
+            settings with { EmbeddingDimensions = 1024 },
+            settings with { QdrantHost = "localhost" },
+            settings with { QdrantHttpPort = 7333 },
+              settings with { QdrantGrpcPort = 7334 },
+              settings with { QdrantUseTls = true },
+              settings with { QdrantCollectionName = "collection-b" },
+              settings with { RootDirectory = Path.Combine(Path.GetTempPath(), "other-local-library") }
+          };
+
+        Assert.Matches("^[0-9A-F]{64}$", marker);
+        Assert.All(changedSettings, changed =>
+            Assert.NotEqual(marker, LocalVectorLibraryRetriever.CreateEmbeddingSpaceMarker(changed)));
+        Assert.Equal(
+              marker,
+              LocalVectorLibraryRetriever.CreateEmbeddingSpaceMarker(
+                  settings with { MaxFiles = 1 }));
+    }
+
+    [Fact]
+    public void EmbeddingSpaceGuardDecision_ResetsOnlyWhenMismatchedArtifactsMayExist()
+    {
+        const string expected = "EXPECTED";
+
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.Current,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, expected, scanStateExists: true, collectionExists: true));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.Current,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, expected, scanStateExists: false, collectionExists: false));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.ResetAndReindex,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, expected, scanStateExists: true, collectionExists: false));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.ResetAndReindex,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, expected, scanStateExists: false, collectionExists: true));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.InitializeMarker,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, observedMarker: null, scanStateExists: false, collectionExists: false));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.InitializeMarker,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, "OLD", scanStateExists: false, collectionExists: false));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.ResetAndReindex,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, observedMarker: null, scanStateExists: true, collectionExists: false));
+        Assert.Equal(
+            EmbeddingSpaceGuardAction.ResetAndReindex,
+            LocalVectorLibraryRetriever.DetermineEmbeddingSpaceGuardAction(
+                expected, "OLD", scanStateExists: false, collectionExists: true));
+    }
+
+    [Fact]
+    public void EmbeddingSpaceMarker_IsStoredOutsideTheScanStateJson()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ali-marker-path-test");
+
+        var markerPath = LocalVectorLibrarySettingsStore.GetEmbeddingSpaceMarkerPath(root);
+        var scanStatePath = LocalVectorLibrarySettingsStore.GetScanStatePath(root);
+
+        Assert.NotEqual(markerPath, scanStatePath);
+        Assert.EndsWith(".sha256", markerPath, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(".json", scanStatePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RipgrepFindsLiteralTextAndHonorsAllowedExtensions()
     {
         var root = Path.Combine(Path.GetTempPath(), "ali-ripgrep-test", Guid.NewGuid().ToString("N"));
@@ -104,7 +195,9 @@ public sealed class LocalKnowledgeInfrastructureTests
         var library = Path.Combine(root, "Library");
         Directory.CreateDirectory(dataRoot);
         Directory.CreateDirectory(library);
-        await File.WriteAllTextAsync(Path.Combine(library, "notes.txt"), "alpha marker explains the local semantic concept", TestContext.Current.CancellationToken);
+        var directFile = Path.Combine(library, "notes.txt");
+        await File.WriteAllTextAsync(directFile, "alpha marker explains the local semantic concept", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(library, "second.txt"), "beta marker proves a full forced reindex", TestContext.Current.CancellationToken);
         await using var embeddingServer = new FakeEmbeddingServer();
         var httpPort = GetFreeTcpPort();
         var grpcPort = GetFreeTcpPort();
@@ -113,6 +206,7 @@ public sealed class LocalKnowledgeInfrastructureTests
         {
             RootDirectory = library,
             EmbeddingEndpoint = embeddingServer.Endpoint,
+            EmbeddingDimensions = 3,
             QdrantHttpPort = httpPort,
             QdrantGrpcPort = grpcPort,
             QdrantCollectionName = $"h_{Guid.NewGuid():N}"[..12],
@@ -130,6 +224,58 @@ public sealed class LocalKnowledgeInfrastructureTests
             Assert.True(result.HasSources, string.Join(" ", result.Warnings));
             Assert.Contains(result.Excerpts, excerpt => excerpt.Name.StartsWith("notes.txt:1", StringComparison.Ordinal));
             Assert.Contains(result.Excerpts, excerpt => excerpt.Name.StartsWith("notes.txt", StringComparison.Ordinal));
+
+            var markerPath = LocalVectorLibrarySettingsStore.GetEmbeddingSpaceMarkerPath(dataRoot);
+            var firstMarker = await File.ReadAllTextAsync(markerPath, TestContext.Current.CancellationToken);
+            var siblingCollection = $"s_{Guid.NewGuid():N}"[..12];
+            using (var client = manager.CreateClient(settings))
+            {
+                await client.CreateCollectionAsync(
+                    siblingCollection,
+                    new VectorParams { Size = 3, Distance = Distance.Cosine },
+                    cancellationToken: TestContext.Current.CancellationToken);
+            }
+
+            var changedSettings = settings with { EmbeddingModel = "changed-embedding-model" };
+            var changedRetriever = new LocalVectorLibraryRetriever(
+                dataRoot,
+                httpClient,
+                changedSettings,
+                manager);
+            var pending = await changedRetriever.GetStatusAsync(TestContext.Current.CancellationToken);
+            Assert.True(pending.ServerReachable);
+            Assert.False(pending.CollectionExists);
+            Assert.Equal(0ul, pending.ChunkCount);
+            Assert.Contains("pending an embedding-space rebuild", pending.Message, StringComparison.OrdinalIgnoreCase);
+            using (var client = manager.CreateClient(settings))
+            {
+                Assert.True(await client.CollectionExistsAsync(
+                    settings.QdrantCollectionName,
+                    TestContext.Current.CancellationToken));
+            }
+
+            var directResult = await changedRetriever.RetrieveAsync(
+                $"read local document \"{directFile}\"",
+                TestContext.Current.CancellationToken);
+            Assert.True(directResult.HasSources, string.Join(" ", directResult.Warnings));
+            using (var client = manager.CreateClient(changedSettings))
+            {
+                Assert.True(await client.CollectionExistsAsync(
+                    siblingCollection,
+                    TestContext.Current.CancellationToken));
+                Assert.Equal(
+                    2ul,
+                    await client.CountAsync(
+                        changedSettings.QdrantCollectionName,
+                        exact: true,
+                        cancellationToken: TestContext.Current.CancellationToken));
+            }
+
+            var secondMarker = await File.ReadAllTextAsync(markerPath, TestContext.Current.CancellationToken);
+            Assert.NotEqual(firstMarker, secondMarker);
+            Assert.Equal(
+                LocalVectorLibraryRetriever.CreateEmbeddingSpaceMarker(changedSettings),
+                secondMarker.Trim());
         }
         finally
         {

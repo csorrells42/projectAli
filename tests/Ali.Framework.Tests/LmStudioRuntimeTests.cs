@@ -10,17 +10,29 @@ namespace Ali.Framework.Tests;
 public sealed class LmStudioRuntimeTests
 {
     [Fact]
-    public void EngineCatalog_UsesLmStudioAsTheSafeLocalDefaultAndKeepsCustomOpenAi()
+    public void EngineCatalog_UsesExplicitProvidersWithoutInferringFromPorts()
     {
-        var endpoint = LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio);
+        var lmStudioEndpoint = LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio);
+        var ollamaEndpoint = LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Ollama);
+        var llamaCppEndpoint = LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LlamaCpp);
+        var lemonadeEndpoint = LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.Lemonade);
+        var customEndpoint = LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.GenericOpenAi);
 
-        Assert.Equal("http://127.0.0.1:1234/v1/", endpoint.ToString());
-        Assert.Equal(LocalRuntimeEngines.LmStudio, LocalRuntimeEngines.Choices[0]);
-        Assert.Contains(LocalRuntimeEngines.GenericOpenAi, LocalRuntimeEngines.Choices);
-        Assert.Equal(LocalRuntimeEngines.LmStudio, LocalRuntimeEngines.Normalize(string.Empty, endpoint));
+        Assert.Equal("http://127.0.0.1:1234/v1/", lmStudioEndpoint.ToString());
+        Assert.Equal("http://127.0.0.1:11434/v1/", ollamaEndpoint.ToString());
+        Assert.Equal("http://127.0.0.1:8080/v1/", llamaCppEndpoint.ToString());
+        Assert.Equal("http://127.0.0.1:13305/api/v1/", lemonadeEndpoint.ToString());
+        Assert.Equal("http://127.0.0.1:1234/v1/", customEndpoint.ToString());
         Assert.Equal(
-            LocalRuntimeEngines.GenericOpenAi,
-            LocalRuntimeEngines.Normalize(LocalRuntimeEngines.GenericOpenAi, endpoint));
+            "LM Studio|Ollama|llama.cpp|Lemonade|OpenAI-compatible/Custom",
+            string.Join('|', LocalRuntimeEngines.Choices));
+        Assert.Equal(LocalRuntimeEngines.GenericOpenAi, LocalRuntimeEngines.Normalize(string.Empty, ollamaEndpoint));
+        Assert.Equal(LocalRuntimeEngines.GenericOpenAi, LocalRuntimeEngines.Normalize("unknown-provider", lemonadeEndpoint));
+        Assert.Equal(LocalRuntimeEngines.LmStudio, LocalRuntimeEngines.Normalize(LocalRuntimeEngines.LmStudio, ollamaEndpoint));
+        Assert.Equal(LocalRuntimeEngines.Ollama, LocalRuntimeEngines.Normalize(LocalRuntimeEngines.Ollama, lmStudioEndpoint));
+        Assert.Equal(LocalRuntimeEngines.LlamaCpp, LocalRuntimeEngines.Normalize(LocalRuntimeEngines.LlamaCpp, ollamaEndpoint));
+        Assert.Equal(LocalRuntimeEngines.Lemonade, LocalRuntimeEngines.Normalize(LocalRuntimeEngines.Lemonade, lmStudioEndpoint));
+        Assert.Equal(LocalRuntimeEngines.GenericOpenAi, LocalRuntimeEngines.Normalize("OpenAI-compatible", lmStudioEndpoint));
     }
 
     [Fact]
@@ -54,54 +66,210 @@ public sealed class LmStudioRuntimeTests
 
         Assert.Equal("openai/gpt-oss-20b", choice.Model);
         Assert.Equal("Installed local runtime model", choice.Source);
+        Assert.Equal(65_536, choice.DefaultContextTokens);
+        Assert.Equal(8_192, choice.DefaultOutputTokenLimit);
+        Assert.True(choice.SupportsToolCalls);
     }
 
     [Fact]
-    public async Task Shutdown_UnloadsExactLmStudioInstanceAndVerifiesRelease()
+    public void OpenAiModelDiscovery_ExcludesEmbeddingIdsAndMetadataFromChatChoices()
     {
-        var handler = new LmStudioReleaseHandler();
-        using var client = new HttpClient(handler);
-        var runtime = new OpenAiCompatibleLocalModelRuntime(
-            client,
-            new OpenAiCompatibleRuntimeOptions(
-                Enabled: true,
-                Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio),
-                Model: "openai/gpt-oss-20b",
-                DisplayName: "GPT-OSS 20B",
-                Family: "GPT-OSS",
-                Size: "20B",
-                Quantization: "Q4_K_M",
-                ContextTokens: 8192,
-                OutputTokenLimit: 2048,
-                Temperature: 1,
-                TopP: null,
-                StreamingEnabled: true,
-                SupportsVision: false,
-                SupportsToolCalls: true,
-                AllowPrivateLanEndpoint: false)
+        const string json =
+            """
             {
-                Engine = LocalRuntimeEngines.LmStudio
-            });
+              "data": [
+                { "id": "openai/gpt-oss-20b", "object": "model" },
+                { "id": "hybrid-chat-model", "object": "model", "capabilities": ["chat", "embedding"] },
+                { "id": "text-embedding-nomic-embed-text-v1.5", "object": "model" },
+                { "id": "custom-encoder", "object": "model", "type": "embedding" },
+                { "id": "metadata-encoder", "object": "model", "capabilities": ["embedding"] }
+              ]
+            }
+            """;
+
+        var choices = RuntimeModelChoiceCatalog.ParseRuntimeModelChoices(json);
+
+        Assert.Equal(
+            ["hybrid-chat-model", "openai/gpt-oss-20b"],
+            choices.Select(choice => choice.Model).OrderBy(value => value, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task OpenAiModelDiscovery_NormalizesAMissingBaseSlashAndParsesABoundedResponse()
+    {
+        var handler = new RuntimeModelInventoryHandler(
+            new StringContent(
+                "{\"data\":[{\"id\":\"openai/gpt-oss-20b\",\"object\":\"model\"}]}",
+                Encoding.UTF8,
+                "application/json"));
+        using var client = new HttpClient(handler);
+
+        var choice = Assert.Single(await MainWindowViewModel.FetchInstalledRuntimeModelChoicesAsync(
+            client,
+            new Uri("http://127.0.0.1:1234/v1"),
+            TestContext.Current.CancellationToken));
+
+        Assert.Equal("openai/gpt-oss-20b", choice.Model);
+        Assert.Equal("http://127.0.0.1:1234/v1/models", handler.RequestUri?.ToString());
+    }
+
+    [Fact]
+    public async Task OpenAiModelDiscovery_RejectsAPublicEndpointBeforeSendingARequest()
+    {
+        var handler = new RuntimeModelInventoryHandler(
+            new StringContent("{\"data\":[]}", Encoding.UTF8, "application/json"));
+        using var client = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            MainWindowViewModel.FetchInstalledRuntimeModelChoicesAsync(
+                client,
+                new Uri("https://example.com/v1/"),
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("Only loopback endpoints", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(handler.RequestUri);
+    }
+
+    [Theory]
+    [InlineData("{\"data\":[{\"id\":\"openai/gpt-oss-20b\"}]}")]
+    [InlineData("{\"models\":[{\"key\":\"openai/gpt-oss-20b\"}]}")]
+    [InlineData("{\"all_models_loaded\":[{\"model_name\":\"openai/gpt-oss-20b\"}]}")]
+    public void RuntimeModelInventory_RequiresAnExactParsedModelIdentity(string json)
+    {
+        Assert.True(LocalRuntimeModelInventory.ListsExactModel(json, "openai/gpt-oss-20b"));
+        Assert.False(LocalRuntimeModelInventory.ListsExactModel(json, "openai/gpt-oss-20"));
+        Assert.False(LocalRuntimeModelInventory.ListsExactModel(
+            "{\"metadata\":{\"name\":\"openai/gpt-oss-20b\"}}",
+            "openai/gpt-oss-20b"));
+    }
+
+    [Fact]
+    public async Task RuntimeHealth_RejectsASubstringModelInventoryMatch()
+    {
+        var handler = new RuntimeModelInventoryHandler(
+            new StringContent(
+                "{\"data\":[{\"id\":\"openai/gpt-oss-20b-extra\"}]}",
+                Encoding.UTF8,
+                "application/json"));
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.LmStudio);
+
+        var health = await runtime.CheckHealthAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(health.Succeeded);
+        Assert.Contains("was not listed", health.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("http://127.0.0.1:1234/v1/models", handler.RequestUri?.ToString());
+    }
+
+    [Fact]
+    public async Task RuntimeHealth_RejectsAnOversizedModelInventoryBeforePromptCalls()
+    {
+        var bytes = Encoding.UTF8.GetBytes(
+            new string('x', MainWindowViewModel.MaximumRuntimeModelInventoryResponseBytes + 1));
+        var handler = new RuntimeModelInventoryHandler(new UnknownLengthContent(bytes));
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.LmStudio);
+
+        var health = await runtime.CheckHealthAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(health.Succeeded);
+        Assert.Contains("model inventory response exceeded", health.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 MiB", health.Summary, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OpenAiModelDiscovery_RejectsOversizedInventoryBeforeJsonParsing(bool includeContentLength)
+    {
+        var bytes = Encoding.UTF8.GetBytes(
+            new string('x', MainWindowViewModel.MaximumRuntimeModelInventoryResponseBytes + 1));
+        HttpContent content = includeContentLength
+            ? new ByteArrayContent(bytes)
+            : new UnknownLengthContent(bytes);
+        var handler = new RuntimeModelInventoryHandler(content);
+        using var client = new HttpClient(handler);
+
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            MainWindowViewModel.FetchInstalledRuntimeModelChoicesAsync(
+                client,
+                new Uri("http://127.0.0.1:1234/v1/"),
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("model inventory response exceeded", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 MiB", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("JSON", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OpenAiModelDiscovery_AcceptsAnExactlyOneMiBUnknownLengthInventory()
+    {
+        const string prefix = "{\"data\":[],\"padding\":\"";
+        const string suffix = "\"}";
+        var body = prefix
+            + new string(
+                'x',
+                MainWindowViewModel.MaximumRuntimeModelInventoryResponseBytes - prefix.Length - suffix.Length)
+            + suffix;
+        var bytes = Encoding.UTF8.GetBytes(body);
+        Assert.Equal(MainWindowViewModel.MaximumRuntimeModelInventoryResponseBytes, bytes.Length);
+        var handler = new RuntimeModelInventoryHandler(new UnknownLengthContent(bytes));
+        using var client = new HttpClient(handler);
+
+        var choices = await MainWindowViewModel.FetchInstalledRuntimeModelChoicesAsync(
+            client,
+            new Uri("http://127.0.0.1:1234/v1/"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(choices);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SavedModelChoice_RetainsExplicitToolCallSupport(bool supportsToolCalls)
+    {
+        var options = RuntimeSettingsStore.GetDefaultOptions() with
+        {
+            Model = "openai/gpt-oss-20b",
+            SupportsToolCalls = supportsToolCalls
+        };
+
+        var choice = RuntimeModelChoice.FromOptions(options);
+
+        Assert.Equal(supportsToolCalls, choice.SupportsToolCalls);
+    }
+
+    [Theory]
+    [InlineData(LocalRuntimeEngines.LmStudio)]
+    [InlineData(LocalRuntimeEngines.Ollama)]
+    [InlineData(LocalRuntimeEngines.LlamaCpp)]
+    [InlineData(LocalRuntimeEngines.GenericOpenAi)]
+    public async Task Shutdown_LeavesExternallyOwnedProviderModelLoaded(string engine)
+    {
+        var handler = new RecordingHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, engine);
+
+        await runtime.ShutdownAsync(TestContext.Current.CancellationToken);
+        await runtime.UnloadForModelSwitchAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Shutdown_KeepsLemonadeSpecificUnloadAndVerificationLifecycle()
+    {
+        var handler = new LemonadeReleaseHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.Lemonade);
 
         await runtime.ShutdownAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            [
-                "GET /api/v1/models",
-                "POST /api/v1/models/unload",
-                "GET /api/v1/models"
-            ],
+            ["POST /api/v1/unload", "GET /api/v1/health"],
             handler.Requests.Select(request => $"{request.Method} {request.Path}"));
-        Assert.Contains("\"instance_id\":\"openai/gpt-oss-20b\"", handler.Requests[1].Body, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void LmStudioReleaseVerification_RejectsAnUnknownInventoryShape()
-    {
-        Assert.Throws<System.Text.Json.JsonException>(() =>
-            OpenAiCompatibleLocalModelRuntime.LmStudioListsModelAsLoaded(
-                "{\"data\":[]}",
-                "openai/gpt-oss-20b"));
+        Assert.Contains("\"model_name\":\"openai/gpt-oss-20b\"", handler.Requests[0].Body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -112,7 +280,7 @@ public sealed class LmStudioRuntimeTests
 
         Assert.Contains("RuntimeEngineGuidanceText", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Refresh models\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("http://127.0.0.1:1234/v1/", xaml, StringComparison.Ordinal);
+        Assert.Contains("Choose LM Studio, Ollama, llama.cpp, Lemonade, or a custom OpenAI-compatible localhost runtime.", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -221,10 +389,27 @@ public sealed class LmStudioRuntimeTests
                 ReasoningEffort = "low"
             });
 
-    private sealed class LmStudioReleaseHandler : HttpMessageHandler
+    private sealed class RecordingHandler : HttpMessageHandler
     {
-        private bool _unloaded;
+        public List<RecordedRequest> Requests { get; } = [];
 
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add(new RecordedRequest(
+                request.Method.Method,
+                request.RequestUri!.AbsolutePath,
+                body));
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
+    private sealed class LemonadeReleaseHandler : HttpMessageHandler
+    {
         public List<RecordedRequest> Requests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
@@ -240,36 +425,19 @@ public sealed class LmStudioRuntimeTests
                 body));
 
             if (request.Method == HttpMethod.Post
-                && request.RequestUri!.AbsolutePath == "/api/v1/models/unload")
+                && request.RequestUri.AbsolutePath == "/api/v1/unload")
             {
-                _unloaded = true;
-                return Json("{\"instance_id\":\"openai/gpt-oss-20b\"}");
+                return Json("{}");
             }
 
             if (request.Method == HttpMethod.Get
-                && request.RequestUri!.AbsolutePath == "/api/v1/models")
+                && request.RequestUri.AbsolutePath == "/api/v1/health")
             {
-                return Json(_unloaded
-                    ? ModelInventory("[]")
-                    : ModelInventory("[{\"id\":\"openai/gpt-oss-20b\",\"config\":{\"context_length\":8192}}]"));
+                return Json("{\"all_models_loaded\":[]}");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
-
-        private static string ModelInventory(string loadedInstances) =>
-            $$"""
-              {
-                "models": [
-                  {
-                    "type": "llm",
-                    "key": "openai/gpt-oss-20b",
-                    "selected_variant": "openai/gpt-oss-20b@q4_k_m",
-                    "loaded_instances": {{loadedInstances}}
-                  }
-                ]
-              }
-              """;
 
         private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK)
         {
@@ -299,6 +467,37 @@ public sealed class LmStudioRuntimeTests
                     "application/json")
             };
         }
+    }
+
+    private sealed class RuntimeModelInventoryHandler(HttpContent content) : HttpMessageHandler
+    {
+        public Uri? RequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = content
+            });
+        }
+    }
+
+    private sealed class UnknownLengthContent(byte[] bytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            stream.WriteAsync(bytes).AsTask();
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+
+        protected override Task<Stream> CreateContentReadStreamAsync() =>
+            Task.FromResult<Stream>(new MemoryStream(bytes, writable: false));
     }
 
     private sealed record RecordedRequest(string Method, string Path, string Body);

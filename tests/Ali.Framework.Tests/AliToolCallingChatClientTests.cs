@@ -14,7 +14,7 @@ using AIChatRole = Microsoft.Extensions.AI.ChatRole;
 
 namespace Ali.Framework.Tests;
 
-public sealed class LemonadeToolCallingChatClientTests
+public sealed class AliToolCallingChatClientTests
 {
     [Fact]
     public async Task BlockedAndUncertainFrameworkResults_AreNotPresentedAsCompletedInvocations()
@@ -46,7 +46,7 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
             AIChatRole.Assistant,
             "{\"action\":\"call\",\"assessment\":\"A fresh test is needed.\",\"tool\":\"test_tool\",\"arguments\":{},\"summary\":\"Run the test\",\"next\":\"Evaluate the result.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -100,7 +100,7 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
             AIChatRole.Assistant,
             decision)));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -156,7 +156,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"The project exists but lacks build evidence.\",\"tool\":\"dotnet_build_project\",\"arguments\":{},\"summary\":\"Build the project\",\"next\":\"Use the compiler result to verify or repair it.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -213,7 +213,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 $$"""{"action":"final","answer":"{{answer}}"}""")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -254,7 +254,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The requested repair has not been written or verified.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/AliChess/ChessBoardView.xaml.cs\",\"content\":\"complete source\"},\"summary\":\"Write the requested implementation\",\"next\":\"Build and verify the repaired project.\",\"basis\":\"No successful write or build result proves the requested repair exists.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -299,7 +299,7 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
             AIChatRole.Assistant,
             "{\"action\":\"final\",\"answer\":\"Hey Chris!\",\"review\":\"direct\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -340,7 +340,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"A topic is required for the refined search.\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"software engineering developments July 29 2026\",\"topic\":\"software engineering\"},\"summary\":\"Refine the search with a valid topic\",\"next\":\"Evaluate the returned current evidence.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -378,7 +378,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"Official release evidence is needed.\",\"tool\":\"research_web\",\"arguments\":{\"query\":\"official .NET releases\"},\"summary\":\"Research primary sources\",\"next\":\"Ground the answer in official releases.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -412,7 +412,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"The prior provider name was not registered.\",\"tool\":\"research_web\",\"arguments\":{\"question\":\"Find official release notes\"},\"summary\":\"Use Ali's registered research tool\",\"next\":\"Review the official evidence it returns.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -448,7 +448,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The final source has not been built.\",\"tool\":\"coding_build_project\",\"arguments\":{\"projectPath\":\"Desktop/AliChess/AliChess.csproj\"},\"summary\":\"Verify the final source\",\"next\":\"Use build diagnostics to confirm or repair the result.\",\"basis\":\"The requested repair has no successful verification result.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -503,7 +503,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"No successful build proves the project works.\",\"tool\":\"coding_build_project\",\"arguments\":{\"projectPath\":\"Desktop/AliChess/AliChess.csproj\"},\"summary\":\"Build the final source now\",\"next\":\"Inspect diagnostics and continue until verified.\",\"basis\":\"No successful build result exists for the requested project.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -553,7 +553,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"board initialization is missing\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/Chess/MainWindow.xaml.cs\",\"content\":\"complete board\",\"overwrite\":true},\"summary\":\"implement the complete board\",\"next\":\"inspect and build the result\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -609,7 +609,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The scaffold still lacks the chess engine.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/ChessGame/Program.cs\",\"content\":\"complete chess engine\",\"overwrite\":true},\"summary\":\"Implement the next atomic chess subsystem\",\"next\":\"Build and inspect the completed subsystem.\",\"basis\":\"The successful scaffold and build prove progress, not an impossibility.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -656,7 +656,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"blocked\":true,\"action\":\"final\",\"answer\":\"I could not build the project because two independent build attempts failed with the required compiler unavailable.\",\"basis\":\"Two distinct authoritative tool failures report the same external compiler blocker.\",\"evidenceQuote\":\"Required compiler unavailable\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -701,7 +701,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The original playable chess request remains unfinished.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/ChessGame/ChessEngine.cs\",\"content\":\"complete chess engine\",\"overwrite\":false},\"summary\":\"Continue the original chess-game request\",\"next\":\"Verify the full game after implementation.\",\"basis\":\"The complaint criticizes the unfinished prior result and reasserts the original playable-chess outcome.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -751,7 +751,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"The requested application still needs its main window.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/Game/MainWindow.xaml\",\"content\":\"<Window />\"},\"summary\":\"Continue building the requested app\",\"next\":\"Build and inspect the completed UI.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -784,7 +784,7 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
             AIChatRole.Assistant,
             "{\"action\":\"call\",\"assessment\":\"Read the requested state.\",\"tool\":\"read_current_state\",\"arguments\":{},\"summary\":\"Read current state\",\"next\":\"Use the result to answer.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -823,7 +823,7 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new DelayedChatClient(
             TimeSpan.FromMilliseconds(45),
             "{\"action\":\"call\",\"assessment\":\"Read the requested state.\",\"tool\":\"read_current_state\",\"arguments\":{},\"summary\":\"Read current state\",\"next\":\"Use the result to answer.\"}");
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -854,7 +854,7 @@ public sealed class LemonadeToolCallingChatClientTests
             "Finish the current job.",
             activity.Add);
         using var inner = new PegFailureThenSuccessChatClient();
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -885,7 +885,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"The score update is missing from the source.\",\"tool\":\"file_access_replace_lines\",\"arguments\":{\"fileName\":\"Desktop/Game.cs\",\"edits\":[{\"line_number\":10,\"new_line\":\"        UpdateScore();\"}]},\"summary\":\"Update the score\",\"next\":\"Re-read and build the changed source.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -910,7 +910,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 """{"action":"call","assessment":"The report needs the requested update.","tool":"file_access_write","arguments":{"fileName":"C:\\Users\\Chris\\Documents\\report.txt","content":"updated","overwrite":true},"summary":"Update the report","next":"Confirm the write result."}""")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -957,7 +957,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "YES\nThe greeting is answered directly without claiming an unperformed action.")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Bob",
@@ -994,7 +994,7 @@ public sealed class LemonadeToolCallingChatClientTests
             {
                 FinishReason = ChatFinishReason.Stop
             });
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Charlie",
@@ -1036,7 +1036,7 @@ public sealed class LemonadeToolCallingChatClientTests
             {
                 FinishReason = ChatFinishReason.Stop
             });
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1069,7 +1069,7 @@ public sealed class LemonadeToolCallingChatClientTests
             {
                 FinishReason = ChatFinishReason.Stop
             });
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Charlie",
@@ -1108,7 +1108,7 @@ public sealed class LemonadeToolCallingChatClientTests
             {
                 FinishReason = ChatFinishReason.Stop
             });
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1150,7 +1150,7 @@ public sealed class LemonadeToolCallingChatClientTests
             {
                 FinishReason = ChatFinishReason.Stop
             });
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Charlie",
@@ -1184,7 +1184,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Created Desktop/touch.txt.\",\"basis\":\"The successful write result proves Desktop/touch.txt was created.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Charlie",
@@ -1232,7 +1232,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Here are all 120 authoritative rows.\",\"basis\":\"The authoritative collection result declares a total of 120 rows.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1270,7 +1270,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Handled the bounded result.\",\"basis\":\"The requested bounded inspection result was supplied.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1302,7 +1302,7 @@ public sealed class LemonadeToolCallingChatClientTests
     {
         var inventory = AliCapabilityCatalog.ListAvailableTools(new AgentOrchestrationSettings());
 
-        var serialized = LemonadeToolCallingChatClient.SerializeToolResultForModel(inventory);
+        var serialized = AliToolCallingChatClient.SerializeToolResultForModel(inventory);
         using var document = System.Text.Json.JsonDocument.Parse(serialized);
         var root = document.RootElement;
         var rows = root.GetProperty("tools").EnumerateArray().ToArray();
@@ -1321,7 +1321,7 @@ public sealed class LemonadeToolCallingChatClientTests
         using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
             AIChatRole.Assistant,
             "{\"action\":\"final\",\"answer\":\"Catalog handled.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1356,7 +1356,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The build still reports unresolved references.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\",\"content\":\"clean\"},\"summary\":\"Remove the unresolved references before rebuilding\",\"next\":\"Rebuild and verify the clean result.\",\"basis\":\"The successful build still reported unresolved work, so the requested clean result is not complete.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1416,7 +1416,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"From the limited results returned, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\",\"basis\":\"The answer now limits its claim to the evidence returned and labels the ranking as inference.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1459,7 +1459,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The existing source is still a placeholder.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/AliChess/ChessGame.cs\",\"content\":\"complete engine\",\"overwrite\":false},\"summary\":\"Continue the requested implementation\",\"next\":\"Inspect and build the completed game.\",\"basis\":\"The existing source is still a placeholder, so the requested complete game is not done.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1503,7 +1503,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "YES\nThe answer identifies bluegill correctly; the harmless spelling error does not change the requested fact.")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1545,7 +1545,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The legal move is known but has not been executed.\",\"tool\":\"chess_make_move\",\"arguments\":{\"move\":\"e8d8\"},\"summary\":\"Execute the selected legal move\",\"next\":\"Verify the authoritative board advanced to White.\",\"basis\":\"Only a read-only board result exists; no move result proves execution.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1601,7 +1601,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"No route-capable result proves the requested directions.\",\"tool\":\"maps_create_directions_link\",\"arguments\":{\"origin\":\"home\",\"destination\":\"home\",\"waypoints\":[\"Publix near Stuart, FL\",\"Waffle House near Stuart, FL\",\"gym near Stuart, FL\"],\"travelMode\":\"driving\"},\"summary\":\"Create a live map route without inventing directions\",\"next\":\"Give the verified Maps handoff to the user.\",\"basis\":\"No route-capable tool result proves the requested directions.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1661,7 +1661,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"call\",\"assessment\":\"The returned weather evidence is not fresh enough.\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"weather observation July 29 2026\",\"topic\":\"weather\"},\"summary\":\"Verify a same-day observation before recommending\",\"next\":\"Base the recommendation on the fresh observation.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1715,7 +1715,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The build still reports eight warnings.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\",\"content\":\"clean\"},\"summary\":\"Remove the warning source\",\"next\":\"Rebuild and verify zero warnings.\",\"basis\":\"The build result reports eight warnings, so the requested clean build is not complete.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -1771,7 +1771,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The build still reports nine warnings.\",\"tool\":\"file_access_replace\",\"arguments\":{},\"summary\":\"Remove the warning source\",\"next\":\"Rebuild after the source repair and verify a clean result.\",\"basis\":\"The build result reports nine warnings, so the requested clean runnable app is not complete.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -1829,7 +1829,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"From the five returned excerpts, these are the two strongest matches. Their broader importance is my inference, not a source-established ranking.\",\"basis\":\"The answer reports the evidence limits and labels broader importance as inference.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -1875,7 +1875,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"Your saved bridge validation codeword is cobalt-heron-4729.\",\"basis\":\"The durable-memory tool result contains the exact requested codeword.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -1922,7 +1922,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"blocked\":true,\"action\":\"final\",\"answer\":\"I did not update that memory because permission was denied.\",\"basis\":\"The user denied the required mutation permission, so the requested update could not be performed.\",\"evidenceQuote\":\"Denied by the user.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -1965,7 +1965,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 ["overwrite"] = true
             }));
         using var inner = new RecordingChatClient(new ChatResponse(nativeCallMessage));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -2003,7 +2003,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 ["basis"] = "The requested outcome is a new executable software project."
             }));
         using var inner = new RecordingChatClient(new ChatResponse(classification));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -2047,7 +2047,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 """
                 {"action":"call","assessment":"The requested application has no authoritative implementation evidence.","tool":"coding_agent_execute","arguments":{"targetPath":"Desktop/TicTacToe","objective":"Create, build, verify, and run the requested WPF Tic-Tac-Toe application."},"summary":"Delegate the complete implementation to the selected coding executor","next":"Evaluate the executor's build and runtime evidence."}
                 """)));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -2097,7 +2097,7 @@ public sealed class LemonadeToolCallingChatClientTests
             "read_current_state",
             new Dictionary<string, object?>()));
         using var inner = new RecordingChatClient(new ChatResponse(toolCall));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -2137,7 +2137,7 @@ public sealed class LemonadeToolCallingChatClientTests
             "The model classified the greeting as casual conversation.");
         using var inner = new RecordingChatClient(
             new ChatResponse(new AIChatMessage(AIChatRole.Assistant, "Hello! How can I help?")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -2169,7 +2169,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":false,\"action\":\"call\",\"assessment\":\"The requested framework fact has not been read from its authoritative file.\",\"tool\":\"file_access_read\",\"arguments\":{\"fileName\":\"Desktop/App/App.csproj\"},\"summary\":\"Read the requested authoritative project file\",\"next\":\"Answer from the exact project evidence.\",\"basis\":\"The requested framework fact has not been verified from the specified project file.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -2217,7 +2217,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"taskComplete\":true,\"action\":\"final\",\"answer\":\"108 tools across Ali native, Agent Framework, Roslyn, and integration sources.\",\"basis\":\"The authoritative tool inventory reports exactly 108 tools and the requested source categories.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -2260,7 +2260,7 @@ public sealed class LemonadeToolCallingChatClientTests
             new ChatResponse(new AIChatMessage(
                 AIChatRole.Assistant,
                 "{\"action\":\"final\",\"answer\":\"I can move that folder into recoverable trash after approval.\"}")));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
@@ -2287,7 +2287,7 @@ public sealed class LemonadeToolCallingChatClientTests
         var nativeCallMessage = new AIChatMessage(AIChatRole.Assistant, string.Empty);
         nativeCallMessage.Contents.Add(new FunctionCallContent("call-memory", "recall_user_memory"));
         using var inner = new RecordingChatClient(new ChatResponse(nativeCallMessage));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new NativeToolRuntime(),
             "Ali",
@@ -2325,7 +2325,7 @@ public sealed class LemonadeToolCallingChatClientTests
                 """
                 {"action":"call","assessment":"The requested file still needs to be written.","tool":"file_access_write","arguments":{"":"discarded","":"also discarded","fileName":"Desktop/board.txt","content":"stone board"},"summary":"Write the board artifact","next":"Verify the created file."}
                 """)));
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",

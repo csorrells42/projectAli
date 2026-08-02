@@ -18,7 +18,7 @@ public sealed class FullToolRegistryPlanningTests
             "{\"action\":\"final\",\"answer\":\"The project scaffold is ready, but build and execution tools are unavailable.\"}",
             "NO\nThe scaffold alone does not contain game logic and there is no build, run, or application-verification evidence.",
             "{\"action\":\"call\",\"assessment\":\"The scaffold still needs playable game logic.\",\"tool\":\"file_access_write\",\"arguments\":{\"fileName\":\"Desktop/Game/MainWindow.xaml.cs\",\"content\":\"complete game logic\"},\"summary\":\"Write the playable implementation\",\"next\":\"Build, run, and verify the completed game.\"}");
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             model,
             new DevelopmentLocalModelRuntime(),
             "Bob",
@@ -64,7 +64,7 @@ public sealed class FullToolRegistryPlanningTests
             "{\"action\":\"final\",\"answer\":\"Tulsa, Oklahoma is warm today.\"}",
             "NO\nThe draft substitutes Tulsa for Tullahoma and has no successful live evidence for the requested current weather.",
             "{\"action\":\"call\",\"assessment\":\"Current evidence for the requested Tennessee location is missing.\",\"tool\":\"search_current_web\",\"arguments\":{\"query\":\"current weather Tullahoma Tennessee\"},\"summary\":\"Retrieve live weather evidence for Tullahoma\",\"next\":\"Answer from the returned Tullahoma observations or forecast.\"}");
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             model,
             new DevelopmentLocalModelRuntime(),
             "Bob",
@@ -108,7 +108,7 @@ public sealed class FullToolRegistryPlanningTests
             "NO\nThe successful National Weather Service result contains a current Tullahoma observation, so the draft contradicts available evidence.",
             "{\"action\":\"final\",\"answer\":\"The National Weather Service reports 78 F with light wind in Tullahoma at 10:55 AM CDT.\"}",
             "YES\nThe answer preserves Tullahoma and accurately synthesizes the successful current weather evidence.");
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             model,
             new DevelopmentLocalModelRuntime(),
             "Bob",
@@ -153,7 +153,7 @@ public sealed class FullToolRegistryPlanningTests
             "{\"action\":\"final\",\"answer\":\"The build and execution tools are unavailable.\"}",
             "NO\nThe build and run tools already succeeded. The later build reports that process 9800 is running the target artifact, so the approved stop-project action is the missing next step.",
             "{\"action\":\"call\",\"assessment\":\"The previously launched game is locking its build output.\",\"tool\":\"dotnet_stop_project\",\"arguments\":{\"projectPath\":\"Desktop/TicTacToe/TicTacToe.csproj\",\"configuration\":\"Debug\"},\"summary\":\"Request approval to close process 9800\",\"next\":\"Rebuild and relaunch after the target closes.\"}");
-        using var client = new LemonadeToolCallingChatClient(
+        using var client = new AliToolCallingChatClient(
             model,
             new DevelopmentLocalModelRuntime(),
             "Bob",

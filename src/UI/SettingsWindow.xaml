@@ -496,7 +496,7 @@
                                         HorizontalAlignment="Right"
                                         Margin="0,4,0,2"
                                         ToolTip="Refresh installed model choices from the endpoint." />
-                                <TextBlock Text="LM Studio defaults to http://127.0.0.1:1234/v1/. Custom OpenAI-compatible localhost endpoints remain supported."
+                                <TextBlock Text="Choose LM Studio, Ollama, llama.cpp, Lemonade, or a custom OpenAI-compatible localhost runtime. Ali preserves the selected provider and endpoint."
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"
@@ -601,6 +601,8 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="12" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0">
                                         <CheckBox Content="Streaming responses"
@@ -618,6 +620,17 @@
                                                   Margin="0,0,0,2"
                                                   ToolTip="User selectable. Enable only for image-capable models." />
                                         <TextBlock Text="User selectable; enable only for image-capable models."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <CheckBox Content="Native tool calls"
+                                                  IsChecked="{Binding RuntimeToolCallsEnabled}"
+                                                  AutomationProperties.AutomationId="RuntimeToolCallsEnabled"
+                                                  Margin="0,0,0,2"
+                                                  ToolTip="Enable only when the selected chat model supports OpenAI-compatible tool calls." />
+                                        <TextBlock Text="Required for Ali's native tool-use path; leave off for models without tool support."
                                                    TextWrapping="Wrap"
                                                    FontSize="11"
                                                    Foreground="{StaticResource SubtleTextBrush}" />
@@ -1074,7 +1087,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="Per-User Long-Term Memory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Text="Mem0 uses GPT-OSS through Lemonade and a separate Qdrant collection. Identity profile IDs—not display names—own memories."
+                                <TextBlock Text="Mem0 uses the configured local embedding provider and separate Qdrant collections. Identity profile IDs—not display names—own memories."
                                            Foreground="{StaticResource SubtleTextBrush}" TextWrapping="Wrap" Margin="0,4,12,0" />
                                 <TextBlock Text="{Binding StatusText}" Foreground="#64D8FF" TextWrapping="Wrap" Margin="0,6,12,0"
                                            AutomationProperties.AutomationId="SettingsUserMemoryStatusText" />
@@ -1379,7 +1392,7 @@
                                        FontSize="18"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource TextBrush}" />
-                            <TextBlock Text="Create a zip backup of Ali's user data, or restore one after reinstalling. Lemonade models are not included or changed."
+                            <TextBlock Text="Create a zip backup of Ali's user data, or restore one after reinstalling. Local runtime models are not included or changed."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,3,0,12" />
@@ -2840,7 +2853,7 @@
                                 <TextBlock Text="{Binding Statistics}" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,10,0,0" />
                                 <TextBlock Text="{Binding QdrantDataPath, StringFormat=Data: {0}}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
                                 <WrapPanel Margin="0,12,0,0">
-                                    <Button Content="Test Connection" Command="{Binding TestCommand}" Margin="0,0,8,0" />
+                                    <Button Content="Test Qdrant Connection" Command="{Binding TestCommand}" Margin="0,0,8,0" />
                                     <Button Content="Start" Command="{Binding StartCommand}" Margin="0,0,8,0" />
                                     <Button Content="Stop Ali-owned" Command="{Binding StopCommand}" Margin="0,0,8,0" />
                                     <Button Content="Open Dashboard" Command="{Binding OpenDashboardCommand}" Margin="0,0,8,0" />
@@ -2854,20 +2867,35 @@
                                 <TextBlock Text="Approved Library and Embeddings" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10" />
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <TextBlock Text="Library folder" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding RootDirectory, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,8,3" />
                                     <Button Grid.Column="2" Content="Choose" Command="{Binding ChooseFolderCommand}" Margin="0,3,8,3" /><Button Grid.Column="3" Content="Open" Command="{Binding OpenFolderCommand}" Margin="0,3" />
-                                    <TextBlock Grid.Row="1" Text="Embedding URL" VerticalAlignment="Center" /><TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingEndpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
-                                    <TextBlock Grid.Row="2" Text="Model" VerticalAlignment="Center" /><TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
-                                    <TextBlock Grid.Row="3" Text="Scan / results" VerticalAlignment="Center" />
-                                    <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,3">
+                                    <TextBlock Grid.Row="1" Text="Provider" VerticalAlignment="Center" />
+                                    <ComboBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
+                                              ItemsSource="{Binding EmbeddingProviderChoices}"
+                                              SelectedItem="{Binding EmbeddingProvider}"
+                                              AutomationProperties.AutomationId="EmbeddingProviderSelector"
+                                              Margin="0,3" />
+                                    <TextBlock Grid.Row="2" Text="Embedding URL" VerticalAlignment="Center" /><TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingEndpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
+                                    <TextBlock Grid.Row="3" Text="Model" VerticalAlignment="Center" /><TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
+                                    <TextBlock Grid.Row="4" Text="Dimensions" VerticalAlignment="Center" /><TextBox Grid.Row="4" Grid.Column="1" Width="90" HorizontalAlignment="Left" Text="{Binding EmbeddingDimensions, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
+                                    <TextBlock Grid.Row="5" Text="Scan / results" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,3">
                                         <TextBox Width="70" Text="{Binding ScanIntervalMinutes, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" min     return " VerticalAlignment="Center" Margin="5,0" /><TextBox Width="55" Text="{Binding MaxRetrievedChunks, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" chunks" VerticalAlignment="Center" Margin="5,0" />
                                     </StackPanel>
                                 </Grid>
-                                <TextBlock Text="C# is split by Tree-sitter declarations. Other supported text remains searchable through bounded overlapping chunks. Rebuild is required after changing embedding models."
+                                <TextBlock Text="Mem0, semantic tool retrieval, and local knowledge use this one explicit provider, endpoint, model, and dimension setting. Selecting a named provider fills its visible preset; Custom preserves the entered values. Changing any embedding setting starts a separate Mem0 embedding space and rebuilds local and semantic indexes before they are used."
                                            Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,10,0,0" />
                                 <WrapPanel Margin="0,12,0,0">
                                     <Button Content="Save" Command="{Binding SaveCommand}" BorderBrush="{StaticResource AccentBrush}" Margin="0,0,8,0" />
+                                    <Button Content="Test Embeddings" Command="{Binding TestEmbeddingCommand}" Margin="0,0,8,0" AutomationProperties.AutomationId="SettingsTestEmbeddingButton" />
                                     <Button Content="Scan Now" Command="{Binding ScanCommand}" Margin="0,0,8,0" AutomationProperties.AutomationId="SettingsLocalKnowledgeScanButton" />
                                     <Button Content="Rebuild Collection" Command="{Binding RebuildCommand}" />
                                 </WrapPanel>

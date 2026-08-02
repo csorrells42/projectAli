@@ -124,7 +124,7 @@ public sealed class Mem0UserMemoryService : IUserMemoryService, IAsyncDisposable
             try
             {
                 // Exercise the same embedding and Qdrant path used by foreground recall.
-                // A health-only probe leaves the CPU embedding model cold and merely moves
+                // A health-only probe can leave the selected local embedding model cold and merely move
                 // the first-turn stall from process startup to the first actual question.
                 var response = await SendAsync(new
                 {

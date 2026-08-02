@@ -19,7 +19,7 @@ namespace Ali.Modules.Coordinator;
 /// when its server does not emit native tool_calls. The tool catalog remains dynamic; GPT-OSS
 /// chooses one next action and this adapter translates that decision to FunctionCallContent.
 /// </summary>
-internal sealed class LemonadeToolCallingChatClient(
+internal sealed class AliToolCallingChatClient(
     IChatClient inner,
     ILocalModelRuntime runtime,
     string assistantName,
@@ -931,10 +931,12 @@ internal sealed class LemonadeToolCallingChatClient(
             GetRetainedToolNames(turn),
             cancellationToken).ConfigureAwait(false);
         turn?.Report(
-            selection.UsedSemanticIndex ? AgentActivityKind.Status : AgentActivityKind.Warning,
+            selection.RequiresAttention ? AgentActivityKind.Warning : AgentActivityKind.Status,
             selection.UsedSemanticIndex
                 ? $"Opened {string.Join(", ", selection.Buckets)}"
-                : "Semantic tool cabinet used its safe fallback",
+                : selection.RequiresAttention
+                    ? "Semantic tool cabinet used its safe fallback"
+                    : "Using the complete live tool registry",
             selection.Status);
         return new ToolPlanningScope(
             registeredTools,
@@ -1022,10 +1024,10 @@ internal sealed class LemonadeToolCallingChatClient(
     }
 
     private sealed class ActiveTurnScope(
-        LemonadeToolCallingChatClient owner,
+        AliToolCallingChatClient owner,
         CoordinatorTurnContext turn) : IDisposable
     {
-        private LemonadeToolCallingChatClient? _owner = owner;
+        private AliToolCallingChatClient? _owner = owner;
 
         public void Dispose() =>
             Interlocked.Exchange(ref _owner, null)?.EndTurn(turn);

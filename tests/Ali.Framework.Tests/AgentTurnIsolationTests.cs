@@ -40,7 +40,7 @@ public sealed class AgentTurnIsolationTests
     {
         var hugeBuildTranscript = new string('x', 50_000) + "\nerror CS1002: ; expected";
 
-        var compacted = LemonadeToolCallingChatClient.SerializeToolResultForModel(new
+        var compacted = AliToolCallingChatClient.SerializeToolResultForModel(new
         {
             success = false,
             output = hugeBuildTranscript

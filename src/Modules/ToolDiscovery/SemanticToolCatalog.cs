@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
+using Ali.Modules.Embeddings;
 using Ali.Modules.RAG;
 using Microsoft.Extensions.AI;
 using Qdrant.Client.Grpc;
@@ -23,7 +23,8 @@ public sealed record SemanticToolSelection(
     IReadOnlyList<string> Buckets,
     string Directory,
     bool UsedSemanticIndex,
-    string Status);
+    string Status,
+    bool RequiresAttention = false);
 
 public sealed record SemanticToolDiscoveryResult(
     string Need,
@@ -53,7 +54,7 @@ internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
             ["Complete live registry"],
             SemanticToolBuckets.BuildDirectory(buckets),
             false,
-            "Semantic indexing is unavailable; the complete live registry was supplied."));
+            "The complete effective live tool registry was supplied for this planning pass."));
     }
 
     public Task<SemanticToolDiscoveryResult> DiscoverAsync(string need, CancellationToken cancellationToken) =>
@@ -65,7 +66,7 @@ internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
 }
 
 /// <summary>
-/// Uses Ali's CPU embedding endpoint and a separate Qdrant collection to propose a compact
+/// Uses Ali's explicit local embedding endpoint and a separate Qdrant collection to propose a compact
 /// set of tool drawers. Vector similarity generates candidates only; Ali's model remains the
 /// sole interpreter and decides whether any loaded tool should run.
 /// </summary>
@@ -75,8 +76,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
     internal const int MaximumCandidateBuckets = 1;
     private const int MaximumEmbeddingChunkCharacters = 700;
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly HttpClient _httpClient;
+    private readonly OpenAiCompatibleEmbeddingClient _embeddingClient;
     private readonly QdrantServiceManager _qdrant;
     private readonly Func<LocalVectorLibrarySettings> _settings;
     private readonly SemaphoreSlim _indexGate = new(1, 1);
@@ -88,7 +88,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         QdrantServiceManager qdrant,
         Func<LocalVectorLibrarySettings> settings)
     {
-        _httpClient = httpClient;
+        _embeddingClient = new OpenAiCompatibleEmbeddingClient(httpClient);
         _qdrant = qdrant;
         _settings = settings;
     }
@@ -116,7 +116,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                 return FullRegistryFallback(liveTools, directory, runtime.Message);
             }
 
-            var fingerprint = BuildFingerprint(liveTools, buckets, settings.EmbeddingModel);
+            var fingerprint = BuildFingerprint(liveTools, buckets, settings);
             await EnsureIndexedAsync(buckets, fingerprint, settings, cancellationToken).ConfigureAwait(false);
             var query = await CreateEmbeddingAsync(need, settings, cancellationToken).ConfigureAwait(false);
             if (query is null)
@@ -162,7 +162,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                 $"Loaded {selectedTools.Length} of {liveTools.Count} live tools from {selectedBuckets.Length} semantic drawer(s).");
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException
-                                   or Grpc.Core.RpcException or TimeoutException or JsonException)
+                                   or Grpc.Core.RpcException or TimeoutException)
         {
             return FullRegistryFallback(
                 liveTools,
@@ -240,7 +240,10 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                     ["bucket_name"] = bucket.Name,
                     ["description"] = bucket.Description,
                     ["registry_fingerprint"] = fingerprint,
-                    ["embedding_model"] = settings.EmbeddingModel
+                    ["embedding_provider"] = settings.EmbeddingProvider,
+                    ["embedding_endpoint"] = settings.EmbeddingEndpoint,
+                    ["embedding_model"] = settings.EmbeddingModel,
+                    ["embedding_dimensions"] = settings.EmbeddingDimensions
                 }
             }).ToArray();
             await client.UpsertAsync(CollectionName, points, wait: true, cancellationToken: cancellationToken)
@@ -284,27 +287,25 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         LocalVectorLibrarySettings settings,
         CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(settings.EmbeddingEndpoint, UriKind.Absolute, out var endpoint))
+        if (!LocalEmbeddingConfiguration.TryCreate(
+                settings.EmbeddingProvider,
+                settings.EmbeddingEndpoint,
+                settings.EmbeddingModel,
+                settings.EmbeddingDimensions,
+                out var configuration,
+                out var failure))
         {
-            return null;
+            throw new InvalidOperationException(failure);
         }
 
-        var vector = await TryPostEmbeddingAsync(
-            endpoint,
-            JsonSerializer.Serialize(new { model = settings.EmbeddingModel, input }, JsonOptions),
-            cancellationToken).ConfigureAwait(false);
-        if (vector is not null)
+        var result = await _embeddingClient
+            .CreateEmbeddingAsync(configuration!, input, cancellationToken)
+            .ConfigureAwait(false);
+        if (!result.Success || result.Vector is null)
         {
-            return vector;
+            throw new InvalidOperationException(result.Message);
         }
-
-        var legacy = new UriBuilder(endpoint) { Path = "/api/embeddings" }.Uri;
-        return legacy == endpoint
-            ? null
-            : await TryPostEmbeddingAsync(
-                legacy,
-                JsonSerializer.Serialize(new { model = settings.EmbeddingModel, prompt = input }, JsonOptions),
-                cancellationToken).ConfigureAwait(false);
+        return result.Vector;
     }
 
     private static IReadOnlyList<string> SplitEmbeddingInput(string input, int maximumCharacters)
@@ -370,42 +371,6 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         return average;
     }
 
-    private async Task<float[]?> TryPostEmbeddingAsync(
-        Uri endpoint,
-        string payload,
-        CancellationToken cancellationToken)
-    {
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        using var response = await _httpClient.PostAsync(endpoint, content, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        using var document = JsonDocument.Parse(body);
-        var root = document.RootElement;
-        if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
-        {
-            var first = data.EnumerateArray().FirstOrDefault();
-            if (first.ValueKind == JsonValueKind.Object && first.TryGetProperty("embedding", out var embedding))
-            {
-                return ReadVector(embedding);
-            }
-        }
-        if (root.TryGetProperty("embeddings", out var embeddings) && embeddings.ValueKind == JsonValueKind.Array)
-        {
-            var first = embeddings.EnumerateArray().FirstOrDefault();
-            return first.ValueKind == JsonValueKind.Array ? ReadVector(first) : null;
-        }
-        return root.TryGetProperty("embedding", out var direct) ? ReadVector(direct) : null;
-    }
-
-    private static float[]? ReadVector(JsonElement value) =>
-        value.ValueKind == JsonValueKind.Array
-            ? value.EnumerateArray().Select(item => item.GetSingle()).ToArray()
-            : null;
-
     private static SemanticToolSelection FullRegistryFallback(
         IReadOnlyList<AIFunctionDeclaration> liveTools,
         string directory,
@@ -415,7 +380,8 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
             ["Complete live registry fallback"],
             directory,
             false,
-            status + " The complete live registry was supplied so no capability was hidden.");
+            status + " The complete live registry was supplied so no capability was hidden.",
+            RequiresAttention: true);
 
     private static HashSet<string> ExpandBucketDependencies(
         IReadOnlyList<ToolBucketDefinition> buckets,
@@ -442,15 +408,15 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         $"Tool drawer: {bucket.Name}. Purpose: {bucket.Description}. Available operations: "
         + string.Join(", ", bucket.ToolNames);
 
-    private static string BuildFingerprint(
+    internal static string BuildFingerprint(
         IReadOnlyList<AIFunctionDeclaration> liveTools,
         IReadOnlyList<ToolBucketDefinition> buckets,
-        string embeddingModel)
+        LocalVectorLibrarySettings settings)
     {
         var source = string.Join("\n", liveTools.OrderBy(tool => tool.Name, StringComparer.Ordinal)
                 .Select(tool => $"{tool.Name}|{tool.Description}"))
             + "\n" + string.Join("\n", buckets.Select(BuildEmbeddingText))
-            + "\n" + embeddingModel;
+            + $"\n{settings.EmbeddingProvider}|{settings.EmbeddingEndpoint}|{settings.EmbeddingModel}|{settings.EmbeddingDimensions}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
     }
 

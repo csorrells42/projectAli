@@ -46,7 +46,7 @@ public sealed class AliProductionCompositionIntegrationTests
             codingModule,
             () => null,
             orchestrationSettings: () => new AgentOrchestrationSettings());
-        var compatibilityClient = new LemonadeToolCallingChatClient(
+        var compatibilityClient = new AliToolCallingChatClient(
             client,
             runtime,
             profile.AssistantName,

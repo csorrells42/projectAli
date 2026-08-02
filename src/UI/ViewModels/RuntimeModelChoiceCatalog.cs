@@ -55,11 +55,24 @@ internal sealed record RuntimeModelChoice(
     IReadOnlyList<int> OutputTokenLimits,
     bool StreamingEnabled,
     bool SupportsVision,
+    bool SupportsToolCalls,
     string Source)
 {
     public string Label => $"{DisplayName} ({Model})";
 
     public string DefaultQuantization => Quantizations.FirstOrDefault() ?? "Installed package default";
+
+    public int DefaultContextTokens => IsGptOss
+        ? OllamaRuntimeSafetyPolicy.DefaultGptOssContextTokens
+        : ContextTokens.FirstOrDefault();
+
+    public int DefaultOutputTokenLimit => IsGptOss
+        ? OllamaRuntimeSafetyPolicy.DefaultGptOssOutputTokenLimit
+        : OutputTokenLimits.FirstOrDefault();
+
+    private bool IsGptOss =>
+        OllamaRuntimeSafetyPolicy.IsGptOssModel(Model)
+        || OllamaRuntimeSafetyPolicy.IsGptOssModel(Family);
 
     public static RuntimeModelChoice FromOptions(OpenAiCompatibleRuntimeOptions options) =>
         FromModelId(
@@ -71,6 +84,7 @@ internal sealed record RuntimeModelChoice(
             quantization: options.Quantization,
             streamingEnabled: options.StreamingEnabled,
             supportsVision: options.SupportsVision,
+            supportsToolCalls: options.SupportsToolCalls,
             contextTokens: options.ContextTokens,
             outputTokenLimit: options.OutputTokenLimit);
 
@@ -82,12 +96,7 @@ internal sealed record RuntimeModelChoice(
             return null;
         }
 
-        if (TryGetProperty(item, "labels", out var labels)
-            && labels.ValueKind is JsonValueKind.Array
-            && labels.EnumerateArray().Any(label =>
-                label.ValueKind is JsonValueKind.String
-                && label.GetString() is { } value
-                && value is "embeddings" or "embedding" or "reranking" or "transcription" or "tts" or "image"))
+        if (IsNonChatModel(item, model))
         {
             return null;
         }
@@ -123,6 +132,7 @@ internal sealed record RuntimeModelChoice(
         string? quantization = null,
         bool streamingEnabled = true,
         bool? supportsVision = null,
+        bool? supportsToolCalls = null,
         int? contextTokens = null,
         int? outputTokenLimit = null)
     {
@@ -133,6 +143,9 @@ internal sealed record RuntimeModelChoice(
             ?? (normalizedModel.Contains("vl", StringComparison.OrdinalIgnoreCase)
                 || normalizedModel.Contains("vision", StringComparison.OrdinalIgnoreCase)
                 || normalizedModel.Contains("visual", StringComparison.OrdinalIgnoreCase));
+        var inferredToolCalls = supportsToolCalls
+            ?? (OllamaRuntimeSafetyPolicy.IsGptOssModel(normalizedModel)
+                || OllamaRuntimeSafetyPolicy.IsGptOssModel(inferredFamily));
         var contextChoices = BuildContextChoices(contextTokens);
         var outputChoices = BuildOutputChoices(outputTokenLimit);
         var quantizationChoices = new[]
@@ -150,8 +163,79 @@ internal sealed record RuntimeModelChoice(
             outputChoices,
             streamingEnabled,
             inferredVision,
+            inferredToolCalls,
             source);
     }
+
+    private static bool IsNonChatModel(JsonElement item, string model)
+    {
+        var modelId = model.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? model;
+        if (modelId.StartsWith("text-embedding-", StringComparison.OrdinalIgnoreCase)
+            || modelId.StartsWith("embedding-", StringComparison.OrdinalIgnoreCase)
+            || modelId.StartsWith("embeddings-", StringComparison.OrdinalIgnoreCase)
+            || modelId.StartsWith("nomic-embed-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var declaredCapabilities = ReadDeclaredCapabilities(item).ToArray();
+        if (declaredCapabilities.Any(IsChatCapability))
+        {
+            return false;
+        }
+
+        return declaredCapabilities.Any(IsNonChatCapability);
+    }
+
+    private static IEnumerable<string> ReadDeclaredCapabilities(JsonElement item)
+    {
+        foreach (var propertyName in new[] { "type", "task", "kind", "capability" })
+        {
+            if (TryGetProperty(item, propertyName, out var property)
+                && property.ValueKind == JsonValueKind.String
+                && property.GetString() is { } value)
+            {
+                yield return value;
+            }
+        }
+
+        foreach (var propertyName in new[] { "labels", "capabilities" })
+        {
+            if (TryGetProperty(item, propertyName, out var values)
+                && values.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var value in values.EnumerateArray())
+                {
+                    if (value.ValueKind == JsonValueKind.String
+                        && value.GetString() is { } text)
+                    {
+                        yield return text;
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsChatCapability(string? value) =>
+        value is not null
+        && (value.Equals("chat", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("completion", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("completions", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("generation", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("text-generation", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("text_generation", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("llm", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("language-model", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsNonChatCapability(string? value) =>
+        value is not null
+        && (value.Equals("embedding", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("embeddings", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("reranking", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("reranker", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("transcription", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("tts", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("image", StringComparison.OrdinalIgnoreCase));
 
     private static IReadOnlyList<int> BuildContextChoices(int? preferred) =>
         AddPreferred(
