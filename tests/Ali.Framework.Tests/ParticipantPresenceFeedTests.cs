@@ -27,8 +27,6 @@ public sealed class ParticipantPresenceFeedTests
         var roster = authority.CaptureAtAdmission(
             "turn:1",
             "conversation:1",
-            activeUsers.CaptureSelectionSnapshot(),
-            activeUsers.CaptureSelectionRevision(),
             DateTimeOffset.UtcNow);
 
         Assert.Equal("alice", roster.SelectedParticipantReference);
@@ -45,8 +43,6 @@ public sealed class ParticipantPresenceFeedTests
         var recaptured = authority.CaptureAtAdmission(
             "turn:2",
             "conversation:1",
-            activeUsers.CaptureSelectionSnapshot(),
-            activeUsers.CaptureSelectionRevision(),
             DateTimeOffset.UtcNow);
         Assert.Equal("alice", recaptured.SelectedParticipantReference);
         Assert.Null(recaptured.Find("bob"));

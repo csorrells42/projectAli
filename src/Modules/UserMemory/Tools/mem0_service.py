@@ -18,11 +18,35 @@ import re
 import secrets
 import stat
 import sys
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
+
+
+def utf16_length(value: str) -> int:
+    """Match .NET string.Length and fail oversized on invalid lone surrogates."""
+
+    try:
+        return len(value.encode("utf-16-le")) // 2
+    except UnicodeEncodeError:
+        return sys.maxsize
+
+
+def dotnet_json_length(value) -> int:
+    """Conservative System.Text.Json default-encoder UTF-16 length."""
+
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=False,
+    )
+    return utf16_length(encoded) + 5 * sum(
+        encoded.count(character) for character in "<>&'"
+    )
 
 if os.name == "nt":
     import msvcrt
@@ -191,7 +215,27 @@ class ParticipantMutationJournal:
         "fingerprint",
         "authorized_access_keys",
         "requesting_participant_reference",
+        "finalization_receipt_ids",
     }
+    _receipt_name = re.compile(r"[0-9a-f]{64}\.json")
+    _writer_name = re.compile(r"writer-[0-9a-f]{64}\.lock")
+    _temporary_name = re.compile(r"\.tmp-[0-9a-f]{32}")
+    _quarantine_name = re.compile(r"[0-9a-f]{64}\.corrupt")
+    _receipt_statuses = {
+        "prepared",
+        "locked",
+        "successor_staged",
+        "target_changed",
+        "in_doubt",
+        "delete_staged",
+        "finalization_started",
+        "rollback_started",
+        "committed",
+        "rolled_back",
+        "erased_by_later_delete",
+        "recovery_expired",
+    }
+    _mutation_operations = {"add", "correct", "dispute", "revoke", "archive", "delete"}
 
     def __init__(self, data_root: str, embedding_space_id: str):
         data_path = Path(data_root)
@@ -208,7 +252,6 @@ class ParticipantMutationJournal:
             self._require_safe_directory(self._root)
         self._tighten_permissions(self._root, 0o700)
         self._embedding_space_id = embedding_space_id
-        self._cleanup_stale_temporaries()
 
     @staticmethod
     def _tighten_permissions(path: Path, mode: int):
@@ -290,6 +333,8 @@ class ParticipantMutationJournal:
         for path in self._root.glob(".tmp-*"):
             if path.parent != self._root:
                 continue
+            if self._temporary_name.fullmatch(path.name) is None:
+                continue
             try:
                 value = self._require_safe_regular_file(path)
                 modified = datetime.fromtimestamp(value.st_mtime, timezone.utc)
@@ -318,15 +363,61 @@ class ParticipantMutationJournal:
 
     def _files(self) -> list[Path]:
         values = []
-        for path in self._root.glob("*.json"):
+        for path in self._root.iterdir():
             if path.parent != self._root:
                 continue
-            try:
-                self._require_safe_regular_file(path)
-            except WorkerProtocolError:
+            if self._receipt_name.fullmatch(path.name) is None:
                 continue
+            self._require_safe_regular_file(path)
             values.append(path)
         return sorted(values)
+
+    def require_classified_global_state(self):
+        """Reject mutation reasoning while recovery artifacts are unclassified."""
+
+        self._require_safe_directory(self._root)
+        try:
+            with os.scandir(self._root) as entries:
+                for entry in entries:
+                    name = entry.name
+                    path = self._root / name
+                    if (
+                        self._temporary_name.fullmatch(name) is not None
+                        or self._quarantine_name.fullmatch(name) is not None
+                    ):
+                        raise WorkerProtocolError(
+                            "mutation_in_doubt",
+                            "The participant-memory journal contains an unclassified recovery artifact; deliberate local repair is required.",
+                            details={"mutationStatus": "in_doubt"},
+                        )
+                    if self._writer_name.fullmatch(name) is not None:
+                        self._require_safe_regular_file(path)
+                        continue
+                    if self._receipt_name.fullmatch(name) is not None:
+                        try:
+                            receipt = self._read_path(path)
+                            self._validate_receipt_structure(path, receipt)
+                        except WorkerProtocolError as error:
+                            self._quarantine_corrupt_receipt(path)
+                            raise WorkerProtocolError(
+                                "mutation_in_doubt",
+                                "A malformed mutation receipt was quarantined; deliberate local repair is required before another write.",
+                                details={"mutationStatus": "in_doubt"},
+                            ) from error
+                        continue
+                    raise WorkerProtocolError(
+                        "mutation_in_doubt",
+                        "The participant-memory journal contains an unknown entry; deliberate local repair is required.",
+                        details={"mutationStatus": "in_doubt"},
+                    )
+        except WorkerProtocolError:
+            raise
+        except OSError as error:
+            raise WorkerProtocolError(
+                "mutation_in_doubt",
+                "The participant-memory journal cannot be classified safely.",
+                details={"mutationStatus": "in_doubt"},
+            ) from error
 
     def _read_path(self, path: Path) -> dict:
         descriptor = None
@@ -380,6 +471,172 @@ class ParticipantMutationJournal:
                 details={"mutationStatus": "in_doubt"},
             )
         return value
+
+    @staticmethod
+    def _bounded_reference(value, maximum: int = 128) -> bool:
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            and utf16_length(value) <= maximum
+            and not any(unicodedata.category(character) == "Cc" for character in value)
+        )
+
+    @staticmethod
+    def _sha256_value(value) -> bool:
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    def _validate_receipt_structure(self, path: Path, receipt: dict):
+        request_id = receipt.get("mutation_request_id")
+        operation = str(receipt.get("operation") or "")
+        status = str(receipt.get("status") or "")
+        if (
+            not self._bounded_reference(request_id)
+            or path != self._path(request_id)
+            or receipt.get("embedding_space_id") != self._embedding_space_id
+            or operation not in self._mutation_operations
+            or status not in self._receipt_statuses
+            or self._parse_utc(receipt.get("updated_utc")) is None
+        ):
+            raise WorkerProtocolError(
+                "mutation_in_doubt",
+                "The durable mutation receipt has invalid identity or state metadata.",
+                details={"mutationStatus": "in_doubt"},
+            )
+
+        if receipt.get("redacted") is True:
+            outcome = str(receipt.get("outcome") or "")
+            redacted_state_is_reachable = (
+                status == "recovery_expired"
+                and outcome == "bounded_rollback_window_expired"
+            ) or (
+                status == "erased_by_later_delete"
+                and outcome == "content_erased_by_authenticated_delete"
+            ) or (
+                operation == "delete"
+                and status == "committed"
+                and outcome == "active_point_deleted_and_journal_redacted"
+            )
+            if (
+                not redacted_state_is_reachable
+                or self._parse_utc(receipt.get("started_utc")) is None
+                or self._content_fields.intersection(receipt)
+                or not self._sha256_value(receipt.get("tenant_id_hash"))
+                or not self._sha256_value(receipt.get("requesting_participant_hash"))
+                or not self._sha256_value(receipt.get("target_id_hash"))
+            ):
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The content-free mutation tombstone is malformed.",
+                    details={"mutationStatus": "in_doubt"},
+                )
+            return
+
+        reachable_states = {
+            "add": {"prepared", "in_doubt", "rollback_started", "committed", "rolled_back"},
+            "correct": {
+                "prepared", "locked", "successor_staged", "target_changed",
+                "in_doubt", "rollback_started", "committed", "rolled_back",
+            },
+            "dispute": {
+                "prepared", "locked", "successor_staged", "target_changed",
+                "in_doubt", "rollback_started", "committed", "rolled_back",
+            },
+            "revoke": {
+                "prepared", "locked", "target_changed", "in_doubt",
+                "rollback_started", "committed", "rolled_back",
+            },
+            "archive": {
+                "prepared", "locked", "target_changed", "in_doubt",
+                "rollback_started", "committed", "rolled_back",
+            },
+            "delete": {
+                "prepared", "locked", "in_doubt", "delete_staged",
+                "finalization_started", "rollback_started", "rolled_back",
+            },
+        }
+        if status not in reachable_states[operation]:
+            raise WorkerProtocolError(
+                "mutation_in_doubt",
+                "The durable mutation receipt has an unreachable operation state.",
+                details={"mutationStatus": "in_doubt"},
+            )
+
+        target_id = str(receipt.get("target_id") or "")
+        created_ids = receipt.get("created_ids")
+        authorized_keys = receipt.get("authorized_access_keys")
+        if (
+            (receipt.get("redacted") is not None and receipt.get("redacted") is not False)
+            or not self._bounded_reference(receipt.get("tenant_id"))
+            or not self._bounded_reference(receipt.get("roster_revision"), 256)
+            or not self._sha256_value(receipt.get("fingerprint"))
+            or self._parse_utc(receipt.get("started_utc")) is None
+            or not isinstance(created_ids, list)
+            or len(created_ids) > 1
+            or any(not self._bounded_reference(value) for value in created_ids)
+            or not isinstance(authorized_keys, list)
+            or not 1 <= len(authorized_keys) <= 16
+            or any(not self._bounded_reference(value, 256) for value in authorized_keys)
+            or not self._bounded_reference(
+                receipt.get("requesting_participant_reference")
+            )
+            or not isinstance(receipt.get("requesting_participant_authenticated"), bool)
+            or (operation != "add" and not self._bounded_reference(target_id))
+            or (operation == "add" and target_id)
+        ):
+            raise WorkerProtocolError(
+                "mutation_in_doubt",
+                "The durable mutation receipt has malformed recovery fields.",
+                details={"mutationStatus": "in_doubt"},
+            )
+        if operation in {"add", "correct", "dispute"} and not self._sha256_value(
+            receipt.get("expected_record_digest")
+        ):
+            raise WorkerProtocolError(
+                "mutation_in_doubt",
+                "The durable mutation receipt lost its successor contract digest.",
+                details={"mutationStatus": "in_doubt"},
+            )
+        if operation != "add":
+            snapshot = receipt.get("target_snapshot")
+            if not isinstance(snapshot, dict) or str(snapshot.get("id") or "") != target_id:
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The durable mutation receipt lost its exact target snapshot.",
+                    details={"mutationStatus": "in_doubt"},
+                )
+        if status == "finalization_started":
+            finalization_ids = receipt.get("finalization_receipt_ids")
+            if (
+                operation != "delete"
+                or self._parse_utc(receipt.get("finalization_started_utc")) is None
+                or not isinstance(finalization_ids, list)
+                or not 1 <= len(finalization_ids) <= self._maximum_receipts
+                or any(not self._bounded_reference(value) for value in finalization_ids)
+                or len(finalization_ids) != len(set(finalization_ids))
+                or request_id not in finalization_ids
+            ):
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The deletion-finalization receipt lost its exact scrub set.",
+                    details={"mutationStatus": "in_doubt"},
+                )
+        for field in ("target_snapshot", "authorization_snapshot"):
+            snapshot = receipt.get(field)
+            if snapshot is None:
+                continue
+            if not isinstance(snapshot, dict) or not self._bounded_reference(snapshot.get("id")):
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The durable mutation receipt contains a malformed point snapshot.",
+                    details={"mutationStatus": "in_doubt"},
+                )
+            payload = snapshot.get("payload")
+            if not isinstance(payload, dict) or not isinstance(payload.get("metadata"), dict):
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The durable mutation receipt contains malformed point metadata.",
+                    details={"mutationStatus": "in_doubt"},
+                )
 
     def _atomic_write(self, path: Path, value: dict):
         if path.parent != self._root:
@@ -541,9 +798,20 @@ class ParticipantMutationJournal:
                 receipt = self._read_path(path)
             except WorkerProtocolError:
                 self._quarantine_corrupt_receipt(path)
-                continue
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "A malformed mutation receipt was quarantined; deliberate local repair is required before another write.",
+                    details={"mutationStatus": "in_doubt"},
+                )
             receipt = self._expire_terminal_receipt(path, receipt, now)
             receipts.append((path, receipt))
+
+        pinned_request_ids = {
+            related_request_id
+            for _, receipt in receipts
+            if str(receipt.get("status") or "") == "finalization_started"
+            for related_request_id in receipt.get("finalization_receipt_ids") or []
+        }
 
         maximum_after_maintenance = self._maximum_receipts - max(0, required_free)
         current_count = len(self._files())
@@ -554,6 +822,8 @@ class ParticipantMutationJournal:
                 if (
                     receipt.get("redacted") is True
                     and str(receipt.get("status") or "") in self._terminal_statuses
+                    and str(receipt.get("mutation_request_id") or "")
+                    not in pinned_request_ids
                     and started is not None
                     and now - started > self._rollback_window
                 ):
@@ -574,7 +844,11 @@ class ParticipantMutationJournal:
     @staticmethod
     def require_request_id(value) -> str:
         request_id = str(value or "").strip()
-        if not request_id or len(request_id) > 128 or any(ord(char) < 32 for char in request_id):
+        if (
+            not request_id
+            or utf16_length(request_id) > 128
+            or any(unicodedata.category(char) == "Cc" for char in request_id)
+        ):
             raise WorkerProtocolError(
                 "invalid_request",
                 "A stable bounded mutation request ID is required.",
@@ -616,6 +890,16 @@ class ParticipantMutationJournal:
         return self._root / f"{digest}.json"
 
     def load(self, request_id: str):
+        self.require_classified_global_state()
+        return self._load_exact_read_only(request_id, expire=True)
+
+    def load_read_only(self, request_id: str):
+        """Read only one exact receipt without maintenance or sibling inspection."""
+
+        return self._load_exact_read_only(request_id, expire=False)
+
+    def _load_exact_read_only(self, request_id: str, *, expire: bool):
+        request_id = self.require_request_id(request_id)
         path = self._path(request_id)
         quarantine = path.with_suffix(".corrupt")
         if os.path.lexists(quarantine):
@@ -628,25 +912,28 @@ class ParticipantMutationJournal:
         if not os.path.lexists(path):
             return None
         value = self._read_path(path)
-        if (
-            not isinstance(value, dict)
-            or value.get("embedding_space_id") != self._embedding_space_id
-            or value.get("mutation_request_id") != request_id
-        ):
+        self._validate_receipt_structure(path, value)
+        if value.get("mutation_request_id") != request_id:
             raise WorkerProtocolError(
                 "mutation_in_doubt",
-                "The durable mutation receipt does not match this embedding space.",
+                "The durable mutation receipt does not match this request.",
                 details={"mutationStatus": "in_doubt"},
             )
-        return self._expire_terminal_receipt(path, value, datetime.now(timezone.utc))
+        return (
+            self._expire_terminal_receipt(path, value, datetime.now(timezone.utc))
+            if expire
+            else value
+        )
 
     def save(self, receipt: dict):
+        self.require_classified_global_state()
         request_id = self.require_request_id(receipt.get("mutation_request_id"))
         value = dict(receipt)
         value["mutation_request_id"] = request_id
         value["embedding_space_id"] = self._embedding_space_id
         value["updated_utc"] = datetime.now(timezone.utc).isoformat()
         path = self._path(request_id)
+        self._validate_receipt_structure(path, value)
         quarantine = path.with_suffix(".corrupt")
         if os.path.lexists(quarantine):
             self._require_safe_regular_file(quarantine)
@@ -677,6 +964,7 @@ class ParticipantMutationJournal:
         self._atomic_write(path, value)
 
     def has_other_active_reference(self, request_id: str, target_ids: list[str]) -> bool:
+        self.require_classified_global_state()
         exact_targets = {str(value or "") for value in target_ids if str(value or "")}
         if not exact_targets:
             return False
@@ -698,6 +986,7 @@ class ParticipantMutationJournal:
         marker for the bounded multi-file scrub.
         """
 
+        self.require_classified_global_state()
         request_id = self.require_request_id(delete_receipt.get("mutation_request_id"))
         target_id = str(delete_receipt.get("target_id") or "")
         if not target_id:
@@ -713,28 +1002,83 @@ class ParticipantMutationJournal:
         originating_mutation_request_id = str(
             deleted_snapshot_metadata.get("mutation_request_id") or ""
         )
-        matching = []
-        for path in self._files():
-            receipt = self._read_path(path)
-            if self._references_target(
-                receipt,
-                target_id,
-                originating_mutation_request_id,
-            ):
+        delete_path = self._path(request_id)
+        status = str(delete_receipt.get("status") or "")
+        if status == "delete_staged":
+            matching = []
+            for path in self._files():
+                receipt = self._read_path(path)
+                if self._references_target(
+                    receipt,
+                    target_id,
+                    originating_mutation_request_id,
+                ):
+                    matching.append((path, receipt))
+            if not any(path == delete_path for path, _ in matching):
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The staged delete receipt is unavailable for finalization.",
+                    details={"mutationStatus": "in_doubt"},
+                )
+            finalization_ids = sorted(
+                str(receipt.get("mutation_request_id") or "")
+                for _, receipt in matching
+            )
+            delete_receipt["status"] = "finalization_started"
+            delete_receipt["finalization_started_utc"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            delete_receipt["finalization_receipt_ids"] = finalization_ids
+            self.save(delete_receipt)
+            matching = [
+                (delete_path, dict(delete_receipt)) if path == delete_path else (path, receipt)
+                for path, receipt in matching
+            ]
+        elif status == "finalization_started":
+            matching = []
+            for related_request_id in delete_receipt.get("finalization_receipt_ids") or []:
+                path = self._path(related_request_id)
+                if not os.path.lexists(path):
+                    raise WorkerProtocolError(
+                        "mutation_in_doubt",
+                        "Deletion finalization lost one exact durable scrub receipt.",
+                        details={"mutationStatus": "finalization_started"},
+                    )
+                receipt = self._read_path(path)
+                self._validate_receipt_structure(path, receipt)
+                if path == delete_path:
+                    if str(receipt.get("status") or "") != "finalization_started":
+                        raise WorkerProtocolError(
+                            "mutation_in_doubt",
+                            "The deletion-finalization marker changed unexpectedly.",
+                            details={"mutationStatus": "finalization_started"},
+                        )
+                    delete_receipt = receipt
+                elif receipt.get("redacted") is True:
+                    # This exact request ID was frozen before the first scrub
+                    # write. Classification already proved a reachable,
+                    # content-free tombstone; expiry may have redacted it first.
+                    pass
+                elif not self._references_target(
+                    receipt,
+                    target_id,
+                    originating_mutation_request_id,
+                ):
+                    raise WorkerProtocolError(
+                        "mutation_in_doubt",
+                        "A deletion scrub receipt no longer references the exact target.",
+                        details={"mutationStatus": "finalization_started"},
+                    )
                 matching.append((path, receipt))
-        if not any(
-            str(receipt.get("mutation_request_id") or "") == request_id
-            for _, receipt in matching
-        ):
+        else:
             raise WorkerProtocolError(
                 "mutation_in_doubt",
-                "The staged delete receipt is unavailable for finalization.",
-                details={"mutationStatus": "in_doubt"},
+                "Deletion finalization requires a staged or resumable receipt.",
+                details={"mutationStatus": status or "in_doubt"},
             )
 
-        delete_path = self._path(request_id)
         for path, receipt in matching:
-            if path == delete_path:
+            if path == delete_path or receipt.get("redacted") is True:
                 continue
             self._atomic_write(
                 path,
@@ -846,6 +1190,12 @@ def participant_single_writer(handler):
     def serialized(worker, *args, **kwargs):
         try:
             with worker.mutation_lease.acquire():
+                # Only the lease owner may remove a crashed writer's old temporary
+                # or rewrite terminal receipts at the bounded recovery deadline.
+                worker.mutation_journal._cleanup_stale_temporaries()
+                worker.mutation_journal.require_classified_global_state()
+                worker.mutation_journal._maintain()
+                worker.mutation_journal.require_classified_global_state()
                 return handler(worker, *args, **kwargs)
         except WorkerProtocolError as error:
             # A nonblocking lease conflict occurs before the handler can load its
@@ -855,7 +1205,7 @@ def participant_single_writer(handler):
             request_id = str(request.get("mutationRequestId") or "").strip()
             if error.error_code == "conflict" and request_id:
                 try:
-                    receipt = worker.mutation_journal.load(request_id)
+                    receipt = worker.mutation_journal.load_read_only(request_id)
                     if receipt is not None:
                         worker.enrich_mutation_error(error, receipt)
                 except (WorkerProtocolError, OSError, ValueError):
@@ -868,7 +1218,9 @@ def participant_single_writer(handler):
 def require_prompt_configuration(mode_value, prefix_value, role: str) -> tuple[str, str]:
     mode = str(mode_value or "").strip().lower()
     prefix = str(prefix_value or "")
-    if len(prefix) > 128 or any(ord(char) < 32 for char in prefix):
+    if utf16_length(prefix) > 128 or any(
+        unicodedata.category(char) == "Cc" for char in prefix
+    ):
         raise ValueError(f"The {role} embedding prefix is invalid")
     if mode == "none-v1" and prefix == "":
         return mode, prefix
@@ -1003,14 +1355,48 @@ class Worker:
         return self.value_from_point(point)
 
     @staticmethod
-    def bounded_references(values, field_name: str, maximum: int = 16) -> list[str]:
+    def has_control(value: str) -> bool:
+        return any(unicodedata.category(character) == "Cc" for character in value)
+
+    @classmethod
+    def bounded_reference_value(
+        cls,
+        value,
+        *,
+        maximum: int = 128,
+        optional: bool = False,
+    ) -> bool:
+        if value is None:
+            return optional
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            and utf16_length(value) <= maximum
+            and not cls.has_control(value)
+        )
+
+    @classmethod
+    def bounded_content_value(cls, value, maximum: int) -> bool:
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            and utf16_length(value) <= maximum
+            and not any(
+                unicodedata.category(character) == "Cc"
+                and character not in "\r\n\t"
+                for character in value
+            )
+        )
+
+    @classmethod
+    def bounded_references(cls, values, field_name: str, maximum: int = 16) -> list[str]:
         if not isinstance(values, list):
             raise WorkerProtocolError("conflict", f"Participant memory {field_name} is malformed.")
         references = []
         for value in values:
-            reference = str(value or "").strip()
-            if not reference or len(reference) > 128 or any(ord(char) < 32 for char in reference):
+            if not cls.bounded_reference_value(value):
                 raise WorkerProtocolError("conflict", f"Participant memory {field_name} is malformed.")
+            reference = value.strip()
             references.append(reference)
         if len(references) > maximum or len(set(references)) != len(references):
             raise WorkerProtocolError("conflict", f"Participant memory {field_name} is malformed.")
@@ -1018,7 +1404,7 @@ class Worker:
 
     @staticmethod
     def exact_access_keys(visibility_value, sensitivity_value, audience_values) -> list[str]:
-        visibility = str(visibility_value or "").strip().replace("_", "").lower()
+        visibility = str(visibility_value or "").strip().lower()
         sensitivity = str(sensitivity_value or "").strip().lower()
         audience = Worker.bounded_references(audience_values or [], "audience")
         if sensitivity not in {"low", "sensitive"}:
@@ -1043,12 +1429,96 @@ class Worker:
             raise WorkerProtocolError("conflict", "Participant memory visibility is malformed.")
         return sorted({f"{prefix}:{reference}:{sensitivity}" for reference in audience})
 
-    def validate_participant_record(self, value: dict, tenant_id: str, *, current=False) -> dict:
-        metadata = dict(value.get("metadata") or {})
+    def validate_provenance(self, value, *, error_code="conflict") -> dict:
+        if not isinstance(value, dict):
+            raise WorkerProtocolError(error_code, "Participant memory provenance is malformed.")
+        provenance = dict(value)
+        required = (
+            provenance.get("sourceTurnId"),
+            provenance.get("sourceMessageId"),
+            provenance.get("sourceChannel"),
+        )
+        reported_by = provenance.get("reportedByParticipantReference")
+        captured = self.mutation_journal._parse_utc(provenance.get("capturedUtc"))
+        if (
+            any(not self.bounded_reference_value(item) for item in required)
+            or not self.bounded_reference_value(reported_by, optional=True)
+            or captured is None
+            or captured.year == 1
+            or dotnet_json_length(provenance) > 4096
+        ):
+            raise WorkerProtocolError(error_code, "Participant memory provenance is malformed.")
+        return provenance
+
+    def validate_consent_receipts(self, values, *, error_code="conflict") -> list[dict]:
+        if not isinstance(values, list) or len(values) > 16:
+            raise WorkerProtocolError(error_code, "Participant memory consent receipts are malformed.")
+        receipts = []
+        for value in values:
+            if not isinstance(value, dict):
+                raise WorkerProtocolError(error_code, "Participant memory consent receipts are malformed.")
+            receipt = dict(value)
+            audience = self.bounded_references(
+                receipt.get("audienceParticipantReferences"),
+                "consent audience",
+            )
+            granted = self.mutation_journal._parse_utc(receipt.get("grantedUtc"))
+            expires_value = receipt.get("expiresUtc")
+            expires = (
+                None
+                if expires_value is None
+                else self.mutation_journal._parse_utc(expires_value)
+            )
+            visibility = str(receipt.get("visibility") or "").lower()
+            if (
+                not self.bounded_reference_value(receipt.get("receiptId"))
+                or not self.bounded_reference_value(receipt.get("grantedByParticipantReference"))
+                or not self.bounded_reference_value(receipt.get("operation"))
+                or not self.bounded_reference_value(
+                    receipt.get("proposalFingerprint"), maximum=256
+                )
+                or not self.bounded_reference_value(receipt.get("consentSessionId"))
+                or not self.bounded_reference_value(receipt.get("sourceTurnId"))
+                or visibility not in {"private", "shared", "teamproject", "general"}
+                or granted is None
+                or granted.year == 1
+                or (expires_value is not None and expires is None)
+                or (expires is not None and expires <= granted)
+            ):
+                raise WorkerProtocolError(error_code, "Participant memory consent receipts are malformed.")
+            receipt["audienceParticipantReferences"] = audience
+            receipts.append(receipt)
+        if dotnet_json_length(receipts) > 16384:
+            raise WorkerProtocolError(error_code, "Participant memory consent receipts are malformed.")
+        return receipts
+
+    def validate_participant_record(
+        self,
+        value: dict,
+        tenant_id: str,
+        *,
+        current=False,
+        require_id=True,
+    ) -> dict:
+        if not isinstance(value, dict) or not isinstance(value.get("metadata"), dict):
+            raise WorkerProtocolError("conflict", "The exact participant memory record is malformed.")
+        metadata = dict(value["metadata"])
+        memory_id = value.get("id")
+        if require_id and not self.bounded_reference_value(memory_id):
+            raise WorkerProtocolError("conflict", "The exact participant memory ID is malformed.")
         if str(metadata.get("tenant_id") or "") != tenant_id:
             raise WorkerProtocolError("permission_denied", "The exact participant memory is outside this tenant.")
+        if not self.bounded_reference_value(metadata.get("tenant_id")):
+            raise WorkerProtocolError("conflict", "Participant memory tenant metadata is malformed.")
         if str(metadata.get("embedding_space_id") or "") != self.embedding_space_id:
             raise EmbeddingSpaceMismatchError("The selected memory belongs to another embedding space")
+        if not self.bounded_reference_value(metadata.get("embedding_space_id"), maximum=256):
+            raise WorkerProtocolError("conflict", "Participant memory embedding metadata is malformed.")
+        if (
+            not self.bounded_content_value(metadata.get("display_text"), 4096)
+            or not self.bounded_content_value(metadata.get("category"), 128)
+        ):
+            raise WorkerProtocolError("conflict", "Participant memory text or category is malformed.")
         state = str(metadata.get("state") or "").strip().lower()
         if state not in {"candidate", "confirmed", "disputed", "superseded", "revoked", "archived"}:
             raise WorkerProtocolError("conflict", "The exact participant memory state is malformed.")
@@ -1056,7 +1526,12 @@ class Worker:
             raise WorkerProtocolError("conflict", "The exact participant memory is no longer current.")
         claim_kind = str(metadata.get("claim_kind") or "")
         evidence_kind = str(metadata.get("evidence_kind") or "")
-        confidence = float(metadata.get("attribution_confidence", -1))
+        confidence_value = metadata.get("attribution_confidence", -1)
+        if isinstance(confidence_value, bool) or not isinstance(
+            confidence_value, (int, float)
+        ):
+            raise WorkerProtocolError("conflict", "Participant memory attribution confidence is malformed.")
+        confidence = float(confidence_value)
         if claim_kind not in {
             "directStatement", "hearsay", "directObservation", "preference",
             "sharedExperience", "directive", "other",
@@ -1066,11 +1541,15 @@ class Worker:
             raise WorkerProtocolError("conflict", "Participant memory role evidence is malformed.")
         if not math.isfinite(confidence) or confidence < 0 or confidence > 1:
             raise WorkerProtocolError("conflict", "Participant memory attribution confidence is malformed.")
-        speaker = metadata.get("speaker_participant_reference")
-        if speaker is not None:
-            speaker = str(speaker).strip()
-            if not speaker or len(speaker) > 128 or any(ord(char) < 32 for char in speaker):
-                raise WorkerProtocolError("conflict", "Participant memory speaker metadata is malformed.")
+        for field in (
+            "speaker_participant_reference",
+            "shared_event_reference",
+            "corrects_memory_id",
+            "supersedes_memory_id",
+            "disputes_memory_id",
+        ):
+            if not self.bounded_reference_value(metadata.get(field), optional=True):
+                raise WorkerProtocolError("conflict", "Participant memory reference metadata is malformed.")
         self.bounded_references(
             metadata.get("subject_participant_references") or [],
             "subject roles",
@@ -1094,6 +1573,60 @@ class Worker:
         )
         if sorted(stored_keys) != expected_keys:
             raise WorkerProtocolError("conflict", "Participant memory audience authorization is inconsistent.")
+        self.validate_provenance(metadata.get("provenance"))
+        self.validate_consent_receipts(metadata.get("consent_receipts"))
+        created = self.mutation_journal._parse_utc(metadata.get("created_utc"))
+        timestamp_fields = (
+            "confirmed_utc",
+            "corrected_utc",
+            "revoked_utc",
+            "archived_utc",
+        )
+        if created is None or created.year == 1 or any(
+            metadata.get(field) is not None
+            and self.mutation_journal._parse_utc(metadata.get(field)) is None
+            for field in timestamp_fields
+        ):
+            raise WorkerProtocolError("conflict", "Participant memory timestamps are malformed.")
+        if state == "confirmed" and self.mutation_journal._parse_utc(metadata.get("confirmed_utc")) is None:
+            raise WorkerProtocolError("conflict", "Confirmed participant memory lacks its confirmation time.")
+        corrects = metadata.get("corrects_memory_id")
+        supersedes = metadata.get("supersedes_memory_id")
+        disputes = metadata.get("disputes_memory_id")
+        lineage_is_valid = (
+            corrects is None and supersedes is None and disputes is None
+        ) or (
+            require_id
+            and corrects is not None
+            and corrects == supersedes
+            and disputes is None
+            and corrects != memory_id
+        ) or (
+            require_id
+            and disputes is not None
+            and corrects is None
+            and supersedes is None
+            and disputes != memory_id
+        )
+        if not lineage_is_valid:
+            raise WorkerProtocolError("conflict", "Participant memory lineage is malformed.")
+        score_details = value.get("score_details")
+        if score_details is not None and not isinstance(score_details, dict):
+            raise WorkerProtocolError("conflict", "Participant memory scores are malformed.")
+        score_details = dict(score_details or {})
+        for score in (
+            value.get("score"),
+            score_details.get("semantic_score"),
+            score_details.get("bm25_score"),
+        ):
+            if score is not None and (
+                isinstance(score, bool)
+                or not isinstance(score, (int, float))
+                or not math.isfinite(float(score))
+                or float(score) < 0
+                or float(score) > 1
+            ):
+                raise WorkerProtocolError("conflict", "Participant memory scores are malformed.")
         return metadata
 
     @staticmethod
@@ -1105,8 +1638,8 @@ class Worker:
             key = str(item or "").strip()
             if (
                 not key
-                or len(key) > 256
-                or any(ord(char) < 32 for char in key)
+                or utf16_length(key) > 256
+                or Worker.has_control(key)
                 or not re.fullmatch(
                     r"(?:scope:general|participant:[^:]+|team:[^:]+):(low|sensitive)",
                     key,
@@ -1133,8 +1666,8 @@ class Worker:
         authenticated = request.get("requestingParticipantAuthenticated")
         if (
             not principal
-            or len(principal) > 128
-            or any(ord(char) < 32 for char in principal)
+            or utf16_length(principal) > 128
+            or Worker.has_control(principal)
             or authenticated is not True
         ):
             raise WorkerProtocolError(
@@ -1156,7 +1689,7 @@ class Worker:
         reporter = provenance.get("reportedByParticipantReference")
         if reporter is not None:
             reporter = str(reporter).strip()
-            if not reporter or len(reporter) > 128 or any(ord(char) < 32 for char in reporter):
+            if not self.bounded_reference_value(reporter):
                 raise WorkerProtocolError("conflict", "Participant memory reporter metadata is malformed.")
             target_roles.add(reporter)
         if principal not in target_roles:
@@ -1184,10 +1717,25 @@ class Worker:
         shared_event = proposal.get("sharedEventReference")
         if shared_event is not None:
             shared_event = str(shared_event).strip()
-            if not shared_event or len(shared_event) > 128 or any(ord(char) < 32 for char in shared_event):
+            if not self.bounded_reference_value(shared_event):
                 raise WorkerProtocolError("invalid_request", "Participant-memory shared-event identity is malformed.")
-        confidence = float(proposal.get("attributionConfidence", 0))
-        if not text or len(text) > 4096 or not category or len(category) > 128:
+        confidence_value = proposal.get("attributionConfidence", 0)
+        if isinstance(confidence_value, bool) or not isinstance(
+            confidence_value, (int, float)
+        ):
+            raise WorkerProtocolError("invalid_request", "Participant-memory attribution confidence is malformed.")
+        confidence = float(confidence_value)
+        if (
+            not text
+            or utf16_length(text) > 4096
+            or not category
+            or utf16_length(category) > 128
+            or any(
+                unicodedata.category(character) == "Cc"
+                and character not in "\r\n\t"
+                for character in text + category
+            )
+        ):
             raise WorkerProtocolError("invalid_request", "Participant-memory text or category exceeds its bound.")
         if claim_kind not in {
             "directStatement", "hearsay", "directObservation", "preference",
@@ -1198,12 +1746,32 @@ class Worker:
             raise WorkerProtocolError("invalid_request", "Participant-memory claim or evidence kind is malformed.")
         if not math.isfinite(confidence) or confidence < 0 or confidence > 1:
             raise WorkerProtocolError("invalid_request", "Participant-memory attribution confidence is malformed.")
-        if not provenance or len(json.dumps(provenance, ensure_ascii=False)) > 4096:
+        required_provenance = (
+            provenance.get("sourceTurnId"),
+            provenance.get("sourceMessageId"),
+            provenance.get("sourceChannel"),
+        )
+        reported_by = provenance.get("reportedByParticipantReference")
+        bounded_provenance_values = required_provenance + (
+            () if reported_by is None else (reported_by,)
+        )
+        if (
+            not provenance
+            or any(
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value) > 128
+                or any(unicodedata.category(character) == "Cc" for character in value)
+                for value in bounded_provenance_values
+            )
+            or self.mutation_journal._parse_utc(provenance.get("capturedUtc")) is None
+            or dotnet_json_length(provenance) > 4096
+        ):
             raise WorkerProtocolError("invalid_request", "Participant-memory provenance is missing or oversized.")
         if (
             not isinstance(consent_receipt_values, list)
             or len(consent_receipt_values) > 16
-            or len(json.dumps(consent_receipt_values, ensure_ascii=False)) > 16384
+            or dotnet_json_length(consent_receipt_values) > 16384
         ):
             raise WorkerProtocolError("invalid_request", "Participant-memory consent receipts are malformed.")
         subjects = self.bounded_references(
@@ -1265,6 +1833,7 @@ class Worker:
             {"metadata": metadata},
             tenant_id,
             current=True,
+            require_id=False,
         )
         return metadata
 
@@ -1382,7 +1951,8 @@ class Worker:
         }
 
     def mark_mutation_in_doubt(self, receipt: dict, stage: str):
-        receipt["status"] = "in_doubt"
+        if str(receipt.get("status") or "") != "rollback_started":
+            receipt["status"] = "in_doubt"
         receipt["failure_stage"] = stage
         self.mutation_journal.save(receipt)
 
@@ -1677,6 +2247,7 @@ class Worker:
                 )
             if (
                 any(not value for value in recorded_successor_ids)
+                or any(not value for value in actual_successor_ids)
                 or len(recorded_successor_ids) != len(set(recorded_successor_ids))
                 or (
                     recorded_successor_ids
@@ -1685,8 +2256,13 @@ class Worker:
                 )
                 or (
                     status == "rollback_started"
-                    and mutation in {"add", "correct", "dispute"}
-                    and len(recorded_successor_ids) != 1
+                    and mutation == "add"
+                    and len(recorded_successor_ids) not in {0, 1}
+                )
+                or (
+                    status == "rollback_started"
+                    and mutation in {"correct", "dispute"}
+                    and len(recorded_successor_ids) not in {0, 1}
                 )
             ):
                 # Once a creation receipt records its exact successor, absence or
@@ -1708,7 +2284,27 @@ class Worker:
                 ):
                     return False
                 successor_metadata.append(metadata)
+            if (
+                status == "rollback_started"
+                and mutation in {"correct", "dispute"}
+                and not recorded_successor_ids
+                and len(successors) == 1
+            ):
+                # A crash can occur after Mem0 creates the one attributable
+                # successor but before its ID reaches the receipt. Adopt that
+                # exact, digest-validated point durably before changing Qdrant.
+                adopted_id = actual_successor_ids[0]
+                receipt["created_ids"] = [adopted_id]
+                receipt["authorization_snapshot"] = {
+                    "id": adopted_id,
+                    "payload": {"metadata": successor_metadata[0]},
+                }
+                self.mutation_journal.save(receipt)
+                recorded_successor_ids = [adopted_id]
             if mutation == "add":
+                # A failed Add can durably record rollback intent before it ever
+                # records a successor ID. Zero points is exact no-effect; any
+                # bounded unrecorded points were just request-ID/digest validated.
                 for successor in successors:
                     self.memory.delete(str(successor.get("id") or ""))
                 return not self.mutation_points(tenant_id, request_id)
@@ -1817,11 +2413,11 @@ class Worker:
             # A crash may occur after the active point is deleted but before the
             # delete_staged receipt is fsynced. Recover that exact state without
             # ever promoting a content-bearing receipt to committed.
-            if status != "delete_staged":
+            if status not in {"delete_staged", "finalization_started"}:
                 receipt["status"] = "delete_staged"
                 receipt["delete_staged_utc"] = datetime.now(timezone.utc).isoformat()
                 self.mutation_journal.save(receipt)
-            status = "delete_staged"
+                status = "delete_staged"
         if status == "erased_by_later_delete":
             raise WorkerProtocolError(
                 "conflict",
@@ -1844,6 +2440,26 @@ class Worker:
             )
         if status == "committed":
             return self.committed_mutation_response(receipt, roster_revision, reconciled=True)
+        if status == "finalization_started":
+            if (
+                str(receipt.get("operation") or "") != "delete"
+                or self.participant_owned(
+                    tenant_id,
+                    str(receipt.get("target_id") or ""),
+                )
+                is not None
+            ):
+                raise WorkerProtocolError(
+                    "mutation_in_doubt",
+                    "The resumable deletion-finalization marker is inconsistent.",
+                    details={"mutationStatus": "finalization_started"},
+                )
+            receipt = self.mutation_journal.finalize_delete(receipt)
+            return self.committed_mutation_response(
+                receipt,
+                roster_revision,
+                reconciled=True,
+            )
         if status == "delete_staged":
             if str(receipt.get("operation") or "") != "delete":
                 raise WorkerProtocolError(
@@ -1901,28 +2517,13 @@ class Worker:
             receipt["reconciled_utc"] = datetime.now(timezone.utc).isoformat()
             self.mutation_journal.save(receipt)
             return self.committed_mutation_response(receipt, roster_revision, reconciled=True)
-        if self.rollback_exact_partial_mutation(receipt):
-            receipt["status"] = "rolled_back"
-            receipt["no_effect_confirmed"] = True
-            receipt["reconciled_utc"] = datetime.now(timezone.utc).isoformat()
-            self.mutation_journal.save(receipt)
-            return self.participant_ok(
-                "The exact partial participant-memory mutation was rolled back without reapplying it.",
-                roster_revision,
-                mutationRequestId=request_id,
-                mutationStatus="rolled_back",
-                mutationOperation=receipt["operation"],
-                reconciled=True,
-            )
-        raise WorkerProtocolError(
-            "mutation_in_doubt",
-            "The mutation has no complete commit receipt; reconcile did not reapply it.",
-            retryable=True,
-            details={
-                "mutationRequestId": request_id,
-                "mutationStatus": status,
-                "mutationOperation": receipt["operation"],
-            },
+        receipt["status"] = "rollback_started"
+        receipt["rollback_started_utc"] = datetime.now(timezone.utc).isoformat()
+        self.mutation_journal.save(receipt)
+        return self.resume_started_rollback(
+            receipt,
+            roster_revision,
+            reconciled=True,
         )
 
     @participant_single_writer
@@ -2000,12 +2601,13 @@ class Worker:
             raise
         except Exception as error:
             self.mark_mutation_in_doubt(receipt, "rollback")
+            durable_status = str(receipt.get("status") or "in_doubt")
             raise WorkerProtocolError(
                 "mutation_in_doubt",
                 "Participant-memory rollback is incomplete; deliberate repair is required.",
                 details={
                     "mutationRequestId": request_id,
-                    "mutationStatus": "in_doubt",
+                    "mutationStatus": durable_status,
                     "mutationOperation": receipt["operation"],
                 },
             ) from error
@@ -2101,6 +2703,23 @@ class Worker:
             if durable_status == "committed":
                 self.authorize_mutation_receipt(receipt, tenant_id, authorized_keys, request)
                 return self.committed_mutation_response(receipt, roster_revision, reconciled=True)
+            if durable_status == "finalization_started":
+                self.authorize_mutation_receipt(receipt, tenant_id, authorized_keys, request)
+                if (
+                    mutation != "delete"
+                    or self.participant_owned(tenant_id, target_id) is not None
+                ):
+                    raise WorkerProtocolError(
+                        "mutation_in_doubt",
+                        "The resumable deletion-finalization marker is inconsistent.",
+                        details={"mutationStatus": "finalization_started"},
+                    )
+                receipt = self.mutation_journal.finalize_delete(receipt)
+                return self.committed_mutation_response(
+                    receipt,
+                    roster_revision,
+                    reconciled=True,
+                )
             if durable_status == "delete_staged":
                 self.authorize_mutation_receipt(receipt, tenant_id, authorized_keys, request)
                 if mutation != "delete" or self.participant_owned(tenant_id, target_id) is not None:
@@ -2430,7 +3049,7 @@ class Worker:
         point_ids = []
         for value in requested_ids:
             point_id = str(value or "").strip()
-            if not point_id or len(point_id) > 128 or any(ord(char) < 32 for char in point_id):
+            if not self.bounded_reference_value(point_id):
                 raise WorkerProtocolError("invalid_request", "A hybrid repair point ID is malformed.")
             if point_id not in point_ids:
                 point_ids.append(point_id)
@@ -2484,7 +3103,10 @@ class Worker:
     def handle_participant(self, operation: str, request: dict) -> dict:
         tenant_id = str(request.get("tenantId", "")).strip()
         roster_revision = str(request.get("rosterRevision", "")).strip()
-        if not tenant_id or not roster_revision or len(tenant_id) > 128 or len(roster_revision) > 256:
+        if (
+            not self.bounded_reference_value(tenant_id)
+            or not self.bounded_reference_value(roster_revision, maximum=256)
+        ):
             raise WorkerProtocolError("invalid_request", "Participant memory requires exact bounded tenant and roster identities.")
 
         if operation == "participant_health":
@@ -2721,7 +3343,11 @@ def main() -> int:
             if not isinstance(request, dict):
                 raise WorkerProtocolError("invalid_request", "The worker request must be a JSON object.")
             request_id = request.get("id")
-            if not isinstance(request_id, str) or len(request_id) > 128:
+            if (
+                not isinstance(request_id, str)
+                or utf16_length(request_id) > 128
+                or any(unicodedata.category(char) == "Cc" for char in request_id)
+            ):
                 request_id = None
             response = worker.handle(request)
         except EmbeddingSpaceMismatchError:

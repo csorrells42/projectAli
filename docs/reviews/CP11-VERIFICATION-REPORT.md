@@ -5,32 +5,35 @@ Scope: Project Ali participant-aware memory in the isolated checkpoint-11 worktr
 
 ## Current conclusion
 
-CP11 has substantial focused source and simulated-transport evidence, but the final
-verification gate is still pending. The most recent relevant Release test invocation
-compiled 91 tests: 90 passed and one stale source-canary assertion failed. The canary
-was corrected after that run; the corrected 91-test set has not yet been rerun. An
-earlier focused checkpoint completed 46/46 green.
+CP11 has current focused source and simulated-transport evidence. The current expanded
+six-class Release selection is 104/104 green; it includes the previously documented
+five-class selection plus participant-presence tests. The two exact legacy-MCP boundary
+tests are 2/2 green. The current Release app build succeeds with zero warnings and zero
+errors. The broad suite was attempted and is not green. Python-runtime, live-provider,
+and final independent-audit gates remain separate and are not implied by focused passes.
 
-Those are the only aggregate counts asserted by this report. It does not declare the
-broad solution suite green and does not claim a final build/test/audit gate.
+Those are the only aggregate counts asserted by this report at this checkpoint. It
+does not declare the broad solution suite green or claim live worker/provider behavior.
 
 | Gate | Current evidence | Boundary |
 | --- | --- | --- |
-| Latest focused relevant Release run | 91 compiled; 90 passed; 1 stale source-canary failure | The failed canary was corrected after the run, but final rerun remains pending. |
-| Earlier focused checkpoint | 46 passed; 0 failed | Earlier checkpoint evidence only; it is not a substitute for the final rerun. |
-| Python worker execution | Not run | Python source was inspected and covered by .NET source canaries, but no Python interpreter executed the worker or its tests in this pass. |
-| Broad solution suite | No green claim | A broad aggregate is intentionally not reported as passing. |
+| Current expanded focused Release run | 104 passed; 0 failed; 0 skipped | Six CP11 classes: policy, service integration, production boundary, architecture/source canaries, embedding settings, and participant presence. |
+| Exact legacy-MCP boundary run | 2 passed; 0 failed; 0 skipped | Exact production catalog-policy and binding cases. |
+| Current Release app build | 0 warnings; 0 errors | Compilation only; no app or shortcut was launched. |
+| Python worker execution | Syntax-only pass | Installed Python 3.12 parsed `mem0_service.py` and `local_qdrant.py` through `ast.parse` successfully. Imports, dependencies, providers, and worker operations were not executed. |
+| Broad solution suite | Attempted; non-green | Failures include pre-existing Roslyn capability-catalog drift, protected-directory access denials, and unavailable external toolchains/hardware. Output truncation prevents a trustworthy aggregate count, so none is invented. |
 
-## Implemented boundaries awaiting final aggregate rerun
+## Implemented boundaries covered by focused evidence
 
 The checked source and focused tests cover or assert the following CP11 boundaries.
-This list describes the intended verification surface; it does not turn the pending
-aggregate rerun into a pass.
+This list describes the focused verification surface; it does not turn it into a live
+provider or broad-suite pass.
 
 - immutable admitted rosters, explicit selection, advisory target/speaker freshness,
   attachment epochs, and stale-roster rejection;
-- trusted context deriving selected/test identity only from the authoritative active
-  session rather than caller flags;
+- a CP11 read-only identity boundary over the frozen active-user session, with stable
+  immutable selection/registry sampling, authority-owned roster generation capture,
+  and selected/test identity derived from authority rather than caller flags;
 - exact process-issued permission, consent, and authentication receipts;
 - consent prepared intent, exact proposal fingerprints, separately selected grants,
   first-stable-mutation-ID session binding, same-ID retry, bounded retention, and
@@ -38,20 +41,26 @@ aggregate rerun into a pass.
 - production credential binding to the sole selected registered real profile,
   multi-real-profile fail-closed behavior, exact current-binding rechecks, and the
   narrow authoritative generated John Doe test factor;
-- full exact mutation validation of record shape/count, tenant, space, access, state,
-  target, operation lineage, provenance, and consent arrays;
+- exact add/correct/dispute validation of record shape/count, proposal metadata,
+  tenant, space, access, state, target, operation lineage, provenance, and consent
+  arrays, with separate exact lifecycle/delete receipt checks;
 - no cached embedding identity resolution: two endpoint probes on every resolution,
   using pinned-Mem0 request parity (one-element input array, newline normalization,
   `encoding_format: float`, and `Bearer ali-local-only`);
 - exact access filtering before recall/inventory, Ali-owned candidate-local dense+
   BM25 ranking without `Memory.search`/entity extraction/English lemmatization, and
   a full exact-filtered inventory scan retaining the newest at most eight records;
-- legacy MCP file-memory names removed from catalog policy and function bindings;
+- legacy MCP file-memory names removed from catalog policy and function bindings, and
+  model-visible recall/list fail closed instead of falling back to the legacy store;
 - prepared mutate/reconcile intents, exact request correlation, bounded uncertain-
   outcome reconciliation, and rejection of unauthorized current bindings;
-- bounded durable journal admission, safe path/link/temp handling, corrupt-receipt
-  quarantine, terminal redaction/compaction, successor ownership preflight,
-  `rollback_started`, and two-phase delete;
+- bounded durable journal admission, safe path/link/temp handling, global fail-closed
+  structural classification of every receipt plus corrupt/temp/unsafe artifacts,
+  terminal redaction/compaction, successor ownership preflight, monotonic
+  `rollback_started`, and resumable two-phase delete finalization;
+- exact worker-side pre-effect parity for UTF-16 string bounds, Unicode controls,
+  record/provenance/consent shape, timestamps, lineage, and finite scores so malformed
+  stored targets cannot be changed before C# would reject the returned record;
 - ordinary historical committed reconcile inspection reporting stale without rolling
   back solely for a post-response roster change, while staged delete may finalize or
   roll back;
@@ -61,28 +70,18 @@ aggregate rerun into a pass.
   and desktop participant-service adaptation without hidden `RememberAsync`; and
 - fresh current-format storage with no migration or old-vector read path.
 
-## Final automated gates still pending
+## Remaining automated gate
 
-- Rerun the corrected 91-test focused Release selection and report exact pass/fail/skip
-  counts.
-- Rebuild the final source after all CP11 code/test edits converge and report warnings
-  and errors without extrapolating runtime behavior.
-- Rerun the consent, production-boundary, participant-service integration, user-memory
-  architecture/source-canary, embedding-settings, and MCP legacy-name cases included
-  by the final filter.
-- Run any available Python worker tests only if an intended Python runtime is present;
-  until then keep the evidence explicitly source-only.
-- Run the broader solution suite separately and distinguish CP11 regressions from
-  unrelated repository baseline failures. Do not restate a partial selection as broad
-  green.
-- Complete the independent read-only final diff audit before commit, push, publish,
-  shortcut work, or UI launch.
+- Commit and push the independently audited delta. Python evidence remains syntax-only,
+  and the attempted broad suite remains explicitly non-green rather than being restated
+  as a focused success.
 
 ## Live and environment-dependent checks not run
 
 No current evidence proves:
 
-- Python syntax/import/runtime execution of `mem0_service.py` or `local_qdrant.py`;
+- Python import/runtime execution of `mem0_service.py` or `local_qdrant.py` beyond the
+  successful syntax-only AST parse;
 - a live local OpenAI-compatible provider completing both live probes with the pinned
   Mem0-compatible envelope, or the installed model's true quantization/template/
   truncation/token-limit behavior;
@@ -103,7 +102,7 @@ No current evidence proves:
 - real model tool selection, memory relevance, answer quality, or long-running
   conversation behavior;
 - real CPU, memory, disk, network, GPU, webcam, microphone, or latency characteristics;
-- published-folder or shared-shortcut launch, or any UI launch/visual verification;
+- published-folder, Ali app, or shared-shortcut launch, and any UI visual verification;
 - encryption, backup/restore, authentication security beyond the exact implemented
   checks, privileged authority, medical validity, or identity/liveness assurance; or
 - a green broad repository test suite.
@@ -118,7 +117,8 @@ from compilation, fake transports, and source-canary evidence.
 - The Windows credential prompt happens before the transport budget, but the native
   prompt itself is synchronous and not separately cancellable.
 - Reconcile is not read-only. Consent, mutate, and reconcile all use prepared intents.
-- Exact mutation response validation includes provenance and consent values.
+- Exact add/correct/dispute response validation includes provenance and consent values;
+  lifecycle and delete responses use their separate target/state/zero-content checks.
 - Explicit reconcile validates the returned bounded shape, tenant, space, access,
   state, and available lineage. It cannot claim target-contract-digest validation
   because that digest is absent from the response.
@@ -126,6 +126,9 @@ from compilation, fake transports, and source-canary evidence.
   roster becomes stale after inspection. Staged delete is the special two-phase state
   that may be finalized or rolled back under current authority.
 - The production MCP catalog no longer exposes the three legacy file-memory names.
+- Delete finalization persists `finalization_started` plus the exact receipt scrub set
+  before the first irreversible redaction. Retry/restart resumes that scrub; rollback
+  cannot cross the marker.
 
 ## Deterministic-processing statement
 

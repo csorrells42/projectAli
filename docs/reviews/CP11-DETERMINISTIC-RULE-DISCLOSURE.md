@@ -31,6 +31,8 @@ from prose.
 - The production MCP catalog removes and cannot bind the legacy file-memory names
   `recall_user_memory`, `list_current_user_memories`, and
   `forget_current_user_memory`; configuration normalization drops them.
+- If participant trust dependencies are absent, the model-visible recall/list tools
+  return unavailable and never fall back to the legacy memory store.
 
 These rules affect capability admission and recovery only. They do not infer intent.
 
@@ -38,11 +40,16 @@ These rules affect capability admission and recovery only. They do not infer int
 
 - A roster normalizes and binds exact tenant, turn, conversation, selection revision,
   presence revision, selected reference, capture time, and at most 16 participants.
+- A CP11 read-only boundary double-samples the frozen Identity session's immutable
+  selection and registry state. An unstable sample fails closed; any observed material
+  change advances an opaque participant generation. Roster authority captures its own
+  selection and generation together rather than trusting a caller generation.
 - Target freshness is 3 seconds and speaker freshness is 15 seconds. Future values,
   targets without `HasTarget`, and speaker enrollment utterances are excluded.
-- At most one fresh target and one fresh speaker are projected. Attachment epoch and
-  source sequence/freshness enter the presence revision; attach/detach or unavailable
-  source changes it.
+- At most one fresh target and one fresh speaker are projected. Camera attachment
+  epoch, material target identity/track, material speaker identity, and fresh-versus-
+  absent state enter the presence revision. Per-frame source sequence/timestamp changes
+  intentionally do not churn it; attach/detach or unavailable source changes it.
 - Exact local membership maps a recognized ID to a registered profile. Other nonempty
   IDs map to opaque conversation guests; missing IDs map to opaque conversation
   unknowns. At most 4,096 conversation scopes are retained.
@@ -55,8 +62,10 @@ recognize liveness, or decide a semantic role.
 
 ## Proposal, receipt, permission, consent, and authentication rules
 
-- Memory text is 1-4,096 characters; category is 1-128; participant/reference lists
-  are normalized, deduplicated, and bounded. Operations, claim/evidence kinds,
+- Memory text is 1-4,096 characters; category is 1-128; CR, LF, and tab are permitted
+  content while other control characters are rejected before dispatch and on returned
+  records. Participant/reference lists are normalized, deduplicated, and bounded.
+  Operations, claim/evidence kinds,
   visibility, sensitivity, states, IDs, provenance, and target requirements use closed
   typed sets and exact comparisons.
 - Permission, consent, and authentication authority accepts only the exact immutable
@@ -74,8 +83,9 @@ recognize liveness, or decide a semantic role.
 - Adds, corrections, and disputes require consent from every distinct speaker,
   reporter, subject, witness, participant audience member, and selected requester.
   Revoke/archive/delete do not stage proposal consent but remain consequential.
-- Consent fingerprint is SHA-256 over exact tenant plus the complete normalized typed
-  proposal. Any field change changes the fingerprint. At most 256 proposal
+- Consent fingerprint is SHA-256 over exact tenant plus the complete typed proposal as
+  supplied before policy normalization.
+  Any field change changes the fingerprint. At most 256 proposal
   fingerprints are retained and expired five-minute grants are removed.
 - Each required participant is separately selected and approves the unchanged
   proposal. Unknowns cannot consent. The resulting short turn/operation/visibility/
@@ -126,9 +136,10 @@ They cannot infer who intended a statement.
 - Positive raw BM25 is sigmoid-normalized. `(midpoint, steepness)` is `(5,.7)` for
   1-3 query tokens, `(7,.6)` for 4-6, `(9,.5)` for 7-9, `(10,.5)` for 10-15, and
   `(12,.5)` above 15. Empty query has no BM25 score.
-- Dense score below 0.1 is discarded. If any candidate has positive BM25, every
+- Non-finite dense scores are discarded; dense and BM25 components clamp to 0-1.
+  Dense score below 0.1 is discarded. If any candidate has positive BM25, every
   combined score is `(dense + candidateBM25) / 2`; otherwise combined score is dense.
-  The result clamps to 1, sorts score descending then ID ascending within that exact-
+  The result clamps to 0-1, sorts score descending then ID ascending within that exact-
   key query, and truncates.
 - Authorized keys are normalized in ordinal order. Cross-key merge retains the higher
   score for a duplicate ID and sorts by score descending; an exact score tie preserves
@@ -183,13 +194,18 @@ interpret vector meaning.
 - Accepted mutations are add, correct, dispute, revoke, archive, and delete. Mem0
   inference is disabled. Adds create one confirmed record; correction/dispute create
   one candidate successor, preserve audience/security, transition the exact target,
-  then confirm exact lineage; revoke/archive leave confirmed state.
+  then confirm exact lineage; revoke/archive transition the target out of confirmed
+  state.
 - Fingerprint covers request ID, tenant, roster, space, complete proposal, exact
   provenance and consent arrays, record/access keys, requester, authentication, and
-  target material. Same ID/different fingerprint conflicts; same ID/same fingerprint
-  inspects existing exact receipt/points.
-- C# exact mutation validation checks bounded count and shape, tenant, space, access,
-  state, target, operation lineage, and exact returned provenance and consent arrays.
+  the exact target ID carried by the proposal. Target snapshot and successor-contract
+  digest are separate receipt/preflight fields. Same ID/different fingerprint
+  conflicts; same ID/same fingerprint inspects existing exact receipt/points.
+- C# add/correct/dispute validation checks bounded count and shape, exact proposal
+  metadata, tenant, space, access, state, target, operation lineage, and exact returned
+  provenance and consent arrays. Revoke/archive require exact target ID plus lifecycle
+  state; staged delete requires the exact target, while finalized delete returns zero
+  records.
 - One nonblocking embedding-space file lease covers every write/reconcile/rollback.
   Contention returns a retryable conflict.
 - The journal is bounded to 4,096 active receipts and 2 MiB per receipt. New mutation
@@ -198,11 +214,16 @@ interpret vector meaning.
 - Journal paths must be safe non-reparse directories and single-link regular files.
   Writes use exclusive safe 0600 temporaries, file flush/fsync, atomic replace,
   permission tightening, and supported directory fsync. Unsafe links are never
-  followed. Safe temporary files older than one hour are cleaned.
-- Unreadable receipts are quarantined. Terminal committed/rolled-back receipt content
-  crosses to a redacted hashed `recovery_expired` tombstone after 24 hours. Old
-  terminal tombstones are compacted only as needed for bounded admission; active or
-  recoverable receipts are not pruned. Full/quarantine-full state fails closed.
+  followed. On the next under-lease writer maintenance after one hour, safe stale
+  temporary files are cleaned; any remaining temporary blocks that writer.
+- Unreadable receipts are quarantined. Any `.corrupt`, remaining `.tmp-*`, or unsafe
+  `.json` artifact blocks every writer, reconcile/rollback, delete scrub, and global
+  lineage/reference decision until deliberate local repair. On the next under-lease
+  writer maintenance after 24 hours, terminal committed/rolled-back receipt content
+  crosses to a redacted hashed `recovery_expired` tombstone. Old terminal tombstones
+  are compacted only as needed for bounded admission; active or recoverable receipts
+  are not pruned. Full,
+  unclassified, or quarantine-full state fails closed.
 - Successor creation saves exact created IDs and authorization snapshot before later
   transitions. Rollback preflights creation request, pending owner, last owner, and
   expected digest for all successors before changing any, preventing an old receipt
@@ -213,6 +234,9 @@ interpret vector meaning.
   returns `delete_staged`. C# revalidates authority/roster/authentication. Exact
   reconcile then finalizes a zero-content committed tombstone or authorized rollback
   restores the snapshot. Direct delete finalization that skips staging is rejected.
+- Before its first irreversible associated-receipt redaction, delete persists
+  `finalization_started` and the exact bounded scrub receipt IDs. Retry/restart resumes
+  only that set; rollback is rejected once this monotonic marker exists.
 - Uncertain write outcomes trigger one bounded same-ID inspection. Reconcile can mark
   fully applied state committed, finalize/restore staged delete, or resume rollback;
   it never fills arbitrary missing mutation work.
@@ -248,8 +272,9 @@ or semantic target.
 
 ## Evidence boundary
 
-These are source rules, not proof of a live deployment. The last focused relevant
-Release run compiled 91 tests, with 90 passing and one stale source-canary failure.
-That canary was corrected, but a final rerun is pending; an earlier focused run was
-46/46 green. Python worker runtime, live Mem0/Qdrant/provider, UI, Windows credential,
-multi-person, crash/power-loss, hardware, and broad-suite behavior are not claimed.
+These are source rules, not proof of a live deployment. The current expanded focused
+Release selection is 104/104 green, the two exact legacy-MCP boundary tests are 2/2
+green, and the current Release app build has zero warnings and zero errors. Python
+worker runtime, live Mem0/Qdrant/provider, UI, Windows credential, multi-person,
+crash/power-loss, hardware, and broad-suite-green behavior are not claimed; the
+attempted broad suite was non-green.

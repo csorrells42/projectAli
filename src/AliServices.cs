@@ -329,15 +329,16 @@ public sealed class AliServices
         var activeUsers = new ActiveUserSession(
             dataRoot,
             Path.Combine(userDataRoot, "Vision"));
+        var participantIdentitySession = new ParticipantIdentitySessionBoundary(activeUsers);
         var participantPresence = new ParticipantPresenceSnapshotBridge();
         var participantReceiptAuthority = new ParticipantMemoryReceiptAuthority();
         var participantRosterAuthority = new SelectedParticipantRosterAuthority(
-            activeUsers,
+            participantIdentitySession,
             profile.ProfileId,
             participantPresence);
         var participantAuthentication =
             new WindowsCredentialParticipantAuthenticationProvider(
-                activeUsers,
+                participantIdentitySession,
                 participantReceiptAuthority,
                 new WindowsCredentialVerifier());
         var mem0Client = new Mem0ProcessClient(
@@ -352,7 +353,7 @@ public sealed class AliServices
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
             participantReceiptAuthority,
             participantRosterAuthority,
-            activeUsers,
+            participantIdentitySession,
             participantAuthentication);
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
         var fileAccess = AliWorkstationFileAccess.CreateDefault(

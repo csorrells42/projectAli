@@ -24,6 +24,17 @@ public sealed class ParticipantAwareMemoryTests
     }
 
     [Fact]
+    public void ModelVisibleParticipantRecallNeverFallsBackToTheLegacyMemoryStore()
+    {
+        var catalog = File.ReadAllText(FindRepositoryFile(
+            "src", "Modules", "Coordinator", "AliToolCatalog.cs"));
+
+        Assert.DoesNotContain("MemoryTools.SearchAsModelToolAsync", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("MemoryTools.ListCurrentAsync", catalog, StringComparison.Ordinal);
+        Assert.Contains("No legacy memory store was read.", catalog, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Roster_KeepsRecognitionAdvisoryAndUnknownParticipantsSessionScoped()
     {
         var selection = ActiveUserSelectionSnapshot.Resolved(User("alice", "Alice"));
@@ -86,6 +97,49 @@ public sealed class ParticipantAwareMemoryTests
         Assert.Equal(["bob"], result.Proposal?.SubjectParticipantReferences);
         Assert.Equal(["alice"], result.Proposal?.WitnessParticipantReferences);
         Assert.Equal(ParticipantMemoryEvidenceKind.ObservedDirectly, result.Proposal?.EvidenceKind);
+    }
+
+    [Fact]
+    public void ContentValidation_AllowsLineBreaksAndTabsButRejectsOtherControls()
+    {
+        var roster = Roster("alice");
+        var allowed = Proposal(
+            ParticipantMemoryMutationKind.Add,
+            null,
+            "Alice prefers\nblue\tworkspaces.",
+            "alice",
+            ["alice"],
+            [],
+            ParticipantMemoryClaimKind.Preference,
+            ParticipantMemoryEvidenceKind.StatedDirectly,
+            ParticipantMemoryVisibility.Private,
+            ["alice"],
+            consents: [Consent("alice", "Add", ["alice"])]);
+        var rejected = Proposal(
+            ParticipantMemoryMutationKind.Add,
+            null,
+            "Alice prefers\u0001blue workspaces.",
+            "alice",
+            ["alice"],
+            [],
+            ParticipantMemoryClaimKind.Preference,
+            ParticipantMemoryEvidenceKind.StatedDirectly,
+            ParticipantMemoryVisibility.Private,
+            ["alice"],
+            consents: [Consent("alice", "Add", ["alice"])]);
+
+        var allowedResult = ParticipantMemoryPolicy.ValidateMutation(
+            Request(roster, allowed, Authority("alice")),
+            DateTimeOffset.UtcNow,
+            TestReceiptAuthority);
+        var rejectedResult = ParticipantMemoryPolicy.ValidateMutation(
+            Request(roster, rejected, Authority("alice")),
+            DateTimeOffset.UtcNow,
+            TestReceiptAuthority);
+
+        Assert.True(allowedResult.Valid, allowedResult.Failure?.SafeMessage);
+        Assert.False(rejectedResult.Valid);
+        Assert.Equal(ParticipantMemoryFailureCode.InvalidProposal, rejectedResult.Failure?.Code);
     }
 
     [Fact]
@@ -468,10 +522,19 @@ public sealed class ParticipantAwareMemoryTests
         Assert.Contains("mutationOperation=receipt[\"operation\"]", worker, StringComparison.Ordinal);
         Assert.Contains("error.details[\"mutationOperation\"] = receipt.get(\"operation\")", worker, StringComparison.Ordinal);
         Assert.True(reconcileStart >= 0 && rollbackStart > reconcileStart && mutationStart > rollbackStart);
-        Assert.Contains(
-            "reconcile did not reapply it",
-            worker[reconcileStart..rollbackStart],
+        var reconcile = worker[reconcileStart..rollbackStart];
+        var rollbackIntent = reconcile.LastIndexOf(
+            "receipt[\"status\"] = \"rollback_started\"",
             StringComparison.Ordinal);
+        var durableIntent = reconcile.LastIndexOf(
+            "self.mutation_journal.save(receipt)",
+            StringComparison.Ordinal);
+        var resumeRollback = reconcile.LastIndexOf(
+            "return self.resume_started_rollback(",
+            StringComparison.Ordinal);
+        Assert.InRange(rollbackIntent, 0, int.MaxValue);
+        Assert.True(rollbackIntent < durableIntent && durableIntent < resumeRollback);
+        Assert.DoesNotContain("if self.rollback_exact_partial_mutation(receipt):", reconcile, StringComparison.Ordinal);
         Assert.Contains("restore_exact_point(snapshot)", worker, StringComparison.Ordinal);
         Assert.Contains("self.memory.vector_store.replace_exact_payload(", worker, StringComparison.Ordinal);
         Assert.Contains("snapshot[\"payload\"],", worker, StringComparison.Ordinal);
@@ -531,7 +594,7 @@ public sealed class ParticipantAwareMemoryTests
 
         Assert.Contains("mode == \"none-v1\" and prefix == \"\"", worker, StringComparison.Ordinal);
         Assert.Contains("mode == \"prefix-v1\" and prefix.strip()", worker, StringComparison.Ordinal);
-        Assert.Contains("len(prefix) > 128", worker, StringComparison.Ordinal);
+        Assert.Contains("utf16_length(prefix) > 128", worker, StringComparison.Ordinal);
         Assert.Contains("embedded_query = self.embedding_query_prefix + query", worker, StringComparison.Ordinal);
         Assert.Contains("self.embedding_document_prefix + display_text", worker, StringComparison.Ordinal);
         Assert.Contains("\"display_text\": text", worker, StringComparison.Ordinal);

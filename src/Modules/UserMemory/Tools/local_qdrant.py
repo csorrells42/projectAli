@@ -247,11 +247,20 @@ class LocalQdrant(Qdrant):
         scored = []
         for point in semantic_results:
             semantic_score = float(getattr(point, "score", 0.0) or 0.0)
+            if not math.isfinite(semantic_score):
+                continue
+            semantic_score = max(0.0, min(semantic_score, 1.0))
             if semantic_score < 0.1:
                 continue
             point_id = str(point.id)
             bm25_score = float(bm25_scores.get(point_id, 0.0))
-            combined = min((semantic_score + bm25_score) / divisor, 1.0)
+            if not math.isfinite(bm25_score):
+                bm25_score = 0.0
+            bm25_score = max(0.0, min(bm25_score, 1.0))
+            combined = max(
+                0.0,
+                min((semantic_score + bm25_score) / divisor, 1.0),
+            )
             scored.append({
                 "id": point_id,
                 "payload": dict(point.payload or {}),

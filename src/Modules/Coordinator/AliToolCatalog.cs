@@ -49,9 +49,6 @@ internal sealed class AliToolCatalog
         ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
     {
         var profile = assistantProfile.Normalize();
-        MemoryTools = userMemories is not null && activeUsers is not null && memorySettings is not null
-            ? new AliMemoryTools(userMemories, activeUsers, memorySettings, turnAccessor, waitForPendingMemoryReview)
-            : new AliMemoryTools(memories, turnAccessor);
         ParticipantMemoryTools = participantMemories is not null
             && participantRosterAuthority is not null
             && participantReceiptAuthority is not null
@@ -63,12 +60,17 @@ internal sealed class AliToolCatalog
             : null;
         Func<string, bool, CancellationToken, Task<CoordinatorMemoryResult>> recallMemory =
             ParticipantMemoryTools is null
-                ? ((query, _, cancellationToken) =>
-                    MemoryTools.SearchAsModelToolAsync(query, cancellationToken))
+                ? ((_, _, _) => Task.FromResult(new CoordinatorMemoryResult(
+                    "Participant-aware memory recall is unavailable without a trusted admitted roster.",
+                    [],
+                    ["No legacy memory store was read."])))
                 : ParticipantMemoryTools.RecallAsync;
         Func<bool, CancellationToken, Task<CoordinatorMemoryResult>> listMemories =
             ParticipantMemoryTools is null
-                ? ((_, cancellationToken) => MemoryTools.ListCurrentAsync(cancellationToken))
+                ? ((_, _) => Task.FromResult(new CoordinatorMemoryResult(
+                    "Participant-aware memory inventory is unavailable without a trusted admitted roster.",
+                    [],
+                    ["No legacy memory store was read."])))
                 : ParticipantMemoryTools.ListAsync;
         Func<ParticipantMemoryProposal, CancellationToken, Task<CoordinatorMemoryWriteResult>> mutateMemory =
             ParticipantMemoryTools is null
@@ -212,8 +214,6 @@ internal sealed class AliToolCatalog
     public IReadOnlyList<AITool> Tools { get; }
 
     public string Instructions { get; }
-
-    public AliMemoryTools MemoryTools { get; }
 
     public AliParticipantMemoryTools? ParticipantMemoryTools { get; }
 

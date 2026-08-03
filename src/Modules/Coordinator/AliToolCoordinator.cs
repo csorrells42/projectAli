@@ -347,7 +347,6 @@ public sealed class AliToolCoordinator : IDisposable
             prompt.DurableIdentity.AssistantMessageId);
         var participantRoster = CaptureParticipantRoster(
             _participantRosterAuthority,
-            _activeUsers,
             capturedUserSelection,
             conversationId,
             prompt.DurableIdentity.AssistantMessageId);
@@ -387,7 +386,6 @@ public sealed class AliToolCoordinator : IDisposable
             assistantMessageId);
         var participantRoster = CaptureParticipantRoster(
             _participantRosterAuthority,
-            _activeUsers,
             capturedUserSelection,
             conversationId,
             assistantMessageId);
@@ -505,7 +503,6 @@ public sealed class AliToolCoordinator : IDisposable
             assistantMessageId);
         var participantRoster = CaptureParticipantRoster(
             _participantRosterAuthority,
-            _activeUsers,
             capturedUserSelection,
             conversationId,
             assistantMessageId);
@@ -643,13 +640,11 @@ public sealed class AliToolCoordinator : IDisposable
 
     private static ParticipantRosterSnapshot? CaptureParticipantRoster(
         IParticipantRosterAuthority? rosterAuthority,
-        IActiveUserSession? activeUsers,
         ActiveUserSelectionSnapshot? capturedSelection,
         string conversationId,
         string turnId)
     {
         if (rosterAuthority is null
-            || activeUsers is null
             || capturedSelection is null)
         {
             return null;
@@ -657,13 +652,20 @@ public sealed class AliToolCoordinator : IDisposable
 
         try
         {
-            var selectionGeneration = activeUsers.CaptureSelectionRevision();
             var roster = rosterAuthority.CaptureAtAdmission(
                 turnId,
                 conversationId,
-                capturedSelection,
-                selectionGeneration,
                 DateTimeOffset.UtcNow);
+            var capturedReference = capturedSelection.IsResolved
+                ? capturedSelection.SelectedUser!.Normalize().StableId
+                : null;
+            if (!string.Equals(
+                    roster.SelectedParticipantReference,
+                    capturedReference,
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
             return rosterAuthority.CheckCurrent(roster).IsCurrent ? roster : null;
         }
         catch

@@ -193,21 +193,24 @@ public sealed class UserMemoryArchitectureTests
         {
             var profiles = new FakeIdentityProfiles([Person("person-a", "Alice")]);
             var session = new ActiveUserSession(root, profiles);
-            var rosters = new SelectedParticipantRosterAuthority(session, "tenant");
+            var participantSession = new ParticipantIdentitySessionBoundary(session);
+            var rosters = new SelectedParticipantRosterAuthority(participantSession, "tenant");
             var admitted = rosters.CaptureAtAdmission(
                 "turn",
                 "conversation",
-                session.CaptureSelectionSnapshot(),
-                session.CaptureSelectionRevision(),
                 DateTimeOffset.UtcNow);
-            var before = session.CaptureSelectionRevision();
+            var before = participantSession.CaptureSelectionRevision();
 
             profiles.Items = [Person("person-a", "Alice"), Person("person-b", "Bob")];
             session.Refresh();
 
             Assert.Equal("person-a", session.Current.StableId);
-            Assert.NotEqual(before, session.CaptureSelectionRevision());
-            Assert.False(rosters.CheckCurrent(admitted).IsCurrent);
+            Assert.NotEqual(before, participantSession.CaptureSelectionRevision());
+            var stale = rosters.CheckCurrent(admitted);
+            Assert.False(stale.IsCurrent);
+            Assert.Equal(
+                participantSession.CaptureSelectionRevision(),
+                stale.CurrentSelectionGeneration);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -220,15 +223,16 @@ public sealed class UserMemoryArchitectureTests
         {
             var profiles = new FakeIdentityProfiles([]);
             var session = new ActiveUserSession(root, profiles);
+            var participantSession = new ParticipantIdentitySessionBoundary(session);
             var testId = session.Current.StableId;
-            var before = session.CaptureSelectionRevision();
+            var before = participantSession.CaptureSelectionRevision();
 
             profiles.Items = [Person(testId, "Registered Alice")];
             session.Refresh();
 
             Assert.Equal(testId, session.Current.StableId);
             Assert.False(session.Current.IsTestProfile);
-            Assert.NotEqual(before, session.CaptureSelectionRevision());
+            Assert.NotEqual(before, participantSession.CaptureSelectionRevision());
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -582,6 +586,9 @@ public sealed class UserMemoryArchitectureTests
             adapter.IndexOf("def set_exact_metadata", StringComparison.Ordinal)];
         Assert.Contains("internal_limit = max(maximum * 4, 60)", hybrid, StringComparison.Ordinal);
         Assert.Contains("semantic_score < 0.1", hybrid, StringComparison.Ordinal);
+        Assert.Contains("not math.isfinite(semantic_score)", hybrid, StringComparison.Ordinal);
+        Assert.Contains("max(0.0, min(semantic_score, 1.0))", hybrid, StringComparison.Ordinal);
+        Assert.Contains("max(0.0, min(bm25_score, 1.0))", hybrid, StringComparison.Ordinal);
         Assert.Contains("divisor = 2.0 if bm25_scores else 1.0", hybrid, StringComparison.Ordinal);
         Assert.Contains("(-float(value[\"score\"]), value[\"id\"])", hybrid, StringComparison.Ordinal);
         Assert.Contains("unicodedata.normalize(\"NFKC\"", adapter, StringComparison.Ordinal);
@@ -614,6 +621,10 @@ public sealed class UserMemoryArchitectureTests
         Assert.Contains("require_fresh_mutation_request_id", journal, StringComparison.Ordinal);
         Assert.Contains("outside its 24-hour admission window", journal, StringComparison.Ordinal);
         Assert.Contains("_quarantine_corrupt_receipt", journal, StringComparison.Ordinal);
+        Assert.Contains("def require_classified_global_state", journal, StringComparison.Ordinal);
+        Assert.Contains("self._temporary_name.fullmatch(name)", journal, StringComparison.Ordinal);
+        Assert.Contains("self._quarantine_name.fullmatch(name)", journal, StringComparison.Ordinal);
+        Assert.Contains("self.require_classified_global_state()", finalize, StringComparison.Ordinal);
         Assert.Contains("secrets.token_hex(16)", journal, StringComparison.Ordinal);
         Assert.Contains("os.O_EXCL", journal, StringComparison.Ordinal);
         Assert.Contains("getattr(os, \"O_NOFOLLOW\", 0)", journal, StringComparison.Ordinal);
@@ -647,11 +658,42 @@ public sealed class UserMemoryArchitectureTests
             < mutation.LastIndexOf("mutationStatus=\"delete_staged\"", StringComparison.Ordinal));
         Assert.Contains("request.get(\"finalizeDelete\") is True", source, StringComparison.Ordinal);
         Assert.Contains("deletionFinalized=", source, StringComparison.Ordinal);
+        Assert.Contains("def validate_provenance", source, StringComparison.Ordinal);
+        Assert.Contains("def validate_consent_receipts", source, StringComparison.Ordinal);
+        Assert.Contains("dotnet_json_length", source, StringComparison.Ordinal);
+        Assert.Contains("self._validate_receipt_structure(path, value)", journal, StringComparison.Ordinal);
+        var finalizationMarker = finalize.IndexOf(
+            "delete_receipt[\"status\"] = \"finalization_started\"",
+            StringComparison.Ordinal);
+        var finalizationMarkerSave = finalize.IndexOf(
+            "self.save(delete_receipt)",
+            finalizationMarker,
+            StringComparison.Ordinal);
+        var firstScrubWrite = finalize.IndexOf(
+            "for path, receipt in matching:",
+            finalizationMarkerSave,
+            StringComparison.Ordinal);
+        Assert.InRange(finalizationMarker, 0, int.MaxValue);
+        Assert.True(finalizationMarker < finalizationMarkerSave);
+        Assert.True(finalizationMarkerSave < firstScrubWrite);
+        Assert.Contains("finalization_receipt_ids", finalize, StringComparison.Ordinal);
+        Assert.Contains("if status == \"finalization_started\":", source, StringComparison.Ordinal);
+        Assert.Contains("pinned_request_ids", journal, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "and len(actual_successor_ids) > 1",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("self.has_control(key)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("self.has_control(principal)", source, StringComparison.Ordinal);
         Assert.Contains("A crash may occur after the active point is deleted", source, StringComparison.Ordinal);
         Assert.Contains("and receipt.get(\"redacted\") is not True", source, StringComparison.Ordinal);
         Assert.Contains("if status == \"rollback_started\":", source, StringComparison.Ordinal);
         Assert.Contains("def resume_started_rollback", source, StringComparison.Ordinal);
         Assert.Contains("has_other_active_reference", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "if str(receipt.get(\"status\") or \"\") != \"rollback_started\"",
+            source,
+            StringComparison.Ordinal);
         Assert.True(
             source.IndexOf("A crash may occur after the active point is deleted", StringComparison.Ordinal)
             < source.IndexOf("if status == \"committed\":", StringComparison.Ordinal));

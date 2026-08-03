@@ -24,6 +24,10 @@ the model cannot supply those fields. Recall and inventory prefilter the backing
 store by exact authorization before any candidate is scored or returned. Mutations
 and explicit reconciliation enter a single-writer receipt journal and are addressed
 by one stable ID, so an uncertain result is inspected rather than blindly replayed.
+The frozen general Identity session is not modified: a CP11-owned read-only boundary
+double-samples its immutable selection and registry publications, rejects an unstable
+capture, and owns the participant security generation. The roster authority captures
+that selection and generation together rather than accepting a caller generation.
 
 Coordinator durable-effect ownership is selected by exact participant tool name.
 Consent, mutation, and explicit reconciliation each require a prepared intent. Their
@@ -37,7 +41,9 @@ The production MCP server no longer publishes or binds the legacy file-memory na
 `recall_user_memory`, `list_current_user_memories`, or
 `forget_current_user_memory`. Configuration normalization cannot re-enable them.
 Participant memory remains in Ali's participant tool/service path, and legacy worker
-operations are rejected from the CP11 collection.
+operations are rejected from the CP11 collection. If the participant trust
+dependencies are missing, model-visible recall and inventory report unavailable and
+do not fall back to the legacy memory store.
 
 ## Immutable roster and advisory presence
 
@@ -50,7 +56,9 @@ normalized participants. The advisory feed accepts at most one target and one sp
 - future-dated values are stale;
 - targets require `HasTarget`;
 - speaker-enrollment utterances are excluded; and
-- attachment epoch, source sequence, and freshness participate in presence revision.
+- camera attachment epoch, material target identity/track, material speaker identity,
+  and fresh-versus-absent state participate in presence revision; per-frame source
+  sequence and timestamp changes intentionally do not invalidate every call.
 
 An exact local profile match becomes registered. An unmatched nonempty recognition
 ID becomes an opaque conversation-scoped guest; a missing ID becomes an opaque
@@ -104,8 +112,11 @@ profile. Recognition never supplies authentication.
 
 For every non-add mutation the authenticated requester must also be the exact target
 record's speaker, subject, or provenance reporter. Witness or audience membership
-alone is insufficient. C# validates the exact returned provenance and consent arrays,
-not merely counts, as well as tenant, space, access, state, target, and lineage.
+alone is insufficient. For record-creating add, correct, and dispute, C# validates the
+exact returned provenance and consent arrays, not merely counts, as well as proposal
+metadata, tenant, space, access, state, target, and lineage. Revoke/archive instead
+require the exact target ID and resulting lifecycle state; staged delete requires the
+exact target before finalization, and a finalized delete must return no record content.
 
 ## Provider-parity embedding identity
 
@@ -161,9 +172,10 @@ The exact deterministic hybrid mechanics are:
 - sigmoid `(midpoint, steepness)` is `(5,.7)` for at most 3 query tokens, `(7,.6)`
   for at most 6, `(9,.5)` for at most 9, `(10,.5)` for at most 15, and `(12,.5)`
   above 15;
-- dense candidates below 0.1 are discarded;
+- non-finite dense scores are discarded; dense and BM25 components are clamped to
+  0-1, and dense candidates below 0.1 are discarded;
 - when any candidate has a positive BM25 score, combined score is
-  `(dense + BM25) / 2`; otherwise it is dense alone; combined score clamps to 1;
+  `(dense + BM25) / 2`; otherwise it is dense alone; combined score clamps to 0-1;
 - within each exact-key query, candidates order by combined score descending and ID
   ascending, then truncate to the requested maximum;
 - authorized keys are normalized into ordinal order; the cross-key merge keeps the
@@ -182,9 +194,11 @@ first eight points.
 
 The worker accepts only add, correct, dispute, revoke, archive, and delete, with Mem0
 inference disabled. A mutation fingerprint covers the stable ID, tenant, roster,
-space, complete proposal, provenance, exact consent receipts, access keys, requesting
-principal, authentication state, and target material. Same ID plus different material
-is a conflict; same ID plus identical material inspects durable state.
+space, complete proposal (including its exact target ID), provenance, exact consent
+receipts, access keys, requesting principal, and authentication state. The current
+target snapshot and successor contract digest are separate durable receipt/preflight
+fields. Same ID plus a different fingerprint is a conflict; same ID plus an identical
+fingerprint inspects durable state.
 
 Each embedding space uses a nonblocking OS file lease around write, reconcile, and
 rollback. The journal admits at most 4,096 active receipt files, each at most 2 MiB.
@@ -192,11 +206,16 @@ New mutations require Ali's timestamped request-ID form, no more than five minut
 the future and no more than 24 hours old. Files are written through an exclusive
 0600 temporary file, flushed and fsynced, atomically replaced, permissions tightened,
 and the containing directory fsynced where supported. Directories and receipts must
-be non-reparse, regular, single-link paths; unsafe links are not followed. Hour-old
-safe temporary files are cleaned. Unreadable/corrupt receipts are quarantined, not
-guessed. Terminal committed/rolled-back content older than 24 hours is replaced by a
-redacted hashed tombstone, and old terminal tombstones may be compacted to make room.
-The bounded journal fails closed when safe admission or quarantine capacity is gone.
+be non-reparse, regular, single-link paths; unsafe links are not followed. On the next
+under-lease writer maintenance after one hour, safe stale temporary files are cleaned.
+Unreadable receipts are quarantined, not guessed. Any `.corrupt`, remaining `.tmp-*`,
+or unsafe `.json` artifact blocks every journal
+writer, reconcile/rollback, delete scrub, and cross-receipt lineage decision until
+deliberate local repair classifies it. On the next under-lease writer maintenance after
+24 hours, terminal committed/rolled-back content is replaced by a redacted hashed
+tombstone; old terminal tombstones are compacted only as needed to make room. The
+bounded journal fails closed when safe admission,
+classification, or quarantine capacity is gone.
 
 Before rollback side effects the journal persists `rollback_started`. Restart or a
 retry resumes exact rollback from that durable state. Successor rollback preflights
@@ -210,6 +229,9 @@ verifies absence, and returns `delete_staged`. C# then revalidates current autho
 roster, and authentication. Explicit reconciliation can finalize the committed,
 zero-content tombstone or authorized rollback can restore the exact snapshot. A
 worker response that skips staging and claims direct finalization is rejected.
+Before the first associated-receipt redaction, the worker persists monotonic
+`finalization_started` with the exact bounded receipt scrub set. A retry or restart
+resumes that set to the committed tombstone; rollback is forbidden after this marker.
 
 Explicit reconciliation is not a read-only operation: it can promote a fully applied
 receipt, finalize a staged delete, roll back a staged delete when authority becomes
@@ -233,11 +255,11 @@ the same participant service. The passed profile must equal current explicit
 selection. Correction/delete target only an exact current bounded review-cache ID.
 Automatic legacy `RememberAsync` remains retired.
 
-The current evidence is deliberately narrower than runtime certification. The last
-focused relevant Release run compiled 91 tests: 90 passed and one stale source-canary
-assertion failed. That canary was corrected, but the final rerun is pending. An earlier
-focused checkpoint was 46/46 green. No Python worker runtime, live provider, Mem0,
-Qdrant, Windows prompt, camera, microphone, multi-person consent, crash/power-loss,
-hardware, published UI, or broad-suite claim is made. See
+The current evidence is deliberately narrower than runtime certification. The current
+expanded focused Release selection is 104/104 green; the two exact legacy-MCP boundary
+tests are 2/2 green; and the current Release app build is green with zero warnings and
+zero errors. No Python worker runtime, live provider, Mem0, Qdrant, Windows prompt,
+camera, microphone, multi-person consent, crash/power-loss, hardware, published UI,
+or broad-suite-green claim is made; the attempted broad suite was non-green. See
 `docs/reviews/CP11-VERIFICATION-REPORT.md` for the exact boundary and
 `docs/reviews/CP11-DETERMINISTIC-RULE-DISCLOSURE.md` for the rule inventory.
