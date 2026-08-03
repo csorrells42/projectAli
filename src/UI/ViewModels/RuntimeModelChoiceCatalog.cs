@@ -58,21 +58,19 @@ internal sealed record RuntimeModelChoice(
     bool SupportsToolCalls,
     string Source)
 {
+    public ModelThinkingControl ThinkingControl { get; init; } = ModelThinkingControl.None;
+
+    public string TokenizerIdentity { get; init; } = "provider-reported-or-unknown";
+
+    public string RollingWindowMode { get; init; } = "provider-managed";
+
     public string Label => $"{DisplayName} ({Model})";
 
     public string DefaultQuantization => Quantizations.FirstOrDefault() ?? "Installed package default";
 
-    public int DefaultContextTokens => IsGptOss
-        ? OllamaRuntimeSafetyPolicy.DefaultGptOssContextTokens
-        : ContextTokens.FirstOrDefault();
+    public int DefaultContextTokens => ContextTokens.FirstOrDefault();
 
-    public int DefaultOutputTokenLimit => IsGptOss
-        ? OllamaRuntimeSafetyPolicy.DefaultGptOssOutputTokenLimit
-        : OutputTokenLimits.FirstOrDefault();
-
-    private bool IsGptOss =>
-        OllamaRuntimeSafetyPolicy.IsGptOssModel(Model)
-        || OllamaRuntimeSafetyPolicy.IsGptOssModel(Family);
+    public int DefaultOutputTokenLimit => OutputTokenLimits.FirstOrDefault();
 
     public static RuntimeModelChoice FromOptions(OpenAiCompatibleRuntimeOptions options) =>
         FromModelId(
@@ -86,7 +84,12 @@ internal sealed record RuntimeModelChoice(
             supportsVision: options.SupportsVision,
             supportsToolCalls: options.SupportsToolCalls,
             contextTokens: options.ContextTokens,
-            outputTokenLimit: options.OutputTokenLimit);
+            outputTokenLimit: options.OutputTokenLimit) with
+        {
+            ThinkingControl = options.ThinkingControl,
+            TokenizerIdentity = options.TokenizerIdentity,
+            RollingWindowMode = options.RollingWindowMode
+        };
 
     public static RuntimeModelChoice? FromJsonModel(JsonElement item)
     {
@@ -115,12 +118,45 @@ internal sealed record RuntimeModelChoice(
             ? ReadStringProperty(quantDetails, "quantization_level", "quantization")
             : null;
 
+        var declaredCapabilities = ReadDeclaredCapabilities(item).ToArray();
+        var supportsVision = declaredCapabilities.Any(value =>
+            value.Contains("vision", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("image", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("multimodal", StringComparison.OrdinalIgnoreCase));
+        var supportsToolCalls = declaredCapabilities.Any(value =>
+            value.Contains("tool", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("function", StringComparison.OrdinalIgnoreCase));
+        var contextTokens = ReadIntProperty(
+            item,
+            "context_length",
+            "max_context_length",
+            "context_window",
+            "context_tokens");
+        var outputTokenLimit = ReadIntProperty(
+            item,
+            "max_output_tokens",
+            "output_token_limit",
+            "completion_tokens");
+        var thinkingControl = ReadThinkingControl(item);
+        var tokenizerIdentity = ReadStringProperty(item, "tokenizer", "tokenizer_identity")
+            ?? "provider-reported-or-unknown";
+        var rollingWindowMode = ReadStringProperty(item, "rolling_window", "rolling_window_mode")
+            ?? "provider-managed";
         return FromModelId(
             model,
-            "Installed local runtime model",
+            "Installed runtime model",
             family: family,
             size: size,
-            quantization: quantization);
+            quantization: quantization,
+            supportsVision: supportsVision,
+            supportsToolCalls: supportsToolCalls,
+            contextTokens: contextTokens,
+            outputTokenLimit: outputTokenLimit) with
+        {
+            ThinkingControl = thinkingControl,
+            TokenizerIdentity = tokenizerIdentity,
+            RollingWindowMode = rollingWindowMode
+        };
     }
 
     public static RuntimeModelChoice FromModelId(
@@ -137,15 +173,10 @@ internal sealed record RuntimeModelChoice(
         int? outputTokenLimit = null)
     {
         var normalizedModel = model.Trim();
-        var inferredSize = string.IsNullOrWhiteSpace(size) ? InferSize(normalizedModel) : size.Trim();
-        var inferredFamily = string.IsNullOrWhiteSpace(family) ? InferFamily(normalizedModel) : family.Trim();
-        var inferredVision = supportsVision
-            ?? (normalizedModel.Contains("vl", StringComparison.OrdinalIgnoreCase)
-                || normalizedModel.Contains("vision", StringComparison.OrdinalIgnoreCase)
-                || normalizedModel.Contains("visual", StringComparison.OrdinalIgnoreCase));
-        var inferredToolCalls = supportsToolCalls
-            ?? (OllamaRuntimeSafetyPolicy.IsGptOssModel(normalizedModel)
-                || OllamaRuntimeSafetyPolicy.IsGptOssModel(inferredFamily));
+        var inferredSize = string.IsNullOrWhiteSpace(size) ? "provider-reported-or-unknown" : size.Trim();
+        var inferredFamily = string.IsNullOrWhiteSpace(family) ? "provider-reported-or-unknown" : family.Trim();
+        var inferredVision = supportsVision ?? false;
+        var inferredToolCalls = supportsToolCalls ?? false;
         var contextChoices = BuildContextChoices(contextTokens);
         var outputChoices = BuildOutputChoices(outputTokenLimit);
         var quantizationChoices = new[]
@@ -155,7 +186,7 @@ internal sealed record RuntimeModelChoice(
 
         return new RuntimeModelChoice(
             normalizedModel,
-            string.IsNullOrWhiteSpace(displayName) ? InferDisplayName(normalizedModel, inferredSize) : displayName.Trim(),
+            string.IsNullOrWhiteSpace(displayName) ? normalizedModel : displayName.Trim(),
             inferredFamily,
             inferredSize,
             quantizationChoices,
@@ -276,78 +307,21 @@ internal sealed record RuntimeModelChoice(
         {
             set.Add(preferred.Value);
         }
-
-        return set.ToList();
+        var choices = set.ToList();
+        if (preferred.HasValue && preferred.Value >= minimum)
+        {
+            choices.Remove(preferred.Value);
+            choices.Insert(0, preferred.Value);
+        }
+        return choices;
     }
 
-    private static string InferDisplayName(string model, string size)
+    private static ModelThinkingControl ReadThinkingControl(JsonElement item)
     {
-        var lower = model.ToLowerInvariant();
-        if (lower.Contains("gpt-oss", StringComparison.Ordinal))
-        {
-            return $"GPT-OSS {size}";
-        }
-
-        if (lower.Contains("qwen3-vl", StringComparison.Ordinal))
-        {
-            return $"Qwen3 VL {size}";
-        }
-
-        if (lower.Contains("qwen3", StringComparison.Ordinal))
-        {
-            return $"Qwen3 {size}";
-        }
-
-        if (lower.Contains("gemma4", StringComparison.Ordinal))
-        {
-            return $"Gemma 4 {size}";
-        }
-
-        if (lower.Contains("deepseek-coder", StringComparison.Ordinal))
-        {
-            return $"DeepSeek Coder V2 {size}";
-        }
-
-        return model;
-    }
-
-    private static string InferFamily(string model)
-    {
-        var lower = model.ToLowerInvariant();
-        if (lower.Contains("gpt-oss", StringComparison.Ordinal))
-        {
-            return "GPT-OSS";
-        }
-
-        if (lower.Contains("qwen", StringComparison.Ordinal))
-        {
-            return "Qwen";
-        }
-
-        if (lower.Contains("gemma", StringComparison.Ordinal))
-        {
-            return "Gemma";
-        }
-
-        if (lower.Contains("deepseek", StringComparison.Ordinal))
-        {
-            return "DeepSeek Coder";
-        }
-
-        return "local";
-    }
-
-    private static string InferSize(string model)
-    {
-        foreach (var size in new[] { "120B", "32B", "27B", "26B", "20B", "16B", "14B", "12B", "8B", "4B", "1.7B" })
-        {
-            if (model.Contains(size, StringComparison.OrdinalIgnoreCase))
-            {
-                return size;
-            }
-        }
-
-        return "unknown";
+        var text = ReadStringProperty(item, "thinking_control", "reasoning_control");
+        return Enum.TryParse<ModelThinkingControl>(text, ignoreCase: true, out var value)
+            ? value
+            : ModelThinkingControl.None;
     }
 
     private static string? ReadStringProperty(JsonElement item, params string[] names)
@@ -377,6 +351,21 @@ internal sealed record RuntimeModelChoice(
             }
         }
 
+        return null;
+    }
+
+    private static int? ReadIntProperty(JsonElement item, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (TryGetProperty(item, name, out var property)
+                && property.ValueKind == JsonValueKind.Number
+                && property.TryGetInt32(out var value)
+                && value > 0)
+            {
+                return value;
+            }
+        }
         return null;
     }
 

@@ -56,7 +56,13 @@ public sealed class LmStudioRuntimeTests
               "data": [
                 {
                   "id": "openai/gpt-oss-20b",
-                  "object": "model"
+                  "object": "model",
+                  "context_length": 65536,
+                  "max_output_tokens": 8192,
+                  "capabilities": ["chat", "tool_calls", "vision"],
+                  "thinking_control": "QwenTemplateToggle",
+                  "tokenizer_identity": "provider-tokenizer-r4",
+                  "rolling_window_mode": "provider-managed-sliding"
                 }
               ]
             }
@@ -65,10 +71,14 @@ public sealed class LmStudioRuntimeTests
         var choice = Assert.Single(RuntimeModelChoiceCatalog.ParseRuntimeModelChoices(json));
 
         Assert.Equal("openai/gpt-oss-20b", choice.Model);
-        Assert.Equal("Installed local runtime model", choice.Source);
+        Assert.Equal("Installed runtime model", choice.Source);
         Assert.Equal(65_536, choice.DefaultContextTokens);
         Assert.Equal(8_192, choice.DefaultOutputTokenLimit);
         Assert.True(choice.SupportsToolCalls);
+        Assert.True(choice.SupportsVision);
+        Assert.Equal(ModelThinkingControl.QwenTemplateToggle, choice.ThinkingControl);
+        Assert.Equal("provider-tokenizer-r4", choice.TokenizerIdentity);
+        Assert.Equal("provider-managed-sliding", choice.RollingWindowMode);
     }
 
     [Fact]
@@ -280,7 +290,7 @@ public sealed class LmStudioRuntimeTests
 
         Assert.Contains("RuntimeEngineGuidanceText", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Refresh models\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Choose LM Studio, Ollama, llama.cpp, Lemonade, or a custom OpenAI-compatible localhost runtime.", xaml, StringComparison.Ordinal);
+        Assert.Contains("Choose LM Studio, Ollama, llama.cpp, Lemonade, or a custom OpenAI-compatible local or explicitly approved remote HTTPS runtime.", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -386,7 +396,8 @@ public sealed class LmStudioRuntimeTests
                 AllowPrivateLanEndpoint: false)
             {
                 Engine = engine,
-                ReasoningEffort = "low"
+                ReasoningEffort = "low",
+                ThinkingControl = ModelThinkingControl.GptOssReasoningEffort
             });
 
     private sealed class RecordingHandler : HttpMessageHandler

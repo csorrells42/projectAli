@@ -76,7 +76,10 @@ public sealed class ProviderNeutralRuntimeUiTests
         Assert.Contains("RuntimeToolCallsEnabled = options.SupportsToolCalls", viewModel, StringComparison.Ordinal);
         Assert.Contains("RuntimeToolCallsEnabled = choice.SupportsToolCalls", viewModel, StringComparison.Ordinal);
         Assert.Contains("provider-owned lifecycle", viewModel, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("allowRemoteHttps: RuntimeAllowRemoteHttps", viewModel, StringComparison.Ordinal);
+        Assert.Contains("RuntimeAllowRemoteHttps", xaml, StringComparison.Ordinal);
+        Assert.Contains("RuntimeApiKey", xaml, StringComparison.Ordinal);
+        Assert.Contains("Windows current-user protection", xaml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Active runtime unloaded", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("Previous runtime released", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("release could not be verified", viewModel, StringComparison.Ordinal);

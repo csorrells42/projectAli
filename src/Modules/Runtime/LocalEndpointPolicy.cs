@@ -4,7 +4,10 @@ namespace Ali.Modules.Runtime;
 
 public static class LocalEndpointPolicy
 {
-    public static EndpointValidationResult Validate(Uri endpoint, bool allowPrivateLan)
+    public static EndpointValidationResult Validate(
+        Uri endpoint,
+        bool allowPrivateLan,
+        bool allowRemoteHttps = false)
     {
         if (!endpoint.IsAbsoluteUri)
         {
@@ -16,9 +19,38 @@ public static class LocalEndpointPolicy
             return EndpointValidationResult.Deny("Runtime endpoint must use HTTP or HTTPS.");
         }
 
+        if (!string.IsNullOrEmpty(endpoint.Query) || !string.IsNullOrEmpty(endpoint.Fragment))
+        {
+            return EndpointValidationResult.Deny(
+                "Runtime endpoint must be a base URL without a query string or fragment.");
+        }
+
+        if (!string.IsNullOrEmpty(endpoint.UserInfo))
+        {
+            return EndpointValidationResult.Deny(
+                "Runtime endpoint credentials must use Ali's protected API-key store, not URL user information.");
+        }
+
         if (IsLoopbackHost(endpoint.Host))
         {
             return EndpointValidationResult.Allow("Loopback endpoint is allowed.");
+        }
+
+        if (IPAddress.TryParse(endpoint.Host, out var ipAddress) && IsPrivateAddress(ipAddress))
+        {
+            return allowPrivateLan
+                ? EndpointValidationResult.Allow("Private LAN endpoint is allowed by settings.")
+                : EndpointValidationResult.Deny(
+                    "Only loopback endpoints are allowed until private LAN pairing is implemented.");
+        }
+
+        if (allowRemoteHttps)
+        {
+            return endpoint.Scheme == Uri.UriSchemeHttps
+                ? EndpointValidationResult.Allow(
+                    "Explicit remote OpenAI-compatible HTTPS endpoint is allowed with normal certificate validation.")
+                : EndpointValidationResult.Deny(
+                    "Remote OpenAI-compatible endpoints must use HTTPS.");
         }
 
         if (!allowPrivateLan)
@@ -26,12 +58,18 @@ public static class LocalEndpointPolicy
             return EndpointValidationResult.Deny("Only loopback endpoints are allowed until private LAN pairing is implemented.");
         }
 
-        if (IPAddress.TryParse(endpoint.Host, out var ipAddress) && IsPrivateAddress(ipAddress))
-        {
-            return EndpointValidationResult.Allow("Private LAN endpoint is allowed by settings.");
-        }
-
         return EndpointValidationResult.Deny("Public or unresolved runtime endpoints are refused in local-only mode.");
+    }
+
+    public static bool IsRemote(Uri endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        if (IsLoopbackHost(endpoint.Host))
+        {
+            return false;
+        }
+        return !IPAddress.TryParse(endpoint.Host, out var address)
+            || !IsPrivateAddress(address);
     }
 
     private static bool IsLoopbackHost(string host) =>

@@ -401,7 +401,7 @@
 
         <StackPanel Margin="0,0,0,14">
             <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-            <TextBlock Text="Local runtime, voice, and microphone controls." Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+            <TextBlock Text="Model runtime, voice, and microphone controls." Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
         </StackPanel>
 
         <TabControl x:Name="SettingsTabs"
@@ -447,7 +447,7 @@
                                                Margin="0,3,0,8" />
                                     <CheckBox x:Name="RuntimeAdvancedUnlockCheck"
                                               Content="I understand. Enable runtime settings."
-                                              ToolTip="Check this only when intentionally changing local runtime settings." />
+                                              ToolTip="Check this only when intentionally changing model runtime settings." />
                                 </StackPanel>
                             </Border>
 
@@ -487,16 +487,33 @@
                                            Margin="0,0,0,8" />
 
                                 <TextBlock Text="Endpoint" Style="{StaticResource FieldLabel}" />
-                                <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}"
-                                         Margin="0,2,0,2" />
-                                <Button Content="Refresh models"
+                                 <TextBox Text="{Binding RuntimeEndpointText, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,2,0,2" />
+                                 <CheckBox Content="Allow this explicitly selected remote HTTPS endpoint"
+                                           IsChecked="{Binding RuntimeAllowRemoteHttps}"
+                                           AutomationProperties.AutomationId="RuntimeAllowRemoteHttps"
+                                           Margin="0,4,0,2"
+                                           ToolTip="Remote access is accepted only for OpenAI-compatible/Custom over HTTPS with ordinary certificate validation." />
+                                 <TextBlock Text="Remote API key (optional for local endpoints)"
+                                            Style="{StaticResource FieldLabel}"
+                                            Margin="0,5,0,0" />
+                                 <PasswordBox x:Name="RuntimeApiKeyPasswordBox"
+                                              PasswordChanged="RuntimeApiKeyPasswordChanged"
+                                              AutomationProperties.AutomationId="RuntimeApiKey"
+                                              Margin="0,2,0,2" />
+                                 <TextBlock Text="Saved separately with Windows current-user protection. The key is never written to runtime-settings.json, capability profiles, or logs. ALI_REMOTE_OPENAI_API_KEY can supply it instead."
+                                            TextWrapping="Wrap"
+                                            FontSize="11"
+                                            Foreground="{StaticResource SubtleTextBrush}"
+                                            Margin="0,0,0,4" />
+                                 <Button Content="Refresh models"
                                         Command="{Binding RefreshRuntimeModelsCommand}"
                                         Width="118"
                                         Padding="8,5"
                                         HorizontalAlignment="Right"
                                         Margin="0,4,0,2"
                                         ToolTip="Refresh installed model choices from the endpoint." />
-                                <TextBlock Text="Choose LM Studio, Ollama, llama.cpp, Lemonade, or a custom OpenAI-compatible localhost runtime. Ali preserves the selected provider and endpoint."
+                                 <TextBlock Text="Choose LM Studio, Ollama, llama.cpp, Lemonade, or a custom OpenAI-compatible local or explicitly approved remote HTTPS runtime. Ali preserves the selected provider and endpoint."
                                            TextWrapping="Wrap"
                                            FontSize="11"
                                            Foreground="{StaticResource SubtleTextBrush}"
@@ -584,6 +601,12 @@
                                                    Foreground="{StaticResource SubtleTextBrush}" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="8">
+                                        <TextBlock Text="Thinking convention" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding RuntimeThinkingControlChoices}"
+                                                  SelectedItem="{Binding RuntimeThinkingControl}"
+                                                  AutomationProperties.AutomationId="RuntimeThinkingControl"
+                                                  Margin="0,2,0,4"
+                                                  ToolTip="Explicit endpoint/model convention. Unknown models use None until metadata or the operator selects one." />
                                         <CheckBox Content="Enable model thinking"
                                                   IsChecked="{Binding RuntimeThinkingEnabled}"
                                                   AutomationProperties.AutomationId="RuntimeThinkingEnabled"
@@ -1392,7 +1415,7 @@
                                        FontSize="18"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource TextBrush}" />
-                            <TextBlock Text="Create a zip backup of Ali's user data, or restore one after reinstalling. Local runtime models are not included or changed."
+                            <TextBlock Text="Create a zip backup of Ali's user data, or restore one after reinstalling. Runtime model packages are not included or changed."
                                        Foreground="{StaticResource MutedTextBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,3,0,12" />

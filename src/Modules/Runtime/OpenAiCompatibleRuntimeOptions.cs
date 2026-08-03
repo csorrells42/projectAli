@@ -25,13 +25,32 @@ public sealed record OpenAiCompatibleRuntimeOptions(
 
     public bool ThinkingEnabled { get; init; }
 
+    public ModelThinkingControl ThinkingControl { get; init; } = ModelThinkingControl.None;
+
+    public bool AllowRemoteHttpsEndpoint { get; init; }
+
+    public string ApiKeyEnvironmentVariable { get; init; } =
+        RuntimeCredentialStore.DefaultApiKeyEnvironmentVariable;
+
+    public string TokenizerIdentity { get; init; } = "provider-reported-or-unknown";
+
+    public string RollingWindowMode { get; init; } = "provider-managed";
+
+    public bool CapabilityProbeEnabled { get; init; }
+
     public ModelProfile ToModelProfile(bool isLastKnownGood) =>
         new(
             ProfileId: $"openai-compatible-{Model}-{Quantization}-{ContextTokens}",
             DisplayName: DisplayName,
-            RuntimeLocation: AllowPrivateLanEndpoint ? "Private LAN AI Workstation" : "This PC",
+            RuntimeLocation: LocalEndpointPolicy.IsRemote(Endpoint)
+                ? "Remote HTTPS runtime"
+                : AllowPrivateLanEndpoint
+                    ? "Private LAN AI Workstation"
+                    : "This PC",
             RuntimeEndpoint: Endpoint.ToString(),
-            RuntimeKind: $"{LocalRuntimeEngines.Normalize(Engine)} local HTTP",
+            RuntimeKind: LocalEndpointPolicy.IsRemote(Endpoint)
+                ? $"{LocalRuntimeEngines.Normalize(Engine)} remote HTTPS"
+                : $"{LocalRuntimeEngines.Normalize(Engine)} local HTTP",
             PackageId: Model,
             Family: Family,
             Size: Size,
@@ -42,7 +61,12 @@ public sealed record OpenAiCompatibleRuntimeOptions(
             StreamingEnabled: StreamingEnabled,
             SupportsVision: SupportsVision,
             SupportsToolCalls: SupportsToolCalls,
-            IsLastKnownGood: isLastKnownGood);
+            IsLastKnownGood: isLastKnownGood)
+        {
+            ProtocolIdentity = RuntimeProtocolIdentities.ChatOnly,
+            TokenizerIdentity = TokenizerIdentity,
+            RollingWindowMode = RollingWindowMode
+        };
 }
 
 public static class LocalRuntimeEngines
@@ -141,7 +165,7 @@ public static class OllamaRuntimeSafetyPolicy
 
     public static string ResolveReasoningEffort(OpenAiCompatibleRuntimeOptions options)
     {
-        if (!IsGptOssModel(options.Model) && !IsGptOssModel(options.Family))
+        if (options.ThinkingControl != ModelThinkingControl.GptOssReasoningEffort)
         {
             return "off";
         }
@@ -155,7 +179,7 @@ public static class OllamaRuntimeSafetyPolicy
             {
                 Engine = LocalRuntimeEngines.Ollama,
                 ContextTokens = ResolveContextTokens(options.ContextTokens),
-                ReasoningEffort = IsGptOssModel(options.Model) || IsGptOssModel(options.Family)
+                ReasoningEffort = options.ThinkingControl == ModelThinkingControl.GptOssReasoningEffort
                     ? ResolveReasoningEffort(options)
                     : null
             }

@@ -105,10 +105,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isTranscribing;
     private bool _isSpeaking;
     private DateTimeOffset _suppressVoiceIngressUntil = DateTimeOffset.MinValue;
-    private string _statusText = "Ready. Local runtime is not configured yet.";
+    private string _statusText = "Ready. Model runtime is not configured yet.";
     private string _runtimeDisplay;
     private string _selectedRuntimeEngine = LocalRuntimeEngines.LmStudio;
     private string _runtimeEndpointText = string.Empty;
+    private string _runtimeApiKeyText = string.Empty;
+    private bool _runtimeAllowRemoteHttps;
     private string _runtimeModelText = string.Empty;
     private string _runtimeContextText = "2048";
     private string _runtimeOutputLimitText = "256";
@@ -123,6 +125,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _runtimeVisionEnabled;
     private bool _runtimeToolCallsEnabled;
     private bool _runtimeThinkingEnabled;
+    private ModelThinkingControl _runtimeThinkingControl;
     private bool _loadingRuntimeOptions;
     private bool _canActivateRuntime;
     private bool _canRevertToLastKnownGood;
@@ -1043,7 +1046,9 @@ public sealed class MainWindowViewModel : ObservableObject
             LocalRuntimeEngines.LlamaCpp =>
                 "Start llama.cpp's local server, keep the selected model loaded there, then refresh its OpenAI-compatible /v1/models list.",
             LocalRuntimeEngines.GenericOpenAi =>
-                "Enter a localhost OpenAI-compatible base URL ending in /v1/. Refresh models works when that server implements GET /v1/models.",
+                RuntimeAllowRemoteHttps
+                    ? "Enter the explicitly selected remote OpenAI-compatible HTTPS base URL ending in /v1/. Ali uses the protected API key only after Refresh, Check, or a model request."
+                    : "Enter a localhost OpenAI-compatible base URL ending in /v1/. Refresh models works when that server implements GET /v1/models.",
             LocalRuntimeEngines.Lemonade =>
                 "Lemonade uses its own unload-and-verify barrier before another model can be checked.",
             _ =>
@@ -1056,6 +1061,25 @@ public sealed class MainWindowViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _runtimeEndpointText, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+                OnPropertyChanged(nameof(RuntimeEngineGuidanceText));
+            }
+        }
+    }
+
+    public string RuntimeApiKeyText
+    {
+        get => _runtimeApiKeyText;
+        set => SetProperty(ref _runtimeApiKeyText, value);
+    }
+
+    public bool RuntimeAllowRemoteHttps
+    {
+        get => _runtimeAllowRemoteHttps;
+        set
+        {
+            if (SetProperty(ref _runtimeAllowRemoteHttps, value))
             {
                 OnPropertyChanged(nameof(RuntimeRequestContractText));
                 OnPropertyChanged(nameof(RuntimeEngineGuidanceText));
@@ -1201,6 +1225,21 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public IReadOnlyList<ModelThinkingControl> RuntimeThinkingControlChoices { get; } =
+        Enum.GetValues<ModelThinkingControl>();
+
+    public ModelThinkingControl RuntimeThinkingControl
+    {
+        get => _runtimeThinkingControl;
+        set
+        {
+            if (SetProperty(ref _runtimeThinkingControl, value))
+            {
+                OnPropertyChanged(nameof(RuntimeRequestContractText));
+            }
+        }
+    }
+
     public bool IsReasoningLow
     {
         get => _selectedReasoningEffort == "low";
@@ -1247,6 +1286,9 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             var engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint);
+            var endpointScope = LocalEndpointPolicy.IsRemote(endpoint)
+                ? "explicit remote HTTPS"
+                : "local/private";
             if (engine != LocalRuntimeEngines.Ollama)
             {
                 var lifecycle = engine == LocalRuntimeEngines.Lemonade
@@ -1254,14 +1296,14 @@ public sealed class MainWindowViewModel : ObservableObject
                     : "provider-owned lifecycle; Ali disconnects without unloading models";
                 var model = RuntimeModelText.Trim();
                 var reasoningContract = ModelThinkingPolicy.Describe(
-                    model,
-                    CurrentRuntimeModelChoice()?.Family,
+                    RuntimeThinkingControl,
                     RuntimeThinkingEnabled,
                     _selectedReasoningEffort);
-                return $"Engine: {engine} | Transport: OpenAI-compatible\n"
+                return $"Engine: {engine} | Transport: OpenAI-compatible | Scope: {endpointScope}\n"
                     + $"Model: {model} | reasoning: {reasoningContract}\n"
                     + $"Tool calls: {(RuntimeToolCallsEnabled ? "enabled" : "disabled")} | Lifecycle: {lifecycle}.\n"
-                    + "Context and GPU placement are controlled by the selected engine.";
+                    + $"Tokenizer: {CurrentRuntimeModelChoice()?.TokenizerIdentity ?? "provider-reported-or-unknown"} | rolling window: {CurrentRuntimeModelChoice()?.RollingWindowMode ?? "provider-managed"}.\n"
+                    + $"Remote credential: {(RuntimeAllowRemoteHttps ? "protected store/environment reference; never written to runtime settings" : "not used")}.";
             }
 
             var requestedContext = int.TryParse(RuntimeContextText.Trim(), out var parsedContext)
@@ -1280,7 +1322,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 + $"num_ctx: {contextText} | selected value is sent unchanged\n"
                 + $"num_predict: {outputText} | stream: {RuntimeStreamingEnabled.ToString().ToLowerInvariant()}\n"
                 + $"temperature: {RuntimeTemperatureText.Trim()} | top_p: {topPText}\n"
-                + $"think: {(OllamaRuntimeSafetyPolicy.IsGptOssModel(RuntimeModelText) ? _selectedReasoningEffort : "false")} | keep_alive: {OllamaRuntimeSafetyPolicy.KeepAlive}\n"
+                + $"think: {ResolveConfiguredThinkingPreview()} | keep_alive: {OllamaRuntimeSafetyPolicy.KeepAlive}\n"
                 + $"vision: {RuntimeVisionEnabled.ToString().ToLowerInvariant()} | tools: {RuntimeToolCallsEnabled.ToString().ToLowerInvariant()}\n"
                 + "model lifecycle: provider-owned; Ali does not send an unload request\n"
                 + "Unspecified Ollama options use the model defaults. Logs contain request metadata, not conversation text.";
@@ -5037,6 +5079,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             var options = BuildRuntimeOptionsFromUi();
+            _services.SaveRuntimeApiKey(RuntimeApiKeyText);
             _services.SaveRuntimeSettings(options);
             _services.ConfigureRuntimeCandidate(options);
             CanActivateRuntime = false;
@@ -5058,22 +5101,41 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false);
+        var endpointPolicy = LocalEndpointPolicy.Validate(
+            endpoint,
+            allowPrivateLan: false,
+            allowRemoteHttps: RuntimeAllowRemoteHttps);
         if (!endpointPolicy.IsAllowed)
         {
             RuntimeSelectionStatusText = endpointPolicy.Reason;
             return;
         }
 
+        var engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint);
+        if (LocalEndpointPolicy.IsRemote(endpoint)
+            && engine != LocalRuntimeEngines.GenericOpenAi)
+        {
+            RuntimeSelectionStatusText =
+                "Remote endpoints are supported only through the explicit OpenAI-compatible/Custom engine.";
+            return;
+        }
+
         IsBusy = true;
-        StatusText = "Refreshing installed local models...";
+        StatusText = "Refreshing installed runtime models...";
         var operation = BeginUiOperation(TimeSpan.FromSeconds(15));
         try
         {
-            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, operation.Token).ConfigureAwait(true);
+            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(
+                    _services.SelectRuntimeHttpClient(BuildRuntimeOptionsFromUi()),
+                    endpoint,
+                    allowPrivateLanEndpoint: false,
+                    allowRemoteHttpsEndpoint: RuntimeAllowRemoteHttps,
+                    apiKey: RuntimeApiKeyText,
+                    cancellationToken: operation.Token)
+                .ConfigureAwait(true);
             if (installedChoices.Count == 0)
             {
-                RuntimeSelectionStatusText = "No installed models were listed by the local runtime endpoint.";
+                RuntimeSelectionStatusText = "No installed models were listed by the runtime endpoint.";
                 StatusText = RuntimeSelectionStatusText;
                 return;
             }
@@ -5092,7 +5154,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 preferredOutputLimit: currentOutputLimit,
                 resetToSmallest: string.IsNullOrWhiteSpace(currentModel));
 
-            RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed local model(s).";
+            RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed runtime model(s).";
             StatusText = RuntimeSelectionStatusText;
         }
         catch (OperationCanceledException) when (operation.IsCancellationRequested)
@@ -5116,7 +5178,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         IsBusy = true;
         CanActivateRuntime = false;
-        StatusText = "Checking local runtime...";
+        StatusText = "Checking model runtime...";
         SetModelConnectionStatus("command sent, waiting on model to load", MediaBrushes.Gold);
         await Task.Yield();
 
@@ -5451,10 +5513,21 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Runtime endpoint must be an absolute URL.");
         }
 
-        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false);
+        var endpointPolicy = LocalEndpointPolicy.Validate(
+            endpoint,
+            allowPrivateLan: false,
+            allowRemoteHttps: RuntimeAllowRemoteHttps);
         if (!endpointPolicy.IsAllowed)
         {
             throw new InvalidOperationException(endpointPolicy.Reason);
+        }
+
+        var engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint);
+        if (LocalEndpointPolicy.IsRemote(endpoint)
+            && engine != LocalRuntimeEngines.GenericOpenAi)
+        {
+            throw new InvalidOperationException(
+                "Remote endpoints are supported only through the explicit OpenAI-compatible/Custom engine.");
         }
 
         if (!int.TryParse(RuntimeContextText.Trim(), out var contextTokens) || contextTokens < 1)
@@ -5514,9 +5587,15 @@ public sealed class MainWindowViewModel : ObservableObject
             SupportsToolCalls: RuntimeToolCallsEnabled,
             AllowPrivateLanEndpoint: false)
         {
-            Engine = LocalRuntimeEngines.Normalize(SelectedRuntimeEngine, endpoint),
+            Engine = engine,
             ReasoningEffort = _selectedReasoningEffort,
-            ThinkingEnabled = RuntimeThinkingEnabled
+            ThinkingEnabled = RuntimeThinkingEnabled,
+            ThinkingControl = RuntimeThinkingControl,
+            AllowRemoteHttpsEndpoint = RuntimeAllowRemoteHttps,
+            ApiKeyEnvironmentVariable = RuntimeCredentialStore.DefaultApiKeyEnvironmentVariable,
+            TokenizerIdentity = selectedModel?.TokenizerIdentity ?? "provider-reported-or-unknown",
+            RollingWindowMode = selectedModel?.RollingWindowMode ?? "provider-managed",
+            CapabilityProbeEnabled = true
         });
     }
 
@@ -6396,7 +6475,10 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLan: false);
+        var endpointPolicy = LocalEndpointPolicy.Validate(
+            endpoint,
+            allowPrivateLan: false,
+            allowRemoteHttps: RuntimeAllowRemoteHttps);
         if (!endpointPolicy.IsAllowed)
         {
             EnsureRuntimeModelChoicesAvailable(currentModel);
@@ -6408,11 +6490,18 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             using var refresh = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
             refresh.CancelAfter(TimeSpan.FromSeconds(10));
-            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(endpoint, refresh.Token).ConfigureAwait(true);
+            var installedChoices = await FetchInstalledRuntimeModelChoicesAsync(
+                    _services.SelectRuntimeHttpClient(BuildRuntimeOptionsFromUi()),
+                    endpoint,
+                    allowPrivateLanEndpoint: false,
+                    allowRemoteHttpsEndpoint: RuntimeAllowRemoteHttps,
+                    apiKey: RuntimeApiKeyText,
+                    cancellationToken: refresh.Token)
+                .ConfigureAwait(true);
             if (installedChoices.Count == 0)
             {
                 EnsureRuntimeModelChoicesAvailable(currentModel);
-                RuntimeSelectionStatusText = "No installed models were listed by the local runtime endpoint.";
+                RuntimeSelectionStatusText = "No installed models were listed by the runtime endpoint.";
                 return;
             }
 
@@ -6426,7 +6515,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 preferredContext: currentContext,
                 preferredOutputLimit: currentOutputLimit,
                 resetToSmallest: string.IsNullOrWhiteSpace(currentModel));
-            RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed local model(s).";
+            RuntimeSelectionStatusText = $"Found {installedChoices.Count} installed runtime model(s).";
         }
         catch (OperationCanceledException)
         {
@@ -6882,13 +6971,24 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             _services.SaveRuntimeSettings(BuildRuntimeOptionsFromUi());
-            StatusText = $"Reasoning effort set to {normalized}. The next GPT-OSS request will use it.";
+            StatusText = $"Reasoning effort set to {normalized}. The next request using the selected reasoning convention will use it.";
         }
         catch (Exception ex)
         {
             StatusText = $"Reasoning effort changed for this session, but could not be saved: {ex.Message}";
         }
     }
+
+    private string ResolveConfiguredThinkingPreview() =>
+        RuntimeThinkingControl switch
+        {
+            ModelThinkingControl.GptOssReasoningEffort => _selectedReasoningEffort,
+            ModelThinkingControl.QwenTemplateToggle => RuntimeThinkingEnabled.ToString().ToLowerInvariant(),
+            ModelThinkingControl.GemmaSystemPromptToken => RuntimeThinkingEnabled
+                ? "system-token-enabled"
+                : "system-token-omitted",
+            _ => "omitted"
+        };
 
     private void NotifyReasoningEffortChanged()
     {
@@ -6918,6 +7018,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         RuntimeEnabled = options.Enabled;
         RuntimeEndpointText = options.Endpoint.ToString();
+        RuntimeAllowRemoteHttps = options.AllowRemoteHttpsEndpoint;
+        RuntimeApiKeyText = _services.LoadRuntimeApiKey() ?? string.Empty;
         var temperatureText = options.Temperature.ToString(CultureInfo.InvariantCulture);
         var topPText = options.TopP?.ToString(CultureInfo.InvariantCulture) ?? RuntimeTopPModelDefault;
         EnsureChoice(RuntimeTemperatureChoices, temperatureText);
@@ -6928,6 +7030,7 @@ public sealed class MainWindowViewModel : ObservableObject
         RuntimeVisionEnabled = options.SupportsVision;
         RuntimeToolCallsEnabled = options.SupportsToolCalls;
         RuntimeThinkingEnabled = options.ThinkingEnabled;
+        RuntimeThinkingControl = options.ThinkingControl;
         _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(options.ReasoningEffort);
         NotifyReasoningEffortChanged();
         _services.RuntimeController.SetReasoningEffort(_selectedReasoningEffort);
@@ -7008,6 +7111,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         RuntimeModelText = choice.Model;
+        RuntimeThinkingControl = choice.ThinkingControl;
         RuntimeEnabled = !string.IsNullOrWhiteSpace(choice.Model);
         RuntimeStreamingEnabled = choice.StreamingEnabled;
         RuntimeVisionEnabled = choice.SupportsVision;
@@ -7023,15 +7127,14 @@ public sealed class MainWindowViewModel : ObservableObject
         ReplaceChoices(RuntimeContextChoices, choice.ContextTokens.Select(value => value.ToString(CultureInfo.InvariantCulture)));
         ReplaceChoices(RuntimeOutputLimitChoices, choice.OutputTokenLimits.Select(value => value.ToString(CultureInfo.InvariantCulture)));
 
-        var isGptOss = OllamaRuntimeSafetyPolicy.IsGptOssModel(choice.Model)
-            || OllamaRuntimeSafetyPolicy.IsGptOssModel(choice.Family);
+        var usesReasoningEffort = choice.ThinkingControl == ModelThinkingControl.GptOssReasoningEffort;
         var defaultContext = choice.DefaultContextTokens.ToString(CultureInfo.InvariantCulture);
         var defaultOutputLimit = choice.DefaultOutputTokenLimit.ToString(CultureInfo.InvariantCulture);
 
         RuntimeQuantizationText = PickChoice(RuntimeQuantizationChoices, preferredQuantization, choice.DefaultQuantization, resetToSmallest);
-        RuntimeContextText = PickChoice(RuntimeContextChoices, preferredContext, defaultContext, resetToSmallest && !isGptOss);
-        RuntimeOutputLimitText = PickChoice(RuntimeOutputLimitChoices, preferredOutputLimit, defaultOutputLimit, resetToSmallest && !isGptOss);
-        if (resetToSmallest && isGptOss)
+        RuntimeContextText = PickChoice(RuntimeContextChoices, preferredContext, defaultContext, resetToSmallest && !usesReasoningEffort);
+        RuntimeOutputLimitText = PickChoice(RuntimeOutputLimitChoices, preferredOutputLimit, defaultOutputLimit, resetToSmallest && !usesReasoningEffort);
+        if (resetToSmallest && usesReasoningEffort)
         {
             EnsureChoice(RuntimeTemperatureChoices, "1");
             RuntimeTemperatureText = "1";
@@ -7165,8 +7268,26 @@ public sealed class MainWindowViewModel : ObservableObject
         Uri endpoint,
         bool allowPrivateLanEndpoint,
         CancellationToken cancellationToken)
+        => await FetchInstalledRuntimeModelChoicesAsync(
+            httpClient,
+            endpoint,
+            allowPrivateLanEndpoint,
+            allowRemoteHttpsEndpoint: false,
+            apiKey: null,
+            cancellationToken).ConfigureAwait(false);
+
+    internal static async Task<IReadOnlyList<RuntimeModelChoice>> FetchInstalledRuntimeModelChoicesAsync(
+        HttpClient httpClient,
+        Uri endpoint,
+        bool allowPrivateLanEndpoint,
+        bool allowRemoteHttpsEndpoint,
+        string? apiKey,
+        CancellationToken cancellationToken)
     {
-        var endpointPolicy = LocalEndpointPolicy.Validate(endpoint, allowPrivateLanEndpoint);
+        var endpointPolicy = LocalEndpointPolicy.Validate(
+            endpoint,
+            allowPrivateLanEndpoint,
+            allowRemoteHttpsEndpoint);
         if (!endpointPolicy.IsAllowed)
         {
             throw new InvalidOperationException(endpointPolicy.Reason);
@@ -7175,6 +7296,17 @@ public sealed class MainWindowViewModel : ObservableObject
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
             LocalRuntimeModelInventory.BuildModelsUri(endpoint));
+        if (LocalEndpointPolicy.IsRemote(endpoint))
+        {
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException(
+                    "The selected remote runtime requires an API key before model discovery.");
+            }
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer",
+                apiKey.Trim());
+        }
         using var response = await httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
@@ -7186,7 +7318,7 @@ public sealed class MainWindowViewModel : ObservableObject
         return RuntimeModelChoiceCatalog.ParseRuntimeModelChoices(body);
     }
 
-    private static async Task<RuntimeHealthCheck> CheckRuntimeEndpointStatusAsync(
+    private async Task<RuntimeHealthCheck> CheckRuntimeEndpointStatusAsync(
         OpenAiCompatibleRuntimeOptions options,
         CancellationToken cancellationToken)
     {
@@ -7214,9 +7346,13 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             var choices = await FetchInstalledRuntimeModelChoicesAsync(
-                options.Endpoint,
-                options.AllowPrivateLanEndpoint,
-                cancellationToken).ConfigureAwait(false);
+                    _services.SelectRuntimeHttpClient(options),
+                    options.Endpoint,
+                    options.AllowPrivateLanEndpoint,
+                    options.AllowRemoteHttpsEndpoint,
+                    _services.ResolveRuntimeApiKey(options),
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             if (choices.Any(choice => choice.Model.Equals(options.Model, StringComparison.OrdinalIgnoreCase)))
             {
@@ -7224,17 +7360,21 @@ public sealed class MainWindowViewModel : ObservableObject
                     started,
                     succeeded: true,
                     options,
-                    $"Local runtime endpoint responded and listed model '{options.Model}'.");
+                    $"Runtime endpoint responded and listed model '{options.Model}'.");
             }
 
             var summary = choices.Count == 0
-                ? "Local runtime endpoint responded, but no installed models were listed."
-                : $"Local runtime endpoint responded, but model '{options.Model}' was not listed.";
+                ? "Runtime endpoint responded, but no installed models were listed."
+                : $"Runtime endpoint responded, but model '{options.Model}' was not listed.";
             return CreateRuntimeEndpointStatus(started, succeeded: false, options, summary, summary);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException
+                                      or TaskCanceledException
+                                      or OperationCanceledException
+                                      or JsonException
+                                      or InvalidOperationException)
         {
-            var summary = $"Local runtime endpoint ping failed: {ex.Message}";
+            var summary = $"Runtime endpoint ping failed: {ex.Message}";
             return CreateRuntimeEndpointStatus(started, succeeded: false, options, summary, summary);
         }
     }

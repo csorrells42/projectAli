@@ -126,7 +126,7 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             settings.CollectionName,
             embedding,
             vectorSettings);
-        var thinkingControl = ModelThinkingPolicy.Resolve(runtime.Model, runtime.Family);
+        var thinkingControl = runtime.ThinkingControl;
         var processConfiguration = BuildProcessConfigurationFingerprint(
             runtime,
             thinkingControl,
