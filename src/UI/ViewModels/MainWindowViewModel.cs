@@ -63,6 +63,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly ConversationBridgeHost _conversationBridge;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
     private AliInteractionRuntime? _interactionRuntime;
+    private IDisposable? _participantPresenceBinding;
     private readonly DispatcherTimer _interactionTimer = new() { Interval = TimeSpan.FromMilliseconds(75) };
     private CancellationTokenSource? _visionModeLoad;
     private Task _visionModeLoadTask = Task.CompletedTask;
@@ -404,6 +405,7 @@ public sealed class MainWindowViewModel : ObservableObject
         try
         {
             _interactionRuntime = new AliInteractionRuntime(AssistantName, _services.UserDataRoot);
+            _participantPresenceBinding = _services.ParticipantPresence.Attach(_interactionRuntime);
         }
         catch (Exception ex)
         {
@@ -2218,6 +2220,8 @@ public sealed class MainWindowViewModel : ObservableObject
         _visionModeLoad?.Dispose();
         _visionModeLoad = null;
         VisionViewport = null;
+        _participantPresenceBinding?.Dispose();
+        _participantPresenceBinding = null;
         var interactionRuntime = _interactionRuntime;
         _interactionRuntime = null;
         if (interactionRuntime is not null)

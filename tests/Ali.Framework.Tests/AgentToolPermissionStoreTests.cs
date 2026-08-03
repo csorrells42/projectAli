@@ -60,15 +60,17 @@ public sealed class AgentToolPermissionStoreTests
     public void NativeRiskClassification_KeepsWritesAndPaidResearchApprovalGated()
     {
         Assert.False(AliToolPermissionPolicy.RequiresApproval("remember_for_current_user"));
-        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(
             "remember_for_current_user",
             AgentPermissionProfile.LockedDown));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(
             AliCapabilityCatalog.CorrectCurrentUserMemoryName));
-        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(
             AliCapabilityCatalog.CorrectCurrentUserMemoryName,
             AgentPermissionProfile.LockedDown));
-        Assert.True(AliToolPermissionPolicy.RequiresApproval("forget_current_user_memory"));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval("forget_current_user_memory"));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.MutateParticipantMemoryName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("create_calendar_event"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval("research_web"));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RunAgentSkillScriptName));
@@ -149,7 +151,14 @@ public sealed class AgentToolPermissionStoreTests
             .Where(AliProductionCapabilityCatalog.IsRetiredToolName)
             .Order(StringComparer.Ordinal)
             .ToArray();
+        var catalogToolNames = AliCapabilityCatalog.Tools
+            .Select(tool => tool.Name)
+            .ToHashSet(StringComparer.Ordinal);
         var expectedRetiredNames = RetiredSingleLoopSurfaceCanary.ToolNames
+            .Concat([
+                AliCapabilityCatalog.RoslynPreviewRenameName,
+                AliCapabilityCatalog.RoslynApplyRenameName
+            ])
             .Order(StringComparer.Ordinal)
             .ToArray();
         var trustedNames = AliToolPermissionPolicy
@@ -161,7 +170,12 @@ public sealed class AgentToolPermissionStoreTests
             .Select(policy => policy.ToolName)
             .ToArray();
 
-        Assert.Equal(expectedRetiredNames, retiredProductionNames);
+        Assert.Equal(
+            expectedRetiredNames.Where(catalogToolNames.Contains),
+            retiredProductionNames);
+        Assert.All(
+            expectedRetiredNames,
+            toolName => Assert.True(AliProductionCapabilityCatalog.IsRetiredToolName(toolName)));
         Assert.All(
             expectedRetiredNames,
             toolName => Assert.DoesNotContain(toolName, trustedNames));

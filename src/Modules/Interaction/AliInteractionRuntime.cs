@@ -7,6 +7,7 @@ using AvatarBuilder.Modules.Vision.Identity;
 using AvatarBuilder.Modules.Vision.IdentityEnrollment;
 using AvatarBuilder.Modules.Webcam.Common;
 using AvatarBuilder.Modules.Webcam.MediaFoundation;
+using Ali.Modules.UserMemory;
 
 namespace Ali.Modules.Interaction;
 
@@ -31,9 +32,10 @@ public sealed record AliIdentityReviewSession(
 /// capture, analysis, security, transcription, overlay, and viewport work is
 /// delegated to reusable modules.
 /// </summary>
-public sealed class AliInteractionRuntime : IDisposable
+public sealed class AliInteractionRuntime : IParticipantPresenceSnapshotSource, IDisposable
 {
     private readonly AliSpeechIngressPipeline _speech;
+    private readonly AliParticipantPresenceFeed _participantPresence;
     private readonly SnapshotCursor<TranscriptionOutput> _transcript = new();
     private AliVisionPipeline? _vision;
     private int _visualAttentionEnabled = 1;
@@ -45,6 +47,7 @@ public sealed class AliInteractionRuntime : IDisposable
         DataFolder = Path.Combine(Path.GetFullPath(aliDataRoot), "Vision");
         Directory.CreateDirectory(DataFolder);
         _speech = new AliSpeechIngressPipeline(assistantName, DataFolder);
+        _participantPresence = new AliParticipantPresenceFeed(_speech.Speaker);
     }
 
     private static void ConfigureBundledMediaPipeRuntime()
@@ -137,12 +140,14 @@ public sealed class AliInteractionRuntime : IDisposable
             DataFolder,
             _speech.Speaker);
         _vision = vision;
+        _participantPresence.AttachTargetSource(vision.TargetSelection);
         _speech.AttachVision(vision);
         return vision.ViewportHost;
     }
 
     public void TurnCameraOff()
     {
+        _participantPresence.AttachTargetSource(null);
         _speech.AttachVision(null);
         var vision = _vision;
         _vision = null;
@@ -215,6 +220,8 @@ public sealed class AliInteractionRuntime : IDisposable
         }
     }
 
+    public ParticipantPresenceSnapshot Capture() => _participantPresence.Capture();
+
     public void Dispose()
     {
         if (_disposed)
@@ -224,6 +231,7 @@ public sealed class AliInteractionRuntime : IDisposable
         _disposed = true;
         TurnCameraOff();
         _transcript.Dispose();
+        _participantPresence.Dispose();
         _speech.Dispose();
     }
 

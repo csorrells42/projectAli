@@ -115,7 +115,9 @@ internal static class SemanticToolBuckets
             [
                 AliCapabilityCatalog.GetActiveUserProfileName,
                 AliCapabilityCatalog.RecallUserMemoryName,
-                AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+                AliCapabilityCatalog.MutateParticipantMemoryName,
+                AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+                AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
                 AliCapabilityCatalog.ListCurrentUserMemoriesName,
                 AliCapabilityCatalog.SearchCurrentWebName,
                 AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName,

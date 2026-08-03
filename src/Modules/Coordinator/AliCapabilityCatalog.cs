@@ -13,6 +13,9 @@ public static class AliCapabilityCatalog
     public const string RememberCurrentUserName = "remember_for_current_user";
     public const string CorrectCurrentUserMemoryName = "correct_current_user_memory";
     public const string ForgetCurrentUserMemoryName = "forget_current_user_memory";
+    public const string MutateParticipantMemoryName = "mutate_participant_memory";
+    public const string ConsentParticipantMemoryProposalName = "consent_participant_memory_proposal";
+    public const string ReconcileParticipantMemoryMutationName = "reconcile_participant_memory_mutation";
     public const string ListCurrentUserMemoriesName = "list_current_user_memories";
     public const string SearchCurrentWebName = "search_current_web";
     public const string CreateGoogleMapsDirectionsLinkName = "maps_create_directions_link";
@@ -143,9 +146,11 @@ public static class AliCapabilityCatalog
         new(ListAvailableToolsName, "Return Ali's exact currently registered model-callable tool catalog."),
         new(SemanticDiscoverToolsName, "Semantically retrieve the most relevant live tool drawers for a described unmet need without interpreting the user's request by keyword."),
         new(GetActiveUserProfileName, "Return the explicitly selected local user's identity profile as authoritative data."),
-        new(RecallUserMemoryName, "Recall relevant long-term memories for the active identity profile. The active user is resolved internally."),
-        new(ForgetCurrentUserMemoryName, "Forget exactly one durable memory belonging to the active identity profile by its exact memory ID after confirmation."),
-        new(ListCurrentUserMemoriesName, "List memories belonging only to the active identity profile after confirmation."),
+        new(RecallUserMemoryName, "Recall attributable participant memory against the immutable admitted roster and trusted read authority."),
+        new(MutateParticipantMemoryName, "Submit one typed participant-memory add, correction, dispute, revoke, archive, or exact delete proposal through trusted consent and authority boundaries."),
+        new(ConsentParticipantMemoryProposalName, "Record the explicitly selected participant's short-lived approval for one exact typed participant-memory proposal so every attributed participant can approve separately."),
+        new(ReconcileParticipantMemoryMutationName, "Inspect one exact durable participant-memory mutation request ID and reconcile only its existing journal receipt without reapplying the operation."),
+        new(ListCurrentUserMemoriesName, "List bounded participant memories authorized for the immutable admitted roster."),
         new(SearchCurrentWebName, "Search the configured live internet backends for current or source-dependent information."),
         new(CreateGoogleMapsDirectionsLinkName, "Create a Google Maps directions handoff from explicit origin, destination, and ordered waypoint queries without inventing route details.", "Ali navigation tools"),
         new(ResearchWebName, "Run provider-managed, multi-source web research for complex nested or comparative questions."),

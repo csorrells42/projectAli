@@ -4,11 +4,19 @@ namespace Ali.Modules.UserMemory;
 
 public sealed record UserMemorySettings
 {
+    public const string FreshParticipantCollectionName = "ali_participant_memories_cp11";
+
     public bool Enabled { get; init; } = true;
 
     public int RecallMaximumResults { get; init; } = 5;
 
     public int RecallTimeoutMilliseconds { get; init; } = 2500;
+
+    public int MutationTimeoutMilliseconds { get; init; } = 5000;
+
+    public int HealthTimeoutMilliseconds { get; init; } = 3000;
+
+    public int RepairTimeoutMilliseconds { get; init; } = 30000;
 
     // Mem0 v1.1 returns a normalized hybrid score. When BM25 is available it
     // averages semantic and keyword evidence, so a strong 0.60 dense match plus
@@ -33,19 +41,24 @@ public sealed record UserMemorySettings
     // phrases whose normalized hybrid score can be lower than a dense match.
     public double RecallMinimumKeywordScore { get; init; } = 0.08;
 
-    public string CollectionName { get; init; } = "ali_user_memories";
+    public string CollectionName { get; init; } = FreshParticipantCollectionName;
 
     public UserMemorySettings Normalize() => this with
     {
         RecallMaximumResults = Math.Clamp(RecallMaximumResults, 1, 8),
         RecallTimeoutMilliseconds = Math.Clamp(RecallTimeoutMilliseconds, 250, 5000),
+        MutationTimeoutMilliseconds = Math.Clamp(MutationTimeoutMilliseconds, 500, 15000),
+        HealthTimeoutMilliseconds = Math.Clamp(HealthTimeoutMilliseconds, 250, 5000),
+        RepairTimeoutMilliseconds = Math.Clamp(RepairTimeoutMilliseconds, 1000, 60000),
         RecallMinimumScore = Math.Clamp(RecallMinimumScore, 0, 1),
         RecallScoreWindow = Math.Clamp(RecallScoreWindow, 0, 0.25),
         RecallSemanticOnlyMinimumScore = Math.Clamp(RecallSemanticOnlyMinimumScore, 0, 1),
         RecallSemanticOnlyStrongScore = Math.Clamp(RecallSemanticOnlyStrongScore, 0, 1),
         RecallSemanticOnlyMinimumLead = Math.Clamp(RecallSemanticOnlyMinimumLead, 0, 1),
         RecallMinimumKeywordScore = Math.Clamp(RecallMinimumKeywordScore, 0, 1),
-        CollectionName = string.IsNullOrWhiteSpace(CollectionName) ? "ali_user_memories" : CollectionName.Trim()
+        CollectionName = string.IsNullOrWhiteSpace(CollectionName)
+            ? FreshParticipantCollectionName
+            : CollectionName.Trim()
     };
 }
 public static class UserMemorySettingsStore

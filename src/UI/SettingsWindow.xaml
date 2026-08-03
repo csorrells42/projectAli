@@ -1109,8 +1109,8 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="Per-User Long-Term Memory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
-                                <TextBlock Text="Mem0 uses the configured local embedding provider and separate Qdrant collections. Identity profile IDs—not display names—own memories."
+                                <TextBlock Text="Participant-Aware Long-Term Memory" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                <TextBlock Text="Mem0 uses the verified local embedding provider and an isolated participant collection. The explicitly selected profile remains authoritative; camera and voice observations are advisory only."
                                            Foreground="{StaticResource SubtleTextBrush}" TextWrapping="Wrap" Margin="0,4,12,0" />
                                 <TextBlock Text="{Binding StatusText}" Foreground="#64D8FF" TextWrapping="Wrap" Margin="0,6,12,0"
                                            AutomationProperties.AutomationId="SettingsUserMemoryStatusText" />
@@ -1142,7 +1142,8 @@
                             </StackPanel>
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button Content="Save" Command="{Binding SaveCommand}" MinWidth="70" Margin="0,0,6,0" />
-                                <Button Content="Test Connection" Command="{Binding TestCommand}" MinWidth="110" />
+                                <Button Content="Test Connection" Command="{Binding TestCommand}" MinWidth="110" Margin="0,0,6,0" />
+                                <Button Content="{Binding RepairButtonText}" Command="{Binding RepairCommand}" MinWidth="125" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -1165,7 +1166,9 @@
                                       Margin="0,0,8,8" MinHeight="28" ToolTip="Optional category filter" />
                             <StackPanel Grid.Column="2" Orientation="Horizontal">
                                 <Button Content="Search" Command="{Binding SearchCommand}" MinWidth="70" Margin="0,0,6,8" />
-                                <Button Content="Review All" Command="{Binding RefreshCommand}" MinWidth="85" Margin="0,0,0,8" />
+                                <Button Content="Review All" Command="{Binding RefreshCommand}" MinWidth="85" Margin="0,0,6,8" />
+                                <Button Content="Load Sensitive" Command="{Binding LoadSensitiveCommand}" MinWidth="105" Margin="0,0,0,8"
+                                        ToolTip="Explicitly authenticate with the current Windows account and include sensitive participant memories" />
                             </StackPanel>
                         </Grid>
                         <DataGrid Grid.Row="1" ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory, Mode=TwoWay}"
@@ -1205,6 +1208,10 @@
                             </DataGrid.Columns>
                         </DataGrid>
                         <Grid Grid.Row="2" Margin="0,8,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
@@ -1215,6 +1222,13 @@
                                 <Button Content="Correct" Command="{Binding CorrectCommand}" MinWidth="72" Margin="0,0,6,0" />
                                 <Button Content="Forget" Command="{Binding ForgetCommand}" MinWidth="72" />
                             </StackPanel>
+                            <TextBox Grid.Row="1" Grid.Column="0"
+                                     Text="{Binding ReconcileRequestId, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="28" Margin="0,8,8,0"
+                                     ToolTip="Exact durable mutation request ID from a prior unresolved operation" />
+                            <Button Grid.Row="1" Grid.Column="1" Content="Reconcile Exact ID"
+                                    Command="{Binding ReconcileCommand}" MinWidth="150" Margin="0,8,0,0"
+                                    ToolTip="Resolve the exact durable receipt without reapplying the original mutation; staged deletion may finalize and partial work may roll back" />
                         </Grid>
                     </Grid>
 
@@ -1223,7 +1237,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="The John Doe test profile is never merged into a future real profile. Camera and voice recognition select profiles; they are not high-assurance authentication."
+                        <TextBlock Text="Current CP11 limitation: consequential participant-memory work for a real profile is available only when that selected profile is the sole registered local profile and confirms the current Windows credential; installations with multiple registered profiles fail closed. The generated John Doe test profile has a narrow maintenance-only test factor and is never merged into a future real profile. Camera and voice recognition remain advisory presence only."
                                    Foreground="{StaticResource SubtleTextBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
                             <Button Content="Export Current User" Command="{Binding ExportCommand}" MinWidth="125" Margin="0,0,6,0" />

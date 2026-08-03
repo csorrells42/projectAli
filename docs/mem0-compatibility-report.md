@@ -1,5 +1,12 @@
 # Ali local long-term memory compatibility report
 
+> Historical pre-Checkpoint-11 compatibility spike. This file records what the
+> isolated spike demonstrated; it is not the current production memory contract.
+> Checkpoint 11 removes automatic post-answer writes and legacy active-user/MCP
+> memory exposure, and uses participant-aware exact filters plus Ali-owned
+> NFKC/casefold candidate-local BM25 ranking. See
+> [Ali Participant-Aware Memory](architecture/ALI-PARTICIPANT-AWARE-MEMORY.md).
+
 ## Verified stack
 
 - Mem0 `2.0.12`

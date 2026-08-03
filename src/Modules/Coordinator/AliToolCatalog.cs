@@ -43,12 +43,57 @@ internal sealed class AliToolCatalog
         Func<AgentOrchestrationSettings>? orchestrationSettings = null,
         Func<CancellationToken, Task>? waitForPendingMemoryReview = null,
         ISemanticToolCatalog? semanticToolCatalog = null,
-        IShadowToolObserver? shadowObserver = null)
+        IShadowToolObserver? shadowObserver = null,
+        IParticipantMemoryService? participantMemories = null,
+        IParticipantRosterAuthority? participantRosterAuthority = null,
+        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
     {
         var profile = assistantProfile.Normalize();
         MemoryTools = userMemories is not null && activeUsers is not null && memorySettings is not null
             ? new AliMemoryTools(userMemories, activeUsers, memorySettings, turnAccessor, waitForPendingMemoryReview)
             : new AliMemoryTools(memories, turnAccessor);
+        ParticipantMemoryTools = participantMemories is not null
+            && participantRosterAuthority is not null
+            && participantReceiptAuthority is not null
+            ? new AliParticipantMemoryTools(
+                participantMemories,
+                participantRosterAuthority,
+                participantReceiptAuthority,
+                turnAccessor)
+            : null;
+        Func<string, bool, CancellationToken, Task<CoordinatorMemoryResult>> recallMemory =
+            ParticipantMemoryTools is null
+                ? ((query, _, cancellationToken) =>
+                    MemoryTools.SearchAsModelToolAsync(query, cancellationToken))
+                : ParticipantMemoryTools.RecallAsync;
+        Func<bool, CancellationToken, Task<CoordinatorMemoryResult>> listMemories =
+            ParticipantMemoryTools is null
+                ? ((_, cancellationToken) => MemoryTools.ListCurrentAsync(cancellationToken))
+                : ParticipantMemoryTools.ListAsync;
+        Func<ParticipantMemoryProposal, CancellationToken, Task<CoordinatorMemoryWriteResult>> mutateMemory =
+            ParticipantMemoryTools is null
+            ? ((_, _) => Task.FromResult(new CoordinatorMemoryWriteResult(
+                false,
+                "Participant-aware memory mutation is unavailable without a trusted admitted roster.")))
+            : ParticipantMemoryTools.MutateAsync;
+        Func<ParticipantMemoryProposal, CancellationToken, Task<CoordinatorParticipantMemoryConsentResult>> consentMemory =
+            ParticipantMemoryTools is null
+                ? ((_, _) => Task.FromResult(new CoordinatorParticipantMemoryConsentResult(
+                    false,
+                    false,
+                    "Participant-aware memory consent is unavailable without a trusted admitted roster.",
+                    string.Empty,
+                    [])))
+                : ParticipantMemoryTools.ConsentAsync;
+        Func<string, CancellationToken, Task<CoordinatorMemoryReconciliationResult>> reconcileMemory =
+            ParticipantMemoryTools is null
+                ? ((requestId, _) => Task.FromResult(new CoordinatorMemoryReconciliationResult(
+                    false,
+                    "Participant-aware memory reconciliation is unavailable without a trusted admitted roster.",
+                    requestId ?? string.Empty,
+                    null,
+                    null)))
+                : ParticipantMemoryTools.ReconcileAsync;
         var activeUserTools = new AliActiveUserTools(activeUsers, turnAccessor);
         var sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, turnAccessor);
         var navigationTools = new AliNavigationTools(turnAccessor);
@@ -77,17 +122,25 @@ internal sealed class AliToolCatalog
                 AliCapabilityCatalog.GetActiveUserProfileName,
                 "Return the explicitly selected local user's identity profile as authoritative data. Call only when the request depends on the current user's name, saved home/address, email, phone number, or selected identity. Never guess those fields and never call personal memory merely to replace this profile lookup.")),
             Protect(AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.SearchAsModelToolAsync,
+                recallMemory,
                 AliCapabilityCatalog.RecallUserMemoryName,
-                "Recall relevant durable memories for the active identity profile. The active stable user ID is resolved internally and cannot be supplied by the model.")),
+                "Recall relevant attributable participant memories with authorized typed attribution, audience, sensitivity, and the immutable admitted roster projection. Set includeSensitive only when the user requests sensitive memory and can complete Windows credential verification. Use the returned exact references for proposals; never invent participant IDs.")),
             Protect(AIFunctionFactory.Create(
-                (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)MemoryTools.ForgetAsync,
-                AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-                "Forget exactly one durable memory for the active identity profile by its exact memory ID. Use the ID from relevant memory context, recall_user_memory, or list_current_user_memories; never guess an ID or pass descriptive text. This is destructive and requires approval.")),
+                consentMemory,
+                AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+                "Record only the explicitly selected participant's short-lived approval for this exact typed proposal. For attributed or shared memories, call this separately after each required participant is selected and approves; every proposal field must remain unchanged. This does not write memory.")),
             Protect(AIFunctionFactory.Create(
-                (Func<CancellationToken, Task<CoordinatorMemoryResult>>)MemoryTools.ListCurrentAsync,
+                mutateMemory,
+                AliCapabilityCatalog.MutateParticipantMemoryName,
+                "Submit exactly one typed participant-memory operation only after consent_participant_memory_proposal reports ready for the unchanged proposal, unless the operation is delete, revoke, or archive. You choose semantic text, speaker, subjects, witnesses, hearsay/evidence kind, visibility, audience, sensitivity, and exact target ID. You cannot supply roster, provenance, permission, consent, authentication, or embedding identity. Every mutation requires one interactive exact-call approval; consequential operations additionally invoke independent Windows credential authentication.")),
+            Protect(AIFunctionFactory.Create(
+                reconcileMemory,
+                AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
+                "Inspect and reconcile one exact durable mutation request ID already returned by mutate_participant_memory. This never reapplies the operation, guesses a target, or accepts a memory ID in place of the durable request ID.")),
+            Protect(AIFunctionFactory.Create(
+                listMemories,
                 AliCapabilityCatalog.ListCurrentUserMemoriesName,
-                "List only the active identity profile's memories. This reads private data and requires approval.")),
+                "List a bounded authorized participant-memory inventory with exact typed attribution/security metadata and the immutable admitted roster references. Call this before authoring a participant proposal. Set includeSensitive only when the user requests sensitive memory and can complete Windows credential verification. This reads private data and requires trusted read permission.")),
             Protect(AIFunctionFactory.Create(
                 (Func<string, string?, CancellationToken, Task<CoordinatorSourceResult>>)sourceTools.SearchCurrentWebAsync,
                 AliCapabilityCatalog.SearchCurrentWebName,
@@ -162,6 +215,8 @@ internal sealed class AliToolCatalog
 
     public AliMemoryTools MemoryTools { get; }
 
+    public AliParticipantMemoryTools? ParticipantMemoryTools { get; }
+
     internal static string BuildInstructions(
         string assistantName,
         AgentOrchestrationSettings? orchestrationSettings = null) =>
@@ -175,7 +230,7 @@ internal sealed class AliToolCatalog
             "Obey the action scope of the newest user message exactly. A stated purpose, future plan, or explanation of why the user wants the current step does not authorize that later work. When the user says only or just, stop immediately after the named action succeeds and answer from that result.",
             "After a tool reports failure, never call the same tool again with identical arguments unless the user changed external state or an approval has just resumed that exact suspended call. Inspect the error, change the approach meaningfully, or report the limitation.",
             "If the user denies any permission request, stop that action plan immediately. Do not retry the denied operation, switch to an alternate tool, exploit a saved permission, or perform an equivalent mutation in the same turn. State accurately that the action was not performed.",
-            "Every completed user turn is queued for a separate post-response Mem0 review. Do not call a foreground save or correction tool and do not delay the conversational answer for memory storage. Mem0 and its configured model decide semantically whether the raw user turn produces ADD, UPDATE, DELETE, or NONE. A simple correction such as 'Cris' to 'Chris' should replace the mistake; a real state change such as moving from address X to Y may preserve the useful transition history.",
+            "Do not mutate durable memory automatically after a turn. Memory relevance, retrieval intent, speaker, subject, witness, hearsay, correction, and response construction belong to this Agent Framework model loop. Typed participant-memory candidates require mechanical roster, provenance, consent, privacy, and authority validation; invalid proposals fail without keyword or phrase fallback.",
             "Semantic memory search is read-only. To forget a memory, use only its exact memoryId from recall_user_memory or list_current_user_memories. If no exact target ID is available, retrieve candidates first; never ask a mutation tool to choose by similarity.",
             TypoInterpretationInstruction,
             $"The current local timestamp is {DateTimeOffset.Now:O}. For current, latest, or today requests, formulate searches for this date and year. Never insert a past model-knowledge cutoff year unless the user explicitly requested that historical timeframe.",

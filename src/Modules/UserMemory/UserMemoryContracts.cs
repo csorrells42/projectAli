@@ -74,10 +74,16 @@ public sealed record MemoryOperationResult(
     bool Success,
     string Message,
     IReadOnlyList<UserMemory> Memories,
-    string? ErrorCode = null)
+    string? ErrorCode = null,
+    string? RequestId = null,
+    string? MutationStatus = null)
 {
-    public static MemoryOperationResult Failed(string message, string code) =>
-        new(false, message, [], code);
+    public static MemoryOperationResult Failed(
+        string message,
+        string code,
+        string? requestId = null,
+        string? mutationStatus = null) =>
+        new(false, message, [], code, requestId, mutationStatus);
 }
 
 public sealed record UserMemoryStatus(
@@ -120,6 +126,45 @@ public interface IUserMemoryService
         CancellationToken cancellationToken);
 
     Task<UserMemoryStatus> TestAsync(ActiveUser user, CancellationToken cancellationToken);
+}
+
+public interface IParticipantMemoryDesktopReviewService
+{
+    Task<IReadOnlyList<UserMemory>> RecallDesktopParticipantsAsync(
+        ActiveUser user,
+        string query,
+        int maximumResults,
+        bool includeSensitive,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<UserMemory>> ListDesktopParticipantsAsync(
+        ActiveUser user,
+        string? category,
+        bool includeSensitive,
+        CancellationToken cancellationToken);
+
+    Task<ParticipantMemoryDesktopReviewResult> ReviewDesktopParticipantsAsync(
+        ActiveUser user,
+        string? category,
+        bool includeSensitive,
+        CancellationToken cancellationToken);
+
+    Task<ParticipantMemoryReconciliationResult> ReconcileDesktopParticipantMutationAsync(
+        ActiveUser user,
+        string mutationRequestId,
+        CancellationToken cancellationToken);
+}
+
+public sealed record ParticipantMemoryDesktopReviewResult(
+    bool Success,
+    IReadOnlyList<UserMemory> Memories,
+    string Message,
+    ParticipantMemoryFailureCode? FailureCode = null)
+{
+    public static ParticipantMemoryDesktopReviewResult Failed(
+        string message,
+        ParticipantMemoryFailureCode code) =>
+        new(false, [], message, code);
 }
 
 public interface IActiveUserSession

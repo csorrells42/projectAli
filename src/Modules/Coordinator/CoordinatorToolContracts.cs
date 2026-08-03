@@ -10,18 +10,72 @@ namespace Ali.Modules.Coordinator;
 public sealed record CoordinatorMemoryResult(
     string Status,
     IReadOnlyList<CoordinatorMemoryItem> Memories,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    public CoordinatorParticipantRosterResult? ParticipantRoster { get; init; }
+}
 
 public sealed record CoordinatorMemoryItem(
     string MemoryId,
     string Text,
     string Category,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public string? SpeakerParticipantReference { get; init; }
+
+    public IReadOnlyList<string> SubjectParticipantReferences { get; init; } = [];
+
+    public IReadOnlyList<string> WitnessParticipantReferences { get; init; } = [];
+
+    public string? SharedEventReference { get; init; }
+
+    public ParticipantMemoryClaimKind ClaimKind { get; init; }
+
+    public ParticipantMemoryEvidenceKind EvidenceKind { get; init; }
+
+    public ParticipantMemoryVisibility Visibility { get; init; }
+
+    public IReadOnlyList<string> AudienceParticipantReferences { get; init; } = [];
+
+    public ParticipantMemorySensitivity Sensitivity { get; init; }
+
+    public string? ReportedByParticipantReference { get; init; }
+}
+
+public sealed record CoordinatorParticipantRosterResult(
+    string Revision,
+    string? SelectedParticipantReference,
+    IReadOnlyList<CoordinatorParticipantRosterItem> Participants);
+
+public sealed record CoordinatorParticipantRosterItem(
+    string ReferenceId,
+    string DisplayLabel,
+    ParticipantReferenceKind Kind,
+    ParticipantPresenceState Presence,
+    string ObservationSource,
+    double? ObservationConfidence);
 
 public sealed record CoordinatorMemoryWriteResult(
     bool Saved,
     string Message,
+    string? MemoryId = null,
+    string? RequestId = null,
+    bool DurableCompletionConfirmed = false);
+
+public sealed record CoordinatorMemoryReconciliationResult(
+    bool Succeeded,
+    string Message,
+    string MutationRequestId,
+    string? MutationOperation,
+    string? MutationStatus,
     string? MemoryId = null);
+
+public sealed record CoordinatorParticipantMemoryConsentResult(
+    bool Recorded,
+    bool Ready,
+    string Message,
+    string ProposalFingerprint,
+    IReadOnlyList<string> PendingParticipantReferences);
 
 public sealed record CoordinatorActiveUserResult(
     bool Selected,
@@ -128,7 +182,8 @@ internal sealed class CoordinatorTurnContext(
     string originalUserText,
     Action<AssistantStreamChunk> publish,
     ActiveUserSelectionSnapshot? capturedUserSelection = null,
-    TurnIdentity? observationIdentity = null)
+    TurnIdentity? observationIdentity = null,
+    ParticipantRosterSnapshot? participantRoster = null)
 {
     internal const int MaximumRememberedShadowTerminals = 4_096;
     internal const int MaximumRememberedShadowPermissions = 4_096;
@@ -149,6 +204,8 @@ internal sealed class CoordinatorTurnContext(
     private readonly Dictionary<string, EvidencePermissionMetadata> _shadowPermissions =
         new(StringComparer.Ordinal);
     private readonly Dictionary<string, CoordinatorPermissionDecisionReceipt> _permissionReceipts =
+        new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _durableOperationIds =
         new(StringComparer.Ordinal);
     private readonly Queue<string> _shadowPermissionOldestFirst = new();
     private readonly Dictionary<string, EvidencePermissionMetadata> _shadowStandingPermissions =
@@ -172,6 +229,8 @@ internal sealed class CoordinatorTurnContext(
     public ActiveUserSelectionSnapshot? CapturedUserSelection { get; } = capturedUserSelection;
 
     public TurnIdentity? ObservationIdentity { get; } = observationIdentity;
+
+    public ParticipantRosterSnapshot? ParticipantRoster { get; } = participantRoster;
 
     public bool UsedEvidenceTool { get; set; }
 
@@ -254,6 +313,7 @@ internal sealed class CoordinatorTurnContext(
             }
 
             _toolPlanRetirementRequests.Remove(callId);
+            _durableOperationIds.Remove(callId);
             return _toolPlans.Remove(callId);
         }
     }
@@ -322,6 +382,45 @@ internal sealed class CoordinatorTurnContext(
         return false;
     }
 
+    internal void RegisterDurableOperationId(string callId, string operationId)
+    {
+        if (!IsBoundedShadowCallId(callId)
+            || !IsBoundedValue(operationId, MaximumShadowCallIdCharacters))
+        {
+            throw new ArgumentException("The durable operation identity is invalid.");
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_durableOperationIds.TryGetValue(callId, out var existing)
+                && !string.Equals(existing, operationId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "An exact tool call cannot change its durable operation identity.");
+            }
+
+            _durableOperationIds[callId] = operationId;
+        }
+    }
+
+    internal bool TryGetActiveDurableOperationId(
+        string toolName,
+        out string? operationId)
+    {
+        var frame = _activeToolInvocation.Value;
+        if (frame?.IsActive == true
+            && string.Equals(frame.ToolName, toolName, StringComparison.Ordinal))
+        {
+            lock (_toolPlanSync)
+            {
+                return _durableOperationIds.TryGetValue(frame.CallId, out operationId);
+            }
+        }
+
+        operationId = null;
+        return false;
+    }
+
     private void ExitActiveToolInvocation(ActiveToolInvocationFrame frame)
     {
         frame.Deactivate();
@@ -335,6 +434,7 @@ internal sealed class CoordinatorTurnContext(
                     if (_toolPlanRetirementRequests.Remove(frame.CallId))
                     {
                         _toolPlans.Remove(frame.CallId);
+                        _durableOperationIds.Remove(frame.CallId);
                     }
                 }
                 else

@@ -2,41 +2,78 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Ali.Modules.Embeddings;
 using Ali.Modules.RAG;
 using Ali.Modules.Runtime;
 
 namespace Ali.Modules.UserMemory;
 
-internal sealed class Mem0ProcessClient : IAsyncDisposable
+internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
 {
     internal const string LoopbackNoProxy = "127.0.0.1,localhost,::1";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    internal const string ProtocolIdentity = "ali-participant-memory-stdio-v2";
+    internal static readonly string FreshRelativeDataRoot =
+        Path.Combine("Memory", "ParticipantAware", "Mem0");
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private readonly string _dataRoot;
     private readonly QdrantServiceManager _qdrant;
     private readonly Func<LocalVectorLibrarySettings> _vectorSettings;
     private readonly Func<UserMemorySettings> _settings;
     private readonly Func<OpenAiCompatibleRuntimeOptions?> _runtimeSettings;
+    private readonly IParticipantMemoryEmbeddingIdentitySource _embeddingIdentitySource;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Queue<string> _stderr = new();
     private Process? _process;
+    private KillOnCloseProcessJob? _processJob;
     private string? _processConfiguration;
+    private string? _processEmbeddingSpaceId;
+    private int _disposed;
 
     public Mem0ProcessClient(
         string userDataRoot,
         QdrantServiceManager qdrant,
         Func<LocalVectorLibrarySettings> qdrantSettings,
         Func<UserMemorySettings> settings,
-        Func<OpenAiCompatibleRuntimeOptions?> runtimeSettings)
+        Func<OpenAiCompatibleRuntimeOptions?> runtimeSettings,
+        IParticipantMemoryEmbeddingIdentitySource? embeddingIdentitySource = null)
     {
-        _dataRoot = Path.Combine(userDataRoot, "Memory", "Mem0");
+        _dataRoot = Path.Combine(userDataRoot, FreshRelativeDataRoot);
         _qdrant = qdrant;
         _vectorSettings = qdrantSettings;
         _settings = settings;
         _runtimeSettings = runtimeSettings;
+        _embeddingIdentitySource = embeddingIdentitySource
+            ?? new ConfiguredParticipantMemoryEmbeddingIdentitySource();
     }
 
     internal string DataRoot => _dataRoot;
+
+    string IParticipantMemoryTransport.DataRoot => DataRoot;
+
+    internal async ValueTask<Mem0EmbeddingSpaceConfiguration> ResolveCurrentEmbeddingSpaceAsync(
+        CancellationToken cancellationToken)
+    {
+        var vectorSettings = _vectorSettings();
+        var settings = _settings().Normalize();
+        var identity = await _embeddingIdentitySource
+            .ResolveAsync(vectorSettings, cancellationToken)
+            .ConfigureAwait(false);
+        var embedding = ResolveEmbeddingConfiguration(vectorSettings, identity);
+        return ResolveEmbeddingSpace(_dataRoot, settings.CollectionName, embedding, vectorSettings);
+    }
+
+    ValueTask<Mem0EmbeddingSpaceConfiguration>
+        IParticipantMemoryTransport.ResolveCurrentEmbeddingSpaceAsync(
+            CancellationToken cancellationToken) =>
+        ResolveCurrentEmbeddingSpaceAsync(cancellationToken);
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+        return options;
+    }
 
     public string LastDiagnostic
     {
@@ -45,25 +82,66 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
 
     public async Task<Mem0Response> SendAsync(object request, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        ArgumentNullException.ThrowIfNull(request);
+        var requestProperties = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        var serializedRequest = JsonSerializer.SerializeToElement(request, JsonOptions);
+        if (serializedRequest.ValueKind != JsonValueKind.Object)
+        {
+            throw new ArgumentException(
+                "A participant-memory worker request must be a JSON object.",
+                nameof(request));
+        }
+        foreach (var property in serializedRequest.EnumerateObject())
+        {
+            requestProperties[property.Name] = property.Value.Clone();
+        }
+        if (!requestProperties.TryGetValue("embeddingSpaceId", out var expectedSpaceElement)
+            || expectedSpaceElement.ValueKind != JsonValueKind.String
+            || expectedSpaceElement.GetString() is not { } expectedEmbeddingSpaceId
+            || expectedEmbeddingSpaceId.Length != 24
+            || expectedEmbeddingSpaceId.Any(character =>
+                character is not (>= '0' and <= '9')
+                    and not (>= 'a' and <= 'f')))
+        {
+            throw new ArgumentException(
+                "A participant-memory worker request requires an explicit exact embeddingSpaceId.",
+                nameof(request));
+        }
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         Process? process = null;
-        var requestWasWritten = false;
+        var workerPipeMayBeDirty = false;
         try
         {
-            process = await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-            var id = Guid.NewGuid().ToString("N");
-            var requestProperties = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase)
+            process = await EnsureStartedAsync(
+                    expectedEmbeddingSpaceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var embeddingSpaceId = _processEmbeddingSpaceId
+                ?? throw new InvalidOperationException(
+                    "The Mem0 worker did not publish an embedding-space identity.");
+            if (!string.Equals(
+                    embeddingSpaceId,
+                    expectedEmbeddingSpaceId,
+                    StringComparison.Ordinal))
             {
-                ["id"] = JsonSerializer.SerializeToElement(id, JsonOptions)
-            };
-            foreach (var property in JsonSerializer.SerializeToElement(request, JsonOptions).EnumerateObject())
-            {
-                requestProperties[property.Name] = property.Value.Clone();
+                throw new InvalidOperationException(
+                    "The participant-memory embedding space changed before send; the request was not written.");
             }
+            var id = Guid.NewGuid().ToString("N");
+            // Correlation is transport-owned. The caller-owned expected space was
+            // validated against the process-bound space before the request can be written.
+            requestProperties["id"] = JsonSerializer.SerializeToElement(id, JsonOptions);
+            requestProperties["embeddingSpaceId"] = JsonSerializer.SerializeToElement(
+                expectedEmbeddingSpaceId,
+                JsonOptions);
             var requestJson = JsonSerializer.Serialize(requestProperties, JsonOptions);
+            // Mark the worker dirty before the first cancellable pipe write. A
+            // WriteLine/Flush exception cannot prove that zero bytes reached stdin.
+            workerPipeMayBeDirty = true;
             await process.StandardInput.WriteLineAsync(requestJson.AsMemory(), cancellationToken).ConfigureAwait(false);
             await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
-            requestWasWritten = true;
             var line = await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -78,6 +156,14 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             {
                 throw new InvalidOperationException("Mem0 worker response did not match the current request.");
             }
+            if (!string.Equals(
+                    response.EmbeddingSpaceId,
+                    embeddingSpaceId,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Mem0 worker response came from a different embedding space.");
+            }
             return response;
         }
         catch
@@ -85,7 +171,7 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             // Once a request is on the stdio pipe, abandoning its response would
             // leave that response queued for the next caller. Restart the private
             // worker so a timed-out recall can never corrupt a later request.
-            if (requestWasWritten && process is not null)
+            if (workerPipeMayBeDirty && process is not null)
             {
                 ResetProcess(process);
             }
@@ -103,11 +189,16 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         try { process.StandardInput.Close(); } catch { }
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
         try { process.Dispose(); } catch { }
+        try { _processJob?.Dispose(); } catch { }
         _process = null;
+        _processJob = null;
         _processConfiguration = null;
+        _processEmbeddingSpaceId = null;
     }
 
-    private async Task<Process> EnsureStartedAsync(CancellationToken cancellationToken)
+    private async Task<Process> EnsureStartedAsync(
+        string expectedEmbeddingSpaceId,
+        CancellationToken cancellationToken)
     {
         var vectorSettings = _vectorSettings();
         var settings = _settings().Normalize();
@@ -120,12 +211,23 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
 
         // Resolve and validate the shared embedding settings before touching
         // Qdrant or attempting to create the private Python worker.
-        var embedding = ResolveEmbeddingConfiguration(vectorSettings);
+        var identity = await _embeddingIdentitySource
+            .ResolveAsync(vectorSettings, cancellationToken)
+            .ConfigureAwait(false);
+        var embedding = ResolveEmbeddingConfiguration(vectorSettings, identity);
         var embeddingSpace = ResolveEmbeddingSpace(
             _dataRoot,
             settings.CollectionName,
             embedding,
             vectorSettings);
+        if (!string.Equals(
+                embeddingSpace.Id,
+                expectedEmbeddingSpaceId,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The participant-memory embedding space changed after it was resolved; the request was not written.");
+        }
         var thinkingControl = runtime.ThinkingControl;
         var processConfiguration = BuildProcessConfigurationFingerprint(
             runtime,
@@ -190,17 +292,38 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         start.Environment["ALI_MEM0_REASONING_EFFORT"] = runtime.ReasoningEffort ?? string.Empty;
 
         var process = Process.Start(start) ?? throw new InvalidOperationException("Mem0 worker did not start.");
+        KillOnCloseProcessJob processJob;
+        try
+        {
+            processJob = KillOnCloseProcessJob.Assign(process);
+        }
+        catch
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            process.Dispose();
+            throw;
+        }
         process.ErrorDataReceived += OnErrorDataReceived;
         process.BeginErrorReadLine();
         _process = process;
+        _processJob = processJob;
         _processConfiguration = processConfiguration;
+        _processEmbeddingSpaceId = embeddingSpace.Id;
         return process;
     }
 
     internal static Mem0EmbeddingProcessConfiguration ResolveEmbeddingConfiguration(
-        LocalVectorLibrarySettings vectorSettings)
+        LocalVectorLibrarySettings vectorSettings) =>
+        ResolveEmbeddingConfiguration(
+            vectorSettings,
+            new ConfiguredParticipantMemoryEmbeddingIdentitySource());
+
+    internal static Mem0EmbeddingProcessConfiguration ResolveEmbeddingConfiguration(
+        LocalVectorLibrarySettings vectorSettings,
+        IParticipantMemoryEmbeddingIdentitySource identitySource)
     {
         ArgumentNullException.ThrowIfNull(vectorSettings);
+        ArgumentNullException.ThrowIfNull(identitySource);
         if (!LocalEmbeddingConfiguration.TryCreate(
                 vectorSettings.EmbeddingProvider,
                 vectorSettings.EmbeddingEndpoint,
@@ -223,6 +346,57 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             throw new InvalidOperationException($"Mem0 embedding configuration is invalid: {failure}");
         }
 
+        var identity = identitySource.Resolve(vectorSettings).Normalize();
+        return ResolveEmbeddingConfiguration(vectorSettings, identity);
+    }
+
+    internal static Mem0EmbeddingProcessConfiguration ResolveEmbeddingConfiguration(
+        LocalVectorLibrarySettings vectorSettings,
+        ParticipantMemoryEmbeddingIdentity resolvedIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(vectorSettings);
+        ArgumentNullException.ThrowIfNull(resolvedIdentity);
+        if (!LocalEmbeddingConfiguration.TryCreate(
+                vectorSettings.EmbeddingProvider,
+                vectorSettings.EmbeddingEndpoint,
+                vectorSettings.EmbeddingModel,
+                vectorSettings.EmbeddingDimensions,
+                vectorSettings.EmbeddingProtocolIdentity,
+                vectorSettings.EmbeddingContextTokens,
+                vectorSettings.EmbeddingDocumentPromptMode,
+                vectorSettings.EmbeddingQueryPromptMode,
+                out var configuration,
+                out var failure)
+            || configuration is null)
+        {
+            throw new InvalidOperationException($"Mem0 embedding configuration is invalid: {failure}");
+        }
+
+        if (!configuration.TryGetOpenAiApiBaseUri(out var apiBaseUri, out failure)
+            || apiBaseUri is null)
+        {
+            throw new InvalidOperationException($"Mem0 embedding configuration is invalid: {failure}");
+        }
+
+        var identity = resolvedIdentity.Normalize();
+        if (!string.Equals(identity.Provider, configuration.Provider, StringComparison.Ordinal)
+            || identity.Endpoint != configuration.Endpoint
+            || identity.Dimensions != configuration.Dimensions
+            || !string.Equals(identity.ConfiguredModel, configuration.Model, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Participant-memory embedding identity does not match the configured embedding endpoint.");
+        }
+        if (!identity.ProbeVerified
+            || identity.ProbeVerifiedUtc is null
+            || identity.ProbeVerifiedUtc > DateTimeOffset.UtcNow
+            || string.Equals(identity.Quantization, "provider-not-reported", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(identity.ResolvedModel, "provider-not-reported", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Participant-memory embedding identity has not been verified against the live provider response.");
+        }
+
         return new Mem0EmbeddingProcessConfiguration(
             configuration.Provider,
             configuration.Endpoint,
@@ -232,7 +406,8 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             configuration.ProtocolIdentity,
             configuration.ContextTokens,
             configuration.DocumentPromptMode,
-            configuration.QueryPromptMode);
+            configuration.QueryPromptMode,
+            identity);
     }
 
     internal static Mem0EmbeddingSpaceConfiguration ResolveEmbeddingSpace(
@@ -251,6 +426,7 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
         var identity = JsonSerializer.Serialize(new
         {
             BaseCollectionName = baseCollectionName,
+            TransportProtocolIdentity = ProtocolIdentity,
             embedding.Provider,
             Endpoint = embedding.Endpoint.AbsoluteUri,
             embedding.Model,
@@ -259,6 +435,7 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             embedding.ContextTokens,
             embedding.DocumentPromptMode,
             embedding.QueryPromptMode,
+            EmbeddingIdentityFingerprint = embedding.Identity.Fingerprint,
             QdrantHost = vectorSettings.QdrantHost.Trim(),
             vectorSettings.QdrantHttpPort,
             vectorSettings.QdrantGrpcPort,
@@ -299,10 +476,15 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             "--embedding-api-base", embedding.ApiBaseUri.AbsoluteUri,
             "--embedding-model", embedding.Model,
             "--embedding-dimensions", embedding.Dimensions.ToString(),
+            "--embedding-space-id", embeddingSpace.Id,
             "--embedding-protocol", embedding.ProtocolIdentity,
+            "--embedding-resolved-model", embedding.Identity.ResolvedModel,
+            "--embedding-quantization", embedding.Identity.Quantization,
             "--embedding-context-tokens", embedding.ContextTokens.ToString(),
-            "--embedding-document-prompt-mode", embedding.DocumentPromptMode.ToString(),
-            "--embedding-query-prompt-mode", embedding.QueryPromptMode.ToString(),
+            "--embedding-query-prompt-mode", embedding.Identity.QueryPromptMode,
+            "--embedding-document-prompt-mode", embedding.Identity.DocumentPromptMode,
+            "--embedding-query-prefix", embedding.Identity.QueryPromptPrefix,
+            "--embedding-document-prefix", embedding.Identity.DocumentPromptPrefix,
             "--qdrant-host", vectorSettings.QdrantHost.Trim(),
             "--qdrant-port", vectorSettings.QdrantHttpPort.ToString(),
             "--qdrant-grpc-port", vectorSettings.QdrantGrpcPort.ToString(),
@@ -325,6 +507,7 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             runtime.ReasoningEffort,
             runtime.ThinkingEnabled,
             ThinkingControl = thinkingControl,
+            ProtocolIdentity,
             EmbeddingProvider = embedding.Provider,
             EmbeddingEndpoint = embedding.Endpoint,
             EmbeddingModel = embedding.Model,
@@ -333,6 +516,15 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             EmbeddingContextTokens = embedding.ContextTokens,
             EmbeddingDocumentPromptMode = embedding.DocumentPromptMode,
             EmbeddingQueryPromptMode = embedding.QueryPromptMode,
+            embedding.Identity.Protocol,
+            embedding.Identity.ResolvedModel,
+            embedding.Identity.Quantization,
+            embedding.Identity.MaximumContextTokens,
+            embedding.Identity.QueryPromptMode,
+            embedding.Identity.DocumentPromptMode,
+            embedding.Identity.QueryPromptPrefix,
+            embedding.Identity.DocumentPromptPrefix,
+            EmbeddingIdentityFingerprint = embedding.Identity.Fingerprint,
             vectorSettings.QdrantHost,
             vectorSettings.QdrantHttpPort,
             vectorSettings.QdrantGrpcPort,
@@ -347,15 +539,21 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
     private void OnErrorDataReceived(object sender, DataReceivedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(e.Data)) return;
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(e.Data));
+        var diagnostic = $"worker-stderr:{Convert.ToHexString(bytes.AsSpan(0, 6)).ToLowerInvariant()}:{Math.Min(e.Data.Length, 999999)}";
         lock (_stderr)
         {
-            _stderr.Enqueue(e.Data.ReplaceLineEndings(" ").Trim());
+            _stderr.Enqueue(diagnostic);
             while (_stderr.Count > 8) _stderr.Dequeue();
         }
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -365,12 +563,18 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             try { await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { if (!process.HasExited) process.Kill(entireProcessTree: true); }
             process.Dispose();
+            _processJob?.Dispose();
             _process = null;
+            _processJob = null;
         }
         finally
         {
             _gate.Release();
             _gate.Dispose();
+            if (_embeddingIdentitySource is IDisposable disposableIdentitySource)
+            {
+                disposableIdentitySource.Dispose();
+            }
         }
     }
 
@@ -385,7 +589,8 @@ internal sealed record Mem0EmbeddingProcessConfiguration(
     string ProtocolIdentity,
     int ContextTokens,
     EmbeddingPromptMode DocumentPromptMode,
-    EmbeddingPromptMode QueryPromptMode);
+    EmbeddingPromptMode QueryPromptMode,
+    ParticipantMemoryEmbeddingIdentity Identity);
 
 internal sealed record Mem0EmbeddingSpaceConfiguration(
     string Id,
@@ -399,4 +604,21 @@ internal sealed record Mem0Response(
     string Message,
     IReadOnlyList<UserMemory>? Memories,
     int Count,
-    string? ErrorCode);
+    string? ErrorCode,
+    string? EmbeddingSpaceId = null,
+    string? RosterRevision = null,
+    IReadOnlyList<ParticipantMemoryRecord>? ParticipantMemories = null,
+    bool? EmbeddingAvailable = null,
+    bool? Mem0Available = null,
+    bool? QdrantAvailable = null,
+    int DegradedPointCount = 0,
+    IReadOnlyList<string>? FailedPointIds = null,
+    int UpdatedPointCount = 0,
+    string? MutationStatus = null,
+    string? MutationRequestId = null,
+    string? MutationOperation = null,
+    bool? Reconciled = null,
+    bool? DeletionFinalized = null,
+    string? RepairRequestId = null,
+    int RequestedPointCount = 0,
+    int UnchangedPointCount = 0);

@@ -29,7 +29,10 @@ public sealed class AliProductionCapabilityCatalogTests
     [
         .. CatalogDeclaredRetiredToolNames,
         AliCapabilityCatalog.RoslynPreviewRenameName,
-        AliCapabilityCatalog.RoslynApplyRenameName
+        AliCapabilityCatalog.RoslynApplyRenameName,
+        AliCapabilityCatalog.RememberCurrentUserName,
+        AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+        AliCapabilityCatalog.ForgetCurrentUserMemoryName
     ];
 
     [Fact]
@@ -44,13 +47,13 @@ public sealed class AliProductionCapabilityCatalogTests
             .ToArray();
 
         Assert.Equal(catalogNames.Length, catalogNames.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(117, activeCatalogNames.Length);
+        Assert.Equal(119, activeCatalogNames.Length);
         Assert.True(CatalogDeclaredRetiredToolNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(retiredCatalogNames));
         Assert.Equal(activeCatalogNames.Length, AliProductionCapabilityCatalog.KnownToolNames.Count);
         Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionCapabilityCatalog.KnownToolNames));
-        Assert.Equal(117, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
+        Assert.Equal(119, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
         Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionToolOutcomeRegistry.ContractedToolNames));
         Assert.All(activeCatalogNames, name =>
@@ -76,7 +79,9 @@ public sealed class AliProductionCapabilityCatalogTests
         AssertGroup(CapabilityGroupIds.PersonalContextAndMemory,
             AliCapabilityCatalog.GetActiveUserProfileName,
             AliCapabilityCatalog.RecallUserMemoryName,
-            AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
             AliCapabilityCatalog.ListCurrentUserMemoriesName,
             AliCapabilityCatalog.GetAssistantIdentityName,
             AliCapabilityCatalog.GetCurrentLocalTimeName);
@@ -224,7 +229,7 @@ public sealed class AliProductionCapabilityCatalogTests
         var result = AliProductionCapabilityCatalog.Build(actualFunctions);
 
         Assert.Empty(result.QuarantinedToolNames);
-        Assert.Equal(117, actualFunctions.Length);
+        Assert.Equal(119, actualFunctions.Length);
         Assert.Equal(actualFunctions.Length, result.Registry.Descriptors.Count);
         Assert.Equal(
             new[]
@@ -633,17 +638,17 @@ public sealed class AliProductionCapabilityCatalogTests
             Assert.False(descriptor.Effect.ChangesSystemState);
         }
 
-        var forget = byName[AliCapabilityCatalog.ForgetCurrentUserMemoryName];
-        Assert.Equal(CapabilityEffectKind.Destructive, forget.Effect.Kind);
-        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, forget.Effect.MutationBoundary);
-        Assert.False(forget.Effect.SupportsIdempotency);
-        Assert.True(forget.Effect.ReadsLocalData);
-        Assert.True(forget.Effect.WritesLocalData);
-        Assert.True(forget.Effect.UsesNetwork);
-        Assert.True(forget.Effect.StartsProcesses);
-        Assert.True(forget.Effect.ChangesSystemState);
-        Assert.True(forget.Permission.RequiresApproval);
-        Assert.False(string.IsNullOrWhiteSpace(forget.Effect.ReconcilerId));
+        var mutation = byName[AliCapabilityCatalog.MutateParticipantMemoryName];
+        Assert.Equal(CapabilityEffectKind.Destructive, mutation.Effect.Kind);
+        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, mutation.Effect.MutationBoundary);
+        Assert.False(mutation.Effect.SupportsIdempotency);
+        Assert.True(mutation.Effect.ReadsLocalData);
+        Assert.True(mutation.Effect.WritesLocalData);
+        Assert.True(mutation.Effect.UsesNetwork);
+        Assert.True(mutation.Effect.StartsProcesses);
+        Assert.True(mutation.Effect.ChangesSystemState);
+        Assert.True(mutation.Permission.RequiresApproval);
+        Assert.False(string.IsNullOrWhiteSpace(mutation.Effect.ReconcilerId));
     }
 
     [Fact]

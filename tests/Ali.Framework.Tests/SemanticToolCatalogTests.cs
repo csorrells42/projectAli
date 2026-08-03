@@ -33,6 +33,14 @@ public sealed class SemanticToolCatalogTests
             && bucket.Requires is not null
             && bucket.Requires.Contains("programming-core")
             && bucket.Requires.Contains("files"));
+        var personal = Assert.Single(buckets, bucket => bucket.Id == "personal-and-current");
+        Assert.Contains(AliCapabilityCatalog.MutateParticipantMemoryName, personal.ToolNames);
+        Assert.Contains(
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            personal.ToolNames);
+        Assert.Contains(
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
+            personal.ToolNames);
     }
 
     [Fact]
@@ -458,7 +466,10 @@ internal static class RetiredSingleLoopSurfaceCanary
         AliCapabilityCatalog.RunProgrammingGroupChatName,
         AliCapabilityCatalog.RunMagenticOrchestrationName,
         AliCapabilityCatalog.ListRecoverableWorkflowsName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName
+        AliCapabilityCatalog.ResumeWorkflowCheckpointName,
+        AliCapabilityCatalog.RememberCurrentUserName,
+        AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+        AliCapabilityCatalog.ForgetCurrentUserMemoryName
     ];
 
     public static IReadOnlyList<string> BucketIds { get; } =

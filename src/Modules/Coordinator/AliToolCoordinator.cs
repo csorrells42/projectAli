@@ -33,12 +33,15 @@ public sealed class AliToolCoordinator : IDisposable
     private readonly CoordinatorTurnLease _turn = new();
     private readonly AliFrameworkToolOutcomeSidecar _toolOutcomes;
     private readonly IActiveUserSession? _activeUsers;
-    private readonly Func<UserMemorySettings>? _memorySettings;
-    private readonly AliUserMemoryReviewQueue? _memoryReviewQueue;
+    private readonly IParticipantRosterAuthority? _participantRosterAuthority;
     private readonly string _assistantName;
     private int _disposed;
 
+    // Retained for the desktop orchestration surface; CP11 removed the legacy
+    // background memory-review producer, so no participant-memory path raises it.
+#pragma warning disable CS0067
     public event Action<AssistantStreamChunk>? BackgroundActivity;
+#pragma warning restore CS0067
 
     public AliToolCoordinator(
         ILocalModelRuntime runtime,
@@ -61,7 +64,10 @@ public sealed class AliToolCoordinator : IDisposable
         string? workflowCheckpointPath = null,
         Func<AgentOrchestrationSettings>? orchestrationSettings = null,
         ISemanticToolCatalog? semanticToolCatalog = null,
-        IConversationPublicationProbe? conversationPublicationProbe = null)
+        IConversationPublicationProbe? conversationPublicationProbe = null,
+        IParticipantMemoryService? participantMemories = null,
+        IParticipantRosterAuthority? participantRosterAuthority = null,
+        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
         : this(
             runtime,
             chatClient,
@@ -85,7 +91,10 @@ public sealed class AliToolCoordinator : IDisposable
             shadowObserver: null,
             capabilitySettingsDataRoot: RequireCapabilitySettingsDataRoot(
                 capabilitySettingsDataRoot),
-            conversationPublicationProbe)
+            conversationPublicationProbe,
+            participantMemories,
+            participantRosterAuthority,
+            participantReceiptAuthority)
     {
     }
 
@@ -111,12 +120,16 @@ public sealed class AliToolCoordinator : IDisposable
         ISemanticToolCatalog? semanticToolCatalog,
         IShadowToolObserver? shadowObserver,
         string? capabilitySettingsDataRoot,
-        IConversationPublicationProbe? conversationPublicationProbe = null)
+        IConversationPublicationProbe? conversationPublicationProbe = null,
+        IParticipantMemoryService? participantMemories = null,
+        IParticipantRosterAuthority? participantRosterAuthority = null,
+        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
-        _memorySettings = memorySettings;
-        _memoryReviewQueue = userMemories is null ? null : new AliUserMemoryReviewQueue(userMemories);
+        _participantRosterAuthority = participantRosterAuthority;
+        participantMemories ??= userMemories as IParticipantMemoryService;
+        participantReceiptAuthority ??= (userMemories as Mem0UserMemoryService)?.ReceiptAuthority;
         _toolOutcomes = new AliFrameworkToolOutcomeSidecar();
         fileAccess.ConfigureOutcomeReporting(_toolOutcomes);
         workMemory.ConfigureOutcomeReporting(_toolOutcomes);
@@ -137,11 +150,12 @@ public sealed class AliToolCoordinator : IDisposable
             activeUsers,
             memorySettings,
             orchestrationSettings,
-            _memoryReviewQueue is null
-                ? null
-                : cancellationToken => _memoryReviewQueue.DrainAsync(cancellationToken),
+            waitForPendingMemoryReview: null,
             semanticToolCatalog,
-            shadowObserver);
+            shadowObserver,
+            participantMemories,
+            participantRosterAuthority,
+            participantReceiptAuthority);
         var targetStateAdapters = fileAccess.TargetStateAdapters
             .Concat(workMemory.TargetStateAdapters)
             .Concat(codingModule.TargetStateAdapters)
@@ -175,6 +189,7 @@ public sealed class AliToolCoordinator : IDisposable
                 targetStateAdapters),
             executionAdapters: new AliExecutionEffectAdapterRegistry(
                 executionEffectAdapters),
+            durableEffects: AliProductionDurableEffectAdapters.Create(),
             toolOutcomes: _toolOutcomes);
     }
 
@@ -345,6 +360,12 @@ public sealed class AliToolCoordinator : IDisposable
             _activeUsers,
             conversationId,
             prompt.DurableIdentity.AssistantMessageId);
+        var participantRoster = CaptureParticipantRoster(
+            _participantRosterAuthority,
+            _activeUsers,
+            capturedUserSelection,
+            conversationId,
+            prompt.DurableIdentity.AssistantMessageId);
         var turn = new CoordinatorTurnContext(
             conversationId,
             prompt.PromptPublicationId,
@@ -352,7 +373,8 @@ public sealed class AliToolCoordinator : IDisposable
             string.Empty,
             _ => { },
             capturedUserSelection,
-            observationIdentity);
+            observationIdentity,
+            participantRoster);
         using var turnScope = _turn.Enter(turn);
         try
         {
@@ -378,6 +400,12 @@ public sealed class AliToolCoordinator : IDisposable
             _activeUsers,
             conversationId,
             assistantMessageId);
+        var participantRoster = CaptureParticipantRoster(
+            _participantRosterAuthority,
+            _activeUsers,
+            capturedUserSelection,
+            conversationId,
+            assistantMessageId);
 
         var turn = new CoordinatorTurnContext(
             conversationId,
@@ -386,9 +414,9 @@ public sealed class AliToolCoordinator : IDisposable
             userText,
             chunk => writer.TryWrite(chunk),
             capturedUserSelection,
-            observationIdentity);
+            observationIdentity,
+            participantRoster);
         using var turnScope = _turn.Enter(turn);
-        _memoryReviewQueue?.BeginForegroundTurn();
         try
         {
             var resumeIdentity = await _harness
@@ -453,7 +481,6 @@ public sealed class AliToolCoordinator : IDisposable
             }
             else
             {
-                QueueIncomingUserMemoryReview(turn, userText);
                 turn.Report(
                     AgentActivityKind.Complete,
                     "Response complete",
@@ -474,7 +501,6 @@ public sealed class AliToolCoordinator : IDisposable
         finally
         {
             _toolOutcomes.DiscardCoordinatorTurn(turn);
-            _memoryReviewQueue?.EndForegroundTurn();
         }
     }
 
@@ -492,6 +518,12 @@ public sealed class AliToolCoordinator : IDisposable
             _activeUsers,
             conversationId,
             assistantMessageId);
+        var participantRoster = CaptureParticipantRoster(
+            _participantRosterAuthority,
+            _activeUsers,
+            capturedUserSelection,
+            conversationId,
+            assistantMessageId);
         var turn = new CoordinatorTurnContext(
             conversationId,
             userMessageId,
@@ -499,9 +531,9 @@ public sealed class AliToolCoordinator : IDisposable
             string.Empty,
             chunk => writer.TryWrite(chunk),
             capturedUserSelection,
-            observationIdentity);
+            observationIdentity,
+            participantRoster);
         using var turnScope = _turn.Enter(turn);
-        _memoryReviewQueue?.BeginForegroundTurn();
         try
         {
             async ValueTask<FinalAnswerPublicationAcknowledgment> PublishFinalAsync(
@@ -581,7 +613,6 @@ public sealed class AliToolCoordinator : IDisposable
         finally
         {
             _toolOutcomes.DiscardCoordinatorTurn(turn);
-            _memoryReviewQueue?.EndForegroundTurn();
         }
     }
 
@@ -625,73 +656,37 @@ public sealed class AliToolCoordinator : IDisposable
         }
     }
 
-    private void QueueIncomingUserMemoryReview(
-        CoordinatorTurnContext turn,
-        string userText)
+    private static ParticipantRosterSnapshot? CaptureParticipantRoster(
+        IParticipantRosterAuthority? rosterAuthority,
+        IActiveUserSession? activeUsers,
+        ActiveUserSelectionSnapshot? capturedSelection,
+        string conversationId,
+        string turnId)
     {
-        if (_memoryReviewQueue is null || _memorySettings is null)
+        if (rosterAuthority is null
+            || activeUsers is null
+            || capturedSelection is null)
         {
-            return;
+            return null;
         }
 
-        var settings = _memorySettings().Normalize();
-        if (!settings.Enabled)
-        {
-            return;
-        }
-
-        var capturedUser = turn.CapturedUserSelection?.SelectedUser;
-        if (capturedUser is null)
-        {
-            turn.Report(
-                AgentActivityKind.Warning,
-                "Personal memory review skipped",
-                "Select the active user profile before Mem0 reviews incoming text.");
-            return;
-        }
-
-        var review = _memoryReviewQueue.Enqueue(capturedUser, userText);
-        _ = PublishMemoryReviewOutcomeAsync(turn, review);
-        turn.Report(
-            AgentActivityKind.Status,
-            "Personal memory review queued",
-            "The answer is available. Mem0 will ask the configured local model whether this user turn contains durable personal information.");
-    }
-
-    private async Task PublishMemoryReviewOutcomeAsync(
-        CoordinatorTurnContext turn,
-        Task<MemoryOperationResult> review)
-    {
-        MemoryOperationResult result;
         try
         {
-            result = await review.ConfigureAwait(false);
+            var selectionGeneration = activeUsers.CaptureSelectionRevision();
+            var roster = rosterAuthority.CaptureAtAdmission(
+                turnId,
+                conversationId,
+                capturedSelection,
+                selectionGeneration,
+                DateTimeOffset.UtcNow);
+            return rosterAuthority.CheckCurrent(roster).IsCurrent ? roster : null;
         }
-        catch (Exception ex)
+        catch
         {
-            result = MemoryOperationResult.Failed(
-                $"Mem0 review failed safely: {ex.Message}",
-                "background_review_failed");
+            // Participant memory is optional and fails closed without an admitted,
+            // live-generation roster. Other Agent Framework capabilities continue.
+            return null;
         }
-
-        var count = result.Memories.Count;
-        var title = !result.Success
-            ? "Mem0 review failed; no memory change was confirmed."
-            : count == 0
-                ? "Mem0 found nothing worth keeping from that turn."
-                : $"Mem0 found {count} durable memory change{(count == 1 ? string.Empty : "s")}.";
-        var changed = count == 0
-            ? string.Empty
-            : " Changes: " + string.Join(" | ", result.Memories.Take(3).Select(memory => memory.Text));
-        BackgroundActivity?.Invoke(new AssistantStreamChunk(
-            turn.ConversationId,
-            turn.UserMessageId,
-            turn.AssistantMessageId,
-            title,
-            Ali.Modules.Evidence.EvidenceStatus.Unknown,
-            IsActivity: true,
-            ActivityKind: result.Success ? AgentActivityKind.Status : AgentActivityKind.Warning,
-            ActivityDetail: $"{result.Message}{changed}"));
     }
 
     public void Dispose()

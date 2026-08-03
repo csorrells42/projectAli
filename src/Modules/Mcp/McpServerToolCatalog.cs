@@ -18,9 +18,6 @@ public static class McpServerToolCatalog
     [
         Policy(AliCapabilityCatalog.ListAvailableToolsName, "List the Ali capabilities currently exposed by this MCP server."),
         Policy(AliCapabilityCatalog.GetActiveUserProfileName, "Return Ali's explicitly selected local user profile.", readsPrivateData: true),
-        Policy(AliCapabilityCatalog.RecallUserMemoryName, "Recall memories for Ali's active identity profile.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
-        Policy(AliCapabilityCatalog.ForgetCurrentUserMemoryName, "Forget memory for Ali's active identity profile.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
-        Policy(AliCapabilityCatalog.ListCurrentUserMemoriesName, "List memories for Ali's active identity profile.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.SearchCurrentWebName, "Search Ali's configured live internet sources.", writesLocalData: true, usesNetwork: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, "Create a Google Maps directions handoff without inventing route details."),
         Policy(AliCapabilityCatalog.ResearchWebName, "Run Ali's configured multi-source web research tool.", usesNetwork: true, readsPrivateData: true),
@@ -266,19 +263,6 @@ internal sealed class AliMcpServerToolFactory
         Func<CoordinatorActiveUserResult> getActiveProfile = boundSelection is null
             ? _activeUserTools.GetActiveProfile
             : () => _activeUserTools.GetActiveProfile(boundSelection);
-        Func<string, CancellationToken, Task<CoordinatorMemoryResult>> recallMemory = boundSelection is null
-            ? _memoryTools.SearchAsync
-            : (query, cancellationToken) =>
-                _memoryTools.SearchForSelectionAsync(boundSelection, query, cancellationToken);
-        Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>> forgetMemory = boundSelection is null
-            ? _memoryTools.ForgetAsync
-            : (memoryId, cancellationToken) =>
-                _memoryTools.ForgetForSelectionAsync(boundSelection, memoryId, cancellationToken);
-        Func<CancellationToken, Task<CoordinatorMemoryResult>> listMemories = boundSelection is null
-            ? _memoryTools.ListCurrentAsync
-            : cancellationToken =>
-                _memoryTools.ListForSelectionAsync(boundSelection, cancellationToken);
-
         var functions = new Dictionary<string, AIFunction>(StringComparer.OrdinalIgnoreCase)
         {
             [AliCapabilityCatalog.ListAvailableToolsName] = AIFunctionFactory.Create(
@@ -291,18 +275,6 @@ internal sealed class AliMcpServerToolFactory
                 getActiveProfile,
                 AliCapabilityCatalog.GetActiveUserProfileName,
                 "Return Ali's explicitly selected local user profile as authoritative identity data."),
-            [AliCapabilityCatalog.RecallUserMemoryName] = AIFunctionFactory.Create(
-                recallMemory,
-                AliCapabilityCatalog.RecallUserMemoryName,
-                "Recall relevant memories for Ali's active identity profile. No user ID argument is accepted."),
-            [AliCapabilityCatalog.ForgetCurrentUserMemoryName] = AIFunctionFactory.Create(
-                forgetMemory,
-                AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-                "Forget exactly one memory for Ali's active identity profile using an exact memory ID returned by recall or list. This is destructive."),
-            [AliCapabilityCatalog.ListCurrentUserMemoriesName] = AIFunctionFactory.Create(
-                listMemories,
-                AliCapabilityCatalog.ListCurrentUserMemoriesName,
-                "List only the active identity profile's private memories. No user ID argument is accepted."),
             [AliCapabilityCatalog.SearchCurrentWebName] = AIFunctionFactory.Create(
                 (Func<string, string?, CancellationToken, Task<CoordinatorSourceResult>>)_sourceTools.SearchCurrentWebAsync,
                 AliCapabilityCatalog.SearchCurrentWebName,

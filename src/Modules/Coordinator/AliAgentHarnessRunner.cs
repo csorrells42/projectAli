@@ -96,6 +96,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         EffectNormalizationRegistry? effectNormalizations = null,
         TargetStateRegistry? targetStates = null,
         AliExecutionEffectAdapterRegistry? executionAdapters = null,
+        AliDurableEffectAdapterRegistry? durableEffects = null,
         AliFrameworkToolOutcomeSidecar? toolOutcomes = null)
     {
         _modelClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
@@ -105,7 +106,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         _toolOutcomes = toolOutcomes ?? new AliFrameworkToolOutcomeSidecar();
         _toolOutcomeRegistry = new AliProductionToolOutcomeRegistry(_toolOutcomes);
         _executionAdapters = executionAdapters ?? AliExecutionEffectAdapterRegistry.Empty;
+        var resolvedDurableEffects = durableEffects ?? AliProductionDurableEffectAdapters.Create();
         _executionReconcilerIds = _executionAdapters.Reconcilers
+            .Concat(resolvedDurableEffects.Reconcilers)
             .Select(reconciler => reconciler.ReconcilerId)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -118,7 +121,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             publicationReconciler,
             effectNormalizations ?? AliProductionEffectNormalizations.Create(),
             targetStates ?? AliProductionTargetStateAdapters.Create(fileAccess),
-            _executionAdapters);
+            _executionAdapters,
+            resolvedDurableEffects);
         try
         {
             _baseTools = catalog.Tools.ToArray();

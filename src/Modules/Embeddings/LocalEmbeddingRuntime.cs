@@ -242,6 +242,48 @@ public sealed class OpenAiCompatibleEmbeddingClient(HttpClient httpClient)
         EmbeddingInputRole role,
         CancellationToken cancellationToken = default)
     {
+        return await CreateEmbeddingCoreAsync(
+            configuration,
+            input,
+            role,
+            mem0CompatibleRequest: false,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<LocalEmbeddingResult> CreateMem0CompatibleEmbeddingAsync(
+        LocalEmbeddingConfiguration configuration,
+        string input,
+        CancellationToken cancellationToken = default)
+    {
+        return await CreateEmbeddingCoreAsync(
+            configuration,
+            input,
+            EmbeddingInputRole.RetrievalQuery,
+            mem0CompatibleRequest: true,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<LocalEmbeddingResult> CreateMem0CompatibleEmbeddingAsync(
+        LocalEmbeddingConfiguration configuration,
+        string input,
+        EmbeddingInputRole role,
+        CancellationToken cancellationToken = default)
+    {
+        return await CreateEmbeddingCoreAsync(
+            configuration,
+            input,
+            role,
+            mem0CompatibleRequest: true,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<LocalEmbeddingResult> CreateEmbeddingCoreAsync(
+        LocalEmbeddingConfiguration configuration,
+        string input,
+        EmbeddingInputRole role,
+        bool mem0CompatibleRequest,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(input);
 
@@ -249,13 +291,27 @@ public sealed class OpenAiCompatibleEmbeddingClient(HttpClient httpClient)
         {
             var promptMode = configuration.ResolvePromptMode(role);
             var promptedInput = EmbeddingPromptFormatter.Format(input, promptMode);
+            var requestBody = mem0CompatibleRequest
+                ? JsonSerializer.Serialize(new
+                {
+                    model = configuration.Model,
+                    input = new[] { promptedInput.Replace("\n", " ", StringComparison.Ordinal) },
+                    encoding_format = "float"
+                }, JsonOptions)
+                : JsonSerializer.Serialize(new { model = configuration.Model, input = promptedInput }, JsonOptions);
             using var request = new HttpRequestMessage(HttpMethod.Post, configuration.Endpoint)
             {
                 Content = new StringContent(
-                    JsonSerializer.Serialize(new { model = configuration.Model, input = promptedInput }, JsonOptions),
+                    requestBody,
                     Encoding.UTF8,
                     "application/json")
             };
+            if (mem0CompatibleRequest)
+            {
+                request.Headers.Authorization = new(
+                    "Bearer",
+                    "ali-local-only");
+            }
             using var response = await httpClient
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);

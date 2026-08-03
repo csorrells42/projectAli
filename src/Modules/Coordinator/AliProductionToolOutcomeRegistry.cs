@@ -137,7 +137,13 @@ internal sealed class AliProductionToolOutcomeRegistry
             result => result.Warnings.Count == 0
                 ? PlanningToolDomainOutcome.Succeeded
                 : PlanningToolDomainOutcome.Unreported);
-        Success<CoordinatorMemoryWriteResult>(AliCapabilityCatalog.ForgetCurrentUserMemoryName, result => result.Saved);
+        Success<CoordinatorMemoryWriteResult>(AliCapabilityCatalog.MutateParticipantMemoryName, result => result.Saved);
+        Success<CoordinatorParticipantMemoryConsentResult>(
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            result => result.Recorded || result.Ready);
+        Success<CoordinatorMemoryReconciliationResult>(
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
+            result => result.Succeeded);
         Outcome<CoordinatorMemoryResult>(
             AliCapabilityCatalog.ListCurrentUserMemoriesName,
             result => result.Warnings.Count == 0

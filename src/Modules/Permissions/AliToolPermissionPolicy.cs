@@ -16,7 +16,9 @@ internal sealed class AliToolPermissionPolicy(
 {
     private static IReadOnlyList<AgentToolPermissionDefinition> TrustedWorkstationTools { get; } =
     [
-        new(AliCapabilityCatalog.ForgetCurrentUserMemoryName, "Deletes personal long-term memory"),
+        new(AliCapabilityCatalog.MutateParticipantMemoryName, "Mutates attributable participant memory through exact consent and authority"),
+        new(AliCapabilityCatalog.ConsentParticipantMemoryProposalName, "Records the selected participant's approval for one exact memory proposal"),
+        new(AliCapabilityCatalog.ReconcileParticipantMemoryMutationName, "Reconciles one exact durable participant-memory mutation receipt"),
         new(AliCapabilityCatalog.ListCurrentUserMemoriesName, "Reads private personal memory"),
         new(AliCapabilityCatalog.CreateCalendarEventName, "Creates a persistent calendar event and Windows notification"),
         new(AliCapabilityCatalog.ResearchWebName, "Starts metered deep web research"),
@@ -77,8 +79,6 @@ internal sealed class AliToolPermissionPolicy(
 
     private static IReadOnlyList<AgentToolPermissionDefinition> LockedDownAdditionalTools { get; } =
     [
-        new(AliCapabilityCatalog.RememberCurrentUserName, "Writes personal long-term memory"),
-        new(AliCapabilityCatalog.CorrectCurrentUserMemoryName, "Changes personal long-term memory"),
         new(AliCapabilityCatalog.GetActiveUserProfileName, "Reads the selected local identity profile"),
         new(AliCapabilityCatalog.GetAssistantIdentityName, "Reads the configured local assistant identity"),
         new(AliCapabilityCatalog.RecallUserMemoryName, "Reads private personal memory"),

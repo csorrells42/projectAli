@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Ali.Modules.Embeddings;
 using Ali.Modules.RAG;
 using Ali.Modules.Runtime;
@@ -8,7 +9,7 @@ namespace Ali.Framework.Tests;
 public sealed class UserMemoryEmbeddingSettingsTests
 {
     [Fact]
-    public async Task Mem0HistoryRoot_IsPlacedUnderTheExplicitUserDataRoot()
+    public async Task FreshParticipantMem0HistoryRoot_IsPlacedUnderTheExplicitUserDataRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "ali-mem0-data-root", Guid.NewGuid().ToString("N"));
         var settingsRoot = Path.Combine(root, "Settings");
@@ -25,7 +26,7 @@ public sealed class UserMemoryEmbeddingSettingsTests
                 static () => new UserMemorySettings(),
                 RuntimeSettings);
             Assert.Equal(
-                Path.Combine(userDataRoot, "Memory", "Mem0"),
+                Path.Combine(userDataRoot, "Memory", "ParticipantAware", "Mem0"),
                 client.DataRoot);
             Assert.False(client.DataRoot.StartsWith(settingsRoot, StringComparison.OrdinalIgnoreCase));
         }
@@ -58,13 +59,15 @@ public sealed class UserMemoryEmbeddingSettingsTests
     [Fact]
     public void Mem0EmbeddingConfiguration_ComesFromTheSharedVectorSettings()
     {
-        var resolved = Mem0ProcessClient.ResolveEmbeddingConfiguration(new LocalVectorLibrarySettings
-        {
-            EmbeddingProvider = LocalEmbeddingProviders.Custom,
-            EmbeddingEndpoint = "http://127.0.0.1:9123/custom/v2/embeddings",
-            EmbeddingModel = "custom-embedding-model",
-            EmbeddingDimensions = 1536
-        });
+        var resolved = Mem0ProcessClient.ResolveEmbeddingConfiguration(
+            new LocalVectorLibrarySettings
+            {
+                EmbeddingProvider = LocalEmbeddingProviders.Custom,
+                EmbeddingEndpoint = "http://127.0.0.1:9123/custom/v2/embeddings",
+                EmbeddingModel = "custom-embedding-model",
+                EmbeddingDimensions = 1536
+            },
+            VerifiedIdentitySource.Instance);
 
         Assert.Equal(LocalEmbeddingProviders.Custom, resolved.Provider);
         Assert.Equal("http://127.0.0.1:9123/custom/v2/embeddings", resolved.Endpoint.AbsoluteUri);
@@ -75,6 +78,15 @@ public sealed class UserMemoryEmbeddingSettingsTests
         Assert.Equal(8192, resolved.ContextTokens);
         Assert.Equal(EmbeddingPromptMode.SearchDocument, resolved.DocumentPromptMode);
         Assert.Equal(EmbeddingPromptMode.SearchQuery, resolved.QueryPromptMode);
+    }
+
+    [Fact]
+    public void Mem0EmbeddingConfiguration_RejectsConfiguredStringsWithoutProviderVerification()
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => Mem0ProcessClient.ResolveEmbeddingConfiguration(SharedEmbeddingSettings()));
+
+        Assert.Contains("not been verified", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -105,7 +117,9 @@ public sealed class UserMemoryEmbeddingSettingsTests
     {
         var mem0DataRoot = Path.Combine("ali-data", "Memory", "Mem0");
         var vectorSettings = SharedEmbeddingSettings();
-        var baselineEmbedding = Mem0ProcessClient.ResolveEmbeddingConfiguration(vectorSettings);
+        var baselineEmbedding = Mem0ProcessClient.ResolveEmbeddingConfiguration(
+            vectorSettings,
+            VerifiedIdentitySource.Instance);
         var baseline = Mem0ProcessClient.ResolveEmbeddingSpace(
             mem0DataRoot,
             "ali_user_memories",
@@ -114,7 +128,9 @@ public sealed class UserMemoryEmbeddingSettingsTests
         var repeated = Mem0ProcessClient.ResolveEmbeddingSpace(
             mem0DataRoot,
             "ali_user_memories",
-            Mem0ProcessClient.ResolveEmbeddingConfiguration(vectorSettings with { }),
+            Mem0ProcessClient.ResolveEmbeddingConfiguration(
+                vectorSettings with { },
+                VerifiedIdentitySource.Instance),
             vectorSettings with { });
 
         Assert.Equal(baseline, repeated);
@@ -138,7 +154,9 @@ public sealed class UserMemoryEmbeddingSettingsTests
 
         Assert.All(alternatives, alternative =>
         {
-            var embedding = Mem0ProcessClient.ResolveEmbeddingConfiguration(alternative);
+            var embedding = Mem0ProcessClient.ResolveEmbeddingConfiguration(
+                alternative,
+                VerifiedIdentitySource.Instance);
             var space = Mem0ProcessClient.ResolveEmbeddingSpace(
                 mem0DataRoot,
                 "ali_user_memories",
@@ -181,7 +199,9 @@ public sealed class UserMemoryEmbeddingSettingsTests
             QdrantUseTls = true,
             QdrantApiKeyEnvironmentVariable = "ALI_TEST_QDRANT_KEY"
         };
-        var embedding = Mem0ProcessClient.ResolveEmbeddingConfiguration(vectorSettings);
+        var embedding = Mem0ProcessClient.ResolveEmbeddingConfiguration(
+            vectorSettings,
+            VerifiedIdentitySource.Instance);
         var space = Mem0ProcessClient.ResolveEmbeddingSpace(
             Path.Combine("ali-data", "Memory", "Mem0"),
             "ali_user_memories",
@@ -196,6 +216,25 @@ public sealed class UserMemoryEmbeddingSettingsTests
             vectorSettings);
         Assert.Equal(space.DataRoot, ArgumentValue(arguments, "--data-root"));
         Assert.Equal(space.CollectionName, ArgumentValue(arguments, "--collection"));
+        Assert.Equal(space.Id, ArgumentValue(arguments, "--embedding-space-id"));
+        Assert.Equal(embedding.Identity.Protocol, ArgumentValue(arguments, "--embedding-protocol"));
+        Assert.Equal(embedding.Identity.ResolvedModel, ArgumentValue(arguments, "--embedding-resolved-model"));
+        Assert.Equal(embedding.Identity.Quantization, ArgumentValue(arguments, "--embedding-quantization"));
+        Assert.Equal(
+            embedding.Identity.MaximumContextTokens.ToString(),
+            ArgumentValue(arguments, "--embedding-context-tokens"));
+        Assert.Equal(
+            embedding.Identity.QueryPromptMode,
+            ArgumentValue(arguments, "--embedding-query-prompt-mode"));
+        Assert.Equal(
+            embedding.Identity.DocumentPromptMode,
+            ArgumentValue(arguments, "--embedding-document-prompt-mode"));
+        Assert.Equal(
+            embedding.Identity.QueryPromptPrefix,
+            ArgumentValue(arguments, "--embedding-query-prefix"));
+        Assert.Equal(
+            embedding.Identity.DocumentPromptPrefix,
+            ArgumentValue(arguments, "--embedding-document-prefix"));
         Assert.Equal(vectorSettings.QdrantHost, ArgumentValue(arguments, "--qdrant-host"));
         Assert.Equal(vectorSettings.QdrantHttpPort.ToString(), ArgumentValue(arguments, "--qdrant-port"));
         Assert.Equal(vectorSettings.QdrantGrpcPort.ToString(), ArgumentValue(arguments, "--qdrant-grpc-port"));
@@ -204,8 +243,8 @@ public sealed class UserMemoryEmbeddingSettingsTests
             LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
             ArgumentValue(arguments, "--embedding-protocol"));
         Assert.Equal("8192", ArgumentValue(arguments, "--embedding-context-tokens"));
-        Assert.Equal("SearchDocument", ArgumentValue(arguments, "--embedding-document-prompt-mode"));
-        Assert.Equal("SearchQuery", ArgumentValue(arguments, "--embedding-query-prompt-mode"));
+        Assert.Equal(EmbeddingPromptMode.SearchDocument, embedding.DocumentPromptMode);
+        Assert.Equal(EmbeddingPromptMode.SearchQuery, embedding.QueryPromptMode);
         Assert.Equal(
             vectorSettings.QdrantApiKeyEnvironmentVariable,
             ArgumentValue(arguments, "--qdrant-api-key-environment-variable"));
@@ -222,6 +261,26 @@ public sealed class UserMemoryEmbeddingSettingsTests
         Assert.Equal(space.Id, root.GetProperty("embeddingSpaceId").GetString());
         Assert.Equal(space.CollectionName, root.GetProperty("collectionName").GetString());
         Assert.Equal(space.DataRoot, root.GetProperty("dataRoot").GetString());
+        Assert.Equal(Mem0ProcessClient.ProtocolIdentity, root.GetProperty("protocolIdentity").GetString());
+        Assert.Equal(embedding.Identity.Protocol, root.GetProperty("protocol").GetString());
+        Assert.Equal(embedding.Identity.ResolvedModel, root.GetProperty("resolvedModel").GetString());
+        Assert.Equal(embedding.Identity.Quantization, root.GetProperty("quantization").GetString());
+        Assert.Equal(
+            embedding.Identity.MaximumContextTokens,
+            root.GetProperty("maximumContextTokens").GetInt32());
+        Assert.Equal(embedding.Identity.QueryPromptMode, root.GetProperty("queryPromptMode").GetString());
+        Assert.Equal(
+            embedding.Identity.DocumentPromptMode,
+            root.GetProperty("documentPromptMode").GetString());
+        Assert.Equal(
+            embedding.Identity.QueryPromptPrefix,
+            root.GetProperty("queryPromptPrefix").GetString());
+        Assert.Equal(
+            embedding.Identity.DocumentPromptPrefix,
+            root.GetProperty("documentPromptPrefix").GetString());
+        Assert.Equal(
+            embedding.Identity.Fingerprint,
+            root.GetProperty("embeddingIdentityFingerprint").GetString());
         Assert.Equal(vectorSettings.QdrantHost, root.GetProperty("qdrantHost").GetString());
         Assert.Equal(vectorSettings.QdrantHttpPort, root.GetProperty("qdrantHttpPort").GetInt32());
         Assert.Equal(vectorSettings.QdrantGrpcPort, root.GetProperty("qdrantGrpcPort").GetInt32());
@@ -231,14 +290,151 @@ public sealed class UserMemoryEmbeddingSettingsTests
             root.GetProperty("embeddingProtocol").GetString());
         Assert.Equal(8192, root.GetProperty("embeddingContextTokens").GetInt32());
         Assert.Equal(
-            (int)EmbeddingPromptMode.SearchDocument,
-            root.GetProperty("embeddingDocumentPromptMode").GetInt32());
+            "searchDocument",
+            root.GetProperty("embeddingDocumentPromptMode").GetString());
         Assert.Equal(
-            (int)EmbeddingPromptMode.SearchQuery,
-            root.GetProperty("embeddingQueryPromptMode").GetInt32());
+            "searchQuery",
+            root.GetProperty("embeddingQueryPromptMode").GetString());
         Assert.Equal(
             vectorSettings.QdrantApiKeyEnvironmentVariable,
             root.GetProperty("qdrantApiKeyEnvironmentVariable").GetString());
+    }
+
+    [Fact]
+    public async Task ProbedEmbeddingIdentity_ReverifiesEveryResolutionWithoutCaching()
+    {
+        var handler = new FixedEmbeddingHandler();
+        using var httpClient = new HttpClient(handler);
+        using var source = new ProbedParticipantMemoryEmbeddingIdentitySource(httpClient);
+        var settings = SharedEmbeddingSettings() with { EmbeddingDimensions = 3 };
+
+        var first = await source.ResolveAsync(settings, TestContext.Current.CancellationToken);
+        var repeated = await Task.WhenAll(Enumerable.Range(0, 32).Select(
+            _ => source.ResolveAsync(settings, TestContext.Current.CancellationToken).AsTask()));
+
+        Assert.Equal(66, handler.Count);
+        Assert.All(repeated, identity =>
+        {
+            Assert.NotSame(first, identity);
+            Assert.Equal(first.Fingerprint, identity.Fingerprint);
+        });
+        Assert.All(handler.Bodies, body =>
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            Assert.Equal("float", root.GetProperty("encoding_format").GetString());
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("input").ValueKind);
+            Assert.Single(root.GetProperty("input").EnumerateArray());
+        });
+    }
+
+    [Fact]
+    public async Task Mem0CompatibleEmbeddingProbe_MatchesPinnedWorkerEnvelopeAndNormalization()
+    {
+        var handler = new FixedEmbeddingHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new OpenAiCompatibleEmbeddingClient(httpClient);
+        var configuration = new LocalEmbeddingConfiguration(
+            LocalEmbeddingProviders.Custom,
+            new Uri("http://127.0.0.1:9123/v1/embeddings"),
+            "custom-embedding-model",
+            3,
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            8_192,
+            EmbeddingPromptMode.Plain,
+            EmbeddingPromptMode.Plain);
+
+        var result = await client.CreateMem0CompatibleEmbeddingAsync(
+            configuration,
+            "query:\nAlice",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.Message);
+        using var document = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        var root = document.RootElement;
+        Assert.Equal("custom-embedding-model", root.GetProperty("model").GetString());
+        Assert.Equal("float", root.GetProperty("encoding_format").GetString());
+        var input = Assert.Single(root.GetProperty("input").EnumerateArray());
+        Assert.Equal("query: Alice", input.GetString());
+        Assert.Equal("Bearer ali-local-only", Assert.Single(handler.AuthorizationHeaders));
+    }
+
+    [Fact]
+    public async Task Mem0Send_RejectsSettingsChangeAfterSpaceResolutionBeforeWorkerStart()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ali-mem0-space-race",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var vectorSettings = SharedEmbeddingSettings();
+        try
+        {
+            await using var qdrant = new QdrantServiceManager(root);
+            await using var client = new Mem0ProcessClient(
+                root,
+                qdrant,
+                () => vectorSettings,
+                static () => new UserMemorySettings(),
+                RuntimeSettings,
+                VerifiedIdentitySource.Instance);
+            var expected = await client.ResolveCurrentEmbeddingSpaceAsync(
+                TestContext.Current.CancellationToken);
+            vectorSettings = vectorSettings with { EmbeddingModel = "changed-embedding-model" };
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => client.SendAsync(
+                    new
+                    {
+                        operation = "participant_health",
+                        embeddingSpaceId = expected.Id
+                    },
+                    TestContext.Current.CancellationToken));
+
+            Assert.Contains("changed after it was resolved", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("Stopped", qdrant.Status.State);
+            Assert.False(qdrant.Status.IsOwnedProcess);
+            Assert.False(Directory.Exists(client.DataRoot));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task Mem0Send_RequiresCallerExpectedSpaceBeforeStartingDependencies()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ali-mem0-missing-space",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var qdrant = new QdrantServiceManager(root);
+            await using var client = new Mem0ProcessClient(
+                root,
+                qdrant,
+                SharedEmbeddingSettings,
+                static () => new UserMemorySettings(),
+                RuntimeSettings,
+                VerifiedIdentitySource.Instance);
+
+            var error = await Assert.ThrowsAsync<ArgumentException>(
+                () => client.SendAsync(
+                    new { operation = "participant_health" },
+                    TestContext.Current.CancellationToken));
+
+            Assert.Contains("explicit exact embeddingSpaceId", error.Message, StringComparison.Ordinal);
+            Assert.Equal("Stopped", qdrant.Status.State);
+            Assert.False(qdrant.Status.IsOwnedProcess);
+            Assert.False(Directory.Exists(client.DataRoot));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
     }
 
     [Fact]
@@ -261,7 +457,13 @@ public sealed class UserMemoryEmbeddingSettingsTests
                 RuntimeSettings);
 
             var error = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => client.SendAsync(new { operation = "health" }, TestContext.Current.CancellationToken));
+                () => client.SendAsync(
+                    new
+                    {
+                        operation = "health",
+                        embeddingSpaceId = new string('0', 24)
+                    },
+                    TestContext.Current.CancellationToken));
 
             Assert.Contains("embedding configuration is invalid", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Equal("Stopped", qdrant.Status.State);
@@ -324,6 +526,57 @@ public sealed class UserMemoryEmbeddingSettingsTests
         SupportsVision: false,
         SupportsToolCalls: true,
         AllowPrivateLanEndpoint: false);
+
+    private sealed class VerifiedIdentitySource : IParticipantMemoryEmbeddingIdentitySource
+    {
+        public static VerifiedIdentitySource Instance { get; } = new();
+
+        public ParticipantMemoryEmbeddingIdentity Resolve(LocalVectorLibrarySettings settings) => new(
+            settings.EmbeddingProvider,
+            "openai-compatible-embeddings-v1",
+            new Uri(settings.EmbeddingEndpoint),
+            settings.EmbeddingModel,
+            settings.EmbeddingModel,
+            "verified-test-quantization",
+            settings.EmbeddingDimensions,
+            8192,
+            "none-v1",
+            "none-v1",
+            string.Empty,
+            string.Empty,
+            "verified-test-provider-probe",
+            true,
+            DateTimeOffset.Parse("2025-01-01T00:00:00Z"));
+    }
+
+    private sealed class FixedEmbeddingHandler : HttpMessageHandler
+    {
+        private int _count;
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _bodies = new();
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string?> _authorizationHeaders = new();
+
+        public int Count => Volatile.Read(ref _count);
+
+        public IReadOnlyList<string> Bodies => _bodies.ToArray();
+
+        public IReadOnlyList<string?> AuthorizationHeaders => _authorizationHeaders.ToArray();
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _count);
+            _bodies.Enqueue(await request.Content!.ReadAsStringAsync(cancellationToken));
+            _authorizationHeaders.Enqueue(request.Headers.Authorization?.ToString());
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"data\":[{\"embedding\":[0.25,-0.5,0.75]}]}",
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            };
+        }
+    }
 
     private static string ArgumentValue(IReadOnlyList<string> arguments, string name)
     {
