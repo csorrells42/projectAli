@@ -27,7 +27,9 @@ os.environ["HTTPS_PROXY"] = "http://127.0.0.1:1"
 
 from mem0 import Memory  # noqa: E402
 from mem0.configs.llms.openai import OpenAIConfig  # noqa: E402
+from mem0.embeddings.base import EmbeddingBase  # noqa: E402
 from mem0.utils.factory import LlmFactory, VectorStoreFactory  # noqa: E402
+from openai import OpenAI  # noqa: E402
 
 
 EXTRACTION_INSTRUCTIONS = """
@@ -79,11 +81,78 @@ def item(value: dict) -> dict:
     }
 
 
+class RoleAwareOpenAIEmbedding(EmbeddingBase):
+    """OpenAI-compatible embedder that preserves Mem0's typed add/search action."""
+
+    def __init__(
+        self,
+        api_base: str,
+        model: str,
+        dimensions: int,
+        document_prompt_mode: str,
+        query_prompt_mode: str,
+    ):
+        super().__init__(None)
+        self.client = OpenAI(api_key="ali-local-only", base_url=api_base)
+        self.model = model
+        self.dimensions = dimensions
+        self.document_prompt_mode = document_prompt_mode
+        self.query_prompt_mode = query_prompt_mode
+
+    @staticmethod
+    def apply_prompt(text: str, mode: str) -> str:
+        normalized = str(text).replace("\n", " ")
+        if mode == "Plain":
+            return normalized
+        if mode == "SearchDocument":
+            return f"search_document: {normalized}"
+        if mode == "SearchQuery":
+            return f"search_query: {normalized}"
+        raise ValueError(f"Unsupported embedding prompt mode: {mode}")
+
+    def mode_for(self, memory_action: str | None) -> str:
+        return self.query_prompt_mode if memory_action == "search" else self.document_prompt_mode
+
+    def embed(self, text, memory_action=None):
+        prompted = self.apply_prompt(text, self.mode_for(memory_action))
+        response = self.client.embeddings.create(
+            input=[prompted],
+            model=self.model,
+            encoding_format="float",
+        )
+        vector = response.data[0].embedding
+        if len(vector) != self.dimensions:
+            raise ValueError(
+                f"Embedding model returned {len(vector)} dimensions; exactly {self.dimensions} are configured"
+            )
+        return vector
+
+    def embed_batch(self, texts, memory_action="add"):
+        mode = self.mode_for(memory_action)
+        prompted = [self.apply_prompt(text, mode) for text in texts]
+        response = self.client.embeddings.create(
+            input=prompted,
+            model=self.model,
+            encoding_format="float",
+        )
+        vectors = [item.embedding for item in sorted(response.data, key=lambda value: value.index)]
+        if len(vectors) != len(prompted) or any(len(vector) != self.dimensions for vector in vectors):
+            raise ValueError("Embedding batch did not match the configured count and dimensions")
+        return vectors
+
+
 class Worker:
     def __init__(self, args):
         llm_endpoint = require_loopback(args.llm_endpoint, "LLM endpoint")
         embedding_api_base = require_loopback(args.embedding_api_base, "embedding API base")
+        if args.embedding_protocol != "openai-compatible-embeddings-v1":
+            raise ValueError("Unsupported embedding protocol identity")
+        if args.embedding_context_tokens < 1:
+            raise ValueError("Embedding context tokens must be positive")
         self.embedding_provider = str(args.embedding_provider).strip()
+        self.embedding_context_tokens = args.embedding_context_tokens
+        self.embedding_document_prompt_mode = args.embedding_document_prompt_mode
+        self.embedding_query_prompt_mode = args.embedding_query_prompt_mode
         if not self.embedding_provider:
             raise ValueError("An embedding provider is required")
         if args.qdrant_host not in {"127.0.0.1", "localhost", "::1"}:
@@ -132,6 +201,7 @@ class Worker:
                         "model": args.embedding_model,
                         "api_key": "ali-local-only",
                         "openai_base_url": embedding_api_base,
+                        "embedding_dims": args.embedding_dimensions,
                     },
                 },
                 "vector_store": {
@@ -139,6 +209,13 @@ class Worker:
                     "config": qdrant_config,
                 },
             }
+        )
+        self.memory.embedding_model = RoleAwareOpenAIEmbedding(
+            embedding_api_base,
+            args.embedding_model,
+            args.embedding_dimensions,
+            args.embedding_document_prompt_mode,
+            args.embedding_query_prompt_mode,
         )
         self.hybrid_backfill_count = self.memory.vector_store.ensure_hybrid_indexed()
 
@@ -166,7 +243,8 @@ class Worker:
             memories = self.list_for(stable_id, 500)
             return self.ok(
                 f"Mem0 and Qdrant are ready with {self.embedding_provider} embeddings and hybrid retrieval; "
-                f"backfilled {self.hybrid_backfill_count} memory item(s).",
+                f"context {self.embedding_context_tokens}; document role {self.embedding_document_prompt_mode}; "
+                f"query role {self.embedding_query_prompt_mode}; backfilled {self.hybrid_backfill_count} memory item(s).",
                 memories=[],
                 count=len(memories),
             )
@@ -266,6 +344,10 @@ def main() -> int:
     parser.add_argument("--embedding-api-base", required=True)
     parser.add_argument("--embedding-model", required=True)
     parser.add_argument("--embedding-dimensions", type=int, required=True)
+    parser.add_argument("--embedding-protocol", required=True)
+    parser.add_argument("--embedding-context-tokens", type=int, required=True)
+    parser.add_argument("--embedding-document-prompt-mode", choices=("Plain", "SearchDocument", "SearchQuery"), required=True)
+    parser.add_argument("--embedding-query-prompt-mode", choices=("Plain", "SearchDocument", "SearchQuery"), required=True)
     parser.add_argument("--qdrant-host", required=True)
     parser.add_argument("--qdrant-port", type=int, required=True)
     parser.add_argument("--qdrant-grpc-port", type=int, required=True)

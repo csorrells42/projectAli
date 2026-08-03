@@ -391,10 +391,10 @@ public sealed class AliServices
             assistantProfileBinding: assistantProfileBinding);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
-        // Capability Phase 2 uses the live in-memory registry only. Qdrant semantic
-        // indexing creates/deletes collections and may start a process, so it cannot
-        // run inside a model planning pass before a lifecycle reconciler owns it.
-        var semanticToolCatalog = new RegistryOnlySemanticToolCatalog();
+        var semanticToolCatalog = new SettingsAwareSemanticToolCatalog(
+            runtimeHttpClient,
+            qdrant,
+            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot));
         var candidateRuntime = configuredOptions is { Enabled: true }
             ? new OpenAiCompatibleLocalModelRuntime(
                 LocalEndpointPolicy.IsRemote(configuredOptions.Endpoint)

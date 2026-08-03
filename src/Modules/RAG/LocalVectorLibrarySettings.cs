@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Ali;
 using Ali.Modules.Embeddings;
 
@@ -6,15 +7,19 @@ namespace Ali.Modules.RAG;
 
 public sealed record LocalVectorLibrarySettings
 {
-    public const string DefaultEmbeddingProvider = LocalEmbeddingProviders.LmStudio;
+    public const string DefaultEmbeddingProvider = LocalEmbeddingProviders.Custom;
 
-    public const string DefaultEmbeddingEndpoint = "http://127.0.0.1:1234/v1/embeddings";
+    public const string DefaultEmbeddingEndpoint = "";
 
-    public const string DefaultEmbeddingModel = "text-embedding-nomic-embed-text-v1";
+    public const string DefaultEmbeddingModel = "";
 
     public const int DefaultEmbeddingDimensions = 768;
 
+    public const int DefaultEmbeddingContextTokens = 8192;
+
     public bool Enabled { get; init; } = true;
+
+    public bool SemanticToolRetrievalEnabled { get; init; }
 
     public bool UseManagedLocalQdrant { get; init; } = true;
 
@@ -47,6 +52,17 @@ public sealed record LocalVectorLibrarySettings
     public string EmbeddingModel { get; init; } = DefaultEmbeddingModel;
 
     public int EmbeddingDimensions { get; init; } = DefaultEmbeddingDimensions;
+
+    public string EmbeddingProtocolIdentity { get; init; } =
+        LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1;
+
+    public int EmbeddingContextTokens { get; init; } = DefaultEmbeddingContextTokens;
+
+    public EmbeddingPromptMode EmbeddingDocumentPromptMode { get; init; } =
+        EmbeddingPromptMode.SearchDocument;
+
+    public EmbeddingPromptMode EmbeddingQueryPromptMode { get; init; } =
+        EmbeddingPromptMode.SearchQuery;
 
     public int ScanIntervalMinutes { get; init; } = 10;
 
@@ -105,6 +121,11 @@ public static class LocalVectorLibrarySettingsStore
         WriteIndented = true
     };
 
+    static LocalVectorLibrarySettingsStore()
+    {
+        JsonOptions.Converters.Add(new JsonStringEnumConverter());
+    }
+
     public static string GetSettingsPath(string dataRoot) =>
         Path.Combine(dataRoot, "Sources", "local_vector_library_settings.json");
 
@@ -146,7 +167,19 @@ public static class LocalVectorLibrarySettingsStore
                     : LocalEmbeddingProviders.Custom,
                 EmbeddingDimensions = HasProperty(root, "embeddingDimensions")
                     ? settings.EmbeddingDimensions
-                    : LocalVectorLibrarySettings.DefaultEmbeddingDimensions
+                    : LocalVectorLibrarySettings.DefaultEmbeddingDimensions,
+                EmbeddingProtocolIdentity = HasProperty(root, "embeddingProtocolIdentity")
+                    ? settings.EmbeddingProtocolIdentity
+                    : LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+                EmbeddingContextTokens = HasProperty(root, "embeddingContextTokens")
+                    ? settings.EmbeddingContextTokens
+                    : LocalVectorLibrarySettings.DefaultEmbeddingContextTokens,
+                EmbeddingDocumentPromptMode = HasProperty(root, "embeddingDocumentPromptMode")
+                    ? settings.EmbeddingDocumentPromptMode
+                    : EmbeddingPromptMode.SearchDocument,
+                EmbeddingQueryPromptMode = HasProperty(root, "embeddingQueryPromptMode")
+                    ? settings.EmbeddingQueryPromptMode
+                    : EmbeddingPromptMode.SearchQuery
             };
         }
         catch (JsonException)
@@ -268,6 +301,10 @@ public static class LocalVectorLibrarySettingsStore
             EmbeddingProvider = string.Empty,
             EmbeddingEndpoint = string.Empty,
             EmbeddingModel = string.Empty,
-            EmbeddingDimensions = LocalVectorLibrarySettings.DefaultEmbeddingDimensions
+            EmbeddingDimensions = LocalVectorLibrarySettings.DefaultEmbeddingDimensions,
+            EmbeddingProtocolIdentity = LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            EmbeddingContextTokens = LocalVectorLibrarySettings.DefaultEmbeddingContextTokens,
+            EmbeddingDocumentPromptMode = EmbeddingPromptMode.SearchDocument,
+            EmbeddingQueryPromptMode = EmbeddingPromptMode.SearchQuery
         };
 }

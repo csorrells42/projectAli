@@ -206,6 +206,10 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
                 vectorSettings.EmbeddingEndpoint,
                 vectorSettings.EmbeddingModel,
                 vectorSettings.EmbeddingDimensions,
+                vectorSettings.EmbeddingProtocolIdentity,
+                vectorSettings.EmbeddingContextTokens,
+                vectorSettings.EmbeddingDocumentPromptMode,
+                vectorSettings.EmbeddingQueryPromptMode,
                 out var configuration,
                 out var failure)
             || configuration is null)
@@ -224,7 +228,11 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             configuration.Endpoint,
             apiBaseUri,
             configuration.Model,
-            configuration.Dimensions);
+            configuration.Dimensions,
+            configuration.ProtocolIdentity,
+            configuration.ContextTokens,
+            configuration.DocumentPromptMode,
+            configuration.QueryPromptMode);
     }
 
     internal static Mem0EmbeddingSpaceConfiguration ResolveEmbeddingSpace(
@@ -247,6 +255,10 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             Endpoint = embedding.Endpoint.AbsoluteUri,
             embedding.Model,
             embedding.Dimensions,
+            embedding.ProtocolIdentity,
+            embedding.ContextTokens,
+            embedding.DocumentPromptMode,
+            embedding.QueryPromptMode,
             QdrantHost = vectorSettings.QdrantHost.Trim(),
             vectorSettings.QdrantHttpPort,
             vectorSettings.QdrantGrpcPort,
@@ -287,6 +299,10 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             "--embedding-api-base", embedding.ApiBaseUri.AbsoluteUri,
             "--embedding-model", embedding.Model,
             "--embedding-dimensions", embedding.Dimensions.ToString(),
+            "--embedding-protocol", embedding.ProtocolIdentity,
+            "--embedding-context-tokens", embedding.ContextTokens.ToString(),
+            "--embedding-document-prompt-mode", embedding.DocumentPromptMode.ToString(),
+            "--embedding-query-prompt-mode", embedding.QueryPromptMode.ToString(),
             "--qdrant-host", vectorSettings.QdrantHost.Trim(),
             "--qdrant-port", vectorSettings.QdrantHttpPort.ToString(),
             "--qdrant-grpc-port", vectorSettings.QdrantGrpcPort.ToString(),
@@ -313,6 +329,10 @@ internal sealed class Mem0ProcessClient : IAsyncDisposable
             EmbeddingEndpoint = embedding.Endpoint,
             EmbeddingModel = embedding.Model,
             EmbeddingDimensions = embedding.Dimensions,
+            EmbeddingProtocol = embedding.ProtocolIdentity,
+            EmbeddingContextTokens = embedding.ContextTokens,
+            EmbeddingDocumentPromptMode = embedding.DocumentPromptMode,
+            EmbeddingQueryPromptMode = embedding.QueryPromptMode,
             vectorSettings.QdrantHost,
             vectorSettings.QdrantHttpPort,
             vectorSettings.QdrantGrpcPort,
@@ -361,7 +381,11 @@ internal sealed record Mem0EmbeddingProcessConfiguration(
     Uri Endpoint,
     Uri ApiBaseUri,
     string Model,
-    int Dimensions);
+    int Dimensions,
+    string ProtocolIdentity,
+    int ContextTokens,
+    EmbeddingPromptMode DocumentPromptMode,
+    EmbeddingPromptMode QueryPromptMode);
 
 internal sealed record Mem0EmbeddingSpaceConfiguration(
     string Id,

@@ -9,18 +9,23 @@ namespace Ali.Framework.Tests;
 public sealed class LocalEmbeddingRuntimeTests
 {
     [Fact]
-    public void NewSettings_DefaultToExactLmStudioNomicV1Configuration()
+    public void NewSettings_SelectNomicRolesAndContextWithoutChoosingALoadedModel()
     {
         var settings = new LocalVectorLibrarySettings();
 
-        Assert.Equal(LocalEmbeddingProviders.LmStudio, settings.EmbeddingProvider);
-        Assert.Equal("http://127.0.0.1:1234/v1/embeddings", settings.EmbeddingEndpoint);
-        Assert.Equal("text-embedding-nomic-embed-text-v1", settings.EmbeddingModel);
+        Assert.Equal(LocalEmbeddingProviders.Custom, settings.EmbeddingProvider);
+        Assert.Equal(string.Empty, settings.EmbeddingEndpoint);
+        Assert.Equal(string.Empty, settings.EmbeddingModel);
         Assert.Equal(768, settings.EmbeddingDimensions);
+        Assert.Equal(8192, settings.EmbeddingContextTokens);
+        Assert.Equal(EmbeddingPromptMode.SearchDocument, settings.EmbeddingDocumentPromptMode);
+        Assert.Equal(EmbeddingPromptMode.SearchQuery, settings.EmbeddingQueryPromptMode);
+        Assert.True(settings.Enabled);
+        Assert.False(settings.SemanticToolRetrievalEnabled);
     }
 
     [Fact]
-    public void ProviderCatalog_ExposesExactPresetsWithoutAComputedPortRule()
+    public void ProviderCatalog_ExposesLabelsWithoutSupplyingEndpointsPortsOrModels()
     {
         Assert.Equal(
             [
@@ -32,29 +37,15 @@ public sealed class LocalEmbeddingRuntimeTests
             ],
             LocalEmbeddingProviders.Choices);
 
-        AssertPreset(
-            LocalEmbeddingProviders.LmStudio,
-            "http://127.0.0.1:1234/v1/embeddings",
-            "text-embedding-nomic-embed-text-v1");
-        AssertPreset(
-            LocalEmbeddingProviders.Ollama,
-            "http://127.0.0.1:11434/v1/embeddings",
-            "nomic-embed-text");
-        AssertPreset(
-            LocalEmbeddingProviders.LlamaCpp,
-            "http://127.0.0.1:8080/v1/embeddings",
-            "nomic-embed-text-v1-GGUF");
-        AssertPreset(
-            LocalEmbeddingProviders.Lemonade,
-            "http://127.0.0.1:13305/api/v1/embeddings",
-            "nomic-embed-text-v1-GGUF");
-        Assert.False(LocalEmbeddingProviders.TryGetPreset(LocalEmbeddingProviders.Custom, out _));
-
         Assert.True(LocalEmbeddingConfiguration.TryCreate(
             LocalEmbeddingProviders.Custom,
             "http://127.0.0.1:1234/v1/embeddings",
             "user-selected-model",
             768,
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            8192,
+            EmbeddingPromptMode.SearchDocument,
+            EmbeddingPromptMode.SearchQuery,
             out var custom,
             out var customFailure), customFailure);
         Assert.Equal(LocalEmbeddingProviders.Custom, custom!.Provider);
@@ -64,6 +55,10 @@ public sealed class LocalEmbeddingRuntimeTests
             "http://127.0.0.1:11434/v1/embeddings",
             "user-selected-model",
             768,
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            8192,
+            EmbeddingPromptMode.SearchDocument,
+            EmbeddingPromptMode.SearchQuery,
             out var explicitLmStudio,
             out var lmStudioFailure), lmStudioFailure);
         Assert.Equal(LocalEmbeddingProviders.LmStudio, explicitLmStudio!.Provider);
@@ -90,6 +85,9 @@ public sealed class LocalEmbeddingRuntimeTests
             Assert.Equal("http://127.0.0.1:13305/api/v1/embeddings", loaded.EmbeddingEndpoint);
             Assert.Equal("user-selected-legacy-model", loaded.EmbeddingModel);
             Assert.Equal(768, loaded.EmbeddingDimensions);
+            Assert.Equal(8192, loaded.EmbeddingContextTokens);
+            Assert.Equal(EmbeddingPromptMode.SearchDocument, loaded.EmbeddingDocumentPromptMode);
+            Assert.Equal(EmbeddingPromptMode.SearchQuery, loaded.EmbeddingQueryPromptMode);
             Assert.Equal(existing, File.ReadAllText(path));
             Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
         }
@@ -162,6 +160,10 @@ public sealed class LocalEmbeddingRuntimeTests
                 loaded.EmbeddingEndpoint,
                 loaded.EmbeddingModel,
                 loaded.EmbeddingDimensions,
+                loaded.EmbeddingProtocolIdentity,
+                loaded.EmbeddingContextTokens,
+                loaded.EmbeddingDocumentPromptMode,
+                loaded.EmbeddingQueryPromptMode,
                 out _,
                 out _));
 
@@ -204,7 +206,10 @@ public sealed class LocalEmbeddingRuntimeTests
             EmbeddingProvider = LocalEmbeddingProviders.Custom,
             EmbeddingEndpoint = "http://127.0.0.1:9001/custom/embeddings",
             EmbeddingModel = "exact-user-model",
-            EmbeddingDimensions = 1024
+            EmbeddingDimensions = 1024,
+            EmbeddingContextTokens = 16_384,
+            EmbeddingDocumentPromptMode = EmbeddingPromptMode.SearchDocument,
+            EmbeddingQueryPromptMode = EmbeddingPromptMode.SearchQuery
         };
         try
         {
@@ -215,6 +220,9 @@ public sealed class LocalEmbeddingRuntimeTests
             Assert.Equal(settings.EmbeddingEndpoint, loaded.EmbeddingEndpoint);
             Assert.Equal(settings.EmbeddingModel, loaded.EmbeddingModel);
             Assert.Equal(settings.EmbeddingDimensions, loaded.EmbeddingDimensions);
+            Assert.Equal(settings.EmbeddingContextTokens, loaded.EmbeddingContextTokens);
+            Assert.Equal(settings.EmbeddingDocumentPromptMode, loaded.EmbeddingDocumentPromptMode);
+            Assert.Equal(settings.EmbeddingQueryPromptMode, loaded.EmbeddingQueryPromptMode);
             var directory = Path.GetDirectoryName(LocalVectorLibrarySettingsStore.GetSettingsPath(root))!;
             Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
         }
@@ -232,6 +240,10 @@ public sealed class LocalEmbeddingRuntimeTests
             "http://127.0.0.1:13305/api/v1/embeddings",
             "model",
             768,
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            8192,
+            EmbeddingPromptMode.SearchDocument,
+            EmbeddingPromptMode.SearchQuery,
             out var valid,
             out var createFailure), createFailure);
         Assert.True(valid!.TryGetOpenAiApiBaseUri(out var apiBase, out var baseFailure), baseFailure);
@@ -242,6 +254,10 @@ public sealed class LocalEmbeddingRuntimeTests
             "http://127.0.0.1:1234/v1/embed",
             "model",
             768,
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            8192,
+            EmbeddingPromptMode.SearchDocument,
+            EmbeddingPromptMode.SearchQuery,
             out var invalidBase,
             out createFailure), createFailure);
         Assert.False(invalidBase!.TryGetOpenAiApiBaseUri(out _, out baseFailure));
@@ -249,7 +265,7 @@ public sealed class LocalEmbeddingRuntimeTests
     }
 
     [Fact]
-    public async Task Client_PostsOnceToTheExactEndpointAndModel()
+    public async Task Client_PostsTypedNomicQueryRoleAndBindsTheEffectiveIdentity()
     {
         var handler = new RecordingHandler(
             HttpStatusCode.OK,
@@ -261,6 +277,7 @@ public sealed class LocalEmbeddingRuntimeTests
         var result = await client.CreateEmbeddingAsync(
             configuration,
             "exact input",
+            EmbeddingInputRole.RetrievalQuery,
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.Message);
@@ -271,8 +288,11 @@ public sealed class LocalEmbeddingRuntimeTests
         Assert.Equal(configuration.Endpoint, handler.RequestUri);
         using var request = JsonDocument.Parse(handler.Body!);
         Assert.Equal(configuration.Model, request.RootElement.GetProperty("model").GetString());
-        Assert.Equal("exact input", request.RootElement.GetProperty("input").GetString());
+        Assert.Equal("search_query: exact input", request.RootElement.GetProperty("input").GetString());
         Assert.False(request.RootElement.TryGetProperty("prompt", out _));
+        Assert.Equal(EmbeddingPromptMode.SearchQuery, result.PromptMode);
+        Assert.Equal(8192, result.EffectiveContextTokens);
+        Assert.Equal(configuration.CaptureBindingIdentity(EmbeddingInputRole.RetrievalQuery), result.BindingIdentity);
     }
 
     [Fact]
@@ -287,6 +307,7 @@ public sealed class LocalEmbeddingRuntimeTests
         var result = await client.CreateEmbeddingAsync(
             CreateConfiguration(dimensions: 3),
             "dimension gate",
+            EmbeddingInputRole.RetrievalQuery,
             TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
@@ -307,6 +328,7 @@ public sealed class LocalEmbeddingRuntimeTests
         var result = await client.CreateEmbeddingAsync(
             CreateConfiguration(dimensions: 3),
             "bad request",
+            EmbeddingInputRole.RetrievalQuery,
             TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
@@ -315,13 +337,42 @@ public sealed class LocalEmbeddingRuntimeTests
         Assert.True(result.Message.Length < 400, result.Message);
     }
 
-    private static void AssertPreset(string provider, string endpoint, string model)
+    [Fact]
+    public async Task ContextProbe_SendsConfigured8192TokenInputWithTheQueryRole()
     {
-        Assert.True(LocalEmbeddingProviders.TryGetPreset(provider, out var preset));
-        Assert.Equal(provider, preset.Provider);
-        Assert.Equal(endpoint, preset.Endpoint);
-        Assert.Equal(model, preset.Model);
-        Assert.Equal(768, preset.Dimensions);
+        var handler = new RecordingHandler(
+            HttpStatusCode.OK,
+            "{\"data\":[{\"embedding\":[1.0,0.5,0.25]}]}");
+        using var httpClient = new HttpClient(handler);
+        var configuration = CreateConfiguration(dimensions: 3);
+
+        var result = await new OpenAiCompatibleEmbeddingClient(httpClient)
+            .ProbeConfiguredContextAsync(configuration, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.Message);
+        using var request = JsonDocument.Parse(handler.Body!);
+        var input = request.RootElement.GetProperty("input").GetString()!;
+        Assert.StartsWith("search_query: ", input, StringComparison.Ordinal);
+        Assert.Equal(8192, input["search_query: ".Length..].Split(' ').Length);
+    }
+
+    [Fact]
+    public async Task Client_PostsSearchDocumentForStoredContent()
+    {
+        var handler = new RecordingHandler(
+            HttpStatusCode.OK,
+            "{\"data\":[{\"embedding\":[1.0,0.5,0.25]}]}");
+        using var httpClient = new HttpClient(handler);
+
+        var result = await new OpenAiCompatibleEmbeddingClient(httpClient).CreateEmbeddingAsync(
+            CreateConfiguration(dimensions: 3),
+            "stored memory",
+            EmbeddingInputRole.StoredDocument,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.Message);
+        using var request = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("search_document: stored memory", request.RootElement.GetProperty("input").GetString());
     }
 
     private static LocalEmbeddingConfiguration CreateConfiguration(int dimensions)
@@ -331,6 +382,10 @@ public sealed class LocalEmbeddingRuntimeTests
             "http://127.0.0.1:1234/v1/embeddings",
             "text-embedding-nomic-embed-text-v1",
             dimensions,
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            8192,
+            EmbeddingPromptMode.SearchDocument,
+            EmbeddingPromptMode.SearchQuery,
             out var configuration,
             out var failure), failure);
         return configuration!;

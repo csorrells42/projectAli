@@ -27,6 +27,11 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
     private string _embeddingEndpoint = LocalVectorLibrarySettings.DefaultEmbeddingEndpoint;
     private string _embeddingModel = LocalVectorLibrarySettings.DefaultEmbeddingModel;
     private string _embeddingDimensions = LocalVectorLibrarySettings.DefaultEmbeddingDimensions.ToString(CultureInfo.InvariantCulture);
+    private string _embeddingProtocolIdentity = LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1;
+    private string _embeddingContextTokens = LocalVectorLibrarySettings.DefaultEmbeddingContextTokens.ToString(CultureInfo.InvariantCulture);
+    private EmbeddingPromptMode _embeddingDocumentPromptMode = EmbeddingPromptMode.SearchDocument;
+    private EmbeddingPromptMode _embeddingQueryPromptMode = EmbeddingPromptMode.SearchQuery;
+    private bool _semanticToolRetrievalEnabled;
     private string _scanInterval = "10";
     private string _maxResults = "4";
     private string _runtimeState = "Not checked";
@@ -55,6 +60,7 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
     public string SettingsPath => _services.LocalVectorLibrarySettingsPath;
     public string QdrantDataPath => _services.LocalVectorLibraryDataPath;
     public bool Enabled { get => _enabled; set => SetProperty(ref _enabled, value); }
+    public bool SemanticToolRetrievalEnabled { get => _semanticToolRetrievalEnabled; set => SetProperty(ref _semanticToolRetrievalEnabled, value); }
     public bool UseManagedLocalQdrant { get => _managed; set => SetProperty(ref _managed, value); }
     public bool AutoStartQdrant { get => _autoStart; set => SetProperty(ref _autoStart, value); }
     public bool QdrantUseTls { get => _useTls; set => SetProperty(ref _useTls, value); }
@@ -69,22 +75,17 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
     public string EmbeddingProvider
     {
         get => _embeddingProvider;
-        set
-        {
-            if (!SetProperty(ref _embeddingProvider, value)
-                || !LocalEmbeddingProviders.TryGetPreset(value, out var preset))
-            {
-                return;
-            }
-
-            EmbeddingEndpoint = preset.Endpoint;
-            EmbeddingModel = preset.Model;
-            EmbeddingDimensions = preset.Dimensions.ToString(CultureInfo.InvariantCulture);
-        }
+        set => SetProperty(ref _embeddingProvider, value);
     }
     public string EmbeddingEndpoint { get => _embeddingEndpoint; set => SetProperty(ref _embeddingEndpoint, value); }
     public string EmbeddingModel { get => _embeddingModel; set => SetProperty(ref _embeddingModel, value); }
     public string EmbeddingDimensions { get => _embeddingDimensions; set => SetProperty(ref _embeddingDimensions, value); }
+    public IReadOnlyList<string> EmbeddingProtocolChoices => LocalEmbeddingProtocolIdentities.Choices;
+    public string EmbeddingProtocolIdentity { get => _embeddingProtocolIdentity; set => SetProperty(ref _embeddingProtocolIdentity, value); }
+    public string EmbeddingContextTokens { get => _embeddingContextTokens; set => SetProperty(ref _embeddingContextTokens, value); }
+    public IReadOnlyList<EmbeddingPromptMode> EmbeddingPromptModeChoices { get; } = Enum.GetValues<EmbeddingPromptMode>();
+    public EmbeddingPromptMode EmbeddingDocumentPromptMode { get => _embeddingDocumentPromptMode; set => SetProperty(ref _embeddingDocumentPromptMode, value); }
+    public EmbeddingPromptMode EmbeddingQueryPromptMode { get => _embeddingQueryPromptMode; set => SetProperty(ref _embeddingQueryPromptMode, value); }
     public string ScanIntervalMinutes { get => _scanInterval; set => SetProperty(ref _scanInterval, value); }
     public string MaxRetrievedChunks { get => _maxResults; set => SetProperty(ref _maxResults, value); }
     public string RuntimeState { get => _runtimeState; private set => SetProperty(ref _runtimeState, value); }
@@ -109,6 +110,7 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
     {
         var settings = _services.LoadLocalVectorLibrarySettings();
         Enabled = settings.Enabled;
+        SemanticToolRetrievalEnabled = settings.SemanticToolRetrievalEnabled;
         UseManagedLocalQdrant = settings.UseManagedLocalQdrant;
         AutoStartQdrant = settings.AutoStartQdrant;
         QdrantUseTls = settings.QdrantUseTls;
@@ -123,6 +125,10 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
         EmbeddingEndpoint = settings.EmbeddingEndpoint;
         EmbeddingModel = settings.EmbeddingModel;
         EmbeddingDimensions = settings.EmbeddingDimensions.ToString(CultureInfo.InvariantCulture);
+        EmbeddingProtocolIdentity = settings.EmbeddingProtocolIdentity;
+        EmbeddingContextTokens = settings.EmbeddingContextTokens.ToString(CultureInfo.InvariantCulture);
+        EmbeddingDocumentPromptMode = settings.EmbeddingDocumentPromptMode;
+        EmbeddingQueryPromptMode = settings.EmbeddingQueryPromptMode;
         ScanIntervalMinutes = settings.ScanIntervalMinutes.ToString();
         MaxRetrievedChunks = settings.MaxRetrievedChunks.ToString();
         ApplyRuntimeStatus(_services.Qdrant.Status);
@@ -170,12 +176,10 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
                 "AliEmbeddingSettings/1.0",
                 TimeSpan.FromSeconds(20));
             var result = await new OpenAiCompatibleEmbeddingClient(httpClient)
-                .CreateEmbeddingAsync(
-                    configuration,
-                    "Ali local embedding connectivity test.")
+                .ProbeConfiguredContextAsync(configuration)
                 .ConfigureAwait(true);
             StatusText = result.Success
-                ? $"{settings.EmbeddingProvider} returned the configured {settings.EmbeddingDimensions}-dimension embedding from {settings.EmbeddingModel}."
+                ? $"{settings.EmbeddingProvider} completed the {result.EffectiveContextTokens:N0}-token context probe with {result.PromptMode}; binding {result.BindingIdentity[..12]}."
                 : result.Message;
         }
         finally { IsBusy = false; }
@@ -267,6 +271,8 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
             throw new InvalidOperationException("Retrieved chunks must be from 1 through 20.");
         if (!int.TryParse(EmbeddingDimensions, NumberStyles.None, CultureInfo.InvariantCulture, out var embeddingDimensions))
             throw new InvalidOperationException("Embedding dimensions must be a whole number.");
+        if (!int.TryParse(EmbeddingContextTokens, NumberStyles.None, CultureInfo.InvariantCulture, out var embeddingContextTokens))
+            throw new InvalidOperationException("Embedding context must be a whole number.");
         var collection = QdrantCollectionName.Trim();
         if (collection.Length == 0 || collection.Any(character => !(char.IsLetterOrDigit(character) || character is '_' or '-')))
             throw new InvalidOperationException("The Qdrant collection name may contain letters, numbers, underscores, and hyphens.");
@@ -274,6 +280,7 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
         var settings = _services.LoadLocalVectorLibrarySettings() with
         {
             Enabled = Enabled,
+            SemanticToolRetrievalEnabled = SemanticToolRetrievalEnabled,
             UseManagedLocalQdrant = UseManagedLocalQdrant,
             AutoStartQdrant = AutoStartQdrant,
             QdrantUseTls = QdrantUseTls,
@@ -288,6 +295,10 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
             EmbeddingEndpoint = EmbeddingEndpoint,
             EmbeddingModel = EmbeddingModel,
             EmbeddingDimensions = embeddingDimensions,
+            EmbeddingProtocolIdentity = EmbeddingProtocolIdentity,
+            EmbeddingContextTokens = embeddingContextTokens,
+            EmbeddingDocumentPromptMode = EmbeddingDocumentPromptMode,
+            EmbeddingQueryPromptMode = EmbeddingQueryPromptMode,
             ScanIntervalMinutes = scanMinutes,
             MaxRetrievedChunks = maxResults
         };
@@ -306,6 +317,10 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
                 settings.EmbeddingEndpoint,
                 settings.EmbeddingModel,
                 settings.EmbeddingDimensions,
+                settings.EmbeddingProtocolIdentity,
+                settings.EmbeddingContextTokens,
+                settings.EmbeddingDocumentPromptMode,
+                settings.EmbeddingQueryPromptMode,
                 out var configuration,
                 out var embeddingFailure)
             || configuration is null)

@@ -2739,9 +2739,10 @@
                                     <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" Margin="0,8,20,0"
                                                AutomationProperties.AutomationId="SettingsLocalKnowledgeStatusText" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <CheckBox Content="Enable local knowledge" IsChecked="{Binding Enabled}" Margin="0,0,0,6" />
-                                    <TextBlock Text="{Binding RuntimeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                     <CheckBox Content="Enable local knowledge" IsChecked="{Binding Enabled}" Margin="0,0,0,6" />
+                                     <CheckBox Content="Enable semantic tool retrieval" IsChecked="{Binding SemanticToolRetrievalEnabled}" Margin="0,0,0,6" />
+                                     <TextBlock Text="{Binding RuntimeState}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" HorizontalAlignment="Right" />
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -2789,10 +2790,14 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
+                                         <RowDefinition Height="Auto" />
+                                         <RowDefinition Height="Auto" />
+                                         <RowDefinition Height="Auto" />
+                                         <RowDefinition Height="Auto" />
+                                         <RowDefinition Height="Auto" />
+                                         <RowDefinition Height="Auto" />
+                                         <RowDefinition Height="Auto" />
+                                     </Grid.RowDefinitions>
                                     <TextBlock Text="Library folder" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding RootDirectory, UpdateSourceTrigger=PropertyChanged}" Margin="0,3,8,3" />
                                     <Button Grid.Column="2" Content="Choose" Command="{Binding ChooseFolderCommand}" Margin="0,3,8,3" /><Button Grid.Column="3" Content="Open" Command="{Binding OpenFolderCommand}" Margin="0,3" />
                                     <TextBlock Grid.Row="1" Text="Provider" VerticalAlignment="Center" />
@@ -2802,14 +2807,24 @@
                                               AutomationProperties.AutomationId="EmbeddingProviderSelector"
                                               Margin="0,3" />
                                     <TextBlock Grid.Row="2" Text="Embedding URL" VerticalAlignment="Center" /><TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingEndpoint, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
-                                    <TextBlock Grid.Row="3" Text="Model" VerticalAlignment="Center" /><TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
-                                    <TextBlock Grid.Row="4" Text="Dimensions" VerticalAlignment="Center" /><TextBox Grid.Row="4" Grid.Column="1" Width="90" HorizontalAlignment="Left" Text="{Binding EmbeddingDimensions, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
-                                    <TextBlock Grid.Row="5" Text="Scan / results" VerticalAlignment="Center" />
-                                    <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,3">
-                                        <TextBox Width="70" Text="{Binding ScanIntervalMinutes, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" min     return " VerticalAlignment="Center" Margin="5,0" /><TextBox Width="55" Text="{Binding MaxRetrievedChunks, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" chunks" VerticalAlignment="Center" Margin="5,0" />
-                                    </StackPanel>
-                                </Grid>
-                                <TextBlock Text="Mem0, semantic tool retrieval, and local knowledge use this one explicit provider, endpoint, model, and dimension setting. Selecting a named provider fills its visible preset; Custom preserves the entered values. Changing any embedding setting starts a separate Mem0 embedding space and rebuilds local and semantic indexes before they are used."
+                                     <TextBlock Grid.Row="3" Text="Model" VerticalAlignment="Center" /><TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding EmbeddingModel, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
+                                     <TextBlock Grid.Row="4" Text="Dimensions" VerticalAlignment="Center" /><TextBox Grid.Row="4" Grid.Column="1" Width="90" HorizontalAlignment="Left" Text="{Binding EmbeddingDimensions, UpdateSourceTrigger=PropertyChanged}" Margin="0,3" />
+                                     <TextBlock Grid.Row="5" Text="Protocol" VerticalAlignment="Center" />
+                                     <ComboBox Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" ItemsSource="{Binding EmbeddingProtocolChoices}" SelectedItem="{Binding EmbeddingProtocolIdentity}" Margin="0,3" />
+                                     <TextBlock Grid.Row="6" Text="Context" VerticalAlignment="Center" />
+                                     <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,3">
+                                         <TextBox Width="90" Text="{Binding EmbeddingContextTokens, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" tokens (8,192 selected)" VerticalAlignment="Center" Margin="5,0" />
+                                     </StackPanel>
+                                     <TextBlock Grid.Row="7" Text="Document role" VerticalAlignment="Center" />
+                                     <ComboBox Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" ItemsSource="{Binding EmbeddingPromptModeChoices}" SelectedItem="{Binding EmbeddingDocumentPromptMode}" Margin="0,3" />
+                                     <TextBlock Grid.Row="8" Text="Query role" VerticalAlignment="Center" />
+                                     <ComboBox Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="3" ItemsSource="{Binding EmbeddingPromptModeChoices}" SelectedItem="{Binding EmbeddingQueryPromptMode}" Margin="0,3" />
+                                     <TextBlock Grid.Row="9" Text="Scan / results" VerticalAlignment="Center" />
+                                     <StackPanel Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,3">
+                                         <TextBox Width="70" Text="{Binding ScanIntervalMinutes, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" min     return " VerticalAlignment="Center" Margin="5,0" /><TextBox Width="55" Text="{Binding MaxRetrievedChunks, UpdateSourceTrigger=PropertyChanged}" /><TextBlock Text=" chunks" VerticalAlignment="Center" Margin="5,0" />
+                                     </StackPanel>
+                                 </Grid>
+                                 <TextBlock Text="Mem0, semantic tool retrieval, and local knowledge share this visible binding: provider, endpoint, installed model ID, dimensions, protocol, context, and typed document/query roles. Provider selection never supplies an endpoint, port, loaded model, dimensions, or provider behavior; enter the values exposed by the selected runtime. Nomic v1.5 uses SearchDocument and SearchQuery, sent as search_document: and search_query:. Changing any binding field starts a separate embedding space and rebuilds local and semantic indexes before use."
                                            Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,10,0,0" />
                                 <WrapPanel Margin="0,12,0,0">
                                     <Button Content="Save" Command="{Binding SaveCommand}" BorderBrush="{StaticResource AccentBrush}" Margin="0,0,8,0" />

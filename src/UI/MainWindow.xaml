@@ -240,11 +240,12 @@
                                     BorderThickness="1"
                                     Padding="10,6">
                                 <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
+                         <Grid.ColumnDefinitions>
+                             <ColumnDefinition Width="*" />
+                             <ColumnDefinition Width="Auto" />
+                             <ColumnDefinition Width="Auto" />
+                             <ColumnDefinition Width="Auto" />
+                         </Grid.ColumnDefinitions>
                                     <ContentPresenter Grid.Column="0"
                                                       ContentSource="Header"
                                                       RecognizesAccessKey="True"
@@ -634,8 +635,9 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="0"
-                    Height="44"
+             <Border Grid.Row="0"
+                     Height="44"
+                     ClipToBounds="True"
                     Margin="0,0,0,8"
                     Padding="14,0"
                     Background="{StaticResource PanelBrush}"
@@ -1086,8 +1088,17 @@
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
-                        <Button Grid.Column="1"
-                                x:Name="PushToTalkButton"
+                         <Button Grid.Column="1"
+                                 AutomationProperties.AutomationId="MainChatAttachScreenshotButton"
+                                 Content="&#xE722; Image"
+                                 Command="{Binding PasteImageCommand}"
+                                 ToolTip="Paste the current clipboard image and preview it before sending."
+                                 Style="{StaticResource ComposerButton}"
+                                 VerticalAlignment="Bottom"
+                                 MinWidth="88" />
+
+                         <Button Grid.Column="2"
+                                 x:Name="PushToTalkButton"
                                 AutomationProperties.AutomationId="MainChatPushToTalkButton"
                                 Content="{Binding PushToTalkKeyButtonText}"
                                 Command="{Binding TogglePushToTalkCommand}"
@@ -1098,7 +1109,7 @@
                                 Style="{StaticResource ComposerButton}"
                                 VerticalAlignment="Bottom"
                                 MinWidth="116" />
-                        <Grid Grid.Column="2"
+                         <Grid Grid.Column="3"
                               MinWidth="92"
                               Margin="4,0,0,0"
                               VerticalAlignment="Bottom">

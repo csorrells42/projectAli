@@ -937,7 +937,7 @@ internal sealed class AliToolCallingChatClient(
                 ? $"Opened {string.Join(", ", selection.Buckets)}"
                 : selection.RequiresAttention
                     ? "Semantic tool cabinet used its safe fallback"
-                    : "Using the complete live tool registry",
+                    : "Using the settings-selected live tool registry",
             selection.Status);
         return new ToolPlanningScope(
             registeredTools,

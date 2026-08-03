@@ -1,4 +1,5 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.Embeddings;
 using Ali.Modules.RAG;
 using Ali.Modules.ToolDiscovery;
 using Microsoft.Extensions.AI;
@@ -286,6 +287,43 @@ public sealed class SemanticToolCatalogTests
     }
 
     [Fact]
+    public async Task DisabledSemanticRetrieval_UsesBoundedLiveRegistryWithoutAnUnavailableWarning()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ali-semantic-disabled", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using var httpClient = new HttpClient(new RejectingHttpHandler());
+            await using var qdrant = new QdrantServiceManager(root);
+            var catalog = new SettingsAwareSemanticToolCatalog(
+                httpClient,
+                qdrant,
+                static () => new LocalVectorLibrarySettings
+                {
+                    SemanticToolRetrievalEnabled = false
+                });
+            var tools = new[]
+            {
+                (AIFunctionDeclaration)AIFunctionFactory.Create(() => "ok", "read_tool", "Read evidence.")
+            };
+
+            var selection = await catalog.SelectAsync(
+                "read evidence",
+                tools,
+                [],
+                TestContext.Current.CancellationToken);
+
+            Assert.False(selection.RequiresAttention);
+            Assert.False(selection.UsedSemanticIndex);
+            Assert.Contains("disabled in settings", selection.Status, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SemanticFingerprint_ChangesForEveryEmbeddingSpaceChoice()
     {
         var tools = new[]
@@ -301,7 +339,7 @@ public sealed class SemanticToolCatalogTests
             QdrantSemanticToolCatalog.BuildFingerprint(
                 tools,
                 buckets,
-                settings with { EmbeddingProvider = "Custom" }));
+                settings with { EmbeddingProvider = LocalEmbeddingProviders.LmStudio }));
         Assert.NotEqual(
             baseline,
             QdrantSemanticToolCatalog.BuildFingerprint(
@@ -320,6 +358,24 @@ public sealed class SemanticToolCatalogTests
                 tools,
                 buckets,
                 settings with { EmbeddingDimensions = 1024 }));
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingContextTokens = 16_384 }));
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingDocumentPromptMode = EmbeddingPromptMode.Plain }));
+        Assert.NotEqual(
+            baseline,
+            QdrantSemanticToolCatalog.BuildFingerprint(
+                tools,
+                buckets,
+                settings with { EmbeddingQueryPromptMode = EmbeddingPromptMode.Plain }));
     }
 
     [Fact]
@@ -378,6 +434,14 @@ public sealed class SemanticToolCatalogTests
             current = current.Parent;
         }
         throw new FileNotFoundException(Path.Combine(segments));
+    }
+
+    private sealed class RejectingHttpHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Disabled semantic retrieval must not make an HTTP request.");
     }
 }
 

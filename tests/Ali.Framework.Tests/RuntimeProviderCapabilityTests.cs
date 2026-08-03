@@ -203,6 +203,52 @@ public sealed class RuntimeProviderCapabilityTests
     }
 
     [Fact]
+    public async Task VisionProbeFailure_IsAdvisoryAndPreservesManualVisionOverride()
+    {
+        var handler = new CapabilityProbeHandler(
+            nativeToolCallSupported: false,
+            visionFailureStatus: HttpStatusCode.BadGateway);
+        using var client = new HttpClient(handler);
+        var runtime = new OpenAiCompatibleLocalModelRuntime(
+            client,
+            CreateOptions(new Uri("http://127.0.0.1:1234/v1/")) with
+            {
+                SupportsVision = true,
+                CapabilityProbeEnabled = true
+            });
+
+        var health = await runtime.CheckHealthAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(health.Succeeded, health.Summary);
+        Assert.Equal(RuntimeCapabilityState.Unknown, health.CapabilityProfile?.Vision.State);
+        Assert.True(runtime.ActiveProfile.SupportsVision);
+        Assert.Contains("manual override", health.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TypedVisionStabilityRefusal_DisablesVisionForThatActivationOnly()
+    {
+        var handler = new CapabilityProbeHandler(
+            nativeToolCallSupported: false,
+            visionFailureStatus: HttpStatusCode.UnsupportedMediaType);
+        using var client = new HttpClient(handler);
+        var runtime = new OpenAiCompatibleLocalModelRuntime(
+            client,
+            CreateOptions(new Uri("http://127.0.0.1:1234/v1/")) with
+            {
+                SupportsVision = true,
+                CapabilityProbeEnabled = true
+            });
+
+        var health = await runtime.CheckHealthAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(health.Succeeded, health.Summary);
+        Assert.Equal(RuntimeCapabilityState.Unsupported, health.CapabilityProfile?.Vision.State);
+        Assert.False(runtime.ActiveProfile.SupportsVision);
+        Assert.Contains("typed endpoint stability response", health.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CapabilityIdentity_ChangesWithContextTokenizerAndProtocolMaterial()
     {
         var observedAt = DateTimeOffset.Parse("2026-08-03T12:00:00Z");
@@ -280,7 +326,9 @@ public sealed class RuntimeProviderCapabilityTests
             Engine = LocalRuntimeEngines.GenericOpenAi
         };
 
-    private sealed class CapabilityProbeHandler(bool nativeToolCallSupported) : HttpMessageHandler
+    private sealed class CapabilityProbeHandler(
+        bool nativeToolCallSupported,
+        HttpStatusCode? visionFailureStatus = null) : HttpMessageHandler
     {
         public List<string> RequestBodies { get; } = [];
 
@@ -299,6 +347,18 @@ public sealed class RuntimeProviderCapabilityTests
             if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/models", StringComparison.Ordinal))
             {
                 return Json("{\"data\":[{\"id\":\"provider/model-revision-1\",\"object\":\"model\"}]}");
+            }
+
+            if (body.Contains("\"image_url\"", StringComparison.Ordinal)
+                && visionFailureStatus is { } visionStatus)
+            {
+                return new HttpResponseMessage(visionStatus)
+                {
+                    Content = new StringContent(
+                        "{\"error\":{\"message\":\"typed image refusal\"}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
             }
 
             using var payload = JsonDocument.Parse(body);

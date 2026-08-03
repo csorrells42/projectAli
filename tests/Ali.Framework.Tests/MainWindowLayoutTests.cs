@@ -127,6 +127,28 @@ public sealed class MainWindowLayoutTests
     }
 
     [Fact]
+    public void Composer_ShowsPastedImagePreviewAndWrappedReceiptStatusWithoutOverflow()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));
+        var viewModel = File.ReadAllText(
+            FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
+
+        Assert.Contains("MainChatAttachScreenshotButton", xaml, StringComparison.Ordinal);
+        Assert.Contains("Command=\"{Binding PasteImageCommand}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding Attachments}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Image Source=\"{Binding FilePath}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<WrapPanel />", xaml, StringComparison.Ordinal);
+        Assert.Contains("ClipToBounds=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding AgentActivitySummary}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding ReceiptText}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping=\"Wrap\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AddClipboardImageAsync", viewModel, StringComparison.Ordinal);
+        Assert.Contains("SynchronizeVisibleStackComponents", viewModel, StringComparison.Ordinal);
+        Assert.Contains("McpSettings.Enabled || McpServerSettings.Enabled", viewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RecoveryDecision_UsesTwoWrappedChoices_AndLocksOrdinaryComposerIngress()
     {
         var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));

@@ -71,6 +71,10 @@ public sealed class UserMemoryEmbeddingSettingsTests
         Assert.Equal("http://127.0.0.1:9123/custom/v2/", resolved.ApiBaseUri.AbsoluteUri);
         Assert.Equal("custom-embedding-model", resolved.Model);
         Assert.Equal(1536, resolved.Dimensions);
+        Assert.Equal(LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1, resolved.ProtocolIdentity);
+        Assert.Equal(8192, resolved.ContextTokens);
+        Assert.Equal(EmbeddingPromptMode.SearchDocument, resolved.DocumentPromptMode);
+        Assert.Equal(EmbeddingPromptMode.SearchQuery, resolved.QueryPromptMode);
     }
 
     [Theory]
@@ -126,7 +130,10 @@ public sealed class UserMemoryEmbeddingSettingsTests
             vectorSettings with { EmbeddingProvider = LocalEmbeddingProviders.LmStudio },
             vectorSettings with { EmbeddingEndpoint = "http://127.0.0.1:9124/v1/embeddings" },
             vectorSettings with { EmbeddingModel = "other-embedding-model" },
-            vectorSettings with { EmbeddingDimensions = 1024 }
+            vectorSettings with { EmbeddingDimensions = 1024 },
+            vectorSettings with { EmbeddingContextTokens = 16_384 },
+            vectorSettings with { EmbeddingDocumentPromptMode = EmbeddingPromptMode.Plain },
+            vectorSettings with { EmbeddingQueryPromptMode = EmbeddingPromptMode.Plain }
         };
 
         Assert.All(alternatives, alternative =>
@@ -194,6 +201,12 @@ public sealed class UserMemoryEmbeddingSettingsTests
         Assert.Equal(vectorSettings.QdrantGrpcPort.ToString(), ArgumentValue(arguments, "--qdrant-grpc-port"));
         Assert.Equal("true", ArgumentValue(arguments, "--qdrant-use-tls"));
         Assert.Equal(
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            ArgumentValue(arguments, "--embedding-protocol"));
+        Assert.Equal("8192", ArgumentValue(arguments, "--embedding-context-tokens"));
+        Assert.Equal("SearchDocument", ArgumentValue(arguments, "--embedding-document-prompt-mode"));
+        Assert.Equal("SearchQuery", ArgumentValue(arguments, "--embedding-query-prompt-mode"));
+        Assert.Equal(
             vectorSettings.QdrantApiKeyEnvironmentVariable,
             ArgumentValue(arguments, "--qdrant-api-key-environment-variable"));
 
@@ -213,6 +226,16 @@ public sealed class UserMemoryEmbeddingSettingsTests
         Assert.Equal(vectorSettings.QdrantHttpPort, root.GetProperty("qdrantHttpPort").GetInt32());
         Assert.Equal(vectorSettings.QdrantGrpcPort, root.GetProperty("qdrantGrpcPort").GetInt32());
         Assert.True(root.GetProperty("qdrantUseTls").GetBoolean());
+        Assert.Equal(
+            LocalEmbeddingProtocolIdentities.OpenAiCompatibleV1,
+            root.GetProperty("embeddingProtocol").GetString());
+        Assert.Equal(8192, root.GetProperty("embeddingContextTokens").GetInt32());
+        Assert.Equal(
+            (int)EmbeddingPromptMode.SearchDocument,
+            root.GetProperty("embeddingDocumentPromptMode").GetInt32());
+        Assert.Equal(
+            (int)EmbeddingPromptMode.SearchQuery,
+            root.GetProperty("embeddingQueryPromptMode").GetInt32());
         Assert.Equal(
             vectorSettings.QdrantApiKeyEnvironmentVariable,
             root.GetProperty("qdrantApiKeyEnvironmentVariable").GetString());
@@ -261,6 +284,10 @@ public sealed class UserMemoryEmbeddingSettingsTests
 
         Assert.Contains("--embedding-provider", worker, StringComparison.Ordinal);
         Assert.Contains("--embedding-api-base", worker, StringComparison.Ordinal);
+        Assert.Contains("class RoleAwareOpenAIEmbedding", worker, StringComparison.Ordinal);
+        Assert.Contains("search_document: ", worker, StringComparison.Ordinal);
+        Assert.Contains("search_query: ", worker, StringComparison.Ordinal);
+        Assert.Contains("memory_action == \"search\"", worker, StringComparison.Ordinal);
         Assert.Contains("127.0.0.1,localhost,::1", worker, StringComparison.Ordinal);
         Assert.Contains("qdrant_config[\"api_key\"] = qdrant_api_key", worker, StringComparison.Ordinal);
         Assert.Contains("\"https\": args.qdrant_use_tls == \"true\"", worker, StringComparison.Ordinal);
