@@ -192,6 +192,63 @@ public sealed class AgentWorkMemoryTests
         });
     }
 
+    [Fact]
+    public async Task ProductionScopedProvider_DoesNotMutateBeforeANoToolTurn()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "AliAgentWorkMemoryProductionProviderTests",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            var memory = new AliAgentWorkMemory(
+                Path.Combine(root, "UserData"),
+                Path.Combine(root, "OrchestrationV2"),
+                "agent-work-memory-production-provider-test");
+            using var client = new ScriptedChatClient([FinalAnswer("BRIDGE_HELLO_OK")]);
+            using var provider = memory.CreateFrameworkProvider();
+            var agent = client.AsHarnessAgent(new HarnessAgentOptions
+            {
+                MaximumIterationsPerRequest = 2,
+                DisableWebSearch = true,
+                DisableFileMemory = true,
+                AIContextProviders = [provider],
+                DisableAgentSkillsProvider = true,
+                DisableTodoProvider = true,
+                DisableAgentModeProvider = true,
+                DisableOpenTelemetry = true
+            });
+
+            using (memory.EnterScope("bridge-no-tool", User("alice", "Alice")))
+            {
+                var session = await agent.CreateSessionAsync(TestContext.Current.CancellationToken);
+                var response = await agent.RunAsync(
+                    "Reply without calling a tool.",
+                    session,
+                    cancellationToken: TestContext.Current.CancellationToken);
+
+                Assert.Equal("BRIDGE_HELLO_OK", response.Text);
+            }
+
+            if (File.Exists(memory.AuditPath))
+            {
+                var audit = await File.ReadAllTextAsync(
+                    memory.AuditPath,
+                    TestContext.Current.CancellationToken);
+                Assert.DoesNotContain("\"operation\":\"create-directory\"", audit, StringComparison.Ordinal);
+                Assert.DoesNotContain("\"operation\":\"write\"", audit, StringComparison.Ordinal);
+                Assert.DoesNotContain("\"operation\":\"delete\"", audit, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static ChatResponse ToolCall(string name, IDictionary<string, object?> arguments)
     {
         var message = new ChatMessage(ChatRole.Assistant, string.Empty);

@@ -36,7 +36,7 @@ public sealed record OpenAiCompatibleRuntimeOptions(
 
     public string RollingWindowMode { get; init; } = "provider-managed";
 
-    public bool CapabilityProbeEnabled { get; init; }
+    public bool CapabilityProbeEnabled { get; init; } = true;
 
     public ModelProfile ToModelProfile(bool isLastKnownGood) =>
         new(

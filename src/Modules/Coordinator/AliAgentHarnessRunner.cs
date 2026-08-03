@@ -314,6 +314,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             _toolOutcomes);
         var effectiveCapabilityEnforcement = capabilityEnforcementProvider
             ?? _capabilityEnforcementProvider;
+        var contextProviders = new List<AIContextProvider>
+        {
+            _workMemory.CreateFrameworkProvider()
+        };
+        if (effectiveCapabilityEnforcement is not null)
+        {
+            contextProviders.Add(effectiveCapabilityEnforcement);
+        }
         AIAgent agent = planningClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
@@ -324,7 +332,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             MaxOutputTokens = profile.OutputTokenLimit,
 #pragma warning restore MAAI001
             DisableWebSearch = true,
-            DisableFileMemory = false,
+            // Ali's store already owns stable user/conversation isolation. Supplying the
+            // provider explicitly prevents Harness from adding a random working folder
+            // whose setup mutation would sit outside the exact durable tool-call grant.
+            DisableFileMemory = true,
             DisableAgentSkillsProvider = false,
             AgentSkillsSource = skillsSource,
             DisableOpenTelemetry = false,
@@ -334,7 +345,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             // model narrate an internal plan on ordinary turns and repeatedly surfaced an
             // unfinished list, so keep that overlapping provider out of the conversation.
             DisableTodoProvider = true,
-            FileMemoryStore = _workMemory.Store,
             FileAccessStore = _fileAccess.FrameworkStore,
             FileAccessProviderOptions = new FileAccessProviderOptions
             {
@@ -347,9 +357,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             {
                 AutoApprovalRules = [ShouldAutoApproveAndRecordAsync]
             },
-            AIContextProviders = effectiveCapabilityEnforcement is null
-                ? []
-                : [effectiveCapabilityEnforcement],
+            AIContextProviders = contextProviders,
             ChatOptions = new ChatOptions
             {
                 Instructions = AliToolCatalog.BuildInstructions(

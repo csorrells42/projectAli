@@ -88,6 +88,12 @@ public sealed class AliAgentWorkMemory
 
     internal IReadOnlyList<IActionTargetStateAdapter> TargetStateAdapters { get; }
 
+    internal FileMemoryProvider CreateFrameworkProvider() =>
+        new(
+            Store,
+            static _ => new FileMemoryState { WorkingFolder = string.Empty },
+            options: null);
+
     public string RootPath { get; }
 
     public string RecoverableTrashPath { get; }

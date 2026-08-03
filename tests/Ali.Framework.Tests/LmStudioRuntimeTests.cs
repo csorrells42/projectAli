@@ -44,6 +44,53 @@ public sealed class LmStudioRuntimeTests
         Assert.Equal(LocalRuntimeEngines.LmStudio, options.Engine);
         Assert.Equal("http://127.0.0.1:1234/v1/", options.Endpoint.ToString());
         Assert.Empty(options.Model);
+        Assert.True(options.CapabilityProbeEnabled);
+    }
+
+    [Fact]
+    public void RuntimeSettingsFromBeforeCapabilityProbing_EnableTheCurrentSafeDefault()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "AliLmStudioRuntimeTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(
+                RuntimeSettingsStore.GetSettingsPath(root),
+                """
+                {
+                  "enabled": true,
+                  "endpoint": "http://127.0.0.1:1234/v1/",
+                  "model": "openai/gpt-oss-20b",
+                  "displayName": "GPT-OSS 20B",
+                  "family": "GPT-OSS",
+                  "size": "20B",
+                  "quantization": "Installed package default",
+                  "contextTokens": 65536,
+                  "outputTokenLimit": 8192,
+                  "temperature": 0.2,
+                  "topP": 0.95,
+                  "streamingEnabled": true,
+                  "supportsVision": false,
+                  "supportsToolCalls": true,
+                  "allowPrivateLanEndpoint": false,
+                  "engine": "LM Studio",
+                  "reasoningEffort": "low",
+                  "thinkingEnabled": false
+                }
+                """);
+
+            var loaded = Assert.IsType<OpenAiCompatibleRuntimeOptions>(
+                RuntimeSettingsStore.LoadOpenAiCompatibleOptions(root));
+
+            Assert.True(loaded.CapabilityProbeEnabled);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
