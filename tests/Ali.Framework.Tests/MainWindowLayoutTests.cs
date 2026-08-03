@@ -126,6 +126,55 @@ public sealed class MainWindowLayoutTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RecoveryDecision_UsesTwoWrappedChoices_AndLocksOrdinaryComposerIngress()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile("src", "UI", "MainWindow.xaml"));
+        var viewModel = File.ReadAllText(
+            FindRepositoryFile("src", "UI", "ViewModels", "MainWindowViewModel.cs"));
+        var panelStart = xaml.IndexOf(
+            "AutomationProperties.AutomationId=\"MainChatRecoveryPanel\"",
+            StringComparison.Ordinal);
+        var panelEnd = xaml.IndexOf("</Border>", panelStart, StringComparison.Ordinal);
+        Assert.True(panelStart >= 0 && panelEnd > panelStart);
+        var recoveryPanel = xaml[panelStart..panelEnd];
+
+        Assert.Contains(
+            "Visibility=\"{Binding IsRecoveryDecisionRequired, Converter={StaticResource BoolToVisibilityConverter}}\"",
+            recoveryPanel,
+            StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(recoveryPanel, "MainChatRecoveryPrimaryButton"));
+        Assert.Equal(1, CountOccurrences(recoveryPanel, "MainChatRecoverySecondaryButton"));
+        Assert.Equal(1, CountOccurrences(recoveryPanel, "ResolvePrimaryRecoveryDecisionCommand"));
+        Assert.Equal(1, CountOccurrences(recoveryPanel, "ResolveSecondaryRecoveryDecisionCommand"));
+        Assert.Equal(2, CountOccurrences(recoveryPanel, "<ColumnDefinition Width=\"*\" />"));
+        Assert.True(CountOccurrences(recoveryPanel, "TextWrapping=\"Wrap\"") >= 3);
+        Assert.DoesNotContain("HorizontalScrollBarVisibility", recoveryPanel, StringComparison.Ordinal);
+        Assert.Contains("IsReadOnly=\"{Binding IsComposerReadOnly}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("!IsRecoveryDecisionRequired\n                && !IsRecording", viewModel.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Equal(
+            2,
+            CountOccurrences(
+                viewModel,
+                "Resolve or cancel the recovered turn before changing attachments."));
+
+        foreach (var hiddenIdentityName in new[]
+                 {
+                     "DurableIdentity",
+                     "ExpectedStateRevision",
+                     "PromptPublicationId",
+                     "PromptTextDigest",
+                     "SubjectId",
+                     "SubjectPreparedRevision"
+                 })
+        {
+            Assert.DoesNotContain(hiddenIdentityName, recoveryPanel, StringComparison.Ordinal);
+        }
+    }
+
+    private static int CountOccurrences(string value, string expected) =>
+        value.Split(expected, StringSplitOptions.None).Length - 1;
+
     private static string FindRepositoryFile(params string[] segments)
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

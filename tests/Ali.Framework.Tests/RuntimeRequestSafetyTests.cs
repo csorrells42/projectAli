@@ -17,6 +17,7 @@ public sealed class RuntimeRequestSafetyTests
     public async Task ActivityObserver_PreservesToolContractAndExactReturnedObject()
     {
         var turn = CreateObservedTurn("call-exact", "exact_tool");
+        using var invocation = EnterInvocation(turn, "call-exact", "exact_tool");
         var expected = new object();
         var observer = new RecordingShadowObserver();
         var inner = AIFunctionFactory.Create(
@@ -47,6 +48,7 @@ public sealed class RuntimeRequestSafetyTests
     public async Task ActivityObserverFailure_PreservesOriginalExceptionInstanceAndStack()
     {
         var turn = CreateObservedTurn("call-throw", "throwing_tool");
+        using var invocation = EnterInvocation(turn, "call-throw", "throwing_tool");
         var expected = new InvalidOperationException("original failure");
         var observer = new RecordingShadowObserver(throwFromCallback: true);
         var inner = AIFunctionFactory.Create(
@@ -74,6 +76,7 @@ public sealed class RuntimeRequestSafetyTests
     {
         var activity = new List<AssistantStreamChunk>();
         var turn = CreateObservedTurn("call-oce", "unexpected_oce", activity.Add);
+        using var invocation = EnterInvocation(turn, "call-oce", "unexpected_oce");
         var expected = new OperationCanceledException("tool-level cancellation");
         var observer = new RecordingShadowObserver();
         var inner = AIFunctionFactory.Create(
@@ -104,6 +107,7 @@ public sealed class RuntimeRequestSafetyTests
             "call-cyclic",
             "cyclic_tool",
             _ => throw new InvalidOperationException("activity publisher failed"));
+        using var invocation = EnterInvocation(turn, "call-cyclic", "cyclic_tool");
         var cyclic = new CyclicResult();
         cyclic.Self = cyclic;
         Assert.Equal(
@@ -129,6 +133,7 @@ public sealed class RuntimeRequestSafetyTests
     {
         var activity = new List<AssistantStreamChunk>();
         var turn = CreateObservedTurn("call-mcp-timeout", "mcp_server_tool", activity.Add);
+        using var invocation = EnterInvocation(turn, "call-mcp-timeout", "mcp_server_tool");
         var failure = new McpToolInvocationTimedOutResult(
             "mcp_server_tool",
             "timed-out",
@@ -211,14 +216,14 @@ public sealed class RuntimeRequestSafetyTests
             }));
         var completed = new FunctionResultContent("call-completed", new { success = true });
 
-        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(blocked));
-        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(uncertain));
-        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(serializedBlocked));
-        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(serializedUncertain));
-        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(dictionaryUncertain));
-        Assert.False(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(threw));
-        Assert.True(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(domainBlockedStatus));
-        Assert.True(AliAgentHarnessRunner.ShouldReportGenericSuccessfulResult(completed));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(blocked));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(uncertain));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(serializedBlocked));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(serializedUncertain));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(dictionaryUncertain));
+        Assert.False(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(threw));
+        Assert.True(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(domainBlockedStatus));
+        Assert.True(AliAgentHarnessRunner.ShouldReportGenericReturnedResult(completed));
     }
 
     [Fact]
@@ -281,6 +286,10 @@ public sealed class RuntimeRequestSafetyTests
             "call-publisher-throw",
             "publisher_throw_tool",
             _ => throw new ApplicationException("activity publisher failed"));
+        using var invocation = EnterInvocation(
+            turn,
+            "call-publisher-throw",
+            "publisher_throw_tool");
         var expected = new InvalidOperationException("original tool failure");
         var observer = new RecordingShadowObserver();
         var inner = AIFunctionFactory.Create(
@@ -352,6 +361,7 @@ public sealed class RuntimeRequestSafetyTests
     {
         var activity = new List<AssistantStreamChunk>();
         var turn = CreateObservedTurn("call-cancel", "cancelled_tool", activity.Add);
+        using var invocation = EnterInvocation(turn, "call-cancel", "cancelled_tool");
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         var expected = new OperationCanceledException("cancelled", cancellation.Token);
@@ -391,6 +401,7 @@ public sealed class RuntimeRequestSafetyTests
             "Ali sees: the chess board is incomplete -> chose file access write -> plan: write the board and legal move logic",
             "File access write returned -> Ali next: read the final source and verify the requested behavior",
             "{\"content\":\"\\u003Chtml\\u003E...\"}"));
+        using var invocation = EnterInvocation(turn, "call-write", "file_access_write");
         var inner = AIFunctionFactory.Create(
             (string content) => new { success = true, content },
             "file_access_write",
@@ -403,7 +414,8 @@ public sealed class RuntimeRequestSafetyTests
 
         Assert.Contains(activity, item =>
             item.IsActivity
-            && item.Text.Contains("chose file access write", StringComparison.OrdinalIgnoreCase));
+            && item.Text.Contains("File access write returned", StringComparison.OrdinalIgnoreCase)
+            && item.Text.Contains("read the final source", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(activity, item =>
             (item.ActivityDetail?.Contains("Arguments:", StringComparison.OrdinalIgnoreCase) ?? false)
             || (item.ActivityDetail?.Contains("\\u003C", StringComparison.Ordinal) ?? false)
@@ -449,6 +461,16 @@ public sealed class RuntimeRequestSafetyTests
             "test result",
             "{}"));
         return turn;
+    }
+
+    private static IDisposable EnterInvocation(
+        CoordinatorTurnContext turn,
+        string callId,
+        string toolName)
+    {
+        turn.RegisterActionExecutionAuthority(new TestAuthority());
+        Assert.True(turn.TryEnterActiveToolInvocation(callId, toolName, out var invocation));
+        return Assert.IsAssignableFrom<IDisposable>(invocation);
     }
 
     private sealed class RecordingShadowObserver(bool throwFromCallback = false) : IShadowToolObserver
@@ -549,5 +571,19 @@ public sealed class RuntimeRequestSafetyTests
     private sealed class CyclicResult
     {
         public CyclicResult? Self { get; set; }
+    }
+
+    private sealed class TestAuthority : ICoordinatorActionExecutionAuthority
+    {
+        public TurnIdentity DurableIdentity { get; } =
+            new("user", "conversation", "assistant");
+
+        public ValueTask<CapabilityInvocationAuthorization> PrepareExecutionAsync(
+            CapabilityInvocationLease lease,
+            string callId,
+            AIFunctionArguments arguments,
+            bool requiresApproval,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

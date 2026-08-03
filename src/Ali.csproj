@@ -53,6 +53,9 @@
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.15.0" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.8.1" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
+    <!-- O200kBase 2.0.0 permits 9.0.4; pin the current patched 9.x line for CVE-2026-26127. -->
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="9.0.18" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="2.0.0" />
     <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.1" />
     <PackageReference Include="AngleSharp" Version="1.5.2" />

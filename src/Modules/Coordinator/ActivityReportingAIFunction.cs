@@ -27,23 +27,25 @@ internal sealed class ActivityReportingAIFunction(
         CancellationToken cancellationToken)
     {
         var turn = TryGetTurn(turnAccessor);
-        var plan = turn?.CurrentToolPlan;
+        var plan = TryResolveActivePlan(turn, Name);
         var started = Stopwatch.GetTimestamp();
         var startedAtUtc = DateTimeOffset.UtcNow;
-        var callId = TryResolveCallId(turn, Name);
+        var callId = plan?.CallId ?? TryResolveCallId(turn, Name);
         var permission = ResolvePermission(turn, callId, Name, requiresApproval);
         var usePlanHeadline = !_hasUserFacingDisplayName
-            && plan is not null
-            && string.Equals(plan.ToolName, Name, StringComparison.Ordinal);
-        TryReport(
-            turn,
-            AgentActivityKind.ToolCall,
-            usePlanHeadline
-                ? plan!.SelectionHeadline
-                : $"Running {_activityDisplayName}",
-            usePlanHeadline
-                ? null
-                : $"Selected tool: {_activityDisplayName}");
+            && plan is not null;
+        // The planning client publishes an accepted model-authored transition once it
+        // has validated and journaled the call. Do not repeat that same start line at
+        // the invocation boundary. Tools invoked outside a registered plan retain the
+        // generic lifecycle notification.
+        if (!usePlanHeadline)
+        {
+            TryReport(
+                turn,
+                AgentActivityKind.ToolCall,
+                $"Running {_activityDisplayName}",
+                $"Selected tool: {_activityDisplayName}");
+        }
         try
         {
             var result = await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
@@ -191,7 +193,7 @@ internal sealed class ActivityReportingAIFunction(
     {
         try
         {
-            if (turn?.TryGetCurrentToolCallId(toolName, out var callId) == true
+            if (turn?.TryGetActiveToolCallId(toolName, out var callId) == true
                 && !string.IsNullOrWhiteSpace(callId))
             {
                 return callId;
@@ -203,6 +205,23 @@ internal sealed class ActivityReportingAIFunction(
         }
 
         return null;
+    }
+
+    private static CoordinatorToolPlan? TryResolveActivePlan(
+        CoordinatorTurnContext? turn,
+        string toolName)
+    {
+        try
+        {
+            return turn?.TryGetActiveToolPlan(toolName, out var plan) == true
+                ? plan
+                : null;
+        }
+        catch
+        {
+            // Ambient activity context is supplementary and cannot affect the actual tool call.
+            return null;
+        }
     }
 
     private static CoordinatorTurnContext? TryGetTurn(

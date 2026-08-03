@@ -229,6 +229,242 @@ public sealed class OutcomeAndEvidenceTests
     }
 
     [Fact]
+    public async Task WorkItemIdentity_IsProtectedAuthenticatedAndCannotBeRebound()
+    {
+        using var directory = new TemporaryDirectory();
+        const string workItemId = "work-item-secret-canary-88b6d1bf";
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var draft = CreateDraft("call", "tool", Json("{}"), Json("{}")) with
+        {
+            EvidenceId = "stable-work-item-evidence",
+            WorkItemId = workItemId
+        };
+        var ledger = new EvidenceLedger(directory.Path, "profile-a");
+
+        var stored = await ledger.AppendAsync(
+            identity,
+            draft,
+            TestContext.Current.CancellationToken);
+        var protectedContent = await ledger.ReadProtectedAsync(
+            identity,
+            stored.Evidence.EvidenceId,
+            TestContext.Current.CancellationToken);
+
+        Assert.Matches("^[0-9a-f]{64}$", stored.Evidence.WorkItemIdDigest!);
+        Assert.Equal(workItemId, protectedContent.Identity.WorkItemId);
+        Assert.DoesNotContain(
+            workItemId,
+            JsonSerializer.Serialize(stored.Evidence),
+            StringComparison.Ordinal);
+        var workItemBytes = Encoding.UTF8.GetBytes(workItemId);
+        foreach (var path in Directory.GetFiles(directory.Path, "*", SearchOption.AllDirectories))
+        {
+            var bytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
+            Assert.True(bytes.AsSpan().IndexOf(workItemBytes) < 0, $"Work-item identity leaked to {path}.");
+        }
+
+        var reopened = new EvidenceLedger(directory.Path, "profile-a");
+        var retry = await reopened.AppendAsync(
+            identity,
+            draft,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(stored.Cursor, retry.Cursor);
+        Assert.Equal(stored.Evidence.WorkItemIdDigest, retry.Evidence.WorkItemIdDigest);
+        await Assert.ThrowsAsync<InvalidDataException>(() => reopened.AppendAsync(
+            identity,
+            draft with { WorkItemId = "different-work-item" },
+            TestContext.Current.CancellationToken));
+        Assert.Single(await reopened.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("effect-kind")]
+    [InlineData("artifact-id")]
+    [InlineData("artifact-kind")]
+    [InlineData("artifact-before")]
+    [InlineData("artifact-after")]
+    [InlineData("source-kind")]
+    [InlineData("source-provider")]
+    [InlineData("source-boundary")]
+    [InlineData("source-freshness")]
+    [InlineData("source-revision")]
+    public async Task StableEvidenceIdentity_RejectsEffectArtifactOrSourceRebinding(
+        string changedField)
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var original = CreateDraft("call", "tool", Json("{}"), Json("{}")) with
+        {
+            EvidenceId = "stable-complete-evidence-identity",
+            Artifacts = [new EvidenceArtifactDraft("artifact", "file", "before", "after")],
+            Source = new EvidenceSourceMetadata(
+                "tool",
+                "source-provider",
+                "trusted-local",
+                DateTimeOffset.Parse("2026-08-02T12:00:00Z"),
+                "source-revision")
+        };
+        var changed = changedField switch
+        {
+            "effect-kind" => original with { EffectKind = "create" },
+            "artifact-id" => original with
+            {
+                Artifacts = [original.Artifacts[0] with { ArtifactId = "different-artifact" }]
+            },
+            "artifact-kind" => original with
+            {
+                Artifacts = [original.Artifacts[0] with { Kind = "directory" }]
+            },
+            "artifact-before" => original with
+            {
+                Artifacts = [original.Artifacts[0] with { BeforeVersion = "different-before" }]
+            },
+            "artifact-after" => original with
+            {
+                Artifacts = [original.Artifacts[0] with { AfterVersion = "different-after" }]
+            },
+            "source-kind" => original with { Source = original.Source with { Kind = "runtime" } },
+            "source-provider" => original with
+            {
+                Source = original.Source with { ProviderId = "different-provider" }
+            },
+            "source-boundary" => original with
+            {
+                Source = original.Source with { TrustBoundary = "untrusted-external" }
+            },
+            "source-freshness" => original with
+            {
+                Source = original.Source with
+                {
+                    FreshAtUtc = original.Source.FreshAtUtc!.Value.AddSeconds(1)
+                }
+            },
+            "source-revision" => original with
+            {
+                Source = original.Source with { StateRevision = "different-revision" }
+            },
+            _ => throw new InvalidOperationException("Unknown test mutation.")
+        };
+        var ledger = new EvidenceLedger(directory.Path, "profile-a");
+
+        await ledger.AppendAsync(
+            identity,
+            original,
+            TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => ledger.AppendAsync(
+            identity,
+            changed,
+            TestContext.Current.CancellationToken));
+        Assert.Single(await ledger.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task StableEvidenceRetry_NormalizesUtcTimestampOffsetsBeforeExactComparison()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var started = new DateTimeOffset(
+            2026,
+            8,
+            2,
+            8,
+            0,
+            0,
+            TimeSpan.FromHours(-4));
+        var completed = started.AddSeconds(2);
+        var original = CreateDraft("call", "tool", Json("{}"), Json("{}")) with
+        {
+            EvidenceId = "stable-normalized-time-evidence",
+            StartedAtUtc = started,
+            CompletedAtUtc = completed,
+            Source = new EvidenceSourceMetadata(
+                "tool",
+                "source-provider",
+                "trusted-local",
+                started,
+                "source-revision")
+        };
+        var equivalentUtc = original with
+        {
+            StartedAtUtc = started.ToUniversalTime(),
+            CompletedAtUtc = completed.ToUniversalTime(),
+            Source = original.Source with
+            {
+                FreshAtUtc = original.Source.FreshAtUtc!.Value.ToUniversalTime()
+            }
+        };
+        var ledger = new EvidenceLedger(directory.Path, "profile-a");
+
+        var first = await ledger.AppendAsync(
+            identity,
+            original,
+            TestContext.Current.CancellationToken);
+        var retry = await ledger.AppendAsync(
+            identity,
+            equivalentUtc,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(first.Cursor, retry.Cursor);
+        Assert.Equal(first.Checksum, retry.Checksum);
+        Assert.Single(await ledger.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Append_RejectsNoncanonicalAndOverlongWorkItemIdentities()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var ledger = new EvidenceLedger(directory.Path, "profile-a");
+        var invalidWorkItemIds = new[]
+        {
+            " noncanonical ",
+            new string('w', 257)
+        };
+
+        foreach (var workItemId in invalidWorkItemIds)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => ledger.AppendAsync(
+                identity,
+                CreateDraft("call", "tool", Json("{}"), Json("{}")) with
+                {
+                    WorkItemId = workItemId
+                },
+                TestContext.Current.CancellationToken));
+        }
+
+        Assert.Empty(await ledger.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task UnboundEvidence_RemainsExplicitlyUnboundAfterProtectedRoundTrip()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var ledger = new EvidenceLedger(directory.Path, "profile-a");
+
+        var stored = await ledger.AppendAsync(
+            identity,
+            CreateDraft("shadow-call", "tool", Json("{}"), Json("{}")),
+            TestContext.Current.CancellationToken);
+        var protectedContent = await ledger.ReadProtectedAsync(
+            identity,
+            stored.Evidence.EvidenceId,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(stored.Evidence.WorkItemIdDigest);
+        Assert.Null(protectedContent.Identity.WorkItemId);
+    }
+
+    [Fact]
     public async Task Append_ClonesJsonBeforeAwaitingPersistence()
     {
         using var directory = new TemporaryDirectory();

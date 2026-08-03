@@ -1,5 +1,6 @@
 using Ali.Modules.Evidence;
 using Ali.Modules.Runtime.Models;
+using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Runtime;
 
@@ -88,4 +89,61 @@ public interface IReasoningEffortRuntime
     string ReasoningEffort { get; }
 
     void SetReasoningEffort(string effort);
+}
+
+/// <summary>
+/// Internal request properties shared by model-facing orchestration lanes. The runtime consumes
+/// these mechanically; they are not user prompt text and never select a tool or interpret intent.
+/// </summary>
+internal static class AliInternalModelRoutingProperties
+{
+    internal const string SuppressInjectedPersona = "ali.internalRouting";
+    internal const string BoundReasoningEffort = "ali.boundReasoningEffort";
+}
+
+internal sealed record BoundRuntimeBindingMaterial(
+    string Engine,
+    string Implementation,
+    string RuntimeKind,
+    string RuntimeLocation,
+    string RuntimeEndpoint);
+
+internal sealed record BoundModelBindingMaterial(
+    string ProfileId,
+    string PackageId,
+    string Family,
+    string Size,
+    string Quantization,
+    bool SupportsVision,
+    bool SupportsToolCalls);
+
+internal sealed record BoundGenerationSettingsBindingMaterial(
+    int ContextTokens,
+    int OutputTokenLimit,
+    double? Temperature,
+    double? TopP,
+    bool? StreamingEnabled,
+    string ThinkingControl,
+    bool? ThinkingEnabled,
+    string ReasoningEffort);
+
+/// <summary>
+/// One immutable dispatch view of a concrete model client and every setting that can change the
+/// request it sends. Capturing the client itself prevents a switching wrapper from redirecting an
+/// already-authorized completion to a different model.
+/// </summary>
+internal sealed record BoundModelDispatchSnapshot(
+    IChatClient ChatClient,
+    ModelProfile Profile,
+    BoundRuntimeBindingMaterial RuntimeBinding,
+    BoundModelBindingMaterial ModelBinding,
+    BoundGenerationSettingsBindingMaterial GenerationSettingsBinding);
+
+/// <summary>
+/// Captures the exact concrete client/profile/settings tuple that one model dispatch will use.
+/// The returned client is borrowed from the runtime owner and must not be disposed by callers.
+/// </summary>
+internal interface IBoundModelDispatchSource
+{
+    BoundModelDispatchSnapshot CaptureBoundModelDispatch();
 }

@@ -1,4 +1,5 @@
 using Ali.Modules.Coordinator;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
@@ -14,6 +15,7 @@ public sealed class ShadowPermissionHookTests
     {
         var turn = CreateTurn("call-denied", "protected_tool");
         turn.RecordPermissionDecision(AgentToolApprovalChoice.Deny);
+        using var invocation = EnterInvocation(turn, "call-denied", "protected_tool");
         var observer = new RecordingObserver();
         var invocationCount = 0;
         var inner = AIFunctionFactory.Create(
@@ -46,6 +48,7 @@ public sealed class ShadowPermissionHookTests
     {
         var turn = CreateTurn("call-hostile", "protected_tool");
         turn.RecordPermissionDecision(AgentToolApprovalChoice.Deny);
+        using var invocation = EnterInvocation(turn, "call-hostile", "protected_tool");
         var invocationCount = 0;
         var inner = AIFunctionFactory.Create(
             () => ++invocationCount,
@@ -84,6 +87,7 @@ public sealed class ShadowPermissionHookTests
     public async Task FormerExternalOwnershipPolicy_DoesNotBlockAliMutation()
     {
         var turn = CreateTurn("call-owner", "implementation_write");
+        using var invocation = EnterInvocation(turn, "call-owner", "implementation_write");
         var observer = new RecordingObserver();
         var invocationCount = 0;
         var inner = AIFunctionFactory.Create(
@@ -295,6 +299,16 @@ public sealed class ShadowPermissionHookTests
         return turn;
     }
 
+    private static IDisposable EnterInvocation(
+        CoordinatorTurnContext turn,
+        string callId,
+        string toolName)
+    {
+        turn.RegisterActionExecutionAuthority(new TestAuthority());
+        Assert.True(turn.TryEnterActiveToolInvocation(callId, toolName, out var invocation));
+        return Assert.IsAssignableFrom<IDisposable>(invocation);
+    }
+
     private sealed class RecordingObserver(
         bool throwAfterRecord = false,
         bool accept = true) : IShadowToolObserver
@@ -373,5 +387,19 @@ public sealed class ShadowPermissionHookTests
             LastTerminal = "cancelled";
             return accept;
         }
+    }
+
+    private sealed class TestAuthority : ICoordinatorActionExecutionAuthority
+    {
+        public TurnIdentity DurableIdentity { get; } =
+            new("user", "conversation", "assistant-message");
+
+        public ValueTask<CapabilityInvocationAuthorization> PrepareExecutionAsync(
+            CapabilityInvocationLease lease,
+            string callId,
+            AIFunctionArguments arguments,
+            bool requiresApproval,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

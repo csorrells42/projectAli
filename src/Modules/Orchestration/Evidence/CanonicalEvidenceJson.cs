@@ -11,13 +11,22 @@ internal static class CanonicalEvidenceJson
     };
 
     public static byte[] SerializeToUtf8Bytes<T>(T value)
+        => SerializeToUtf8Bytes(value, int.MaxValue);
+
+    public static byte[] SerializeToUtf8Bytes<T>(T value, int maximumBytes)
     {
+        if (maximumBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        }
+
         var element = value is JsonElement json
             ? json
             : JsonSerializer.SerializeToElement(value, SerializerOptions);
-        var buffer = new ArrayBufferWriter<byte>();
+        var inner = new ArrayBufferWriter<byte>(Math.Min(maximumBytes, 4096));
+        var buffer = new BoundedBufferWriter(inner, maximumBytes);
         using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
-               {
+        {
                    Indented = false,
                    SkipValidation = false
                }))
@@ -25,7 +34,7 @@ internal static class CanonicalEvidenceJson
             WriteElement(writer, element);
         }
 
-        return buffer.WrittenSpan.ToArray();
+        return inner.WrittenSpan.ToArray();
     }
 
     public static JsonElement CloneOrNull(JsonElement value) =>
@@ -63,6 +72,49 @@ internal static class CanonicalEvidenceJson
             default:
                 element.WriteTo(writer);
                 break;
+        }
+    }
+
+    private sealed class BoundedBufferWriter(
+        ArrayBufferWriter<byte> inner,
+        int maximumBytes) : IBufferWriter<byte>
+    {
+        public void Advance(int count)
+        {
+            if (count < 0 || count > maximumBytes - inner.WrittenCount)
+            {
+                throw new InvalidDataException(
+                    $"Canonical evidence JSON cannot exceed {maximumBytes} bytes.");
+            }
+
+            inner.Advance(count);
+        }
+
+        public Memory<byte> GetMemory(int sizeHint = 0)
+        {
+            RequireCapacity(sizeHint);
+            return inner.GetMemory(sizeHint);
+        }
+
+        public Span<byte> GetSpan(int sizeHint = 0)
+        {
+            RequireCapacity(sizeHint);
+            return inner.GetSpan(sizeHint);
+        }
+
+        private void RequireCapacity(int sizeHint)
+        {
+            if (sizeHint < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sizeHint));
+            }
+
+            var required = Math.Max(sizeHint, 1);
+            if (required > maximumBytes - inner.WrittenCount)
+            {
+                throw new InvalidDataException(
+                    $"Canonical evidence JSON cannot exceed {maximumBytes} bytes.");
+            }
         }
     }
 }

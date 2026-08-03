@@ -1,5 +1,6 @@
 using Ali.Modules.Coordinator;
 using Ali.Modules.Evidence;
+using Ali.Modules.Orchestration.Contracts;
 using Ali.UI.ViewModels;
 using System.Diagnostics;
 using System.Text.Json;
@@ -145,6 +146,32 @@ public sealed class AgentActivityPresentationTests
         Assert.Contains(item.ReceiptText, item.SummaryText, StringComparison.Ordinal);
         Assert.DoesNotContain("succeeded", item.SummaryText, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("The invocation produced a bounded result summary.", receipt.Summary);
+    }
+
+    [Fact]
+    public void CurrentTurnExecutionReceipts_RetainOnlyTheNewestBoundedWindow()
+    {
+        var receipts = new List<AgentToolExecutionReceipt>();
+        var total = MainWindowViewModel.MaximumRetainedTurnExecutionReceipts + 3;
+
+        for (var index = 0; index < total; index++)
+        {
+            MainWindowViewModel.RetainCurrentTurnExecutionReceipt(
+                receipts,
+                new AgentToolExecutionReceipt(
+                    $"tool-{index}",
+                    AgentToolExecutionOutcome.Completed,
+                    $"summary-{index}",
+                    DateTimeOffset.UnixEpoch.AddSeconds(index)));
+        }
+
+        Assert.Equal(MainWindowViewModel.MaximumRetainedTurnExecutionReceipts, receipts.Count);
+        Assert.Equal("tool-3", receipts[0].ToolName);
+        Assert.Equal($"tool-{total - 1}", receipts[^1].ToolName);
+        Assert.Equal(
+            Enumerable.Range(3, MainWindowViewModel.MaximumRetainedTurnExecutionReceipts)
+                .Select(index => $"tool-{index}"),
+            receipts.Select(receipt => receipt.ToolName));
     }
 
     [Fact]
@@ -315,6 +342,76 @@ public sealed class AgentActivityPresentationTests
         Assert.Equal(
             "Checking https://example.com/src/server.cs?next=/api/data.json then Main.cs and http://127.0.0.1:1234/a/b.json.",
             display);
+    }
+
+    [Fact]
+    public void RecoveryPromptIdentity_RemainsTypedButHiddenFromHumanActivityText()
+    {
+        const string userId = "hidden-user-canary";
+        const string conversationId = "hidden-conversation-canary";
+        const string assistantMessageId = "hidden-assistant-canary";
+        const string promptPublicationId = "hidden-prompt-publication-canary";
+        const string subjectId = "hidden-subject-canary";
+        var prompt = new AgentRecoveryPrompt(
+            new TurnIdentity(userId, conversationId, assistantMessageId),
+            ExpectedStateRevision: 17,
+            promptPublicationId,
+            PromptTextDigest: new string('a', 64),
+            subjectId,
+            SubjectPreparedRevision: 11,
+            AgentRecoveryPromptKind.ActionReconciliation);
+        var chunk = new AssistantStreamChunk(
+            conversationId,
+            "visible-user-message",
+            assistantMessageId,
+            "Recovery decision required",
+            EvidenceStatus.Unknown,
+            IsActivity: true,
+            ActivityKind: AgentActivityKind.Warning,
+            ActivityDetail: "Choose one of the two recovery options.",
+            RecoveryPrompt: prompt);
+
+        var item = new AgentActivityItemViewModel(chunk);
+
+        Assert.Same(prompt, chunk.RecoveryPrompt);
+        Assert.Equal("Recovery decision required", item.DisplayTitle);
+        foreach (var hiddenValue in new[]
+                 {
+                     userId,
+                     conversationId,
+                     assistantMessageId,
+                     promptPublicationId,
+                     subjectId,
+                     prompt.PromptTextDigest,
+                     prompt.ExpectedStateRevision.ToString(),
+                     prompt.SubjectPreparedRevision.ToString()
+                 })
+        {
+            Assert.DoesNotContain(hiddenValue, item.DisplayText, StringComparison.Ordinal);
+            Assert.DoesNotContain(hiddenValue, item.SummaryText, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void RecoveryDecision_RejectsChoiceForDifferentPromptKind()
+    {
+        var prompt = new AgentRecoveryPrompt(
+            new TurnIdentity("user", "conversation", "assistant"),
+            ExpectedStateRevision: 5,
+            PromptPublicationId: "publication",
+            PromptTextDigest: new string('b', 64),
+            SubjectId: "action",
+            SubjectPreparedRevision: 4,
+            AgentRecoveryPromptKind.ActionReconciliation);
+        var validDecision = new AgentRecoveryDecision(
+            prompt,
+            AgentRecoveryDecisionChoice.ConfirmApplied);
+        var invalidDecision = new AgentRecoveryDecision(
+            prompt,
+            AgentRecoveryDecisionChoice.ConfirmDisplayed);
+
+        validDecision.Validate();
+        Assert.Throws<ArgumentOutOfRangeException>(invalidDecision.Validate);
     }
 
     private static AssistantStreamChunk CreateChunk(

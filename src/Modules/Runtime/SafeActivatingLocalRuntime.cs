@@ -1,17 +1,23 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Ali.Modules.Runtime.Models;
 using Ali.Modules.Runtime;
 
 namespace Ali.Modules.Runtime;
 
-public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient
+public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
 {
     private readonly ILocalModelRuntime _fallbackRuntime;
     private ILocalModelRuntime? _candidateRuntime;
     private ILocalModelRuntime? _lastHealthCheckedRuntime;
     private ILocalModelRuntime? _lastKnownGoodRuntime;
     private ILocalModelRuntime _activeRuntime;
+    private RuntimeHealthCheck? _lastHealthCheck;
     private bool _activeRuntimeUnloadedForCandidate;
+    // One model server can be unloaded or replaced by the settings UI. Holding this gate for
+    // the complete request/stream lifetime makes dispatch a lease: transitions wait for it, and
+    // a dispatch queued behind a transition revalidates its pinned runtime before touching it.
+    private readonly SemaphoreSlim _dispatchTransitionGate = new(1, 1);
 
     public SafeActivatingLocalRuntime(
         ILocalModelRuntime fallbackRuntime,
@@ -22,16 +28,18 @@ public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IRe
         _activeRuntime = fallbackRuntime;
     }
 
-    public ModelProfile ActiveProfile => _activeRuntime.ActiveProfile;
+    public ModelProfile ActiveProfile => Volatile.Read(ref _activeRuntime).ActiveProfile;
 
-    public RuntimeHealthCheck? LastHealthCheck { get; private set; }
+    public RuntimeHealthCheck? LastHealthCheck => Volatile.Read(ref _lastHealthCheck);
 
     public bool CanActivateCandidate =>
-        LastHealthCheck is { Succeeded: true } && _lastHealthCheckedRuntime is not null;
+        LastHealthCheck is { Succeeded: true }
+        && Volatile.Read(ref _lastHealthCheckedRuntime) is not null;
 
-    public bool CanRevertToLastKnownGood => _lastKnownGoodRuntime is not null;
+    public bool CanRevertToLastKnownGood => Volatile.Read(ref _lastKnownGoodRuntime) is not null;
 
-    public bool IsUsingFallback => ReferenceEquals(_activeRuntime, _fallbackRuntime);
+    public bool IsUsingFallback =>
+        ReferenceEquals(Volatile.Read(ref _activeRuntime), _fallbackRuntime);
 
     public string ReasoningEffort =>
         (_activeRuntime as IReasoningEffortRuntime)?.ReasoningEffort
@@ -56,102 +64,231 @@ public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IRe
         }
     }
 
+    BoundModelDispatchSnapshot IBoundModelDispatchSource.CaptureBoundModelDispatch()
+    {
+        var runtime = Volatile.Read(ref _activeRuntime);
+        if (runtime is IBoundModelDispatchSource boundSource
+            && !ReferenceEquals(runtime, this))
+        {
+            var dispatch = boundSource.CaptureBoundModelDispatch()
+                ?? throw new InvalidOperationException(
+                    "The active runtime returned no exact bound dispatch snapshot.");
+            ArgumentNullException.ThrowIfNull(dispatch.ChatClient);
+            return dispatch with
+            {
+                ChatClient = CreatePinnedBoundDispatchClient(
+                    runtime,
+                    dispatch.ChatClient)
+            };
+        }
+
+        throw new InvalidOperationException(
+            "The active runtime cannot expose the exact client and settings envelope required for a bound completion dispatch.");
+    }
+
     public void ConfigureCandidate(ILocalModelRuntime? candidateRuntime)
     {
-        _candidateRuntime = candidateRuntime;
-        _activeRuntimeUnloadedForCandidate = false;
-        _lastHealthCheckedRuntime = null;
-        LastHealthCheck = null;
+        if (!_dispatchTransitionGate.Wait(0))
+        {
+            throw new InvalidOperationException(
+                "The runtime candidate cannot be changed while a model dispatch or runtime transition is active.");
+        }
+
+        try
+        {
+            Volatile.Write(ref _candidateRuntime, candidateRuntime);
+            Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
+            Volatile.Write(ref _lastHealthCheckedRuntime, null);
+            Volatile.Write(ref _lastHealthCheck, null);
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
     }
 
     public IAsyncEnumerable<ModelToken> StreamChatAsync(
         ChatRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        StreamChatUnderDispatchGateAsync(request, cancellationToken);
+
+    private async IAsyncEnumerable<ModelToken> StreamChatUnderDispatchGateAsync(
+        ChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        _activeRuntimeUnloadedForCandidate = false;
-        return _activeRuntime.StreamChatAsync(request, cancellationToken);
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
+            var runtime = Volatile.Read(ref _activeRuntime);
+            await foreach (var token in runtime
+                               .StreamChatAsync(request, cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return token;
+            }
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
     }
 
     public Task<RuntimeHealthCheck> CheckHealthAsync(CancellationToken cancellationToken) =>
         CheckCandidateAsync(cancellationToken);
 
-    public Task ShutdownAsync(CancellationToken cancellationToken) =>
-        _activeRuntime.ShutdownAsync(cancellationToken);
+    public async Task ShutdownAsync(CancellationToken cancellationToken)
+    {
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await Volatile.Read(ref _activeRuntime)
+                .ShutdownAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
+    }
 
-    public Task<RuntimeHealthCheck> CheckActiveAsync(CancellationToken cancellationToken) =>
-        _activeRuntime.CheckHealthAsync(cancellationToken);
+    public async Task<RuntimeHealthCheck> CheckActiveAsync(CancellationToken cancellationToken)
+    {
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await Volatile.Read(ref _activeRuntime)
+                .CheckHealthAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
+    }
 
     public async Task<RuntimeHealthCheck> CheckCandidateAsync(CancellationToken cancellationToken)
     {
-        if (_candidateRuntime is null)
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            LastHealthCheck = await _fallbackRuntime.CheckHealthAsync(cancellationToken).ConfigureAwait(false);
-            _lastHealthCheckedRuntime = null;
-            return LastHealthCheck;
-        }
-
-        await UnloadActiveModelBeforeSwitchAsync(_candidateRuntime, cancellationToken).ConfigureAwait(false);
-
-        LastHealthCheck = await _candidateRuntime.CheckHealthAsync(cancellationToken).ConfigureAwait(false);
-        if (!LastHealthCheck.Succeeded)
-        {
-            try
+            var candidateRuntime = Volatile.Read(ref _candidateRuntime);
+            if (candidateRuntime is null)
             {
-                await _candidateRuntime.ShutdownAsync(cancellationToken).ConfigureAwait(false);
+                var fallbackHealth = await _fallbackRuntime
+                    .CheckHealthAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                Volatile.Write(ref _lastHealthCheck, fallbackHealth);
+                Volatile.Write(ref _lastHealthCheckedRuntime, null);
+                return fallbackHealth;
             }
-            catch (Exception ex) when (ex is HttpRequestException or JsonException or TimeoutException)
+
+            await UnloadActiveModelBeforeSwitchAsync(candidateRuntime, cancellationToken)
+                .ConfigureAwait(false);
+
+            var health = await candidateRuntime
+                .CheckHealthAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (!health.Succeeded)
             {
-                LastHealthCheck = LastHealthCheck with
+                try
                 {
-                    Summary = $"{LastHealthCheck.Summary} Failed candidate cleanup also failed: {ex.Message}",
-                    ErrorText = ex.Message
-                };
+                    await candidateRuntime.ShutdownAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or JsonException or TimeoutException)
+                {
+                    health = health with
+                    {
+                        Summary = $"{health.Summary} Failed candidate cleanup also failed: {ex.Message}",
+                        ErrorText = ex.Message
+                    };
+                }
             }
-        }
 
-        _lastHealthCheckedRuntime = LastHealthCheck.Succeeded ? _candidateRuntime : null;
-        return LastHealthCheck;
+            Volatile.Write(ref _lastHealthCheck, health);
+            Volatile.Write(
+                ref _lastHealthCheckedRuntime,
+                health.Succeeded ? candidateRuntime : null);
+            return health;
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
     }
 
     public bool ActivateLastHealthChecked()
     {
-        if (!CanActivateCandidate || _lastHealthCheckedRuntime is null)
+        if (!_dispatchTransitionGate.Wait(0))
         {
             return false;
         }
 
-        _activeRuntime = _lastHealthCheckedRuntime;
-        _lastKnownGoodRuntime = _activeRuntime;
-        _activeRuntimeUnloadedForCandidate = false;
-        return true;
+        try
+        {
+            var lastHealthCheckedRuntime = Volatile.Read(ref _lastHealthCheckedRuntime);
+            if (LastHealthCheck is not { Succeeded: true }
+                || lastHealthCheckedRuntime is null)
+            {
+                return false;
+            }
+
+            Volatile.Write(ref _activeRuntime, lastHealthCheckedRuntime);
+            Volatile.Write(ref _lastKnownGoodRuntime, lastHealthCheckedRuntime);
+            Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
+            return true;
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
     }
 
     public async Task RevertToFallbackAsync(CancellationToken cancellationToken)
     {
-        await ShutdownActiveRuntimeBeforeTransitionAsync(_fallbackRuntime, cancellationToken).ConfigureAwait(false);
-        _activeRuntime = _fallbackRuntime;
-        _activeRuntimeUnloadedForCandidate = false;
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ShutdownActiveRuntimeBeforeTransitionAsync(_fallbackRuntime, cancellationToken)
+                .ConfigureAwait(false);
+            Volatile.Write(ref _activeRuntime, _fallbackRuntime);
+            Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
     }
 
     public async Task<bool> RevertToLastKnownGoodAsync(CancellationToken cancellationToken)
     {
-        if (_lastKnownGoodRuntime is null)
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return false;
-        }
+            var lastKnownGoodRuntime = Volatile.Read(ref _lastKnownGoodRuntime);
+            if (lastKnownGoodRuntime is null)
+            {
+                return false;
+            }
 
-        await ShutdownActiveRuntimeBeforeTransitionAsync(_lastKnownGoodRuntime, cancellationToken).ConfigureAwait(false);
-        _activeRuntime = _lastKnownGoodRuntime;
-        _activeRuntimeUnloadedForCandidate = false;
-        return true;
+            await ShutdownActiveRuntimeBeforeTransitionAsync(lastKnownGoodRuntime, cancellationToken)
+                .ConfigureAwait(false);
+            Volatile.Write(ref _activeRuntime, lastKnownGoodRuntime);
+            Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
+            return true;
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
     }
 
     private async Task UnloadActiveModelBeforeSwitchAsync(
         ILocalModelRuntime candidateRuntime,
         CancellationToken cancellationToken)
     {
-        if (_activeRuntimeUnloadedForCandidate
-            || _activeRuntime is not IModelSwitchAwareRuntime active
+        if (Volatile.Read(ref _activeRuntimeUnloadedForCandidate)
+            || Volatile.Read(ref _activeRuntime) is not IModelSwitchAwareRuntime active
             || candidateRuntime is not IModelSwitchAwareRuntime candidate
             || string.Equals(active.RuntimeIdentity, candidate.RuntimeIdentity, StringComparison.OrdinalIgnoreCase))
         {
@@ -159,25 +296,40 @@ public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IRe
         }
 
         await active.UnloadForModelSwitchAsync(cancellationToken).ConfigureAwait(false);
-        _activeRuntimeUnloadedForCandidate = true;
+        Volatile.Write(ref _activeRuntimeUnloadedForCandidate, true);
+    }
+
+    private void NotifyPinnedBoundDispatchStarting(ILocalModelRuntime pinnedRuntime)
+    {
+        if (!ReferenceEquals(Volatile.Read(ref _activeRuntime), pinnedRuntime))
+        {
+            throw new InvalidOperationException(
+                "The bound model dispatch is stale because the active runtime changed. Capture a fresh dispatch before retrying.");
+        }
+
+        // A direct call through the exact pinned client can reload/use the logical active
+        // runtime without passing through this switching facade. Keep the physical-load hint
+        // honest so a later candidate check cannot skip the required unload.
+        Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
     }
 
     private async Task ShutdownActiveRuntimeBeforeTransitionAsync(
         ILocalModelRuntime targetRuntime,
         CancellationToken cancellationToken)
     {
-        if (ReferenceEquals(_activeRuntime, targetRuntime))
+        var activeRuntime = Volatile.Read(ref _activeRuntime);
+        if (ReferenceEquals(activeRuntime, targetRuntime))
         {
             return;
         }
 
-        if (_activeRuntime is IModelSwitchAwareRuntime active
+        if (activeRuntime is IModelSwitchAwareRuntime active
             && targetRuntime is IModelSwitchAwareRuntime target
             && string.Equals(active.RuntimeIdentity, target.RuntimeIdentity, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        await _activeRuntime.ShutdownAsync(cancellationToken).ConfigureAwait(false);
+        await activeRuntime.ShutdownAsync(cancellationToken).ConfigureAwait(false);
     }
 }

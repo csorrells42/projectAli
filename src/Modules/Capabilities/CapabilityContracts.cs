@@ -73,7 +73,7 @@ public static class ProtocolCapabilityToolNames
 {
     public static IReadOnlySet<string> All { get; } = new[]
     {
-        "submit_orchestration_decision"
+        OrchestrationProtocolCapability.ToolName
     }.ToFrozenSet(StringComparer.Ordinal);
 }
 

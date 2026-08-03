@@ -67,6 +67,26 @@ public sealed record StoredAttachmentMetadata(
     bool RetainAfterSession,
     DateTimeOffset CreatedAt);
 
+public enum ConversationPublicationProbeStatus
+{
+    Present,
+    Absent,
+    Mismatch,
+    Unavailable
+}
+
+public sealed record ConversationPublicationProbeResult(
+    ConversationPublicationProbeStatus Status,
+    string OutcomeCode);
+
+public interface IConversationPublicationProbe
+{
+    ConversationPublicationProbeResult ProbeAssistantPublication(
+        string conversationId,
+        string assistantMessageId,
+        string answerDigest);
+}
+
 public interface IConversationStore
 {
     ConversationListResult ListSummaries();

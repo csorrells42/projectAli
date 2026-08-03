@@ -2,6 +2,8 @@
 
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.Capabilities;
@@ -9,10 +11,16 @@ using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
 using Ali.Modules.Mcp;
+using Ali.Modules.Orchestration;
+using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
+using Ali.Modules.Orchestration.Planning;
+using Ali.Modules.Orchestration.State;
+using Ali.Modules.Orchestration.Work;
 using Ali.Modules.Permissions;
 using Ali.Modules.Runtime;
+using Ali.Modules.Runtime.Models;
 using Ali.Modules.UserMemory;
 using Ali.Modules.ToolDiscovery;
 using Microsoft.Agents.AI;
@@ -35,7 +43,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     // ceiling remains only as a final finite-run safety boundary.
     internal const int MaximumToolIterations = int.MaxValue;
     private readonly IReadOnlyList<AITool> _baseTools;
-    private readonly AliToolCallingChatClient _compatibilityClient;
+    private readonly AIFunction _protocolTool;
+    private readonly IChatClient _modelClient;
+    private readonly AliPlanningStateCoordinator _planningStateCoordinator;
     private readonly ILocalModelRuntime _runtime;
     private readonly AssistantProfile _assistantProfile;
     private readonly Func<AgentOrchestrationSettings> _orchestrationSettings;
@@ -53,8 +63,13 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private readonly IReadOnlyList<AITool> _frameworkCapabilityTools;
     private readonly CapabilitySettingsSnapshotOwner? _capabilitySettings;
     private readonly TerminalCapabilityEnforcementProvider? _capabilityEnforcementProvider;
+    private readonly AliFrameworkToolOutcomeSidecar _toolOutcomes;
+    private readonly AliProductionToolOutcomeRegistry _toolOutcomeRegistry;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
+    private readonly object _lifetimeSync = new();
     private AgentToolPermissionSnapshot? _projectionPermissionSnapshot;
+    private int _activeRuns;
+    private bool _planningStateCoordinatorDisposed;
     private int _disposed;
 
     public AliAgentHarnessRunner(
@@ -72,92 +87,107 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         Func<AgentOrchestrationSettings> orchestrationSettings,
         ISemanticToolCatalog? semanticToolCatalog = null,
         IShadowToolObserver? shadowObserver = null,
-        string? capabilitySettingsDataRoot = null)
+        string? capabilitySettingsDataRoot = null,
+        ITurnPublicationReconciler? publicationReconciler = null,
+        EffectNormalizationRegistry? effectNormalizations = null,
+        TargetStateRegistry? targetStates = null,
+        AliFrameworkToolOutcomeSidecar? toolOutcomes = null)
     {
+        _modelClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
         _runtime = runtime;
         _assistantProfile = assistantProfile.Normalize();
         _semanticToolCatalog = semanticToolCatalog ?? new RegistryOnlySemanticToolCatalog();
-        _compatibilityClient = new AliToolCallingChatClient(
-            chatClient,
-            runtime,
+        _toolOutcomes = toolOutcomes ?? new AliFrameworkToolOutcomeSidecar();
+        _toolOutcomeRegistry = new AliProductionToolOutcomeRegistry(_toolOutcomes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(checkpointPath);
+        _planningStateCoordinator = new AliPlanningStateCoordinator(
+            Path.Combine(Path.GetFullPath(checkpointPath), "OrchestrationV2"),
             _assistantProfile.AssistantName,
-            turnAccessor,
-            fileAccess.NormalizeProviderToolArguments,
-            semanticToolCatalog: _semanticToolCatalog);
-        // The checkpoint path remains in the constructor temporarily so existing callers
-        // stay source-compatible during the staged V2 migration. The single-loop harness
-        // never opens the legacy nested-workflow store or creates another model agent.
-        _ = checkpointPath;
-        _baseTools = catalog.Tools.ToArray();
-        _orchestrationSettings = orchestrationSettings;
-        _mcpClients = mcpClients;
-        _toolPermissions = toolPermissions;
-        _fileAccess = fileAccess;
-        _workMemory = workMemory;
-        _activeUsers = activeUsers;
-        _turnAccessor = turnAccessor;
-        _shadowObserver = shadowObserver;
-        _capabilityPermissionPolicy = new AliToolPermissionPolicy(
-            _turnAccessor,
-            () => _toolPermissions.CurrentProfile,
-            _shadowObserver);
+            publicationReconciler,
+            effectNormalizations ?? AliProductionEffectNormalizations.Create(),
+            targetStates ?? AliProductionTargetStateAdapters.Create(fileAccess));
+        try
+        {
+            _baseTools = catalog.Tools.ToArray();
+            _protocolTool = OrchestrationProtocolCapability.CreateInvariantFunction();
+            _orchestrationSettings = orchestrationSettings;
+            _mcpClients = mcpClients;
+            _toolPermissions = toolPermissions;
+            _fileAccess = fileAccess;
+            _workMemory = workMemory;
+            _activeUsers = activeUsers;
+            _turnAccessor = turnAccessor;
+            _shadowObserver = shadowObserver;
+            _capabilityPermissionPolicy = new AliToolPermissionPolicy(
+                _turnAccessor,
+                () => _toolPermissions.CurrentProfile,
+                _shadowObserver);
 
-        if (string.IsNullOrWhiteSpace(capabilitySettingsDataRoot))
-        {
-            _capabilitySettingsDataRoot = null;
-            _baseCapabilityRegistry = null;
-            _frameworkCapabilityTools = [];
-            _capabilitySettings = null;
-            _capabilityEnforcementProvider = null;
-        }
-        else
-        {
-            var normalizedDataRoot = Path.GetFullPath(capabilitySettingsDataRoot);
-            _capabilitySettingsDataRoot = normalizedDataRoot;
-            _frameworkCapabilityTools = AliFrameworkCapabilityProbe.Capture(
-                    _fileAccess,
-                    _turnAccessor)
-                .ToArray();
-            var allDeclarations = _baseTools
-                .Concat(_frameworkCapabilityTools)
-                .OfType<AIFunctionDeclaration>()
-                .ToArray();
-            var productionDeclarations = allDeclarations
-                .Where(declaration =>
-                    !AliProductionCapabilityCatalog.IsRetiredToolName(declaration.Name))
-                .ToArray();
-            var productionCatalog = AliProductionCapabilityCatalog.Build(productionDeclarations);
-            if (productionCatalog.QuarantinedToolNames.Count > 0
-                || productionCatalog.Registry.Descriptors.Count
-                != AliProductionCapabilityCatalog.KnownToolNames.Count)
+            if (string.IsNullOrWhiteSpace(capabilitySettingsDataRoot))
             {
-                throw new InvalidOperationException(
-                    "Ali's production capability catalog does not exactly match the registered tool schemas.");
+                _capabilitySettingsDataRoot = null;
+                _baseCapabilityRegistry = null;
+                _frameworkCapabilityTools = [];
+                _capabilitySettings = null;
+                _capabilityEnforcementProvider = null;
             }
-            _baseCapabilityRegistry = productionCatalog.Registry;
+            else
+            {
+                var normalizedDataRoot = Path.GetFullPath(capabilitySettingsDataRoot);
+                _capabilitySettingsDataRoot = normalizedDataRoot;
+                _frameworkCapabilityTools = AliFrameworkCapabilityProbe.Capture(
+                        _fileAccess,
+                        _turnAccessor)
+                    .ToArray();
+                var allDeclarations = _baseTools
+                    .Concat(_frameworkCapabilityTools)
+                    .Append(_protocolTool)
+                    .OfType<AIFunctionDeclaration>()
+                    .ToArray();
+                var productionDeclarations = allDeclarations
+                    .Where(declaration =>
+                        !AliProductionCapabilityCatalog.IsRetiredToolName(declaration.Name))
+                    .ToArray();
+                var productionCatalog = AliProductionCapabilityCatalog.Build(productionDeclarations);
+                if (productionCatalog.QuarantinedToolNames.Count > 0
+                    || productionCatalog.Registry.Descriptors.Count
+                    != AliProductionCapabilityCatalog.KnownToolNames.Count
+                        + ProtocolCapabilityToolNames.All.Count)
+                {
+                    throw new InvalidOperationException(
+                        "Ali's production capability catalog does not exactly match the registered tool schemas.");
+                }
+                _baseCapabilityRegistry = productionCatalog.Registry;
 
-            var initialTools = BuildPolicyTools(_orchestrationSettings().Normalize())
-                .Concat(_frameworkCapabilityTools)
-                .ToArray();
-            var initialInventory = CapabilityTerminalToolInventory.Create(
-                initialTools,
-                productionCatalog.Registry);
-            var initialRuntime = CapabilityRuntimeAvailabilityFactory.Create(
-                initialInventory,
-                CaptureCapabilityRuntimeState(normalizedDataRoot));
-            _capabilitySettings = CapabilitySettingsSnapshotOwner.Open(
-                normalizedDataRoot,
-                productionCatalog.Registry,
-                initialRuntime);
-            _capabilityEnforcementProvider = new TerminalCapabilityEnforcementProvider(
-                _capabilitySettings,
-                () => CaptureCapabilityRuntimeState(normalizedDataRoot),
-                targetBindingIdAccessor: null,
-                report => ReportCapabilityIssues(report, initialTools),
-                ProjectEffectiveTool,
-                CaptureLiveActiveUserId,
-                CapturePermissionRevision,
-                CaptureLiveActiveUserRevision);
+                var initialTools = BuildPolicyTools(_orchestrationSettings().Normalize())
+                    .Concat(_frameworkCapabilityTools)
+                    .ToArray();
+                var initialInventory = CapabilityTerminalToolInventory.Create(
+                    initialTools,
+                    productionCatalog.Registry);
+                var initialRuntime = CapabilityRuntimeAvailabilityFactory.Create(
+                    initialInventory,
+                    CaptureCapabilityRuntimeState(normalizedDataRoot));
+                _capabilitySettings = CapabilitySettingsSnapshotOwner.Open(
+                    normalizedDataRoot,
+                    productionCatalog.Registry,
+                    initialRuntime);
+                _capabilityEnforcementProvider = new TerminalCapabilityEnforcementProvider(
+                    _capabilitySettings,
+                    () => CaptureCapabilityRuntimeState(normalizedDataRoot),
+                    targetBindingIdAccessor: null,
+                    report => ReportCapabilityIssues(report, initialTools),
+                    ProjectEffectiveTool,
+                    CaptureLiveActiveUserId,
+                    CapturePermissionRevision,
+                    CaptureLiveActiveUserRevision,
+                    actionExecutionBoundary: PrepareDurableExecutionAsync);
+            }
+        }
+        catch
+        {
+            _planningStateCoordinator.Dispose();
+            throw;
         }
     }
 
@@ -254,15 +284,20 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     }
 
     private AIAgent CreateAgent(
+        IChatClient planningClient,
+        ModelProfile profile,
         IReadOnlyList<AITool> tools,
         AgentOrchestrationSettings orchestrationSettings,
         TerminalCapabilityEnforcementProvider? capabilityEnforcementProvider = null)
     {
-        var profile = _runtime.ActiveProfile;
+        ArgumentNullException.ThrowIfNull(profile);
         var skillsRoot = Path.Combine(AppContext.BaseDirectory, "skills");
+        var skillsSource = new AliOutcomeReportingAgentSkillsSource(
+            new AgentFileSkillsSource(skillsRoot),
+            _toolOutcomes);
         var effectiveCapabilityEnforcement = capabilityEnforcementProvider
             ?? _capabilityEnforcementProvider;
-        var agent = _compatibilityClient.AsHarnessAgent(new HarnessAgentOptions
+        AIAgent agent = planningClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
@@ -274,7 +309,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             DisableWebSearch = true,
             DisableFileMemory = false,
             DisableAgentSkillsProvider = false,
-            AgentSkillsSource = new AgentFileSkillsSource(skillsRoot),
+            AgentSkillsSource = skillsSource,
             DisableOpenTelemetry = false,
             OpenTelemetrySourceName = "ProjectAli.AgentFramework",
             // Ali already exposes live progress through CoordinatorTurnContext and keeps
@@ -293,7 +328,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             },
             ToolApprovalAgentOptions = new ToolApprovalAgentOptions
             {
-                AutoApprovalRules = [_fileAccess.ShouldAutoApproveAsync]
+                AutoApprovalRules = [ShouldAutoApproveAndRecordAsync]
             },
             AIContextProviders = effectiveCapabilityEnforcement is null
                 ? []
@@ -309,6 +344,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 MaxOutputTokens = profile.OutputTokenLimit
             }
         });
+        agent = AliFrameworkProviderOutcomeMiddleware.WithOutcomeReporting(
+            agent,
+            _toolOutcomes,
+            _turnAccessor,
+            skillsSource);
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
     }
 
@@ -321,12 +361,17 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             readyProviderIds: AliProductionCapabilityCatalog.RegisteredProviderIds,
             targetResolution: null,
             permissionRevision: CapturePermissionRevision(),
-            allowedPermissionPolicyIds: ["ali-tool-permission-v1"],
+            allowedPermissionPolicyIds:
+            [
+                "ali-tool-permission-v1",
+                "ali-orchestration-protocol-v1"
+            ],
             mcpRevision: McpCapabilityPublicationGate.CalculateMcpRevision([], outgoingToolNames),
             readyIncomingMcpToolNames: [],
             enabledOutgoingMcpToolNames: outgoingToolNames,
             reconcilerRevision: "ali-reconciler-v1:none",
-            availableReconcilerIds: []);
+            availableReconcilerIds: [],
+            enforceReconcilerAvailability: true);
     }
 
     private string CaptureActiveUserId()
@@ -457,7 +502,55 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             invocationBoundaryChangedMessage:
                 "Capability settings changed after this external tool was planned.",
             invocationBoundaryUnavailableMessage:
-                "The live capability-settings publication could not be verified");
+                "The live capability-settings publication could not be verified",
+            actionExecutionBoundary: PrepareDurableExecutionAsync);
+    }
+
+    private TerminalCapabilityEnforcementProvider CreateBaseTurnEnforcer(
+        IReadOnlyList<AITool> activeTools)
+    {
+        if (_capabilitySettings is null
+            || _capabilitySettingsDataRoot is null
+            || _baseCapabilityRegistry is null)
+        {
+            throw new InvalidOperationException(
+                "A turn-scoped capability boundary requires the canonical settings owner.");
+        }
+
+        var initialInventory = CapabilityTerminalToolInventory.Create(
+            activeTools.Concat(_frameworkCapabilityTools),
+            _baseCapabilityRegistry);
+        var initialRuntime = CapabilityRuntimeAvailabilityFactory.Create(
+            initialInventory,
+            CaptureCapabilityRuntimeState(_capabilitySettingsDataRoot));
+        var turnOwner = CapabilitySettingsSnapshotOwner.Open(
+            _capabilitySettingsDataRoot,
+            _baseCapabilityRegistry,
+            initialRuntime);
+
+        CapabilityRuntimeStateSnapshot CaptureTurnState()
+        {
+            SynchronizeTurnCapabilitySettings(turnOwner);
+            return CaptureCapabilityRuntimeState(_capabilitySettingsDataRoot);
+        }
+
+        return new TerminalCapabilityEnforcementProvider(
+            turnOwner,
+            CaptureTurnState,
+            targetBindingIdAccessor: null,
+            report => ReportCapabilityIssues(report, activeTools),
+            ProjectEffectiveTool,
+            CaptureLiveActiveUserId,
+            CapturePermissionRevision,
+            CaptureLiveActiveUserRevision,
+            invocationBoundaryRevisionAccessor: () =>
+                _capabilitySettings.CaptureSettings().Stamp.PublicationRevision,
+            invocationBoundaryDependencyId: "capability-settings-publication",
+            invocationBoundaryChangedMessage:
+                "Capability settings changed after this tool was planned.",
+            invocationBoundaryUnavailableMessage:
+                "The live capability-settings publication could not be verified",
+            actionExecutionBoundary: PrepareDurableExecutionAsync);
     }
 
     private void SynchronizeTurnCapabilitySettings(
@@ -514,6 +607,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         return _baseTools
             .Where(tool => tool is not AIFunctionDeclaration function
                 || !AliProductionCapabilityCatalog.IsRetiredToolName(function.Name))
+            .Append(_protocolTool)
             .ToArray();
     }
 
@@ -521,12 +615,143 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         _pendingApprovals.TryGetValue(decision.RequestId, out var pending)
         && pending.Completion.TrySetResult(decision.Choice);
 
+    internal Task<TurnIdentity?> FindPausedTurnAsync(
+        CoordinatorTurnContext visibleTurn,
+        CancellationToken cancellationToken) =>
+        _planningStateCoordinator.FindPausedTurnAsync(visibleTurn, cancellationToken);
+
     public async Task<AgentHarnessRunResult> RunAsync(
         CoordinatorTurnContext turn,
         string userText,
         IReadOnlyList<RuntimeChatMessage> history,
         IReadOnlyList<ChatAttachment> attachments,
-        Action<AssistantStreamChunk> publish,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(publishFinal);
+        EnterRun();
+        try
+        {
+            return await RunCoreAsync(
+                    turn,
+                    userText,
+                    history,
+                    attachments,
+                    publishFinal,
+                    resumeRequest: null,
+                    structuredRecoveryRequest: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitRun();
+        }
+    }
+
+    public async Task<AgentHarnessRunResult> ResumeAsync(
+        CoordinatorTurnContext turn,
+        TurnIdentity durableIdentity,
+        string steeringText,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(durableIdentity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(steeringText);
+        ArgumentNullException.ThrowIfNull(publishFinal);
+        EnterRun();
+        try
+        {
+            return await RunCoreAsync(
+                    turn,
+                    steeringText,
+                    history,
+                    attachments,
+                    publishFinal,
+                    new AliHarnessResumeRequest(
+                        durableIdentity,
+                        turn.UserMessageId,
+                        steeringText),
+                    structuredRecoveryRequest: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitRun();
+        }
+    }
+
+    public async Task<AgentHarnessRunResult> ResolveRecoveryAsync(
+        CoordinatorTurnContext turn,
+        AgentRecoveryDecision decision,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(attachments);
+        ArgumentNullException.ThrowIfNull(publishFinal);
+        decision.Validate();
+        EnterRun();
+        try
+        {
+            return await RunCoreAsync(
+                    turn,
+                    userText: string.Empty,
+                    history,
+                    attachments,
+                    publishFinal,
+                    resumeRequest: null,
+                    structuredRecoveryRequest: new AliHarnessStructuredRecoveryRequest(decision),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitRun();
+        }
+    }
+
+    public async Task CancelRecoveryAsync(
+        CoordinatorTurnContext turn,
+        AgentRecoveryPrompt prompt,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+        ArgumentNullException.ThrowIfNull(prompt);
+        prompt.Validate();
+        EnterRun();
+        try
+        {
+            await _planningStateCoordinator.CancelStructuredRecoveryAsync(
+                turn,
+                prompt,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitRun();
+        }
+    }
+
+    private async Task<AgentHarnessRunResult> RunCoreAsync(
+        CoordinatorTurnContext turn,
+        string userText,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        AliHarnessResumeRequest? resumeRequest,
+        AliHarnessStructuredRecoveryRequest? structuredRecoveryRequest,
         CancellationToken cancellationToken)
     {
         var userSelection = turn.CapturedUserSelection
@@ -535,7 +760,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             ? userSelection.SelectedUser
             : null;
         using var workMemoryScope = _workMemory.EnterScope(turn.ConversationId, workMemoryUser);
-        using var connectorTurnScope = _compatibilityClient.BeginTurn(turn);
         var configuredIncomingMcpToolCount = _mcpClients.CountEnabledConfiguredToolPolicies();
         if (configuredIncomingMcpToolCount > 0)
         {
@@ -556,16 +780,13 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         }
 
         var orchestrationSettings = _orchestrationSettings().Normalize();
-        var classificationInput = BuildInitialInput(history, userText, attachments);
-        var disposition = await _compatibilityClient
-            .ClassifyCodingTurnAsync(classificationInput, cancellationToken)
-            .ConfigureAwait(false);
-        turn.SetCodingDisposition(
-            disposition.CanAnswerDirectlyWithoutCritic,
-            disposition.Basis);
-
         IReadOnlyList<AITool> activeTools = BuildPolicyTools(orchestrationSettings);
-        var capabilityEnforcementProvider = _capabilityEnforcementProvider;
+        var activeCapabilityRegistry = _baseCapabilityRegistry;
+        var capabilityEnforcementProvider = _baseCapabilityRegistry is not null
+            && _capabilitySettings is not null
+            && _capabilitySettingsDataRoot is not null
+            ? CreateBaseTurnEnforcer(activeTools)
+            : _capabilityEnforcementProvider;
         if (mcpSession.Tools.Count > 0)
         {
             if (_baseCapabilityRegistry is null
@@ -582,6 +803,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 var incomingCatalog = IncomingMcpCapabilityCatalog.Build(
                     _baseCapabilityRegistry,
                     mcpSession);
+                activeCapabilityRegistry = incomingCatalog.Registry;
                 ReportIncomingMcpIssues(turn, incomingCatalog.Issues);
                 if (incomingCatalog.Tools.Count > 0)
                 {
@@ -602,7 +824,191 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 }
             }
         }
+        var input = structuredRecoveryRequest is null
+            ? BuildInitialInput(history, userText, attachments).ToList()
+            : new List<MeaiChatMessage> { BuildUserMessage(string.Empty, attachments) };
+        var attachmentProjection = AliPlanningAttachmentProjection.Capture(
+            input[^1].Contents.OfType<DataContent>());
+        var initialModelDispatch = CaptureBoundModelDispatch();
+        var bindings = BuildTurnRuntimeBindings(
+            initialModelDispatch,
+            activeTools,
+            activeCapabilityRegistry,
+            mcpSession,
+            attachments);
+        var priorConversation = history
+            .Select((message, index) => (Message: message, Sequence: (long)index))
+            .Select(item => new AcceptedConversationInput(
+                item.Message.Id,
+                item.Sequence,
+                item.Message.Text,
+                item.Message.Role switch
+                {
+                    RuntimeChatRole.User => AcceptedConversationRole.User,
+                    RuntimeChatRole.Assistant => AcceptedConversationRole.Assistant,
+                    RuntimeChatRole.System => AcceptedConversationRole.System,
+                    _ => throw new InvalidDataException(
+                        "The runtime conversation contains an unsupported role.")
+                }))
+            .ToArray();
+        var liveBindingsAccessor = () => BuildTurnRuntimeBindings(
+            CaptureBoundModelDispatch(),
+            activeTools,
+            activeCapabilityRegistry,
+            mcpSession,
+            attachments);
+        AliPlanningResumeAttempt? resumeAttempt = null;
+        if (structuredRecoveryRequest is not null)
+        {
+            var decision = structuredRecoveryRequest.Decision;
+            var resolution = await _planningStateCoordinator.ResolveStructuredRecoveryAsync(
+                turn,
+                decision,
+                cancellationToken).ConfigureAwait(false);
+            if (decision.Choice == AgentRecoveryDecisionChoice.ConfirmDisplayed)
+            {
+                return new AgentHarnessRunResult(
+                    WroteAnswer: false,
+                    FinishReason: "recovery-display-confirmed");
+            }
+
+            resumeAttempt = decision.Choice switch
+            {
+                AgentRecoveryDecisionChoice.ConfirmApplied =>
+                    await _planningStateCoordinator.ResumeResolvedActionAsync(
+                        turn,
+                        decision.Prompt.DurableIdentity,
+                        bindings,
+                        resolution.SourceCommandId,
+                        resolution.State.Revision,
+                        decision.Prompt.SubjectId,
+                        decision.Prompt.SubjectPreparedRevision,
+                        ActionUserResolution.ConfirmApplied,
+                        activeCapabilityRegistry,
+                        liveBindingsAccessor,
+                        cancellationToken).ConfigureAwait(false),
+                AgentRecoveryDecisionChoice.ConfirmAbsent =>
+                    await _planningStateCoordinator.ResumeResolvedActionAsync(
+                        turn,
+                        decision.Prompt.DurableIdentity,
+                        bindings,
+                        resolution.SourceCommandId,
+                        resolution.State.Revision,
+                        decision.Prompt.SubjectId,
+                        decision.Prompt.SubjectPreparedRevision,
+                        ActionUserResolution.ConfirmAbsent,
+                        activeCapabilityRegistry,
+                        liveBindingsAccessor,
+                        cancellationToken).ConfigureAwait(false),
+                AgentRecoveryDecisionChoice.ConfirmNotDisplayed =>
+                    await _planningStateCoordinator.RecoverResolvedFinalPublicationAsync(
+                        turn,
+                        decision.Prompt.DurableIdentity,
+                        bindings,
+                        resolution.SourceCommandId,
+                        resolution.State.Revision,
+                        decision.Prompt.SubjectId,
+                        decision.Prompt.SubjectPreparedRevision,
+                        FinalPublicationUserResolution.ConfirmNotDisplayed,
+                        cancellationToken).ConfigureAwait(false),
+                _ => throw new ArgumentOutOfRangeException(nameof(structuredRecoveryRequest))
+            };
+
+            if (resumeAttempt.RecoveredPublication is { } resolvedPublication)
+            {
+                return await PublishRecoveredFinalAsync(
+                    turn,
+                    resolvedPublication,
+                    publishFinal,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (decision.Choice == AgentRecoveryDecisionChoice.ConfirmNotDisplayed)
+            {
+                throw StructuredRecoveryFailure(resumeAttempt);
+            }
+        }
+        else if (resumeRequest is not null)
+        {
+            resumeAttempt = await _planningStateCoordinator.ResumeTurnAsync(
+                turn,
+                resumeRequest.DurableIdentity,
+                bindings,
+                resumeRequest.SteeringText,
+                resumeRequest.SourceMessageId,
+                activeCapabilityRegistry,
+                liveBindingsAccessor,
+                cancellationToken).ConfigureAwait(false);
+            if (resumeAttempt.RecoveredPublication is { } recoveredPublication)
+            {
+                return await PublishRecoveredFinalAsync(
+                    turn,
+                    recoveredPublication,
+                    publishFinal,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (resumeAttempt.RecoveredInterimPublication is { } recoveredInterim)
+            {
+                return await PublishRecoveredInterimAsync(
+                    turn,
+                    recoveredInterim,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (resumeAttempt.Recovery.State?.Control is TurnControlState.Completed
+                or TurnControlState.Cancelled)
+            {
+                await _planningStateCoordinator.ClearRecoverableTurnAsync(
+                    resumeRequest.DurableIdentity,
+                    CancellationToken.None).ConfigureAwait(false);
+                resumeRequest = null;
+                resumeAttempt = null;
+            }
+        }
+
+        await using var durableTurn = resumeRequest is null && structuredRecoveryRequest is null
+            ? await _planningStateCoordinator.BeginTurnAsync(
+                turn,
+                bindings,
+                priorConversation,
+                activeCapabilityRegistry,
+                liveBindingsAccessor,
+                cancellationToken).ConfigureAwait(false)
+            : RequireResumedTurn(resumeAttempt!);
+        var dispatchBindingsFactory = (BoundModelDispatchSnapshot dispatch) =>
+            BuildTurnRuntimeBindings(
+                dispatch,
+                activeTools,
+                activeCapabilityRegistry,
+                mcpSession,
+                attachments);
+        var completionComposer = new AliCompletionComposer(
+            CaptureBoundModelDispatch,
+            dispatchBindingsFactory,
+            durableTurn.AuthorizeCompletionDispatchAsync);
+        using var planningClient = new AliOrchestrationPlanningClient(
+            _modelClient,
+            () => _runtime.ActiveProfile.SupportsToolCalls,
+            () => _runtime.ActiveProfile,
+            _semanticToolCatalog,
+            completionBridge: TemporaryCompletionBridge.FromComposer(
+                completionComposer.ComposeAsync),
+            toolArgumentNormalizer: _fileAccess.NormalizeProviderToolArguments,
+            completedToolOutcomeClassifier: _toolOutcomeRegistry.Classify,
+            finalAnswerRenderer: static (activeTurn, answer) =>
+                FinalAnswerRenderer.Compose(answer, activeTurn.WebSources),
+            boundDispatchAccessor: CaptureBoundModelDispatch,
+            dispatchBindingsFactory: dispatchBindingsFactory);
+        using var planningTurnScope = planningClient.BeginTurn(
+            turn,
+            durableTurn.Input,
+            durableTurn,
+            attachmentProjection,
+            durableTurn.DurableIdentity,
+            durableTurn.ImmutableOriginalRequest);
         var activeAgent = CreateAgent(
+            planningClient,
+            initialModelDispatch.Profile,
             activeTools,
             orchestrationSettings,
             capabilityEnforcementProvider);
@@ -619,14 +1025,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         // visible turn prevents an unfinished high-effort tool loop from leaking into the
         // user's next message while preserving one session across this turn's tool calls.
         var session = await activeAgent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
-        var input = BuildInitialInput(
-            history,
-            userText,
-            attachments).ToList();
         string? finishReason = null;
-        var wroteAnswer = false;
+        var renderedAnswer = new StringBuilder();
         var pendingShadowCalls = new PendingShadowCallTracker();
         var pendingStandingPermissions = new PendingStandingPermissionTracker();
+        turn.RegisterActionExecutionAuthority(durableTurn);
 
         try
         {
@@ -672,23 +1075,17 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                                     pendingShadowCalls,
                                     functionResult);
                                 if (!turn.TryGetToolPlan(functionResult.CallId, out _)
-                                    && ShouldReportGenericSuccessfulResult(functionResult))
+                                    && ShouldReportGenericReturnedResult(functionResult))
                                 {
                                     turn.Report(
                                         AgentActivityKind.ToolResult,
                                         "Tool returned; Ali is evaluating the result.",
-                                        "The tool completed; Ali is evaluating the returned evidence.");
+                                        "The tool returned; Ali is evaluating the returned evidence.");
                                 }
+                                turn.RequestToolPlanRetirement(functionResult.CallId);
                                 break;
-                            case TextContent textContent when !string.IsNullOrWhiteSpace(textContent.Text):
-                                wroteAnswer = true;
-                                publish(new AssistantStreamChunk(
-                                    turn.ConversationId,
-                                    turn.UserMessageId,
-                                    turn.AssistantMessageId,
-                                    textContent.Text,
-                                    turn.UsedEvidenceTool ? EvidenceStatus.Verified : EvidenceStatus.Unverified,
-                                    finishReason));
+                            case TextContent textContent when textContent.Text is { Length: > 0 }:
+                                renderedAnswer.Append(textContent.Text);
                                 break;
                         }
                     }
@@ -706,13 +1103,504 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                     pendingStandingPermissions,
                     cancellationToken).ConfigureAwait(false);
                 input = [new MeaiChatMessage(MeaiChatRole.User, [response])];
+                }
+
+            var exactAnswer = renderedAnswer.ToString();
+            if (string.IsNullOrWhiteSpace(exactAnswer))
+            {
+                throw new InvalidOperationException(
+                    "The agent run ended without an exact prepared final answer; nothing was published.");
             }
 
-            return new AgentHarnessRunResult(wroteAnswer, finishReason);
+            // The planning client returns only an exact prepared final or interim text at this
+            // boundary. Earlier native protocol/tool iterations may have reported ToolCalls, and
+            // some providers omit a finish reason on an otherwise complete answer. Never let that
+            // earlier protocol metadata leak into the user-visible terminal publication.
+            finishReason = ChatFinishReason.Stop.ToString();
+
+            if (planningClient.PreparedInterimResponse is { } interim)
+            {
+                var exactDigest = TurnStateIntegrity.Digest(exactAnswer);
+                if (!string.Equals(exactDigest, interim.AnswerDigest, StringComparison.Ordinal)
+                    || !string.Equals(exactAnswer, interim.AnswerText, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The streamed interim response differs from the exact planning pause response.");
+                }
+
+                // Make the exact user/conversation -> durable-turn lookup crash durable before
+                // displaying a prompt which invites the user's next explicit message.
+                await _planningStateCoordinator.RecordRecoverableTurnAsync(
+                        interim.DurableIdentity,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                turn.PublishInterimResponse(exactAnswer, finishReason);
+                await durableTurn.CommitInterimPublicationAsync(
+                    interim,
+                    CancellationToken.None).ConfigureAwait(false);
+                return new AgentHarnessRunResult(
+                    WroteAnswer: true,
+                    FinishReason: finishReason,
+                    Paused: true,
+                    ResumeIdentity: interim.DurableIdentity);
+            }
+
+            var prepared = planningClient.RequirePreparedFinalPublication();
+            var publication = FinalAnswerPublicationBoundary.BindExactPreparedAnswer(
+                new FinalAnswerPublication(
+                    turn.ConversationId,
+                    turn.UserMessageId,
+                    turn.AssistantMessageId,
+                    prepared.PublicationId,
+                    exactAnswer,
+                    prepared.AnswerDigest,
+                    turn.UsedEvidenceTool ? EvidenceStatus.Verified : EvidenceStatus.Unverified,
+                    finishReason),
+                prepared.AssistantMessageId,
+                prepared.AnswerText,
+                prepared.AnswerDigest);
+            var acknowledgment = await publishFinal(publication, cancellationToken)
+                .ConfigureAwait(false);
+            FinalAnswerPublicationBoundary.RequireExactAcknowledgment(
+                publication,
+                acknowledgment);
+            // Once the conversation boundary accepts the exact answer, caller cancellation
+            // cannot revoke the obligation to durably record that publication.
+            await durableTurn.CommitFinalPublicationAsync(
+                exactAnswer,
+                CancellationToken.None).ConfigureAwait(false);
+            await _planningStateCoordinator.ClearRecoverableTurnAsync(
+                    durableTurn.DurableIdentity,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+            return new AgentHarnessRunResult(
+                WroteAnswer: true,
+                FinishReason: finishReason,
+                Paused: false,
+                ResumeIdentity: null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var control = await durableTurn.RequestCancellationAsync().ConfigureAwait(false);
+                if (control == TurnControlState.Cancelled)
+                {
+                    await _planningStateCoordinator.ClearRecoverableTurnAsync(
+                            durableTurn.DurableIdentity,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                else if (control == TurnControlState.CancelRequested)
+                {
+                    await _planningStateCoordinator.RecordRecoverableTurnAsync(
+                            durableTurn.DurableIdentity,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Preserve the caller's cancellation. Recovery will fail closed on the last
+                // durable revision if the best-effort cancellation transition could not commit.
+            }
+
+            throw;
         }
         finally
         {
+            turn.ClearActionExecutionAuthority(durableTurn);
             pendingStandingPermissions.Clear();
+        }
+    }
+
+    private static AliDurablePlanningTurn RequireResumedTurn(
+        AliPlanningResumeAttempt attempt)
+    {
+        if (attempt.IsReady)
+        {
+            return attempt.Turn!;
+        }
+
+        var changedBindings = attempt.Recovery.ChangedBindings.Count == 0
+            ? string.Empty
+            : " Changed bindings: " + string.Join(", ", attempt.Recovery.ChangedBindings) + ".";
+        var attachmentGuidance = attempt.Recovery.ChangedBindings.Contains(
+            "attachments",
+            StringComparer.Ordinal)
+            ? " Reattach the exact original attachment bytes before explicitly resuming; Ali will not silently omit or replace them."
+            : string.Empty;
+        throw new InvalidOperationException(
+            "Ali could not explicitly resume the preserved turn ("
+            + (attempt.FailureCode ?? attempt.Recovery.Status.ToString())
+            + ")." + changedBindings + attachmentGuidance);
+    }
+
+    private static InvalidOperationException StructuredRecoveryFailure(
+        AliPlanningResumeAttempt attempt)
+    {
+        var changedBindings = attempt.Recovery.ChangedBindings.Count == 0
+            ? string.Empty
+            : " Changed bindings: " + string.Join(", ", attempt.Recovery.ChangedBindings) + ".";
+        return new InvalidOperationException(
+            "Ali could not apply the exact structured recovery decision ("
+            + (attempt.FailureCode ?? attempt.Recovery.Status.ToString())
+            + ")." + changedBindings);
+    }
+
+    private async Task<AgentHarnessRunResult> PublishRecoveredFinalAsync(
+        CoordinatorTurnContext visibleTurn,
+        AliRecoveredFinalPublication recovered,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        CancellationToken cancellationToken)
+    {
+        var publication = FinalAnswerPublicationBoundary.BindExactPreparedAnswer(
+            new FinalAnswerPublication(
+                visibleTurn.ConversationId,
+                visibleTurn.UserMessageId,
+                recovered.AssistantMessageId,
+                recovered.PublicationId,
+                recovered.AnswerText,
+                recovered.AnswerDigest,
+                EvidenceStatus.Unknown,
+                FinishReason: "recovered-publication"),
+            recovered.AssistantMessageId,
+            recovered.AnswerText,
+            recovered.AnswerDigest);
+        var acknowledgment = await publishFinal(publication, cancellationToken)
+            .ConfigureAwait(false);
+        FinalAnswerPublicationBoundary.RequireExactAcknowledgment(publication, acknowledgment);
+        await _planningStateCoordinator.CommitRecoveredFinalPublicationAsync(
+            recovered,
+            CancellationToken.None).ConfigureAwait(false);
+        return new AgentHarnessRunResult(
+            WroteAnswer: true,
+            FinishReason: publication.FinishReason,
+            Paused: false,
+            ResumeIdentity: null);
+    }
+
+    private async Task<AgentHarnessRunResult> PublishRecoveredInterimAsync(
+        CoordinatorTurnContext visibleTurn,
+        AliRecoveredInterimPublication recovered,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        visibleTurn.PublishInterimResponse(
+            recovered.Text,
+            finishReason: "recovered-interim-publication");
+        var committedState = await _planningStateCoordinator.CommitRecoveredInterimPublicationAsync(
+            recovered,
+            CancellationToken.None).ConfigureAwait(false);
+        await _planningStateCoordinator.RecordRecoverableTurnAsync(
+            recovered.DurableIdentity,
+            CancellationToken.None).ConfigureAwait(false);
+        var recoveryPrompt = CreateRecoveryPrompt(recovered, committedState);
+        if (recoveryPrompt is not null)
+        {
+            visibleTurn.Report(
+                AgentActivityKind.Status,
+                "Recovery decision required",
+                recoveryPrompt.Kind == AgentRecoveryPromptKind.ActionReconciliation
+                    ? "Confirm whether the interrupted action happened. Use a recovery button; chat text will not be interpreted as the answer."
+                    : "Confirm whether the recovered answer was already shown. Use a recovery button; chat text will not be interpreted as the answer.",
+                recoveryPrompt: recoveryPrompt);
+        }
+        return new AgentHarnessRunResult(
+            WroteAnswer: true,
+            FinishReason: "recovered-interim-publication",
+            Paused: true,
+            ResumeIdentity: recovered.DurableIdentity,
+            StructuredRecoveryRequired: recoveryPrompt is not null);
+    }
+
+    private static AgentRecoveryPrompt? CreateRecoveryPrompt(
+        AliRecoveredInterimPublication recovered,
+        TurnState committedState)
+    {
+        var kind = recovered.Reason switch
+        {
+            InterimPublicationReason.ActionReconciliationRequired =>
+                AgentRecoveryPromptKind.ActionReconciliation,
+            InterimPublicationReason.FinalPublicationReconciliationRequired =>
+                AgentRecoveryPromptKind.FinalPublicationReconciliation,
+            _ => (AgentRecoveryPromptKind?)null
+        };
+        if (kind is null)
+        {
+            return null;
+        }
+
+        var prompt = new AgentRecoveryPrompt(
+            recovered.DurableIdentity,
+            committedState.Revision,
+            recovered.PublicationId,
+            recovered.TextDigest,
+            recovered.SubjectId,
+            recovered.SubjectPreparedRevision,
+            kind.Value);
+        prompt.Validate();
+        return prompt;
+    }
+
+    private async ValueTask<CapabilityInvocationAuthorization> PrepareDurableExecutionAsync(
+        CapabilityInvocationLease lease,
+        AIFunctionArguments arguments,
+        bool requiresApproval,
+        CancellationToken cancellationToken)
+    {
+        var turn = _turnAccessor();
+        if (turn is null
+            || !turn.TryGetActiveToolCallId(lease.ToolName, out var callId)
+            || string.IsNullOrWhiteSpace(callId)
+            || !turn.TryGetActionExecutionAuthority(out var authority)
+            || authority is null)
+        {
+            return CapabilityInvocationAuthorization.Block(
+                new CapabilityAvailabilityReason(
+                    CapabilityAvailabilityReasonCode.InvocationLeaseStale,
+                    "durable-action-boundary",
+                    "No exact current turn/call action boundary is available."));
+        }
+
+        return await authority.PrepareExecutionAsync(
+                lease,
+                callId,
+                arguments,
+                requiresApproval,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private BoundModelDispatchSnapshot CaptureBoundModelDispatch()
+    {
+        if (_runtime is not IBoundModelDispatchSource boundSource)
+        {
+            throw new InvalidOperationException(
+                "The active model runtime cannot expose the exact client and settings envelope required for durable orchestration.");
+        }
+
+        var dispatch = boundSource.CaptureBoundModelDispatch()
+            ?? throw new InvalidOperationException(
+                "The active model runtime returned no bound dispatch snapshot.");
+        ArgumentNullException.ThrowIfNull(dispatch.ChatClient);
+        ArgumentNullException.ThrowIfNull(dispatch.Profile);
+        ArgumentNullException.ThrowIfNull(dispatch.RuntimeBinding);
+        ArgumentNullException.ThrowIfNull(dispatch.ModelBinding);
+        ArgumentNullException.ThrowIfNull(dispatch.GenerationSettingsBinding);
+        return dispatch;
+    }
+
+    private TurnRuntimeBindings BuildTurnRuntimeBindings(
+        BoundModelDispatchSnapshot modelDispatch,
+        IReadOnlyList<AITool> activeTools,
+        CanonicalCapabilityRegistry? capabilityRegistry,
+        McpToolSession mcpSession,
+        IReadOnlyList<ChatAttachment> attachments)
+    {
+        ArgumentNullException.ThrowIfNull(modelDispatch);
+        ArgumentNullException.ThrowIfNull(modelDispatch.Profile);
+        ArgumentNullException.ThrowIfNull(modelDispatch.RuntimeBinding);
+        ArgumentNullException.ThrowIfNull(modelDispatch.ModelBinding);
+        ArgumentNullException.ThrowIfNull(modelDispatch.GenerationSettingsBinding);
+        var permission = _toolPermissions.CaptureSnapshot();
+        var declarations = activeTools
+            .OfType<AIFunctionDeclaration>()
+            .OrderBy(tool => tool.Name, StringComparer.Ordinal)
+            .Select(tool => new
+            {
+                tool.Name,
+                tool.Description,
+                schema = tool.JsonSchema.GetRawText(),
+                returnSchema = tool.ReturnJsonSchema?.GetRawText()
+            })
+            .ToArray();
+        var semanticIndexFingerprint = _semanticToolCatalog.CaptureBindingFingerprint(
+            activeTools.OfType<AIFunctionDeclaration>().ToArray());
+        var mcpBoundary = mcpSession.CaptureSnapshot();
+        var capabilitySettings = _capabilitySettings?.CaptureSettings();
+
+        return new TurnRuntimeBindings(
+            DigestCanonical(new
+            {
+                _assistantProfile.ProfileId,
+                _assistantProfile.AssistantName,
+                createdAtUtc = _assistantProfile.CreatedAt.ToUniversalTime()
+            }),
+            DigestCanonical(new
+            {
+                modelDispatch.RuntimeBinding.Engine,
+                modelDispatch.RuntimeBinding.Implementation,
+                modelDispatch.RuntimeBinding.RuntimeKind,
+                modelDispatch.RuntimeBinding.RuntimeLocation,
+                modelDispatch.RuntimeBinding.RuntimeEndpoint
+            }),
+            DigestCanonical(new
+            {
+                modelDispatch.ModelBinding.ProfileId,
+                modelDispatch.ModelBinding.PackageId,
+                modelDispatch.ModelBinding.Family,
+                modelDispatch.ModelBinding.Size,
+                modelDispatch.ModelBinding.Quantization,
+                modelDispatch.ModelBinding.SupportsVision,
+                modelDispatch.ModelBinding.SupportsToolCalls
+            }),
+            DigestCanonical(new
+            {
+                modelDispatch.GenerationSettingsBinding.ContextTokens,
+                modelDispatch.GenerationSettingsBinding.OutputTokenLimit,
+                modelDispatch.GenerationSettingsBinding.Temperature,
+                modelDispatch.GenerationSettingsBinding.TopP,
+                modelDispatch.GenerationSettingsBinding.StreamingEnabled,
+                modelDispatch.GenerationSettingsBinding.ThinkingControl,
+                modelDispatch.GenerationSettingsBinding.ThinkingEnabled,
+                modelDispatch.GenerationSettingsBinding.ReasoningEffort
+            }),
+            DigestCanonical(new
+            {
+                registryRevision = capabilityRegistry?.RegistryRevision ?? "registry-unavailable",
+                activeUserId = CaptureActiveUserId(),
+                declarations,
+                semanticIndexFingerprint,
+                settings = capabilitySettings is null
+                    ? null
+                    : new
+                    {
+                        capabilitySettings.Stamp.PublicationRevision,
+                        capabilitySettings.Stamp.RegistryRevision,
+                        capabilitySettings.Stamp.SettingsRevision,
+                        capabilitySettings.Stamp.ResolutionRevision,
+                        capabilitySettings.RuntimeRevision,
+                        capabilitySettings.ProviderRevision,
+                        capabilitySettings.PermissionRevision,
+                        capabilitySettings.McpRevision,
+                        capabilitySettings.ReconcilerRevision,
+                        capabilitySettings.LoadStatus,
+                        rows = capabilitySettings.Rows
+                            .OrderBy(row => row.GroupId, StringComparer.Ordinal)
+                            .Select(row => new
+                            {
+                                row.GroupId,
+                                row.Enabled,
+                                row.Status,
+                                row.DeclaredToolCount,
+                                row.CallableToolCount,
+                                row.UnavailableToolCount
+                            })
+                            .ToArray()
+                    }
+            }),
+            DigestCanonical(new
+            {
+                permission.Profile,
+                permission.Revision
+            }),
+            DigestCanonical(new
+            {
+                mcpSession.SettingsRevision,
+                mcpSession.SessionRevision,
+                boundary = mcpBoundary,
+                tools = mcpSession.Tools
+                    .OrderBy(tool => tool.Function.Name, StringComparer.Ordinal)
+                    .Select(tool => new
+                    {
+                        tool.Function.Name,
+                        tool.ServerId,
+                        tool.ConfiguredDeclarationFingerprint,
+                        tool.SchemaFingerprint,
+                        tool.RequiresApproval
+                    })
+                    .ToArray()
+            }),
+            CaptureModelVisibleAttachmentDigest(attachments),
+            TurnStateIntegrity.EmptyDigest);
+    }
+
+    internal static string CaptureModelVisibleAttachmentDigest(
+        IReadOnlyList<ChatAttachment> attachments)
+    {
+        ArgumentNullException.ThrowIfNull(attachments);
+        var projected = new List<object>();
+        for (var index = 0; index < attachments.Count; index++)
+        {
+            var attachment = attachments[index]
+                ?? throw new InvalidDataException("An attachment entry cannot be null.");
+            if (attachment.Kind != AttachmentKind.Image)
+            {
+                continue;
+            }
+
+            byte[] bytes;
+            try
+            {
+                bytes = Convert.FromBase64String(attachment.Base64Data);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    $"The attached image '{attachment.FileName}' did not contain valid image data.",
+                    ex);
+            }
+
+            try
+            {
+                projected.Add(new
+                {
+                    originalIndex = index,
+                    kind = attachment.Kind.ToString(),
+                    mediaType = NormalizeAttachmentMediaType(attachment.ContentType),
+                    payloadDigest = TurnStateIntegrity.Digest(bytes)
+                });
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(bytes);
+            }
+        }
+
+        return DigestCanonical(projected);
+    }
+
+    private static string NormalizeAttachmentMediaType(string contentType) =>
+        string.IsNullOrWhiteSpace(contentType)
+            ? "image/png"
+            : contentType.Trim().ToLowerInvariant();
+
+    private async ValueTask<bool> ShouldAutoApproveAndRecordAsync(
+        ToolAutoApprovalRuleContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var approved = await _fileAccess.ShouldAutoApproveAsync(context).ConfigureAwait(false);
+        if (!approved)
+        {
+            return false;
+        }
+
+        var call = context.FunctionCallContent;
+        var turn = _turnAccessor();
+        if (turn is not null && !string.IsNullOrWhiteSpace(call.CallId))
+        {
+            turn.RecordShadowPermission(
+                call.CallId,
+                new EvidencePermissionMetadata("approved-policy", "policy"),
+                source: "auto-policy");
+        }
+
+        return true;
+    }
+
+    private static string DigestCanonical<T>(T value)
+    {
+        var bytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(value);
+        try
+        {
+            return TurnStateIntegrity.Digest(bytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
         }
     }
 
@@ -746,7 +1634,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             {
                 contents.Add(new DataContent(
                     Convert.FromBase64String(attachment.Base64Data),
-                    string.IsNullOrWhiteSpace(attachment.ContentType) ? "image/png" : attachment.ContentType));
+                    NormalizeAttachmentMediaType(attachment.ContentType)));
             }
             catch (FormatException ex)
             {
@@ -781,7 +1669,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             && _toolPermissions.TryMatch(activeUser, toolName, functionCall.Arguments, out var savedGrant)
             && savedGrant is not null)
         {
-            RecordStandingShadowPermission(turn, functionCall, savedGrant.Scope);
+            RecordStandingShadowPermission(
+                turn,
+                functionCall,
+                savedGrant.Scope,
+                request.RequestId);
             turn.Report(
                 AgentActivityKind.Status,
                 $"Used saved permission for {toolDisplayName}",
@@ -827,6 +1719,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 ex,
                 approvalRequestedAtUtc,
                 DateTimeOffset.UtcNow);
+            if (functionCall is not null)
+            {
+                turn.RequestToolPlanRetirement(functionCall.CallId);
+            }
             throw;
         }
         finally
@@ -834,7 +1730,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             _pendingApprovals.TryRemove(request.RequestId, out _);
         }
 
-        RecordInteractiveShadowPermission(turn, functionCall, choice);
+        RecordInteractiveShadowPermission(
+            turn,
+            functionCall,
+            choice,
+            request.RequestId);
         turn.Report(
             choice == AgentToolApprovalChoice.Deny ? AgentActivityKind.Warning : AgentActivityKind.Status,
             choice == AgentToolApprovalChoice.Deny ? "Permission denied" : "Permission granted",
@@ -849,6 +1749,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 toolName,
                 approvalRequestedAtUtc,
                 DateTimeOffset.UtcNow);
+            if (functionCall is not null)
+            {
+                turn.RequestToolPlanRetirement(functionCall.CallId);
+            }
         }
 
         if (choice is AgentToolApprovalChoice.AlwaysAllowArguments or AgentToolApprovalChoice.AlwaysAllowTool)
@@ -884,9 +1788,12 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         return request.CreateResponse(true, message);
     }
 
-    internal static bool ShouldReportGenericSuccessfulResult(
+    // This controls non-authoritative UI wording only. Domain success is decided
+    // exclusively by AliProductionToolOutcomeRegistry in the planning evidence path.
+    internal static bool ShouldReportGenericReturnedResult(
         FunctionResultContent functionResult) =>
-        AliToolCallingChatClient.RepresentsCompletedInvocation(functionResult);
+        FrameworkToolResultClassifier.Classify(functionResult)
+            == FrameworkToolResultDisposition.CompletedReturn;
 
     private void QueueStandingPermission(
         CoordinatorTurnContext turn,
@@ -941,7 +1848,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 "Standing permission was not saved",
                 completion.Status == PendingStandingPermissionCompletionStatus.CapabilityBlocked
                     ? "The matching tool call was blocked because its capability lease became stale. No standing rule was created."
-                    : "The matching tool call did not return successfully. No standing rule was created.");
+                    : "The matching tool call did not reach a returned invocation state. No standing rule was created.");
             return;
         }
 
@@ -1256,7 +2163,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     internal static void RecordInteractiveShadowPermission(
         CoordinatorTurnContext turn,
         FunctionCallContent? functionCall,
-        AgentToolApprovalChoice choice)
+        AgentToolApprovalChoice choice,
+        string? approvalRequestId = null)
     {
         if (functionCall is null || string.IsNullOrWhiteSpace(functionCall.CallId))
         {
@@ -1273,7 +2181,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 new EvidencePermissionMetadata("approved-standing", "tool"),
             _ => new EvidencePermissionMetadata("denied", "none")
         };
-        turn.RecordShadowPermission(functionCall.CallId, permission);
+        turn.RecordShadowPermission(
+            functionCall.CallId,
+            permission,
+            source: "interactive-user",
+            approvalRequestId: approvalRequestId);
         if (choice is AgentToolApprovalChoice.AlwaysAllowArguments
             or AgentToolApprovalChoice.AlwaysAllowTool)
         {
@@ -1284,7 +2196,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     internal static void RecordStandingShadowPermission(
         CoordinatorTurnContext turn,
         FunctionCallContent? functionCall,
-        AgentToolPermissionScope scope)
+        AgentToolPermissionScope scope,
+        string? approvalRequestId = null)
     {
         if (functionCall is null || string.IsNullOrWhiteSpace(functionCall.CallId))
         {
@@ -1294,7 +2207,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var permission = scope == AgentToolPermissionScope.Tool
             ? new EvidencePermissionMetadata("approved-standing", "tool")
             : new EvidencePermissionMetadata("approved-standing", "exact-arguments");
-        turn.RecordShadowPermission(functionCall.CallId, permission);
+        turn.RecordShadowPermission(
+            functionCall.CallId,
+            permission,
+            source: "saved-user-rule",
+            approvalRequestId: approvalRequestId);
         turn.RecordShadowStandingPermission(functionCall.Name, permission);
     }
 
@@ -1382,7 +2299,70 @@ internal sealed class AliAgentHarnessRunner : IDisposable
 
     public void Dispose()
     {
-        Interlocked.Exchange(ref _disposed, 1);
+        bool disposePlanningCoordinator;
+        lock (_lifetimeSync)
+        {
+            if (_disposed != 0)
+            {
+                return;
+            }
+
+            _disposed = 1;
+            disposePlanningCoordinator = TryClaimPlanningCoordinatorDisposalUnderLock();
+        }
+
+        foreach (var pending in _pendingApprovals.Values)
+        {
+            pending.Completion.TrySetCanceled();
+        }
+        _pendingApprovals.Clear();
+        if (disposePlanningCoordinator)
+        {
+            _planningStateCoordinator.Dispose();
+        }
+    }
+
+    private void EnterRun()
+    {
+        lock (_lifetimeSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            checked
+            {
+                _activeRuns++;
+            }
+        }
+    }
+
+    private void ExitRun()
+    {
+        bool disposePlanningCoordinator;
+        lock (_lifetimeSync)
+        {
+            if (_activeRuns <= 0)
+            {
+                throw new InvalidOperationException("Ali's active-run lifetime count is inconsistent.");
+            }
+
+            _activeRuns--;
+            disposePlanningCoordinator = TryClaimPlanningCoordinatorDisposalUnderLock();
+        }
+
+        if (disposePlanningCoordinator)
+        {
+            _planningStateCoordinator.Dispose();
+        }
+    }
+
+    private bool TryClaimPlanningCoordinatorDisposalUnderLock()
+    {
+        if (_disposed == 0 || _activeRuns != 0 || _planningStateCoordinatorDisposed)
+        {
+            return false;
+        }
+
+        _planningStateCoordinatorDisposed = true;
+        return true;
     }
 
     private sealed record PendingApproval(TaskCompletionSource<AgentToolApprovalChoice> Completion);
@@ -1512,6 +2492,9 @@ internal sealed class PendingStandingPermissionTracker
             }
         }
 
+        // Standing-permission persistence tracks whether the already-approved invocation
+        // reached a return boundary. It does not create evidence, complete work, or classify
+        // the tool's domain result; those remain exclusively registry-owned.
         var disposition = FrameworkToolResultClassifier.Classify(functionResult);
         if (disposition is FrameworkToolResultDisposition.ExternalOutcomeUnknown
             or FrameworkToolResultDisposition.InvocationFailed)
@@ -1641,4 +2624,17 @@ internal sealed record PendingShadowCall(
     string ToolName,
     DateTimeOffset StartedAtUtc);
 
-internal sealed record AgentHarnessRunResult(bool WroteAnswer, string? FinishReason);
+internal sealed record AgentHarnessRunResult(
+    bool WroteAnswer,
+    string? FinishReason,
+    bool Paused = false,
+    TurnIdentity? ResumeIdentity = null,
+    bool StructuredRecoveryRequired = false);
+
+internal sealed record AliHarnessResumeRequest(
+    TurnIdentity DurableIdentity,
+    string SourceMessageId,
+    string SteeringText);
+
+internal sealed record AliHarnessStructuredRecoveryRequest(
+    AgentRecoveryDecision Decision);

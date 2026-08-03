@@ -19,7 +19,7 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class AliProductionCompositionIntegrationTests
 {
     [Fact]
-    public async Task ActualProductionComposition_BuildsTheExact114ActiveCanonicalDescriptors_Offline()
+    public async Task ActualProductionComposition_Builds114TaskToolsPlusTheRequiredProtocol_Offline()
     {
         using var fixture = new CompositionFixture();
         var runtime = new DevelopmentLocalModelRuntime();
@@ -50,16 +50,32 @@ public sealed class AliProductionCompositionIntegrationTests
         var activeDeclarations = declarations
             .Where(declaration =>
                 !AliProductionCapabilityCatalog.IsRetiredToolName(declaration.Name))
+            .Append(OrchestrationProtocolCapability.CreateInvariantFunction())
             .ToArray();
 
         var production = AliProductionCapabilityCatalog.Build(activeDeclarations);
 
         Assert.Equal(114, declarations.Length);
         Assert.Equal(114, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(114, activeDeclarations.Length);
-        Assert.Equal(114, production.Registry.Descriptors.Count);
+        Assert.Equal(115, activeDeclarations.Length);
+        Assert.Equal(115, production.Registry.Descriptors.Count);
         Assert.True(AliProductionCapabilityCatalog.KnownToolNames.SetEquals(
-            production.Registry.Descriptors.Select(descriptor => descriptor.ToolName)));
+            production.Registry.Descriptors
+                .Where(descriptor => descriptor.Tier == CapabilityTier.Task)
+                .Select(descriptor => descriptor.ToolName)));
+        Assert.True(AliProductionToolOutcomeRegistry.ContractedToolNames.SetEquals(
+            production.Registry.Descriptors
+                .Where(descriptor => descriptor.Tier == CapabilityTier.Task)
+                .Select(descriptor => descriptor.ToolName)));
+        Assert.All(
+            production.Registry.Descriptors.Where(descriptor => descriptor.Tier == CapabilityTier.Task),
+            descriptor => Assert.Equal(
+                $"ali-outcome.{descriptor.ToolName}.v1",
+                descriptor.SemanticMetadata["outcome-contract"]));
+        var protocol = Assert.Single(
+            production.Registry.Descriptors,
+            descriptor => descriptor.Tier == CapabilityTier.Protocol);
+        Assert.Equal(OrchestrationProtocolCapability.ToolName, protocol.ToolName);
         Assert.DoesNotContain(
             production.Registry.Descriptors,
             descriptor => AliProductionCapabilityCatalog.IsRetiredToolName(descriptor.ToolName));
@@ -67,7 +83,7 @@ public sealed class AliProductionCompositionIntegrationTests
         Assert.Equal(0, client.CallCount);
 
         var inventory = CapabilityTerminalToolInventory.Create(activeDeclarations, production.Registry);
-        Assert.Equal(114, inventory.FunctionDeclarationCount);
+        Assert.Equal(115, inventory.FunctionDeclarationCount);
         Assert.Empty(inventory.Issues);
         var stagedRuntime = CapabilityRuntimeAvailabilityFactory.Create(
             inventory,
@@ -106,7 +122,7 @@ public sealed class AliProductionCompositionIntegrationTests
     }
 
     [Fact]
-    public async Task LegacyWorkflowKey_RemainsUntouchedAndAbsentFromSingleLoopComposition()
+    public async Task PublicComposition_InitializesCanonicalBoundaryWithoutLegacyWorkflowTools()
     {
         using var fixture = new CompositionFixture();
         var checkpointPath = Path.Combine(fixture.Root, "WorkflowCheckpoints");
@@ -134,15 +150,14 @@ public sealed class AliProductionCompositionIntegrationTests
             fixture.Permissions,
             fixture.FileAccess,
             new AliAgentWorkMemory(fixture.Root),
-            codingModule,
+            capabilitySettingsDataRoot: fixture.Root,
+            codingModule: codingModule,
             userMemories: null,
             activeUsers: null,
             memorySettings: null,
             workflowCheckpointPath: checkpointPath,
             orchestrationSettings: () => new AgentOrchestrationSettings(),
-            semanticToolCatalog: null,
-            shadowObserver: null,
-            capabilitySettingsDataRoot: fixture.Root);
+            semanticToolCatalog: null);
 
         var settingsOwner = Assert.IsType<CapabilitySettingsSnapshotOwner>(
             coordinator.CapabilitySettings);
@@ -159,6 +174,8 @@ public sealed class AliProductionCompositionIntegrationTests
             settingsEnvelope.Rows,
             row => row.GroupId == CapabilityGroupIds.ExternalMcp);
         Assert.Equal(114, settingsEnvelope.DeclaredTaskToolCount);
+        Assert.Equal(1, settingsEnvelope.CallableProtocolToolCount);
+        Assert.Equal(0, settingsEnvelope.UnavailableProtocolToolCount);
         Assert.Equal(0, externalMcpRow.DeclaredToolCount);
         Assert.DoesNotContain(
             resolvedToolNames,

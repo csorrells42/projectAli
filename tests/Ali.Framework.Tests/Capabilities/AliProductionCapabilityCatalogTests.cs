@@ -40,6 +40,9 @@ public sealed class AliProductionCapabilityCatalogTests
         Assert.Equal(activeCatalogNames.Length, AliProductionCapabilityCatalog.KnownToolNames.Count);
         Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionCapabilityCatalog.KnownToolNames));
+        Assert.Equal(114, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
+        Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(AliProductionToolOutcomeRegistry.ContractedToolNames));
         Assert.All(activeCatalogNames, name =>
         {
             Assert.True(AliProductionCapabilityCatalog.TryGetGroupId(name, out var groupId));
@@ -482,6 +485,28 @@ public sealed class AliProductionCapabilityCatalogTests
             Assert.True(descriptor.Permission.RequiresApproval);
             Assert.False(string.IsNullOrWhiteSpace(descriptor.Effect.ReconcilerId));
         }
+    }
+
+    [Fact]
+    public void Build_RegistersTheSuppliedOrchestrationProtocolOutsideTaskGroups()
+    {
+        var protocol = OrchestrationProtocolCapability.CreateInvariantFunction();
+
+        var result = AliProductionCapabilityCatalog.Build([protocol]);
+
+        Assert.Empty(result.QuarantinedToolNames);
+        var descriptor = Assert.Single(result.Registry.Descriptors);
+        Assert.Equal(OrchestrationProtocolCapability.ToolName, descriptor.ToolName);
+        Assert.Equal(CapabilityTier.Protocol, descriptor.Tier);
+        Assert.Null(descriptor.GroupId);
+        Assert.False(descriptor.Permission.RequiresApproval);
+        Assert.Equal(CapabilityEffectKind.None, descriptor.Effect.Kind);
+        Assert.True(descriptor.VisibleInCapabilityReport);
+        Assert.True(descriptor.VisibleInCriticInventory);
+        Assert.False(descriptor.McpExposure.Exposed);
+        Assert.DoesNotContain(
+            descriptor.ToolName,
+            AliProductionCapabilityCatalog.KnownToolNames);
     }
 
     [Fact]

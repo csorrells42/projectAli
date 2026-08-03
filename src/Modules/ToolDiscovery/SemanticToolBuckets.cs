@@ -16,7 +16,8 @@ internal static class SemanticToolBuckets
     private const string ExternalMcpServerMarker = "External MCP server: ";
 
     public static IReadOnlyList<ToolBucketDefinition> Create(
-        IReadOnlyList<AIFunctionDeclaration> liveTools)
+        IReadOnlyList<AIFunctionDeclaration> liveTools,
+        bool includeDisabled = false)
     {
         var definitions = KnownDefinitions().ToList();
         var assigned = definitions.SelectMany(bucket => bucket.ToolNames).ToHashSet(StringComparer.Ordinal);
@@ -51,7 +52,9 @@ internal static class SemanticToolBuckets
             {
                 ToolNames = bucket.ToolNames.Where(liveNames.Contains).Distinct(StringComparer.Ordinal).ToArray()
             })
-            .Where(bucket => bucket.ToolNames.Count > 0 || bucket.Requires is { Count: > 0 })
+            .Where(bucket => includeDisabled
+                             || bucket.ToolNames.Count > 0
+                             || bucket.Requires is { Count: > 0 })
             .ToArray();
     }
 
@@ -76,7 +79,18 @@ internal static class SemanticToolBuckets
 
     public static string BuildDirectory(IReadOnlyList<ToolBucketDefinition> buckets) =>
         string.Join(Environment.NewLine, buckets.Select(bucket =>
-            $"- {bucket.Name}: {CompactDirectoryDescription(bucket.Description, bucket.Id.StartsWith("live-", StringComparison.Ordinal) ? MaximumLiveToolDirectoryDescriptionCharacters : MaximumDirectoryDescriptionCharacters)}"));
+            $"- groupId={bucket.Id}; status={(bucket.ToolNames.Count > 0 ? "enabled" : "disabled")}; "
+            + $"name={bucket.Name}; requires={FormatRequirements(bucket.Requires)}; "
+            + CompactDirectoryDescription(
+                bucket.Description,
+                bucket.Id.StartsWith("live-", StringComparison.Ordinal)
+                    ? MaximumLiveToolDirectoryDescriptionCharacters
+                    : MaximumDirectoryDescriptionCharacters)));
+
+    private static string FormatRequirements(IReadOnlyList<string>? requirements) =>
+        requirements is { Count: > 0 }
+            ? string.Join(",", requirements.Order(StringComparer.Ordinal))
+            : "none";
 
     private static string CompactDirectoryDescription(string description, int maximumCharacters)
     {

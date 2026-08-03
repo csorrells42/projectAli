@@ -9,6 +9,38 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class IncomingMcpCapabilityCatalogTests
 {
     [Fact]
+    public async Task EquivalentFreshTransportSessions_HaveTheSameDurableCapabilityBinding()
+    {
+        var resolved = Resolved(
+            Function("Files", "read_document", () => "document"),
+            readOnly: true,
+            requiresApproval: false);
+        await using var first = new McpToolSession(
+            [resolved],
+            [],
+            [],
+            "settings-a",
+            static () => "settings-a",
+            sessionId: "transport-one");
+        await using var second = new McpToolSession(
+            [resolved],
+            [],
+            [],
+            "settings-a",
+            static () => "settings-a",
+            sessionId: "transport-two");
+
+        Assert.NotEqual(first.SessionId, second.SessionId);
+        Assert.Equal(first.SessionRevision, second.SessionRevision);
+        Assert.Equal(
+            first.CaptureSnapshot().BoundaryRevision,
+            second.CaptureSnapshot().BoundaryRevision);
+        Assert.Equal(
+            IncomingMcpCapabilityCatalog.Build(EmptyRegistry(), first).CatalogRevision,
+            IncomingMcpCapabilityCatalog.Build(EmptyRegistry(), second).CatalogRevision);
+    }
+
+    [Fact]
     public async Task ConfiguredReadOnlyTool_JoinsCanonicalTerminalAndRemainsCallable()
     {
         var invoked = 0;

@@ -1,3 +1,4 @@
+using Ali.Modules.Capabilities;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
@@ -41,6 +42,25 @@ public sealed class CoordinatorTurnObservationContextTests
     }
 
     [Fact]
+    public void InterimResponse_IsExplicitlyMarkedAsAPausedDurableTurn()
+    {
+        AssistantStreamChunk? published = null;
+        var turn = new CoordinatorTurnContext(
+            "conversation",
+            "user-message",
+            "assistant-message",
+            "request",
+            chunk => published = chunk);
+
+        turn.PublishInterimResponse("Waiting for your input.", "awaiting-user");
+
+        var response = Assert.IsType<AssistantStreamChunk>(published);
+        Assert.True(response.IsInterimPause);
+        Assert.False(response.IsActivity);
+        Assert.Equal("Waiting for your input.", response.Text);
+    }
+
+    [Fact]
     public void ShadowObservationTracking_IsExactOrdinalAndIdempotent()
     {
         var turn = CreateTurn();
@@ -54,23 +74,79 @@ public sealed class CoordinatorTurnObservationContextTests
     }
 
     [Fact]
-    public void CurrentToolCorrelation_UsesTheExactToolNameAndCallId()
+    public void ActiveToolCorrelation_RequiresAnExactInvocationScope()
     {
         var turn = CreateTurn();
-        turn.RegisterToolPlan(new CoordinatorToolPlan(
+        var registeredPlan = CreateToolPlan("call-Exact", "file_access_read");
+        turn.RegisterToolPlan(registeredPlan);
+        turn.RegisterActionExecutionAuthority(new TestAuthority());
+
+        Assert.False(turn.TryGetActiveToolCallId("file_access_read", out var callId));
+        Assert.Null(callId);
+        Assert.False(turn.TryGetActiveToolPlan("file_access_read", out var inactivePlan));
+        Assert.Null(inactivePlan);
+        Assert.True(turn.TryEnterActiveToolInvocation(
             "call-Exact",
             "file_access_read",
-            "assessment",
-            "plan",
-            "next",
-            "selected",
-            "returned",
-            "{}"));
+            out var invocation));
+        using (invocation)
+        {
+            Assert.True(turn.TryGetActiveToolCallId("file_access_read", out callId));
+            Assert.Equal("call-Exact", callId);
+            Assert.True(turn.TryGetActiveToolPlan("file_access_read", out var activePlan));
+            Assert.Same(registeredPlan, activePlan);
+            Assert.False(turn.TryGetActiveToolCallId("FILE_ACCESS_READ", out callId));
+            Assert.Null(callId);
+            Assert.False(turn.TryGetActiveToolPlan("FILE_ACCESS_READ", out activePlan));
+            Assert.Null(activePlan);
+        }
 
-        Assert.True(turn.TryGetCurrentToolCallId("file_access_read", out var callId));
-        Assert.Equal("call-Exact", callId);
-        Assert.False(turn.TryGetCurrentToolCallId("FILE_ACCESS_READ", out callId));
-        Assert.Null(callId);
+        Assert.False(turn.TryGetActiveToolCallId("file_access_read", out callId));
+    }
+
+    [Fact]
+    public void ToolPlanLifecycle_RetiresLongTurnCompletionsWithoutEvictingAnInFlightPlan()
+    {
+        var turn = CreateTurn();
+        var inFlightPlan = CreateToolPlan("call-in-flight", "file_access_read");
+        turn.RegisterToolPlan(inFlightPlan);
+        turn.RegisterActionExecutionAuthority(new TestAuthority());
+        Assert.True(turn.TryEnterActiveToolInvocation(
+            inFlightPlan.CallId,
+            inFlightPlan.ToolName,
+            out var invocation));
+
+        using (invocation)
+        {
+            // A terminal notification racing the invocation lease schedules exact cleanup,
+            // but the plan remains available until the in-flight consumer releases it.
+            Assert.True(turn.RequestToolPlanRetirement(inFlightPlan.CallId));
+            Assert.True(turn.TryGetToolPlan(inFlightPlan.CallId, out var rememberedInFlight));
+            Assert.Same(inFlightPlan, rememberedInFlight);
+            Assert.False(turn.TryEnterActiveToolInvocation(
+                inFlightPlan.CallId,
+                inFlightPlan.ToolName,
+                out var lateInvocation));
+            Assert.Null(lateInvocation);
+
+            for (var index = 0;
+                 index <= CoordinatorTurnContext.MaximumRememberedShadowTerminals;
+                 index++)
+            {
+                var completed = CreateToolPlan($"call-completed-{index}", "completed-tool");
+                turn.RegisterToolPlan(completed);
+                Assert.True(turn.RequestToolPlanRetirement(completed.CallId));
+            }
+
+            Assert.Equal(1, turn.RememberedToolPlanCount);
+            Assert.True(turn.TryGetActiveToolPlan(inFlightPlan.ToolName, out var activePlan));
+            Assert.Same(inFlightPlan, activePlan);
+        }
+
+        Assert.Equal(0, turn.RememberedToolPlanCount);
+        Assert.False(turn.TryGetActiveToolPlan(inFlightPlan.ToolName, out _));
+        Assert.False(turn.TryGetToolPlan(inFlightPlan.CallId, out _));
+        Assert.False(turn.RequestToolPlanRetirement("call-not-registered"));
     }
 
     [Fact]
@@ -382,6 +458,16 @@ public sealed class CoordinatorTurnObservationContextTests
         "request",
         static _ => { });
 
+    private static CoordinatorToolPlan CreateToolPlan(string callId, string toolName) => new(
+        callId,
+        toolName,
+        "assessment",
+        "plan",
+        "next",
+        "selected",
+        "returned",
+        "{}");
+
     private sealed class FixedSelectionSession(ActiveUserSelectionSnapshot selection)
         : IActiveUserSession
     {
@@ -404,5 +490,19 @@ public sealed class CoordinatorTurnObservationContextTests
         public void Refresh()
         {
         }
+    }
+
+    private sealed class TestAuthority : ICoordinatorActionExecutionAuthority
+    {
+        public TurnIdentity DurableIdentity { get; } =
+            new("user", "conversation", "assistant-message");
+
+        public ValueTask<CapabilityInvocationAuthorization> PrepareExecutionAsync(
+            CapabilityInvocationLease lease,
+            string callId,
+            AIFunctionArguments arguments,
+            bool requiresApproval,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

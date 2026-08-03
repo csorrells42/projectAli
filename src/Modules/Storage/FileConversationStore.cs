@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ali.Modules.Conversation;
@@ -6,7 +8,7 @@ using Ali.Modules.Voice;
 
 namespace Ali.Modules.Storage;
 
-public sealed class FileConversationStore : IConversationStore
+public sealed class FileConversationStore : IConversationStore, IConversationPublicationProbe
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -112,6 +114,96 @@ public sealed class FileConversationStore : IConversationStore
         {
             return null;
         }
+    }
+
+    public ConversationPublicationProbeResult ProbeAssistantPublication(
+        string conversationId,
+        string assistantMessageId,
+        string answerDigest)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId)
+            || string.IsNullOrWhiteSpace(assistantMessageId)
+            || !IsSha256Digest(answerDigest))
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Mismatch,
+                "publication-identity-invalid");
+        }
+
+        var path = GetConversationPath(conversationId);
+        if (!File.Exists(path))
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Absent,
+                "conversation-absent");
+        }
+
+        StoredConversation? conversation;
+        try
+        {
+            conversation = ReadJson<StoredConversation>(path);
+        }
+        catch (Exception ex) when (IsJsonOrIoException(ex))
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Unavailable,
+                "conversation-unreadable");
+        }
+
+        if (conversation is null)
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Unavailable,
+                "conversation-unreadable");
+        }
+
+        if (!string.Equals(
+                conversation.ConversationId,
+                conversationId,
+                StringComparison.Ordinal))
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Mismatch,
+                "conversation-identity-mismatch");
+        }
+
+        if (conversation.Messages is null)
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Unavailable,
+                "conversation-messages-unavailable");
+        }
+
+        var matches = conversation.Messages
+            .Where(message => string.Equals(
+                message.MessageId,
+                assistantMessageId,
+                StringComparison.Ordinal))
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Absent,
+                "assistant-message-absent");
+        }
+
+        if (matches.Length != 1
+            || matches[0].Role != ChatRole.Assistant
+            || !string.Equals(
+                matches[0].ConversationId,
+                conversationId,
+                StringComparison.Ordinal)
+            || matches[0].Text is null
+            || !FixedTimeDigestEquals(Digest(matches[0].Text), answerDigest))
+        {
+            return new ConversationPublicationProbeResult(
+                ConversationPublicationProbeStatus.Mismatch,
+                "assistant-message-mismatch");
+        }
+
+        return new ConversationPublicationProbeResult(
+            ConversationPublicationProbeStatus.Present,
+            "assistant-message-present");
     }
 
     public StoredConversation Save(StoredConversation conversation)
@@ -364,12 +456,26 @@ public sealed class FileConversationStore : IConversationStore
         var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            using (var stream = File.Create(tempPath))
+            using (var stream = new FileStream(
+                       tempPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       64 * 1024,
+                       FileOptions.WriteThrough))
             {
                 JsonSerializer.Serialize(stream, value, JsonOptions);
+                stream.Flush(flushToDisk: true);
             }
 
-            File.Move(tempPath, path, overwrite: true);
+            if (File.Exists(path))
+            {
+                File.Replace(tempPath, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(tempPath, path, overwrite: false);
+            }
         }
         finally
         {
@@ -383,6 +489,56 @@ public sealed class FileConversationStore : IConversationStore
     private static bool Contains(string? haystack, string needle) =>
         !string.IsNullOrWhiteSpace(haystack)
         && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    private static string Digest(string? value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value ?? string.Empty)))
+            .ToLowerInvariant();
+
+    private static bool IsSha256Digest(string value)
+    {
+        if (value.Length != 64)
+        {
+            return false;
+        }
+
+        try
+        {
+            return Convert.FromHexString(value).Length == 32;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool FixedTimeDigestEquals(string left, string right)
+    {
+        byte[]? leftBytes = null;
+        byte[]? rightBytes = null;
+        try
+        {
+            leftBytes = Convert.FromHexString(left);
+            rightBytes = Convert.FromHexString(right);
+            return leftBytes.Length == rightBytes.Length
+                   && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (leftBytes is not null)
+            {
+                CryptographicOperations.ZeroMemory(leftBytes);
+            }
+
+            if (rightBytes is not null)
+            {
+                CryptographicOperations.ZeroMemory(rightBytes);
+            }
+        }
+    }
 
     private static bool IsJsonOrIoException(Exception ex) =>
         ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException;

@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using Ali.Modules.Orchestration.Contracts;
+using Ali.Modules.Orchestration.State;
 
 namespace Ali.Modules.Orchestration.Evidence;
 
@@ -13,6 +15,7 @@ internal enum EvidenceLedgerCommitBoundary
 internal sealed record EvidenceMetadataSeed(
     string EvidenceId,
     string TurnBindingDigest,
+    string? WorkItemIdDigest,
     string CallIdDigest,
     string ToolNameDigest,
     string CapabilityGroupDigest,
@@ -39,6 +42,7 @@ internal sealed record EvidenceMetadataSeed(
 internal sealed record EvidenceUnsignedRecord(
     string EvidenceId,
     string TurnBindingDigest,
+    string? WorkItemIdDigest,
     string CallIdDigest,
     string ToolNameDigest,
     string CapabilityGroupDigest,
@@ -65,9 +69,18 @@ internal sealed record EvidenceUnsignedRecord(
     string ProtectedPayloadDigest,
     string MetadataDigest);
 
+internal sealed record CommittedProtectedEvidence(
+    EvidenceCursorRecord Cursor,
+    ProtectedEvidenceContent ProtectedContent);
+
 public sealed class EvidenceLedger
 {
     private const int MaximumCachedTurnJournals = 64;
+    internal const int MaximumHotEvidenceRecordsPerTurn = 256;
+    internal const int MaximumCommittedEvidenceLookupBatchSize = 256;
+    private const int MaximumArtifactCount = 256;
+    private const int MaximumEvidenceComponentBytes = 4 * 1024 * 1024;
+    private const int ProtectedPayloadJsonOverheadReserve = 4096;
     private static readonly HashSet<string> AllowedEffectKinds = new(
         ["none", "read", "create", "update", "delete", "execute", "external", "mixed"],
         StringComparer.Ordinal);
@@ -75,10 +88,10 @@ public sealed class EvidenceLedger
         ["unknown", "file", "directory", "process", "service", "uri", "symbol", "project"],
         StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedPermissionDecisions = new(
-        ["unknown", "not-required", "approved-once", "approved-standing", "denied", "policy-blocked"],
+        ["unknown", "not-required", "approved-once", "approved-standing", "approved-policy", "denied", "policy-blocked"],
         StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedPermissionScopes = new(
-        ["unknown", "none", "once", "exact-arguments", "tool"],
+        ["unknown", "none", "once", "exact-arguments", "tool", "policy"],
         StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedSourceKinds = new(
         ["tool", "file", "web", "mcp", "process", "runtime", "user"],
@@ -94,10 +107,193 @@ public sealed class EvidenceLedger
     private readonly Action<EvidenceJournalCommitBoundary>? _journalFaultInjector;
     private readonly Action<int>? _journalTailReadObserver;
     private readonly Func<bool>? _journalStampUnavailable;
+    private readonly Action<int>? _journalIndexedRecordReadObserver;
+    private readonly Action? _exactIndexMaintenanceFaultInjector;
     private readonly object _journalCacheSync = new();
-    private readonly Dictionary<string, (EvidenceJournal Journal, LinkedListNode<string> Node)> _journalCache =
+    private readonly Dictionary<string, CachedTurnJournal> _journalCache =
         new(StringComparer.Ordinal);
     private readonly LinkedList<string> _journalLru = [];
+    private readonly Dictionary<string, StableEvidenceTurnIndex> _stableEvidenceTurns =
+        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, StableEvidenceTurnGate> _stableEvidenceGates =
+        new(StringComparer.Ordinal);
+
+    private sealed record CachedTurnJournal(
+        EvidenceJournal Journal,
+        LinkedListNode<string> Node,
+        string StableTurnKey,
+        StableEvidenceTurnIndex StableEvidence);
+
+    private sealed class StableEvidenceTurnIndex
+    {
+        private readonly object _sync = new();
+        private readonly Dictionary<string, HotEvidenceRecord> _records =
+            new(StringComparer.Ordinal);
+        private readonly LinkedList<string> _lru = [];
+        private EvidenceJournalVerificationStamp? _verificationStamp;
+
+        public int Count
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _records.Count;
+                }
+            }
+        }
+
+        public bool TryGetVerified(
+            string evidenceId,
+            EvidenceJournalVerificationStamp? currentStamp,
+            out EvidenceCursorRecord? record)
+        {
+            lock (_sync)
+            {
+                if (currentStamp is null
+                    || _verificationStamp != currentStamp
+                    || !_records.TryGetValue(evidenceId, out var hot))
+                {
+                    record = null;
+                    return false;
+                }
+
+                _lru.Remove(hot.Node);
+                _lru.AddFirst(hot.Node);
+                record = hot.Record;
+                return true;
+            }
+        }
+
+        public void SetVerified(
+            EvidenceCursorRecord record,
+            EvidenceJournalVerificationStamp? verificationStamp)
+        {
+            ArgumentNullException.ThrowIfNull(record);
+            lock (_sync)
+            {
+                _verificationStamp = verificationStamp;
+                UpsertUnderLock(record);
+            }
+        }
+
+        public void MarkVerified(EvidenceJournalVerificationStamp? verificationStamp)
+        {
+            lock (_sync)
+            {
+                _verificationStamp = verificationStamp;
+            }
+        }
+
+        public void ReplaceVerified(
+            IEnumerable<EvidenceCursorRecord> records,
+            EvidenceJournalVerificationStamp? verificationStamp)
+        {
+            ArgumentNullException.ThrowIfNull(records);
+            lock (_sync)
+            {
+                _records.Clear();
+                _lru.Clear();
+                _verificationStamp = verificationStamp;
+                foreach (var record in records)
+                {
+                    UpsertUnderLock(record);
+                }
+            }
+        }
+
+        private void UpsertUnderLock(EvidenceCursorRecord record)
+        {
+            var evidenceId = record.Evidence.EvidenceId;
+            if (_records.TryGetValue(evidenceId, out var existing))
+            {
+                _lru.Remove(existing.Node);
+                _records.Remove(evidenceId);
+            }
+
+            var node = _lru.AddFirst(evidenceId);
+            _records.Add(evidenceId, new HotEvidenceRecord(record, node));
+            while (_records.Count > MaximumHotEvidenceRecordsPerTurn)
+            {
+                var oldest = _lru.Last
+                    ?? throw new InvalidOperationException(
+                        "The bounded evidence-record cache is inconsistent.");
+                _lru.RemoveLast();
+                _records.Remove(oldest.Value);
+            }
+        }
+
+        private sealed record HotEvidenceRecord(
+            EvidenceCursorRecord Record,
+            LinkedListNode<string> Node);
+    }
+
+    private sealed class StableEvidenceTurnGate
+    {
+        private readonly object _sync = new();
+        private int _references;
+        private bool _retired;
+
+        public SemaphoreSlim InvocationGate { get; } = new(1, 1);
+
+        public bool TryRetain()
+        {
+            lock (_sync)
+            {
+                if (_retired)
+                {
+                    return false;
+                }
+
+                checked
+                {
+                    _references++;
+                }
+
+                return true;
+            }
+        }
+
+        public bool ReleaseAndRetireIfUnused()
+        {
+            lock (_sync)
+            {
+                if (_references <= 0)
+                {
+                    throw new InvalidOperationException(
+                        "The stable evidence turn gate reference count is inconsistent.");
+                }
+
+                _references--;
+                if (_references != 0)
+                {
+                    return false;
+                }
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
+
+    private sealed class StableEvidenceGateLease(
+        EvidenceLedger owner,
+        string stableTurnKey,
+        StableEvidenceTurnGate gate) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            gate.InvocationGate.Release();
+            owner.ReleaseStableEvidenceGate(stableTurnKey, gate);
+        }
+    }
 
     public EvidenceLedger(string rootDirectory, string assistantProfileBinding)
         : this(rootDirectory, assistantProfileBinding, null, null, null, null)
@@ -110,7 +306,9 @@ public sealed class EvidenceLedger
         Action<EvidenceLedgerCommitBoundary>? faultInjector,
         Action<EvidenceJournalCommitBoundary>? journalFaultInjector,
         Action<int>? journalTailReadObserver,
-        Func<bool>? journalStampUnavailable = null)
+        Func<bool>? journalStampUnavailable = null,
+        Action<int>? journalIndexedRecordReadObserver = null,
+        Action? exactIndexMaintenanceFaultInjector = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(assistantProfileBinding);
@@ -125,6 +323,18 @@ public sealed class EvidenceLedger
         _journalFaultInjector = journalFaultInjector;
         _journalTailReadObserver = journalTailReadObserver;
         _journalStampUnavailable = journalStampUnavailable;
+        _journalIndexedRecordReadObserver = journalIndexedRecordReadObserver;
+        _exactIndexMaintenanceFaultInjector = exactIndexMaintenanceFaultInjector;
+    }
+
+    internal async Task EnsureReadyAsync(CancellationToken cancellationToken = default)
+    {
+        // Establish the protected current-user key before any turn-scoped journal
+        // directory is materialized. Missing-key detection must remain fail-closed
+        // once durable turn data exists, but a genuinely fresh store must be able to
+        // create its first key before ReplayAsync creates that first directory.
+        using var keys = await _protector.OpenSessionAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<EvidenceCursorRecord> AppendAsync(
@@ -135,15 +345,64 @@ public sealed class EvidenceLedger
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(draft);
         var snapshot = SnapshotAndValidate(draft);
-        var argumentsBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(snapshot.Arguments);
-        var resultBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(snapshot.Result);
-        var normalizedTargetBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(snapshot.NormalizedTarget);
-        var normalizedResultBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(
-            snapshot.NormalizedEffectResult);
-        var permissionBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(
-            snapshot.ProtectedPermissionReceipt);
+        using var stableEvidenceLease = snapshot.EvidenceId is null
+            ? null
+            : await AcquireStableEvidenceGateAsync(identity.StorageKey, cancellationToken)
+                .ConfigureAwait(false);
+        if (snapshot.EvidenceId is not null)
+        {
+            var existing = await FindEvidenceRecordAsync(
+                    identity,
+                    snapshot.EvidenceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (existing is not null)
+            {
+                var protectedExisting = await ReadProtectedRecordAsync(
+                    identity,
+                    existing.Evidence,
+                    cancellationToken).ConfigureAwait(false);
+                RequireIdempotentEvidenceMatches(existing, protectedExisting, snapshot);
+                return existing;
+            }
+        }
+
+        using var sensitiveBuffers = new SensitiveBufferScope();
+        long payloadComponentBytes = 0;
+        var argumentsBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            snapshot.Arguments,
+            ref payloadComponentBytes,
+            "arguments");
+        var resultBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            snapshot.Result,
+            ref payloadComponentBytes,
+            "result");
+        var normalizedTargetBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            snapshot.NormalizedTarget,
+            ref payloadComponentBytes,
+            "normalized target");
+        var normalizedResultBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            snapshot.NormalizedEffectResult,
+            ref payloadComponentBytes,
+            "normalized result");
+        var permissionBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            snapshot.ProtectedPermissionReceipt,
+            ref payloadComponentBytes,
+            "permission receipt");
+        var provenanceBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            snapshot.ProtectedProvenance,
+            ref payloadComponentBytes,
+            "provenance");
         var protectedIdentity = new ProtectedEvidenceIdentity(
             snapshot.CallId,
+            snapshot.WorkItemId,
             snapshot.ToolName,
             snapshot.CapabilityGroup,
             snapshot.ProviderId,
@@ -152,7 +411,13 @@ public sealed class EvidenceLedger
             snapshot.Outcome.FailureCode,
             snapshot.Artifacts,
             snapshot.Source);
-        var protectedPayloadBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(
+        var protectedIdentityBytes = SerializePayloadComponent(
+            sensitiveBuffers,
+            protectedIdentity,
+            ref payloadComponentBytes,
+            "identity");
+        var protectedPayloadBytes = sensitiveBuffers.Track(
+            CanonicalEvidenceJson.SerializeToUtf8Bytes(
             new ProtectedEvidencePayload(
                 protectedIdentity,
                 snapshot.Arguments,
@@ -160,20 +425,25 @@ public sealed class EvidenceLedger
                 snapshot.NormalizedTarget,
                 snapshot.NormalizedEffectResult,
                 snapshot.ProtectedPermissionReceipt,
-                snapshot.ProtectedProvenance));
-        var turnBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(new
-        {
-            identity.UserId,
-            identity.ConversationId,
-            identity.AssistantMessageId
-        });
+                snapshot.ProtectedProvenance),
+            ProtectedEvidencePayloadStore.MaximumPlaintextBytes));
+        var turnBytes = sensitiveBuffers.Track(
+            CanonicalEvidenceJson.SerializeToUtf8Bytes(new
+            {
+                identity.UserId,
+                identity.ConversationId,
+                identity.AssistantMessageId
+            }, 4096));
         try
         {
             using var keys = await _protector.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
-            var evidenceId = Guid.NewGuid().ToString("N");
+            var evidenceId = snapshot.EvidenceId ?? Guid.NewGuid().ToString("N");
             var recordedAtUtc = DateTimeOffset.UtcNow;
             var turnBindingDigest = keys.HmacHex(EvidenceKeyPurpose.TurnBinding, turnBytes);
             var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
+            var workItemIdDigest = snapshot.WorkItemId is null
+                ? null
+                : IdentifierDigest(keys, "work-item-id", snapshot.WorkItemId);
             var callIdDigest = IdentifierDigest(keys, "call-id", snapshot.CallId);
             var toolNameDigest = IdentifierDigest(keys, "tool-name", snapshot.ToolName);
             var capabilityGroupDigest = IdentifierDigest(
@@ -252,6 +522,7 @@ public sealed class EvidenceLedger
             var metadata = new EvidenceMetadataSeed(
                 evidenceId,
                 turnBindingDigest,
+                workItemIdDigest,
                 callIdDigest,
                 toolNameDigest,
                 capabilityGroupDigest,
@@ -301,13 +572,36 @@ public sealed class EvidenceLedger
                     var projectionDigest = Sha256Hex(projectionBytes);
                     var recordMac = keys.HmacHex(EvidenceKeyPurpose.RecordMac, projectionBytes);
                     var record = CreateStoredRecord(unsigned, projectionDigest, recordMac);
-                    var stored = await GetJournal(turnStorageKey).AppendAsync(
+                    var cachedTurn = GetJournal(
+                        turnStorageKey,
+                        identity.StorageKey);
+                    cachedTurn.StableEvidence.MarkVerified(verificationStamp: null);
+                    var append = await cachedTurn.Journal.AppendAsync(
                         record,
                         existing => ValidateRecord(turnBindingDigest, existing, keys),
                         head => SignJournalHead(head, keys),
                         head => ValidateJournalHead(turnStorageKey, head, keys),
+                        bytes => keys.HmacHex(EvidenceKeyPurpose.EvidenceExactIndex, bytes),
                         cancellationToken).ConfigureAwait(false);
-                    return ToPublicCursor(stored);
+                    var publicStored = ToPublicCursor(append.Record);
+                    cachedTurn.StableEvidence.SetVerified(
+                        publicStored,
+                        append.VerificationStamp);
+
+                    if (append.Status == EvidenceJournalAppendStatus.AlreadyRecorded)
+                    {
+                        var protectedExisting = await ReadProtectedRecordAsync(
+                            turnStorageKey,
+                            publicStored.Evidence,
+                            keys,
+                            cancellationToken).ConfigureAwait(false);
+                        RequireIdempotentEvidenceMatches(
+                            publicStored,
+                            protectedExisting,
+                            snapshot);
+                    }
+
+                    return publicStored;
                 }
                 finally
                 {
@@ -326,6 +620,8 @@ public sealed class EvidenceLedger
             CryptographicOperations.ZeroMemory(normalizedTargetBytes);
             CryptographicOperations.ZeroMemory(normalizedResultBytes);
             CryptographicOperations.ZeroMemory(permissionBytes);
+            CryptographicOperations.ZeroMemory(provenanceBytes);
+            CryptographicOperations.ZeroMemory(protectedIdentityBytes);
             CryptographicOperations.ZeroMemory(protectedPayloadBytes);
             CryptographicOperations.ZeroMemory(turnBytes);
         }
@@ -342,12 +638,15 @@ public sealed class EvidenceLedger
         {
             var turnBindingDigest = keys.HmacHex(EvidenceKeyPurpose.TurnBinding, turnBytes);
             var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
-            var replay = await GetJournal(turnStorageKey).ReplayAsync(
+            var cachedTurn = GetJournal(turnStorageKey, identity.StorageKey);
+            cachedTurn.StableEvidence.MarkVerified(verificationStamp: null);
+            var replay = await cachedTurn.Journal.ReplayAsync(
                 existing => ValidateRecord(turnBindingDigest, existing, keys),
                 head => ValidateJournalHead(turnStorageKey, head, keys),
+                bytes => keys.HmacHex(EvidenceKeyPurpose.EvidenceExactIndex, bytes),
                 cancellationToken).ConfigureAwait(false);
             var evidenceIds = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var item in replay)
+            foreach (var item in replay.Records)
             {
                 if (!evidenceIds.Add(item.Evidence.EvidenceId))
                 {
@@ -362,7 +661,160 @@ public sealed class EvidenceLedger
                     cancellationToken).ConfigureAwait(false);
             }
 
-            return Array.AsReadOnly(replay.Select(ToPublicCursor).ToArray());
+            var projected = replay.Records.Select(ToPublicCursor).ToArray();
+            cachedTurn.StableEvidence.ReplaceVerified(
+                projected,
+                replay.VerificationStamp);
+            return Array.AsReadOnly(projected);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(turnBytes);
+        }
+    }
+
+    internal async ValueTask<bool> IsCommittedAsync(
+        TurnIdentity identity,
+        CommittedEvidenceReference reference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(reference);
+        reference.Validate();
+        using var keys = await _protector.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+        var turnBytes = SerializeTurnIdentity(identity);
+        try
+        {
+            var turnBindingDigest = keys.HmacHex(EvidenceKeyPurpose.TurnBinding, turnBytes);
+            var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
+            var record = await FindEvidenceRecordAsync(
+                    identity.StorageKey,
+                    reference.EvidenceId,
+                    turnBindingDigest,
+                    turnStorageKey,
+                    keys,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (record is null || !MatchesCommittedReference(record, reference))
+            {
+                return false;
+            }
+
+            await _payloadStore.ValidateAsync(
+                turnStorageKey,
+                new ProtectedEvidencePayloadReference(
+                    record.Evidence.ProtectedPayloadReference,
+                    record.Evidence.ProtectedPayloadDigest),
+                cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(turnBytes);
+        }
+    }
+
+    internal async Task<IReadOnlyDictionary<string, CommittedProtectedEvidence>>
+        ReadCommittedBatchAsync(
+            TurnIdentity identity,
+            IReadOnlyCollection<CommittedEvidenceReference> references,
+            CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(references);
+        if (references.Count == 0)
+        {
+            return new Dictionary<string, CommittedProtectedEvidence>(StringComparer.Ordinal);
+        }
+
+        if (references.Count > MaximumCommittedEvidenceLookupBatchSize)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(references),
+                $"A committed evidence lookup batch cannot exceed {MaximumCommittedEvidenceLookupBatchSize} references.");
+        }
+
+        var requested = new Dictionary<string, CommittedEvidenceReference>(
+            references.Count,
+            StringComparer.Ordinal);
+        foreach (var reference in references)
+        {
+            ArgumentNullException.ThrowIfNull(reference);
+            reference.Validate();
+            if (requested.TryGetValue(reference.EvidenceId, out var existing))
+            {
+                if (existing != reference)
+                {
+                    throw new InvalidDataException(
+                        "A committed evidence batch contains conflicting references for one evidence ID.");
+                }
+
+                continue;
+            }
+
+            requested.Add(reference.EvidenceId, reference);
+        }
+
+        using var keys = await _protector.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+        var turnBytes = SerializeTurnIdentity(identity);
+        try
+        {
+            var turnBindingDigest = keys.HmacHex(EvidenceKeyPurpose.TurnBinding, turnBytes);
+            var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
+            var cachedTurn = GetJournal(turnStorageKey, identity.StorageKey);
+            cachedTurn.StableEvidence.MarkVerified(verificationStamp: null);
+            var lookup = await cachedTurn.Journal.FindByEvidenceIdsAsync(
+                requested.Keys.ToHashSet(StringComparer.Ordinal),
+                existing => ValidateRecord(turnBindingDigest, existing, keys),
+                head => ValidateJournalHead(turnStorageKey, head, keys),
+                bytes => keys.HmacHex(EvidenceKeyPurpose.EvidenceExactIndex, bytes),
+                cancellationToken).ConfigureAwait(false);
+            cachedTurn.StableEvidence.MarkVerified(lookup.VerificationStamp);
+
+            var committed = new Dictionary<string, EvidenceCursorRecord>(
+                lookup.Records.Count,
+                StringComparer.Ordinal);
+            foreach (var stored in lookup.Records)
+            {
+                var projected = ToPublicCursor(stored);
+                if (!committed.TryAdd(projected.Evidence.EvidenceId, projected))
+                {
+                    throw new InvalidDataException(
+                        "The evidence journal contains a duplicate evidence ID.");
+                }
+
+                cachedTurn.StableEvidence.SetVerified(projected, lookup.VerificationStamp);
+            }
+
+            if (committed.Count != requested.Count)
+            {
+                throw new InvalidDataException(
+                    "A committed evidence batch references evidence that is absent from the authenticated journal.");
+            }
+
+            var result = new Dictionary<string, CommittedProtectedEvidence>(
+                committed.Count,
+                StringComparer.Ordinal);
+            foreach (var (evidenceId, reference) in requested)
+            {
+                var cursor = committed[evidenceId];
+                if (!MatchesCommittedReference(cursor, reference))
+                {
+                    throw new InvalidDataException(
+                        "A committed evidence batch reference does not select its exact authenticated record.");
+                }
+
+                var protectedContent = await ReadProtectedRecordAsync(
+                    turnStorageKey,
+                    cursor.Evidence,
+                    keys,
+                    cancellationToken).ConfigureAwait(false);
+                result.Add(
+                    evidenceId,
+                    new CommittedProtectedEvidence(cursor, protectedContent));
+            }
+
+            return result;
         }
         finally
         {
@@ -377,14 +829,127 @@ public sealed class EvidenceLedger
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentException.ThrowIfNullOrWhiteSpace(evidenceId);
-        var record = (await ReplayAsync(identity, cancellationToken).ConfigureAwait(false))
-            .Select(item => item.Evidence)
-            .SingleOrDefault(item => string.Equals(item.EvidenceId, evidenceId, StringComparison.Ordinal))
-            ?? throw new KeyNotFoundException($"Evidence '{evidenceId}' was not found for this turn.");
+        TurnStateIntegrity.RequireBoundedValue(evidenceId, 256, nameof(evidenceId));
         using var keys = await _protector.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
         var turnBytes = SerializeTurnIdentity(identity);
-        var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
-        CryptographicOperations.ZeroMemory(turnBytes);
+        try
+        {
+            var turnBindingDigest = keys.HmacHex(EvidenceKeyPurpose.TurnBinding, turnBytes);
+            var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
+            var record = (await FindEvidenceRecordAsync(
+                        identity.StorageKey,
+                        evidenceId,
+                        turnBindingDigest,
+                        turnStorageKey,
+                        keys,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+                ?.Evidence
+                ?? throw new KeyNotFoundException($"Evidence '{evidenceId}' was not found for this turn.");
+            return await ReadProtectedRecordAsync(
+                turnStorageKey,
+                record,
+                keys,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(turnBytes);
+        }
+    }
+
+    private async Task<EvidenceCursorRecord?> FindEvidenceRecordAsync(
+        TurnIdentity identity,
+        string evidenceId,
+        CancellationToken cancellationToken)
+    {
+        TurnStateIntegrity.RequireBoundedValue(evidenceId, 256, nameof(evidenceId));
+        using var keys = await _protector.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+        var turnBytes = SerializeTurnIdentity(identity);
+        try
+        {
+            var turnBindingDigest = keys.HmacHex(EvidenceKeyPurpose.TurnBinding, turnBytes);
+            var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
+            return await FindEvidenceRecordAsync(
+                identity.StorageKey,
+                evidenceId,
+                turnBindingDigest,
+                turnStorageKey,
+                keys,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(turnBytes);
+        }
+    }
+
+    private async Task<EvidenceCursorRecord?> FindEvidenceRecordAsync(
+        string stableTurnKey,
+        string evidenceId,
+        string turnBindingDigest,
+        string turnStorageKey,
+        EvidenceKeySession keys,
+        CancellationToken cancellationToken)
+    {
+        var cachedTurn = GetJournal(turnStorageKey, stableTurnKey);
+        var currentStamp = await cachedTurn.Journal.CaptureVerificationStampAsync(
+            head => ValidateJournalHead(turnStorageKey, head, keys),
+            cancellationToken).ConfigureAwait(false);
+        if (cachedTurn.StableEvidence.TryGetVerified(
+                evidenceId,
+                currentStamp,
+                out var cached))
+        {
+            return cached;
+        }
+
+        cachedTurn.StableEvidence.MarkVerified(verificationStamp: null);
+        var lookup = await cachedTurn.Journal.FindByEvidenceIdAsync(
+            evidenceId,
+            existing => ValidateRecord(turnBindingDigest, existing, keys),
+            head => ValidateJournalHead(turnStorageKey, head, keys),
+            bytes => keys.HmacHex(EvidenceKeyPurpose.EvidenceExactIndex, bytes),
+            cancellationToken).ConfigureAwait(false);
+        cachedTurn.StableEvidence.MarkVerified(lookup.VerificationStamp);
+        if (lookup.Record is null)
+        {
+            return null;
+        }
+
+        var projected = ToPublicCursor(lookup.Record);
+        cachedTurn.StableEvidence.SetVerified(projected, lookup.VerificationStamp);
+        return projected;
+    }
+
+    private async Task<ProtectedEvidenceContent> ReadProtectedRecordAsync(
+        TurnIdentity identity,
+        EvidenceRecord record,
+        CancellationToken cancellationToken)
+    {
+        using var keys = await _protector.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+        var turnBytes = SerializeTurnIdentity(identity);
+        try
+        {
+            var turnStorageKey = keys.HmacHex(EvidenceKeyPurpose.TurnStorage, turnBytes);
+            return await ReadProtectedRecordAsync(
+                turnStorageKey,
+                record,
+                keys,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(turnBytes);
+        }
+    }
+
+    private async Task<ProtectedEvidenceContent> ReadProtectedRecordAsync(
+        string turnStorageKey,
+        EvidenceRecord record,
+        EvidenceKeySession keys,
+        CancellationToken cancellationToken)
+    {
         var plaintext = await _payloadStore.ReadAsync(
             turnStorageKey,
             record,
@@ -394,6 +959,7 @@ public sealed class EvidenceLedger
         {
             var payload = JsonSerializer.Deserialize<ProtectedEvidencePayload>(plaintext, JsonOptions)
                 ?? throw new InvalidDataException("The protected evidence payload is empty.");
+            ValidateProtectedWorkItemIdentity(record, payload.Identity, keys);
             return new ProtectedEvidenceContent(
                 payload.Identity with
                 {
@@ -417,7 +983,67 @@ public sealed class EvidenceLedger
         }
     }
 
-    private EvidenceJournal GetJournal(string turnStorageKey)
+    internal (
+        int TurnJournals,
+        int StableEvidenceTurns,
+        int StableEvidenceRecords,
+        int ActiveStableEvidenceGates)
+        CaptureCacheCounts()
+    {
+        lock (_journalCacheSync)
+        {
+            return (
+                _journalCache.Count,
+                _stableEvidenceTurns.Count,
+                _stableEvidenceTurns.Values.Sum(turn => turn.Count),
+                _stableEvidenceGates.Count);
+        }
+    }
+
+    private async Task<StableEvidenceGateLease> AcquireStableEvidenceGateAsync(
+        string stableTurnKey,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var gate = _stableEvidenceGates.GetOrAdd(
+                stableTurnKey,
+                static _ => new StableEvidenceTurnGate());
+            if (!gate.TryRetain())
+            {
+                ((ICollection<KeyValuePair<string, StableEvidenceTurnGate>>)_stableEvidenceGates)
+                    .Remove(new KeyValuePair<string, StableEvidenceTurnGate>(stableTurnKey, gate));
+                continue;
+            }
+
+            try
+            {
+                await gate.InvocationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                return new StableEvidenceGateLease(this, stableTurnKey, gate);
+            }
+            catch
+            {
+                ReleaseStableEvidenceGate(stableTurnKey, gate);
+                throw;
+            }
+        }
+    }
+
+    private void ReleaseStableEvidenceGate(
+        string stableTurnKey,
+        StableEvidenceTurnGate gate)
+    {
+        if (!gate.ReleaseAndRetireIfUnused())
+        {
+            return;
+        }
+
+        ((ICollection<KeyValuePair<string, StableEvidenceTurnGate>>)_stableEvidenceGates)
+            .Remove(new KeyValuePair<string, StableEvidenceTurnGate>(stableTurnKey, gate));
+        gate.InvocationGate.Dispose();
+    }
+
+    private CachedTurnJournal GetJournal(string turnStorageKey, string stableTurnKey)
     {
         var key = turnStorageKey;
         lock (_journalCacheSync)
@@ -426,7 +1052,13 @@ public sealed class EvidenceLedger
             {
                 _journalLru.Remove(cached.Node);
                 _journalLru.AddFirst(cached.Node);
-                return cached.Journal;
+                if (!string.Equals(cached.StableTurnKey, stableTurnKey, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The evidence journal cache resolved to a different turn identity.");
+                }
+
+                return cached;
             }
 
             if (_journalCache.Count >= MaximumCachedTurnJournals)
@@ -434,7 +1066,13 @@ public sealed class EvidenceLedger
                 var oldest = _journalLru.Last
                     ?? throw new InvalidOperationException("The evidence journal cache is inconsistent.");
                 _journalLru.RemoveLast();
+                var evicted = _journalCache[oldest.Value];
                 _journalCache.Remove(oldest.Value);
+                if (_stableEvidenceTurns.TryGetValue(evicted.StableTurnKey, out var current)
+                    && ReferenceEquals(current, evicted.StableEvidence))
+                {
+                    _stableEvidenceTurns.Remove(evicted.StableTurnKey);
+                }
             }
 
             var node = _journalLru.AddFirst(key);
@@ -443,14 +1081,63 @@ public sealed class EvidenceLedger
                 key,
                 _journalFaultInjector,
                 _journalTailReadObserver,
-                _journalStampUnavailable);
-            _journalCache.Add(key, (journal, node));
-            return journal;
+                _journalStampUnavailable,
+                _journalIndexedRecordReadObserver,
+                _exactIndexMaintenanceFaultInjector);
+            var stableEvidence = new StableEvidenceTurnIndex();
+            var added = new CachedTurnJournal(
+                journal,
+                node,
+                stableTurnKey,
+                stableEvidence);
+            _journalCache.Add(key, added);
+            _stableEvidenceTurns.Add(stableTurnKey, stableEvidence);
+            return added;
+        }
+    }
+
+    private static byte[] SerializePayloadComponent<T>(
+        SensitiveBufferScope buffers,
+        T value,
+        ref long accumulatedBytes,
+        string componentName)
+    {
+        var remaining = ProtectedEvidencePayloadStore.MaximumPlaintextBytes
+                        - ProtectedPayloadJsonOverheadReserve
+                        - accumulatedBytes;
+        if (remaining <= 0)
+        {
+            throw new InvalidDataException(
+                "Protected orchestration evidence exceeds its aggregate payload budget.");
+        }
+
+        var maximum = (int)Math.Min(MaximumEvidenceComponentBytes, remaining);
+        try
+        {
+            var bytes = buffers.Track(
+                CanonicalEvidenceJson.SerializeToUtf8Bytes(value, maximum));
+            accumulatedBytes += bytes.LongLength;
+            return bytes;
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidDataException(
+                $"The protected evidence {componentName} exceeds its accepted payload budget.",
+                ex);
         }
     }
 
     private static EvidenceDraft SnapshotAndValidate(EvidenceDraft draft)
     {
+        if (draft.EvidenceId is not null)
+        {
+            TurnStateIntegrity.RequireBoundedValue(
+                draft.EvidenceId,
+                256,
+                nameof(draft.EvidenceId));
+        }
+
+        RequireOptionalWorkItemId(draft.WorkItemId, nameof(draft.WorkItemId));
         RequireProtectedValue(draft.CallId, nameof(draft.CallId));
         RequireProtectedValue(draft.ToolName, nameof(draft.ToolName));
         RequireProtectedValue(draft.CapabilityGroup, nameof(draft.CapabilityGroup));
@@ -470,7 +1157,15 @@ public sealed class EvidenceLedger
             throw new ArgumentException("Evidence completion cannot precede its start.", nameof(draft));
         }
 
-        var artifacts = (draft.Artifacts ?? [])
+        var draftArtifacts = draft.Artifacts ?? [];
+        if (draftArtifacts.Length > MaximumArtifactCount)
+        {
+            throw new ArgumentException(
+                $"Evidence can reference at most {MaximumArtifactCount} artifacts.",
+                nameof(draft));
+        }
+
+        var artifacts = draftArtifacts
             .Select(artifact =>
             {
                 ArgumentNullException.ThrowIfNull(artifact);
@@ -501,6 +1196,8 @@ public sealed class EvidenceLedger
 
         return draft with
         {
+            EvidenceId = draft.EvidenceId?.Trim(),
+            WorkItemId = draft.WorkItemId,
             CallId = draft.CallId.Trim(),
             ToolName = draft.ToolName.Trim(),
             CapabilityGroup = draft.CapabilityGroup.Trim(),
@@ -508,6 +1205,8 @@ public sealed class EvidenceLedger
             RegistryRevision = draft.RegistryRevision.Trim(),
             EffectKind = draft.EffectKind.Trim(),
             StableOutcomeCode = draft.StableOutcomeCode.Trim(),
+            StartedAtUtc = draft.StartedAtUtc.ToUniversalTime(),
+            CompletedAtUtc = draft.CompletedAtUtc.ToUniversalTime(),
             Arguments = CanonicalEvidenceJson.CloneOrNull(draft.Arguments),
             Result = CanonicalEvidenceJson.CloneOrNull(draft.Result),
             NormalizedTarget = CanonicalEvidenceJson.CloneOrNull(draft.NormalizedTarget),
@@ -527,10 +1226,63 @@ public sealed class EvidenceLedger
                 Kind = draft.Source.Kind.Trim(),
                 ProviderId = draft.Source.ProviderId.Trim(),
                 TrustBoundary = draft.Source.TrustBoundary.Trim(),
+                FreshAtUtc = draft.Source.FreshAtUtc?.ToUniversalTime(),
                 StateRevision = draft.Source.StateRevision.Trim()
             }
         };
     }
+
+    private static void RequireIdempotentEvidenceMatches(
+        EvidenceCursorRecord existing,
+        ProtectedEvidenceContent protectedExisting,
+        EvidenceDraft requested)
+    {
+        var identity = protectedExisting.Identity;
+        var exactIdentity = string.Equals(identity.CallId, requested.CallId, StringComparison.Ordinal)
+            && string.Equals(identity.WorkItemId, requested.WorkItemId, StringComparison.Ordinal)
+            && string.Equals(identity.ToolName, requested.ToolName, StringComparison.Ordinal)
+            && string.Equals(identity.CapabilityGroup, requested.CapabilityGroup, StringComparison.Ordinal)
+            && string.Equals(identity.ProviderId, requested.ProviderId, StringComparison.Ordinal)
+            && string.Equals(identity.RegistryRevision, requested.RegistryRevision, StringComparison.Ordinal)
+            && string.Equals(identity.StableOutcomeCode, requested.StableOutcomeCode, StringComparison.Ordinal)
+            && string.Equals(identity.FailureCode, requested.Outcome.FailureCode, StringComparison.Ordinal);
+        var exactPayload = JsonElement.DeepEquals(protectedExisting.Arguments, requested.Arguments)
+            && JsonElement.DeepEquals(protectedExisting.Result, requested.Result)
+            && JsonElement.DeepEquals(protectedExisting.NormalizedTarget, requested.NormalizedTarget)
+            && JsonElement.DeepEquals(
+                protectedExisting.NormalizedEffectResult,
+                requested.NormalizedEffectResult)
+            && JsonElement.DeepEquals(
+                protectedExisting.PermissionReceipt,
+                requested.ProtectedPermissionReceipt)
+            && JsonElement.DeepEquals(protectedExisting.Provenance, requested.ProtectedProvenance);
+        var exactProjection = existing.Evidence.InvocationStatus == requested.Outcome.InvocationStatus
+            && existing.Evidence.DomainOutcome == requested.Outcome.DomainOutcome
+            && string.Equals(
+                existing.Evidence.EffectKind,
+                requested.EffectKind,
+                StringComparison.Ordinal)
+            && existing.Evidence.StartedAtUtc == requested.StartedAtUtc
+            && existing.Evidence.CompletedAtUtc == requested.CompletedAtUtc
+            && existing.Evidence.Permission == requested.Permission
+            && identity.Artifacts.SequenceEqual(requested.Artifacts)
+            && identity.Source == requested.Source;
+        if (!exactIdentity || !exactPayload || !exactProjection)
+        {
+            throw new InvalidDataException(
+                "A stable evidence ID was reused for different invocation evidence.");
+        }
+    }
+
+    private static bool MatchesCommittedReference(
+        EvidenceCursorRecord evidence,
+        CommittedEvidenceReference reference) =>
+        evidence.Cursor == reference.Cursor
+        && string.Equals(
+            evidence.Evidence.EvidenceId,
+            reference.EvidenceId,
+            StringComparison.Ordinal)
+        && FixedTimeHexEquals(evidence.Checksum, reference.RecordDigest);
 
     private static void ValidateRecord(
         string expectedTurnBindingDigest,
@@ -589,6 +1341,7 @@ public sealed class EvidenceLedger
         new(
             record.EvidenceId,
             record.TurnBindingDigest,
+            record.WorkItemIdDigest,
             record.CallIdDigest,
             record.ToolNameDigest,
             record.CapabilityGroupDigest,
@@ -620,6 +1373,7 @@ public sealed class EvidenceLedger
         new(
             metadata.EvidenceId,
             metadata.TurnBindingDigest,
+            metadata.WorkItemIdDigest,
             metadata.CallIdDigest,
             metadata.ToolNameDigest,
             metadata.CapabilityGroupDigest,
@@ -660,6 +1414,7 @@ public sealed class EvidenceLedger
         new(
             unsigned.EvidenceId,
             unsigned.TurnBindingDigest,
+            unsigned.WorkItemIdDigest,
             unsigned.CallIdDigest,
             unsigned.ToolNameDigest,
             unsigned.CapabilityGroupDigest,
@@ -740,11 +1495,15 @@ public sealed class EvidenceLedger
     {
         try
         {
-            if (!Guid.TryParseExact(record.EvidenceId, "N", out _))
-            {
-                throw new ArgumentException("The evidence ID is invalid.", nameof(record.EvidenceId));
-            }
+            // Evidence IDs may be caller-supplied stable idempotency keys. Replay must
+            // enforce the same bounded-value contract as AppendAsync instead of silently
+            // narrowing persisted records to the random GUID format used by the default.
+            TurnStateIntegrity.RequireBoundedValue(
+                record.EvidenceId,
+                256,
+                nameof(record.EvidenceId));
             RequireDigest(record.TurnBindingDigest, nameof(record.TurnBindingDigest));
+            RequireOptionalDigest(record.WorkItemIdDigest, nameof(record.WorkItemIdDigest));
             RequireDigest(record.CallIdDigest, nameof(record.CallIdDigest));
             RequireDigest(record.ToolNameDigest, nameof(record.ToolNameDigest));
             RequireDigest(record.CapabilityGroupDigest, nameof(record.CapabilityGroupDigest));
@@ -842,6 +1601,40 @@ public sealed class EvidenceLedger
         }
     }
 
+    private static void ValidateProtectedWorkItemIdentity(
+        EvidenceRecord record,
+        ProtectedEvidenceIdentity identity,
+        EvidenceKeySession keys)
+    {
+        if (identity.WorkItemId is null)
+        {
+            if (record.WorkItemIdDigest is not null)
+            {
+                throw new InvalidDataException(
+                    "The protected evidence work-item identity does not match its authenticated projection.");
+            }
+
+            return;
+        }
+
+        try
+        {
+            RequireOptionalWorkItemId(identity.WorkItemId, nameof(identity.WorkItemId));
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException("The protected evidence work-item identity is invalid.", ex);
+        }
+
+        var expectedDigest = IdentifierDigest(keys, "work-item-id", identity.WorkItemId);
+        if (record.WorkItemIdDigest is null
+            || !FixedTimeHexEquals(expectedDigest, record.WorkItemIdDigest))
+        {
+            throw new InvalidDataException(
+                "The protected evidence work-item identity does not match its authenticated projection.");
+        }
+    }
+
     private static byte[] SerializeTurnIdentity(TurnIdentity identity) =>
         CanonicalEvidenceJson.SerializeToUtf8Bytes(new
         {
@@ -891,6 +1684,22 @@ public sealed class EvidenceLedger
         }
     }
 
+    private static void RequireOptionalWorkItemId(string? value, string parameterName)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        TurnStateIntegrity.RequireBoundedValue(value, 256, parameterName);
+        if (!string.Equals(value, value.Trim(), StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "A work-item evidence binding must be canonical and cannot have surrounding whitespace.",
+                parameterName);
+        }
+    }
+
     private static void RequireProtectedValue(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > 4096)
@@ -898,6 +1707,28 @@ public sealed class EvidenceLedger
             throw new ArgumentException(
                 "A protected evidence value must be present and bounded.",
                 parameterName);
+        }
+    }
+
+    private sealed class SensitiveBufferScope : IDisposable
+    {
+        private readonly List<byte[]> _buffers = [];
+
+        public byte[] Track(byte[] buffer)
+        {
+            ArgumentNullException.ThrowIfNull(buffer);
+            _buffers.Add(buffer);
+            return buffer;
+        }
+
+        public void Dispose()
+        {
+            foreach (var buffer in _buffers)
+            {
+                CryptographicOperations.ZeroMemory(buffer);
+            }
+
+            _buffers.Clear();
         }
     }
 }

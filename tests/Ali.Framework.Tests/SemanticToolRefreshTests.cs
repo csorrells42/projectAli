@@ -22,7 +22,8 @@ public sealed class FullToolRegistryPlanningTests
             model,
             new DevelopmentLocalModelRuntime(),
             "Bob",
-            () => turn);
+            () => turn,
+            semanticToolCatalog: new BoundedLiveRegistryTestCatalog());
         using var activeTurn = client.BeginTurn(turn);
         var tools = new[]
         {

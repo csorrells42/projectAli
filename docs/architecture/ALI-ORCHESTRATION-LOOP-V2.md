@@ -1,6 +1,13 @@
 # Ali Orchestration Loop V2
 
-Status: implementation blueprint; intentionally not wired into the running application yet.
+Status: living target architecture. The checkpoint-6 durable planner, state, evidence,
+runtime-admission, completion-publication, and production outcome-contract foundations are wired
+into the running harness. Later-phase features called out below remain target design until their
+checkpoint lands; passing source tests is not a claim of live provider, hardware, or UI proof.
+
+For the exact checkpoint-6 implementation boundary and deferred-work list, see
+`docs/reviews/CP6-EXTERNAL-READ-ONLY-REVIEW-BRIEF.md`. Where this target document and executable
+code differ, the mismatch must be reported rather than silently assuming either is complete.
 
 ## Purpose
 
@@ -93,7 +100,8 @@ Every proposed delta passes structural validation before it is stored:
 
 - IDs are stable and unique, and dependencies form an acyclic graph;
 - the original objective and user constraints cannot be deleted, rewritten, or satisfied by assertion;
-- a work item cannot become satisfied or impossible without existing evidence IDs that support that status;
+- every cited evidence ID must resolve to evidence bound to that exact work-item ID, even while the item is pending or active;
+- a work item cannot become satisfied, impossible, or superseded without exact-bound successful evidence that supports that status;
 - satisfied history and unmet critic outcomes cannot silently disappear; they may be resolved, revised, or superseded only with provenance and supporting evidence;
 - a mistaken decomposition may be revised or replaced while the original request remains authoritative; and
 - final completion is checked against the original request, not merely against the model's decomposition.
@@ -114,6 +122,17 @@ Every executed tool produces an immutable `EvidenceEntry` containing:
 - a no-effect/failure fingerprint that excludes timestamps and other incidental noise.
 
 Invocation status and domain outcome are separate. `InvocationStatus=Returned` does not imply `OutcomeStatus=Succeeded`; a tool may return normally with `success:false`, no result, rejected permission, or a domain failure. Tool adapters normalize both fields before evidence can satisfy a work item.
+
+Every canonical production task tool has a versioned outcome contract. Ali-owned tools classify an
+exact CLR result type; Framework tools with ambiguous model-facing returns require an exact
+provider-boundary signal correlated by durable turn identity, call ID, and canonical tool name.
+Missing, mismatched, conflicting, evicted, untrusted external, or otherwise unverifiable outcomes
+remain `Unreported`. Generic JSON properties and prose are never inspected to promote success.
+
+A caller-supplied stable evidence ID is idempotent only when the complete protected invocation
+identity still matches: work item, effect kind, canonical artifacts, source, arguments, normalized
+target/effect, permission, result/outcome, and normalized UTC timestamps. Rebinding any field is
+rejected rather than returning the older receipt.
 
 The model cannot edit the stored evidence. Retrieved web pages, MCP results, documents, and command output are explicitly framed as untrusted data rather than instructions. Secrets and protected arguments are stored only in the existing protected secret facility; checkpoints, model projections, activity, and ordinary logs contain redacted values or digests.
 
@@ -168,9 +187,14 @@ internal abstract record OrchestrationAction
 
 There is no `give up`, arbitrary retry-count blocker, or external-agent delegation action. A `CompletionPlan` contains `CompletionKind`, required outcome/claim IDs, their evidence bindings, requested format/sections, and an answer ID; it does not carry a potentially huge final answer. `CompletionKind` is `Succeeded` or `ProvenImpossible`. Proven impossibility requires conclusive evidence IDs and is reviewed by the same critic as success.
 
-### Typed answer composition
+### Typed answer composition (checkpoint-8 target)
 
-After a valid `BeginCompletion`, `AliFinalAnswerComposer` uses a second non-disableable protocol function with only two actions:
+Checkpoint 6 uses an admitted, exact-runtime-bound, tool-free completion composer whose complete
+answer is accepted only on a non-empty `Stop` result; partial or incompatible output never enters
+the final journal. Checkpoint 8 will extend that safe publication boundary with the paged,
+hash-chained composition protocol below for answers too large for one admitted response.
+
+After a valid `BeginCompletion`, the target `AliFinalAnswerComposer` uses a second non-disableable protocol function with only two actions:
 
 ```csharp
 internal abstract record AnswerCompositionAction
@@ -291,6 +315,29 @@ Effective MCP exposure is the intersection of enabled capability group, MCP-serv
 
 The canonical registry has two tiers. A tiny orchestration protocol tier contains decision submission, tool expansion, state/evidence paging, answer composition, and turn control. These are integrity plumbing, not user task capabilities, are always present, and cannot be disabled. Every ordinary file, coding, web, office, language, Framework, Skill, or MCP capability remains in the user-controlled task tier.
 
+## Provider-neutral runtime and optional vision (checkpoint-9 target)
+
+The orchestration core binds an immutable model-dispatch snapshot, not a Lemonade-, LM Studio-,
+Ollama-, llama.cpp-, or vendor-named client. Provider adapters expose the same concrete client,
+profile/model identity, context/output limits, generation settings, protocol capabilities, and
+health evidence. Changing the provider dropdown changes the adapter selected for a future pass; it
+does not rewrite durable work/evidence or redirect an already authorized call.
+
+Supported runtime families include local Lemonade, LM Studio, Ollama, and llama.cpp endpoints plus
+an explicitly selected OpenAI-compatible HTTPS endpoint hosted on the internet. Remote endpoints
+must require HTTPS, normal certificate validation, explicit user selection, bounded timeouts, and
+secret-store API-key handling. Provider discovery cannot silently send a request, attachment,
+evidence payload, or source file to a remote host.
+
+Model capabilities use a tri-state observation such as `Supported`, `Unsupported`, or `Unknown`
+with provenance and freshness. Vision discovery may notify the user when a trusted endpoint/model
+probe confirms support. An unknown or failed probe does not disable the manual Vision checkbox.
+When Vision is enabled, a compact attachment control appears beside the input and pasted
+screenshots create removable previews; when no image is attached, the ordinary
+text/tool/orchestration path is unchanged. Attached image bytes are admitted into the exact
+selected context budget, retained only under the existing temporary-data policy, and never become
+evidence merely because a model described them.
+
 ## One orchestration loop means one orchestration loop
 
 The V2 cutover removes `AliSpecialistAgentFactory` agents, `AliAgentWorkflowFactory` sequential/group-chat/Magentic managers, and their model-callable workflow tools from the active registry. They are not left behind as nested Agent Framework loops. Valuable researcher, office/artifact, software-engineering, and workflow guidance is retained as Agent Skills, recipe manifests, and capability descriptions consumed by Ali's one planner.
@@ -318,6 +365,8 @@ The C# group exposes five high-power model tools:
 5. `roslyn_verify_changeset`
 
 `inspect` resolves the solution, document, symbol, diagnostics, references, implementations, call relationships, and target version. `list` discovers applicable Roslyn code fixes and refactorings. A returned action handle binds provider identity, equivalence key, action title, diagnostic IDs, document/span, and exact solution/document hashes; title text alone is never an executable identity. `preview` runs an action in a temporary workspace and stores a semantic changeset including added, removed, renamed, and project documents. `verify` first runs Roslyn analysis, affected MSBuild targets, and the smallest relevant tests against that temporary workspace. `apply` publishes only a non-stale, approved changeset with a matching pre-verification receipt through the logical transaction below, then `verify` confirms the canonical workspace still matches the previewed result. Provider exceptions become evidence and cannot partially satisfy the work item.
+
+Checkpoint 7 gives preview compilation its own class-level `AdhocWorkspace` manager. It clones the canonical project's parse/compilation options and resolves the target framework's reference assemblies explicitly (including the project's actual WPF and package references) instead of depending on whichever assemblies happen to be loaded in Ali's process. `MSBuildWorkspace` remains the canonical solution loader; the temporary `AdhocWorkspace` is the isolated semantic gate. If the exact target references cannot be established, verification fails closed and no changeset can publish. This is target-framework aware rather than hardcoded to .NET 8, 9, 10, or the framework used to build Ali herself.
 
 Model-selected recipes describe semantic rename, compiler repair, refactoring, public API change, call-flow investigation, architecture change, and final delivery verification. Recipes are descriptions and dependency graphs, not English routers.
 
@@ -438,6 +487,7 @@ src/Modules/Orchestration/
 src/Modules/Coding/RoslynActions/
   AliRoslynActionDeck.cs
   AliRoslynActionDiscovery.cs
+  AliRoslynPreviewWorkspaceManager.cs
   AliRoslynChangeSetStore.cs
   AliRoslynChangeSetValidator.cs
   AliRoslynChangeSetVerifier.cs
@@ -460,9 +510,8 @@ Capability modules remain separate. Orchestration does not absorb memory, web, f
 5. **Journal and recovery:** add one transition writer, write-ahead action intents, idempotency, in-doubt reconciliation, answer publication receipts, and turn control.
 6. **Progress and planning graph:** add validated model-authored work deltas, evidence-backed status, action/effect identities, and semantic no-progress recovery; retain unlimited advancing work.
 7. **Transactional changesets and Roslyn Action Deck:** enforce source effects through the execution broker; implement inspect/list/preview/pre-verify/apply/post-verify plus non-C# staged all-or-reconciled publication.
-8. **Context and final composition:** add backend-aware token projection, typed paging, `BeginCompletion`, hash-chained answer segments, and exact rendered-answer review.
-9. **Completion critic:** run a fresh critic only after a finished completion draft and return yes or all material unmet outcomes.
-10. **Cutover:** compare shadow traces with recorded regressions, switch the harness, then delete the obsolete compatibility client, external-agent ownership, nested workflows, and duplicate registries.
+8. **Completion hardening and regression:** add full backend-aware context/evidence paging, hash-chained answer segments, exact rendered-answer criticism, an isolated shadow-observation lane, fault injection, recorded regression traces, and long-running soak/property verification; delete superseded compatibility paths only after their cutover evidence passes.
+9. **Provider, vision, deployment, and release cutover:** finish provider-neutral selection for LM Studio, Lemonade, Ollama, llama.cpp, and an explicitly configured secure remote OpenAI-compatible endpoint; add advisory vision discovery with manual override and conditional image attachment UI; clean runtime/deployment artifacts, repair the shortcut, publish the final architecture PDF, and complete live release verification.
 
 ### Current-to-V2 responsibility map
 

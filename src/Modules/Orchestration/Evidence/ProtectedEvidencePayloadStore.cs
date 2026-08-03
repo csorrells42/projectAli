@@ -18,6 +18,8 @@ internal sealed record ProtectedEvidencePayloadReference(
 
 internal sealed class ProtectedEvidencePayloadStore
 {
+    internal const int MaximumPlaintextBytes = 8 * 1024 * 1024;
+    private const int MaximumEnvelopeBytes = MaximumPlaintextBytes + 64;
     private readonly string _rootDirectory;
     private readonly string _assistantProfileBinding;
 
@@ -43,6 +45,11 @@ internal sealed class ProtectedEvidencePayloadStore
         CancellationToken cancellationToken)
     {
         RequireStorageKey(turnStorageKey);
+        if (plaintext.Length > MaximumPlaintextBytes)
+        {
+            throw new InvalidDataException(
+                $"Protected orchestration evidence cannot exceed {MaximumPlaintextBytes} bytes.");
+        }
         var binding = CreateBinding(
             turnStorageKey,
             evidenceId,
@@ -56,18 +63,20 @@ internal sealed class ProtectedEvidencePayloadStore
         {
             var digest = Convert.ToHexString(SHA256.HashData(envelope)).ToLowerInvariant();
             var directory = GetPayloadDirectory(turnStorageKey);
-            Directory.CreateDirectory(directory);
+            WindowsOrchestrationFileBoundary.EnsureRegularDirectoryPath(
+                directory,
+                "The protected evidence payload directory is not a regular local directory.");
             var finalPath = Path.Combine(directory, digest + ".evidence");
             var temporaryPath = Path.Combine(directory, $".{Guid.NewGuid():N}.payload.tmp");
             try
             {
-                await using (var stream = new FileStream(
+                await using (var stream = WindowsOrchestrationFileBoundary.OpenRegularFile(
                                  temporaryPath,
                                  FileMode.CreateNew,
                                  FileAccess.Write,
                                  FileShare.None,
-                                 4096,
-                                 FileOptions.Asynchronous | FileOptions.WriteThrough))
+                                 writeThrough: true,
+                                 "The protected evidence temporary payload is not a regular local file."))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     await stream.WriteAsync(envelope, CancellationToken.None).ConfigureAwait(false);
@@ -75,14 +84,17 @@ internal sealed class ProtectedEvidencePayloadStore
                     stream.Flush(flushToDisk: true);
                 }
 
-                File.Move(temporaryPath, finalPath, overwrite: false);
+                WindowsOrchestrationFileBoundary.MoveRegularFile(
+                    temporaryPath,
+                    finalPath,
+                    replaceExisting: false,
+                    "The protected evidence payload is not a regular local file.");
             }
             finally
             {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
+                _ = WindowsOrchestrationFileBoundary.DeleteRegularFileNoFollow(
+                    temporaryPath,
+                    "The protected evidence temporary payload is not a regular local file.");
             }
 
             return new ProtectedEvidencePayloadReference(digest, digest);
@@ -101,13 +113,7 @@ internal sealed class ProtectedEvidencePayloadStore
     {
         RequireStorageKey(turnStorageKey);
         var path = GetValidatedPayloadPath(turnStorageKey, reference.Reference);
-        if (!File.Exists(path))
-        {
-            throw new InvalidDataException(
-                $"Protected orchestration evidence '{reference.Reference}' is missing.");
-        }
-
-        var envelope = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        var envelope = await ReadBoundedEnvelopeAsync(path, cancellationToken).ConfigureAwait(false);
         try
         {
             var digest = Convert.ToHexString(SHA256.HashData(envelope)).ToLowerInvariant();
@@ -131,7 +137,7 @@ internal sealed class ProtectedEvidencePayloadStore
     {
         RequireStorageKey(turnStorageKey);
         var path = GetValidatedPayloadPath(turnStorageKey, record.ProtectedPayloadReference);
-        var envelope = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+        var envelope = await ReadBoundedEnvelopeAsync(path, cancellationToken).ConfigureAwait(false);
         try
         {
             var digest = Convert.ToHexString(SHA256.HashData(envelope)).ToLowerInvariant();
@@ -185,6 +191,27 @@ internal sealed class ProtectedEvidencePayloadStore
             toolNameDigest,
             providerIdDigest,
             metadataDigest);
+
+    private static async Task<byte[]> ReadBoundedEnvelopeAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(path))
+            ?? throw new InvalidDataException(
+                "The protected evidence payload path has no directory.");
+        WindowsOrchestrationFileBoundary.ValidateRegularDirectoryPath(
+            directory,
+            "The protected evidence payload directory is not a regular local directory.");
+        return await WindowsBoundedFileReader.TryReadExactlyAsync(
+            WindowsOrchestrationFileBoundary.ToExtendedLengthWin32Path(path),
+            minimumLength: 1,
+            MaximumEnvelopeBytes,
+            "The protected evidence payload is not a regular local file.",
+            $"A protected orchestration evidence envelope must be between 1 and {MaximumEnvelopeBytes} bytes.",
+            "The protected orchestration evidence envelope changed while it was being read.",
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidDataException("A referenced protected orchestration evidence payload is missing.");
+    }
 
     private string GetPayloadDirectory(string turnStorageKey) =>
         Path.Combine(_rootDirectory, "turns", turnStorageKey, "payloads");

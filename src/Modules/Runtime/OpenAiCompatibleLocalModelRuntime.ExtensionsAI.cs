@@ -96,8 +96,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         bool useNativeOllama)
     {
         var suppressPersona = options?.AdditionalProperties is { } properties
-            && properties.TryGetValue("ali.internalRouting", out var internalRouting)
+            && properties.TryGetValue(
+                AliInternalModelRoutingProperties.SuppressInjectedPersona,
+                out var internalRouting)
             && internalRouting is true;
+        var boundReasoningEffort = ResolveBoundReasoningEffort(options);
         var serializedMessages = BuildExtensionsAiMessages(messages, suppressPersona, useNativeOllama);
         var lmStudioRequiredFunctionName = IsLmStudioEndpoint()
             && options?.ToolMode is RequiredChatToolMode { RequiredFunctionName: { Length: > 0 } requiredName }
@@ -117,7 +120,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 messages = serializedMessages,
                 tools = tools.Length == 0 ? null : tools,
                 stream = false,
-                think = ResolveNativeThinkingValue(),
+                think = ResolveNativeThinkingValue(boundReasoningEffort),
                 keep_alive = OllamaRuntimeSafetyPolicy.KeepAlive,
                 options = new
                 {
@@ -144,21 +147,41 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 max_tokens = maxTokens,
                 temperature = _options.Temperature,
                 top_p = _options.TopP,
-                chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(),
+                chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(boundReasoningEffort),
                 think = (bool?)null
             };
 
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         if (useNativeOllama)
         {
-            ValidateNativeOllamaPayload(json);
+            ValidateNativeOllamaPayload(json, boundReasoningEffort);
         }
         else
         {
-            ValidateOpenAiCompatiblePayload(json);
+            ValidateOpenAiCompatiblePayload(json, boundReasoningEffort);
         }
 
         return json;
+    }
+
+    private static string? ResolveBoundReasoningEffort(ChatOptions? options)
+    {
+        if (options?.AdditionalProperties is not { } properties
+            || !properties.TryGetValue(
+                AliInternalModelRoutingProperties.BoundReasoningEffort,
+                out var boundValue))
+        {
+            return null;
+        }
+
+        if (boundValue is not string boundReasoningEffort
+            || string.IsNullOrWhiteSpace(boundReasoningEffort))
+        {
+            throw new InvalidOperationException(
+                "A bound model dispatch supplied an invalid reasoning-effort snapshot.");
+        }
+
+        return boundReasoningEffort;
     }
 
     private object[] BuildExtensionsAiMessages(

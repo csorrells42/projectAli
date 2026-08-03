@@ -890,7 +890,12 @@
                 </ItemsControl>
 
                 <Grid Grid.Row="1" Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <Expander
+                          Grid.Row="0"
                           AutomationProperties.AutomationId="AliActivityPanel"
                           IsExpanded="{Binding IsAgentActivityExpanded, Mode=TwoWay}"
                           Foreground="{StaticResource TextBrush}"
@@ -994,6 +999,54 @@
                     </Grid>
                     </Expander>
 
+                    <Border Grid.Row="1"
+                            AutomationProperties.AutomationId="MainChatRecoveryPanel"
+                            Visibility="{Binding IsRecoveryDecisionRequired, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Background="#201C2E"
+                            BorderBrush="#7C5CE7"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="12"
+                            Margin="0,0,12,8"
+                            HorizontalAlignment="Stretch">
+                        <StackPanel>
+                            <TextBlock Text="{Binding RecoveryDecisionQuestion}"
+                                       Foreground="#F1ECFF"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"
+                                       TextTrimming="None"
+                                       Margin="0,0,0,10" />
+                            <Grid HorizontalAlignment="Stretch">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0"
+                                        AutomationProperties.AutomationId="MainChatRecoveryPrimaryButton"
+                                        Command="{Binding ResolvePrimaryRecoveryDecisionCommand}"
+                                        MinHeight="44"
+                                        Padding="10,8"
+                                        HorizontalContentAlignment="Stretch">
+                                    <TextBlock Text="{Binding PrimaryRecoveryDecisionText}"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               TextTrimming="None" />
+                                </Button>
+                                <Button Grid.Column="2"
+                                        AutomationProperties.AutomationId="MainChatRecoverySecondaryButton"
+                                        Command="{Binding ResolveSecondaryRecoveryDecisionCommand}"
+                                        MinHeight="44"
+                                        Padding="10,8"
+                                        HorizontalContentAlignment="Stretch">
+                                    <TextBlock Text="{Binding SecondaryRecoveryDecisionText}"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               TextTrimming="None" />
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </Grid>
 
                 <Border Grid.Row="2"
@@ -1028,6 +1081,7 @@
                                  Padding="8,10"
                                  FontSize="15"
                                  VerticalContentAlignment="Center"
+                                 IsReadOnly="{Binding IsComposerReadOnly}"
                                  ToolTip="Spelling is checked as you type. Right-click an underlined word for suggestions."
                                  Text="{Binding ComposerText, UpdateSourceTrigger=PropertyChanged}"
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />

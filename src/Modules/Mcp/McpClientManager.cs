@@ -200,8 +200,10 @@ public sealed class McpToolSession : IAsyncDisposable
     private string CalculateSessionRevision()
     {
         using var revision = new CapabilityRevisionBuilder();
-        revision.Add("ali-incoming-mcp-tool-session-v1");
-        revision.Add(SessionId);
+        // A session ID identifies one transport lifetime and is intentionally not part of
+        // the durable capability binding. A paused turn necessarily opens a fresh transport
+        // on explicit resume; identical settings, schemas and policies must bind identically.
+        revision.Add("ali-incoming-mcp-tool-binding-v2");
         revision.Add(SettingsRevision);
         revision.Add(Tools.Count);
         foreach (var tool in Tools

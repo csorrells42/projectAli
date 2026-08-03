@@ -9,6 +9,18 @@ public sealed record CapabilityInvocationBlockedReason(
     string DependencyId,
     string Message);
 
+public sealed record CapabilityInvocationAuthorization(
+    bool Allowed,
+    IReadOnlyList<CapabilityAvailabilityReason> Reasons)
+{
+    public static CapabilityInvocationAuthorization Allow() =>
+        new(true, Array.Empty<CapabilityAvailabilityReason>());
+
+    public static CapabilityInvocationAuthorization Block(
+        params CapabilityAvailabilityReason[] reasons) =>
+        new(false, Array.AsReadOnly(reasons ?? []));
+}
+
 public sealed class CapabilityInvocationBlockedResult
 {
     internal CapabilityInvocationBlockedResult(
@@ -93,6 +105,12 @@ public sealed class TerminalCapabilityEnforcementProvider : AIContextProvider
     private readonly string _invocationBoundaryDependencyId;
     private readonly string _invocationBoundaryChangedMessage;
     private readonly string _invocationBoundaryUnavailableMessage;
+    private readonly Func<
+        CapabilityInvocationLease,
+        AIFunctionArguments,
+        bool,
+        CancellationToken,
+        ValueTask<CapabilityInvocationAuthorization>>? _actionExecutionBoundary;
     private readonly CapabilityResolver _resolver = new();
 
     public TerminalCapabilityEnforcementProvider(
@@ -107,7 +125,13 @@ public sealed class TerminalCapabilityEnforcementProvider : AIContextProvider
         Func<string>? invocationBoundaryRevisionAccessor = null,
         string invocationBoundaryDependencyId = "external-security-boundary",
         string invocationBoundaryChangedMessage = "An external security boundary changed after this tool was planned.",
-        string invocationBoundaryUnavailableMessage = "An external security boundary could not be verified")
+        string invocationBoundaryUnavailableMessage = "An external security boundary could not be verified",
+        Func<
+            CapabilityInvocationLease,
+            AIFunctionArguments,
+            bool,
+            CancellationToken,
+            ValueTask<CapabilityInvocationAuthorization>>? actionExecutionBoundary = null)
     {
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
         _runtimeStateAccessor = runtimeStateAccessor
@@ -134,6 +158,7 @@ public sealed class TerminalCapabilityEnforcementProvider : AIContextProvider
                 "An invocation-boundary unavailable message is required.",
                 nameof(invocationBoundaryUnavailableMessage))
             : invocationBoundaryUnavailableMessage;
+        _actionExecutionBoundary = actionExecutionBoundary;
     }
 
     protected override ValueTask<AIContext> InvokingCoreAsync(
@@ -191,6 +216,8 @@ public sealed class TerminalCapabilityEnforcementProvider : AIContextProvider
                     continue;
                 }
 
+                var requiresApproval = ContainsApprovalMarker(projectedFunction)
+                    || descriptor.Permission.RequiresApproval;
                 var lease = planning.CreateInvocationLease(function.Name);
                 AIFunction guarded = new CapabilityInvocationLeaseAIFunction(
                     projectedFunction,
@@ -207,9 +234,9 @@ public sealed class TerminalCapabilityEnforcementProvider : AIContextProvider
                     invocationBoundaryUnavailableMessage: _invocationBoundaryUnavailableMessage,
                     activeUserRevisionAccessor: _activeUserRevisionAccessor,
                     plannedActiveUserRevision: plannedActiveUserRevision,
-                    livePlanningAccessor: token => PublishExactRuntime(inventory, token));
-                var requiresApproval = ContainsApprovalMarker(projectedFunction)
-                    || descriptor.Permission.RequiresApproval;
+                    livePlanningAccessor: token => PublishExactRuntime(inventory, token),
+                    requiresApproval: requiresApproval,
+                    actionExecutionBoundary: _actionExecutionBoundary);
                 if (requiresApproval && !ContainsApprovalMarker(guarded))
                 {
                     guarded = new ApprovalRequiredAIFunction(guarded);
@@ -356,10 +383,17 @@ internal sealed class CapabilityInvocationLeaseAIFunction(
     string invocationBoundaryUnavailableMessage = "Persisted MCP security settings could not be verified",
     Func<string>? activeUserRevisionAccessor = null,
     string? plannedActiveUserRevision = null,
-    Func<CancellationToken, CapabilityPlanningPublication>? livePlanningAccessor = null) :
+    Func<CancellationToken, CapabilityPlanningPublication>? livePlanningAccessor = null,
+    bool requiresApproval = false,
+    Func<
+        CapabilityInvocationLease,
+        AIFunctionArguments,
+        bool,
+        CancellationToken,
+        ValueTask<CapabilityInvocationAuthorization>>? actionExecutionBoundary = null) :
     DelegatingAIFunction(innerFunction)
 {
-    protected override ValueTask<object?> InvokeCoreAsync(
+    protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
@@ -450,12 +484,43 @@ internal sealed class CapabilityInvocationLeaseAIFunction(
                 .Concat(validation.Reasons)
                 .DistinctBy(reason => (reason.Code, reason.DependencyId, reason.Message))
                 .ToArray();
-            return ValueTask.FromResult<object?>(new CapabilityInvocationBlockedResult(
+            return new CapabilityInvocationBlockedResult(
                 lease.ToolName,
                 validation.CurrentResolutionRevision,
-                reasons));
+                reasons);
         }
 
-        return InnerFunction.InvokeAsync(arguments, cancellationToken);
+        if (actionExecutionBoundary is not null)
+        {
+            var authorization = await actionExecutionBoundary(
+                    lease,
+                    arguments,
+                    requiresApproval,
+                    cancellationToken)
+                .ConfigureAwait(false)
+                ?? CapabilityInvocationAuthorization.Block(
+                    new CapabilityAvailabilityReason(
+                        CapabilityAvailabilityReasonCode.InvocationLeaseStale,
+                        "durable-action-boundary",
+                        "The durable action boundary returned no authorization."));
+            if (!authorization.Allowed)
+            {
+                var reasons = authorization.Reasons.Count == 0
+                    ? new[]
+                    {
+                        new CapabilityAvailabilityReason(
+                            CapabilityAvailabilityReasonCode.InvocationLeaseStale,
+                            "durable-action-boundary",
+                            "The durable action boundary withheld this invocation.")
+                    }
+                    : authorization.Reasons;
+                return new CapabilityInvocationBlockedResult(
+                    lease.ToolName,
+                    validation.CurrentResolutionRevision,
+                    reasons);
+            }
+        }
+
+        return await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
     }
 }

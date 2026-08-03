@@ -1,7 +1,9 @@
 using System.Text.Json.Serialization;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.UserMemory;
+using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
 
@@ -102,6 +104,23 @@ internal sealed record PendingExplicitShadowTerminal(
     DateTimeOffset CompletedAtUtc,
     EvidencePermissionMetadata Permission);
 
+internal sealed record CoordinatorPermissionDecisionReceipt(
+    EvidencePermissionMetadata Permission,
+    string Source,
+    string? ApprovalRequestId);
+
+internal interface ICoordinatorActionExecutionAuthority
+{
+    TurnIdentity DurableIdentity { get; }
+
+    ValueTask<CapabilityInvocationAuthorization> PrepareExecutionAsync(
+        CapabilityInvocationLease lease,
+        string callId,
+        AIFunctionArguments arguments,
+        bool requiresApproval,
+        CancellationToken cancellationToken);
+}
+
 internal sealed class CoordinatorTurnContext(
     string conversationId,
     string userMessageId,
@@ -122,10 +141,14 @@ internal sealed class CoordinatorTurnContext(
 
     private readonly long _startedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
     private readonly Dictionary<string, CoordinatorToolPlan> _toolPlans = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _activeToolInvocationCounts = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _toolPlanRetirementRequests = new(StringComparer.Ordinal);
     private readonly HashSet<string> _capabilityIssueReports = new(StringComparer.Ordinal);
     private readonly HashSet<string> _shadowObservedCallIds = new(StringComparer.Ordinal);
     private readonly Queue<string> _shadowObservedOldestFirst = new();
     private readonly Dictionary<string, EvidencePermissionMetadata> _shadowPermissions =
+        new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CoordinatorPermissionDecisionReceipt> _permissionReceipts =
         new(StringComparer.Ordinal);
     private readonly Queue<string> _shadowPermissionOldestFirst = new();
     private readonly Dictionary<string, EvidencePermissionMetadata> _shadowStandingPermissions =
@@ -134,7 +157,9 @@ internal sealed class CoordinatorTurnContext(
     private readonly Dictionary<string, PendingExplicitShadowTerminalEntry> _pendingExplicitShadowTerminals =
         new(StringComparer.Ordinal);
     private readonly LinkedList<string> _pendingExplicitShadowOldestFirst = new();
+    private readonly AsyncLocal<ActiveToolInvocationFrame?> _activeToolInvocation = new();
     private readonly object _toolPlanSync = new();
+    private ICoordinatorActionExecutionAuthority? _actionExecutionAuthority;
 
     public string ConversationId { get; } = conversationId;
 
@@ -168,8 +193,6 @@ internal sealed class CoordinatorTurnContext(
 
     public List<CoordinatorSourceItem> WebSources { get; } = [];
 
-    public CoordinatorToolPlan? CurrentToolPlan { get; private set; }
-
     public bool TryRegisterCapabilityIssueReport(string reportKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reportKey);
@@ -185,7 +208,6 @@ internal sealed class CoordinatorTurnContext(
         lock (_toolPlanSync)
         {
             _toolPlans[plan.CallId] = plan;
-            CurrentToolPlan = plan;
         }
     }
 
@@ -197,25 +219,134 @@ internal sealed class CoordinatorTurnContext(
         }
     }
 
-    public bool TryGetCurrentToolCallId(string toolName, out string? callId)
+    internal int RememberedToolPlanCount
     {
-        if (string.IsNullOrWhiteSpace(toolName))
+        get
         {
-            callId = null;
+            lock (_toolPlanSync)
+            {
+                return _toolPlans.Count;
+            }
+        }
+    }
+
+    // A terminal consumer may finish while the invocation lease is still unwinding.
+    // Record that exact retirement and let the last matching lease remove the plan.
+    internal bool RequestToolPlanRetirement(string callId)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
             return false;
         }
 
         lock (_toolPlanSync)
         {
-            if (CurrentToolPlan is not null
-                && string.Equals(CurrentToolPlan.ToolName, toolName, StringComparison.Ordinal))
+            if (!_toolPlans.ContainsKey(callId))
             {
-                callId = CurrentToolPlan.CallId;
+                return false;
+            }
+
+            if (_activeToolInvocationCounts.TryGetValue(callId, out var activeCount)
+                && activeCount > 0)
+            {
+                _toolPlanRetirementRequests.Add(callId);
                 return true;
             }
 
-            callId = null;
+            _toolPlanRetirementRequests.Remove(callId);
+            return _toolPlans.Remove(callId);
+        }
+    }
+
+    internal bool TryEnterActiveToolInvocation(
+        string callId,
+        string toolName,
+        out IDisposable? scope)
+    {
+        scope = null;
+        if (!IsBoundedShadowCallId(callId)
+            || !IsBoundedShadowToolName(toolName))
+        {
             return false;
+        }
+
+        CoordinatorToolPlan plan;
+        lock (_toolPlanSync)
+        {
+            if (_actionExecutionAuthority is null
+                || !_toolPlans.TryGetValue(callId, out var candidate)
+                || _toolPlanRetirementRequests.Contains(callId)
+                || !string.Equals(candidate.ToolName, toolName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            plan = candidate;
+            _activeToolInvocationCounts[callId] =
+                _activeToolInvocationCounts.GetValueOrDefault(callId) + 1;
+        }
+
+        var frame = new ActiveToolInvocationFrame(
+            plan,
+            _activeToolInvocation.Value);
+        _activeToolInvocation.Value = frame;
+        scope = new ActiveToolInvocationLease(this, frame);
+        return true;
+    }
+
+    internal bool TryGetActiveToolCallId(string toolName, out string? callId)
+    {
+        var frame = _activeToolInvocation.Value;
+        if (frame?.IsActive == true
+            && string.Equals(frame.ToolName, toolName, StringComparison.Ordinal))
+        {
+            callId = frame.CallId;
+            return true;
+        }
+
+        callId = null;
+        return false;
+    }
+
+    internal bool TryGetActiveToolPlan(string toolName, out CoordinatorToolPlan? plan)
+    {
+        var frame = _activeToolInvocation.Value;
+        if (frame?.IsActive == true
+            && string.Equals(frame.ToolName, toolName, StringComparison.Ordinal))
+        {
+            plan = frame.Plan;
+            return true;
+        }
+
+        plan = null;
+        return false;
+    }
+
+    private void ExitActiveToolInvocation(ActiveToolInvocationFrame frame)
+    {
+        frame.Deactivate();
+        lock (_toolPlanSync)
+        {
+            if (_activeToolInvocationCounts.TryGetValue(frame.CallId, out var activeCount))
+            {
+                if (activeCount <= 1)
+                {
+                    _activeToolInvocationCounts.Remove(frame.CallId);
+                    if (_toolPlanRetirementRequests.Remove(frame.CallId))
+                    {
+                        _toolPlans.Remove(frame.CallId);
+                    }
+                }
+                else
+                {
+                    _activeToolInvocationCounts[frame.CallId] = activeCount - 1;
+                }
+            }
+        }
+
+        if (ReferenceEquals(_activeToolInvocation.Value, frame))
+        {
+            _activeToolInvocation.Value = frame.Previous;
         }
     }
 
@@ -259,7 +390,9 @@ internal sealed class CoordinatorTurnContext(
 
     public void RecordShadowPermission(
         string callId,
-        EvidencePermissionMetadata permission)
+        EvidencePermissionMetadata permission,
+        string source = "runtime",
+        string? approvalRequestId = null)
     {
         if (!IsBoundedShadowCallId(callId)
             || !IsBoundedShadowPermission(permission))
@@ -272,6 +405,10 @@ internal sealed class CoordinatorTurnContext(
             if (_shadowPermissions.ContainsKey(callId))
             {
                 _shadowPermissions[callId] = permission with { };
+                _permissionReceipts[callId] = new CoordinatorPermissionDecisionReceipt(
+                    permission with { },
+                    source,
+                    approvalRequestId);
                 return;
             }
 
@@ -279,10 +416,78 @@ internal sealed class CoordinatorTurnContext(
             {
                 var oldest = _shadowPermissionOldestFirst.Dequeue();
                 _shadowPermissions.Remove(oldest);
+                _permissionReceipts.Remove(oldest);
             }
 
             _shadowPermissions.Add(callId, permission with { });
+            _permissionReceipts.Add(
+                callId,
+                new CoordinatorPermissionDecisionReceipt(
+                    permission with { },
+                    source,
+                    approvalRequestId));
             _shadowPermissionOldestFirst.Enqueue(callId);
+        }
+    }
+
+    public bool TryGetPermissionReceipt(
+        string callId,
+        out CoordinatorPermissionDecisionReceipt? receipt)
+    {
+        if (!IsBoundedShadowCallId(callId))
+        {
+            receipt = null;
+            return false;
+        }
+
+        lock (_toolPlanSync)
+        {
+            if (_permissionReceipts.TryGetValue(callId, out var stored))
+            {
+                receipt = stored with { Permission = stored.Permission with { } };
+                return true;
+            }
+
+            receipt = null;
+            return false;
+        }
+    }
+
+    public void RegisterActionExecutionAuthority(ICoordinatorActionExecutionAuthority authority)
+    {
+        ArgumentNullException.ThrowIfNull(authority);
+        lock (_toolPlanSync)
+        {
+            if (_actionExecutionAuthority is not null
+                && !ReferenceEquals(_actionExecutionAuthority, authority))
+            {
+                throw new InvalidOperationException(
+                    "This visible turn already has a durable action execution authority.");
+            }
+
+            _actionExecutionAuthority = authority;
+        }
+    }
+
+    public void ClearActionExecutionAuthority(ICoordinatorActionExecutionAuthority authority)
+    {
+        ArgumentNullException.ThrowIfNull(authority);
+        lock (_toolPlanSync)
+        {
+            if (ReferenceEquals(_actionExecutionAuthority, authority))
+            {
+                _actionExecutionAuthority = null;
+            }
+        }
+    }
+
+    public bool TryGetActionExecutionAuthority(
+        out ICoordinatorActionExecutionAuthority? authority)
+    {
+        lock (_toolPlanSync)
+        {
+            authority = _actionExecutionAuthority;
+            return authority is not null;
         }
     }
 
@@ -477,6 +682,40 @@ internal sealed class CoordinatorTurnContext(
         PendingExplicitShadowTerminal Terminal,
         LinkedListNode<string> Node);
 
+    private sealed class ActiveToolInvocationFrame(
+        CoordinatorToolPlan plan,
+        ActiveToolInvocationFrame? previous)
+    {
+        private int _active = 1;
+
+        public CoordinatorToolPlan Plan { get; } = plan;
+
+        public string CallId => Plan.CallId;
+
+        public string ToolName => Plan.ToolName;
+
+        public ActiveToolInvocationFrame? Previous { get; } = previous;
+
+        public bool IsActive => Volatile.Read(ref _active) != 0;
+
+        public void Deactivate() => Interlocked.Exchange(ref _active, 0);
+    }
+
+    private sealed class ActiveToolInvocationLease(
+        CoordinatorTurnContext owner,
+        ActiveToolInvocationFrame frame) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                owner.ExitActiveToolInvocation(frame);
+            }
+        }
+    }
+
     public void RecordPermissionDecision(AgentToolApprovalChoice choice)
     {
         if (choice == AgentToolApprovalChoice.Deny)
@@ -506,7 +745,8 @@ internal sealed class CoordinatorTurnContext(
         double? elapsedMilliseconds = null,
         AgentToolApprovalPrompt? approvalPrompt = null,
         string? activityKey = null,
-        AgentToolExecutionReceipt? executionReceipt = null) =>
+        AgentToolExecutionReceipt? executionReceipt = null,
+        AgentRecoveryPrompt? recoveryPrompt = null) =>
         publish(new AssistantStreamChunk(
             ConversationId,
             UserMessageId,
@@ -520,7 +760,25 @@ internal sealed class CoordinatorTurnContext(
                 System.Diagnostics.Stopwatch.GetElapsedTime(_startedTimestamp).TotalMilliseconds,
             ApprovalPrompt: approvalPrompt,
             ActivityKey: activityKey,
-            ExecutionReceipt: executionReceipt));
+            ExecutionReceipt: executionReceipt,
+            RecoveryPrompt: recoveryPrompt));
+
+    internal void PublishInterimResponse(
+        string responseText,
+        string? finishReason = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(responseText);
+        publish(new AssistantStreamChunk(
+            ConversationId,
+            UserMessageId,
+            AssistantMessageId,
+            responseText,
+            Ali.Modules.Evidence.EvidenceStatus.Unknown,
+            finishReason)
+        {
+            IsInterimPause = true
+        });
+    }
 }
 
 internal sealed record CodingTurnDisposition(

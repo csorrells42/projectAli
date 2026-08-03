@@ -26,6 +26,7 @@ public sealed class AliWorkstationFileAccess
     ];
 
     private readonly AliWorkstationFileStore _rawStore;
+    private readonly AuditedAgentFileStore _auditedStore;
     private readonly AgentToolPermissionStore _permissions;
 
     public AliWorkstationFileAccess(
@@ -36,7 +37,8 @@ public sealed class AliWorkstationFileAccess
         _rawStore = store;
         Audit = audit;
         _permissions = permissions;
-        Store = new AuditedAgentFileStore(store, audit);
+        _auditedStore = new AuditedAgentFileStore(store, audit);
+        Store = _auditedStore;
     }
 
     public AgentFileStore Store { get; }
@@ -52,6 +54,9 @@ public sealed class AliWorkstationFileAccess
 
     internal AliResolvedWorkstationPath ResolvePhysicalDirectoryPath(string path) =>
         _rawStore.ResolvePhysicalDirectoryPath(path);
+
+    internal void ConfigureOutcomeReporting(AliFrameworkToolOutcomeSidecar outcomes) =>
+        _auditedStore.ConfigureOutcomeReporting(outcomes);
 
     internal Dictionary<string, object?> NormalizeProviderToolArguments(
         string toolName,

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ali.Modules.Coordinator;
 using Ali.Modules.UserMemory;
 using Microsoft.Agents.AI;
 
@@ -26,6 +27,7 @@ public sealed record AgentWorkMemoryAuditEntry(
 public sealed class AliAgentWorkMemory
 {
     private readonly AsyncLocal<ScopeFrame?> _scope = new();
+    private readonly ScopedAgentWorkMemoryStore _store;
 
     public AliAgentWorkMemory(string userDataRoot)
     {
@@ -36,11 +38,12 @@ public sealed class AliAgentWorkMemory
         AuditPath = Path.Combine(fullRoot, "Logs", "agent-work-memory-actions.jsonl");
         Directory.CreateDirectory(RootPath);
         Directory.CreateDirectory(RecoverableTrashPath);
-        Store = new ScopedAgentWorkMemoryStore(
+        _store = new ScopedAgentWorkMemoryStore(
             RootPath,
             RecoverableTrashPath,
             AuditPath,
             () => _scope.Value?.Scope);
+        Store = _store;
     }
 
     public AgentFileStore Store { get; }
@@ -67,6 +70,9 @@ public sealed class AliAgentWorkMemory
 
     internal string GetWorkspacePath(string userStableId, string conversationId) =>
         Path.Combine(RootPath, BuildScopedRelativePath(userStableId, conversationId));
+
+    internal void ConfigureOutcomeReporting(AliFrameworkToolOutcomeSidecar outcomes) =>
+        _store.ConfigureOutcomeReporting(outcomes);
 
     private static string BuildScopedRelativePath(string userStableId, string conversationId) =>
         Path.Combine(
@@ -127,6 +133,20 @@ internal sealed record AgentWorkMemoryScope(
 /// </summary>
 internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
 {
+    private static readonly string[] WriteToolNames =
+    [
+        AliCapabilityCatalog.WorkMemoryWriteName,
+        AliCapabilityCatalog.WorkMemoryReplaceName,
+        AliCapabilityCatalog.WorkMemoryReplaceLinesName
+    ];
+
+    private static readonly string[] ReadAndEditToolNames =
+    [
+        AliCapabilityCatalog.WorkMemoryReadName,
+        AliCapabilityCatalog.WorkMemoryReplaceName,
+        AliCapabilityCatalog.WorkMemoryReplaceLinesName
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _rootPath;
     private readonly string _trashPath;
@@ -134,6 +154,8 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
     private readonly Func<AgentWorkMemoryScope?> _scopeAccessor;
     private readonly ConcurrentDictionary<string, ScopedStore> _stores = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _auditGate = new(1, 1);
+    private readonly object _outcomeBindingSync = new();
+    private OutcomeBinding? _outcomeBinding;
 
     public ScopedAgentWorkMemoryStore(
         string rootPath,
@@ -145,6 +167,21 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
         _trashPath = Path.GetFullPath(trashPath);
         _auditPath = Path.GetFullPath(auditPath);
         _scopeAccessor = scopeAccessor ?? throw new ArgumentNullException(nameof(scopeAccessor));
+    }
+
+    internal void ConfigureOutcomeReporting(AliFrameworkToolOutcomeSidecar outcomes)
+    {
+        ArgumentNullException.ThrowIfNull(outcomes);
+        lock (_outcomeBindingSync)
+        {
+            if (_outcomeBinding is not null)
+            {
+                throw new InvalidOperationException(
+                    "Agent work-memory outcome reporting was already configured.");
+            }
+
+            _outcomeBinding = new OutcomeBinding(outcomes);
+        }
     }
 
     public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default) =>
@@ -232,10 +269,12 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
         {
             var result = await action(store).ConfigureAwait(false);
             await AppendAuditAsync(scope, operation, path, true, Describe(result), cancellationToken).ConfigureAwait(false);
+            ReportCompleted(operation, path, result);
             return result;
         }
         catch (Exception ex)
         {
+            ReportFailed(operation);
             try
             {
                 await AppendAuditAsync(scope, operation, path, false, ex.GetType().Name, CancellationToken.None)
@@ -319,6 +358,9 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
     private static bool IsFrameworkIndex(string path) =>
         string.Equals(path?.Replace('\\', '/').Trim('/'), "memories.md", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsFrameworkDescription(string? path) =>
+        path?.Replace('\\', '/').EndsWith("_description.md", StringComparison.OrdinalIgnoreCase) == true;
+
     private static string Describe<T>(T result) => result switch
     {
         null => "not-found",
@@ -328,6 +370,88 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
         IReadOnlyCollection<FileSearchResult> matches => $"matches:{matches.Count}",
         _ => "completed"
     };
+
+    private void ReportCompleted<T>(string operation, string? path, T result)
+    {
+        if (IsFrameworkIndex(path ?? string.Empty) || IsFrameworkDescription(path))
+        {
+            return;
+        }
+
+        switch (operation)
+        {
+            case "write":
+                Report(WriteToolNames, AliFrameworkToolOutcomeSignal.Completed);
+                break;
+            case "read":
+                Report(
+                    result is null
+                        ? ReadAndEditToolNames
+                        : [AliCapabilityCatalog.WorkMemoryReadName],
+                    result is null
+                        ? AliFrameworkToolOutcomeSignal.NotFound
+                        : AliFrameworkToolOutcomeSignal.Found);
+                break;
+            case "delete" when result is bool deleted:
+                Report(
+                    [AliCapabilityCatalog.WorkMemoryDeleteName],
+                    deleted
+                        ? AliFrameworkToolOutcomeSignal.Completed
+                        : AliFrameworkToolOutcomeSignal.NotFound);
+                break;
+            case "list" when result is IReadOnlyCollection<FileStoreEntry> entries:
+                Report(
+                    [AliCapabilityCatalog.WorkMemoryListName],
+                    entries.Count == 0
+                        ? AliFrameworkToolOutcomeSignal.NoMatches
+                        : AliFrameworkToolOutcomeSignal.Completed);
+                break;
+            case "search" when result is IReadOnlyCollection<FileSearchResult> matches:
+                Report(
+                    [AliCapabilityCatalog.WorkMemorySearchName],
+                    matches.Count == 0
+                        ? AliFrameworkToolOutcomeSignal.NoMatches
+                        : AliFrameworkToolOutcomeSignal.Completed);
+                break;
+        }
+    }
+
+    private void ReportFailed(string operation)
+    {
+        var toolNames = operation switch
+        {
+            "write" or "exists" or "create-directory" => WriteToolNames,
+            "read" => ReadAndEditToolNames,
+            "delete" => [AliCapabilityCatalog.WorkMemoryDeleteName],
+            "list" => [AliCapabilityCatalog.WorkMemoryListName],
+            "search" => [AliCapabilityCatalog.WorkMemorySearchName],
+            _ => []
+        };
+        Report(toolNames, AliFrameworkToolOutcomeSignal.Failed);
+    }
+
+    private void Report(
+        IReadOnlyList<string> eligibleToolNames,
+        AliFrameworkToolOutcomeSignal signal)
+    {
+        var binding = Volatile.Read(ref _outcomeBinding);
+        if (binding is null || eligibleToolNames.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            binding.Outcomes.TryRecordActive(
+                eligibleToolNames,
+                signal);
+        }
+        catch
+        {
+            // Outcome observation never changes work-memory semantics. Missing
+            // exact evidence remains Unreported at the planning boundary.
+        }
+    }
 
     private sealed class ScopedStore
     {
@@ -344,4 +468,6 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
 
         public SemaphoreSlim Gate { get; } = new(1, 1);
     }
+
+    private sealed record OutcomeBinding(AliFrameworkToolOutcomeSidecar Outcomes);
 }

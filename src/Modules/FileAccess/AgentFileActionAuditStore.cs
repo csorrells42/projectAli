@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Ali.Modules.Coordinator;
 using Ali.Modules.UserMemory;
 using Microsoft.Agents.AI;
 
@@ -70,6 +71,38 @@ public sealed class AuditedAgentFileStore(
     AgentFileStore inner,
     AgentFileActionAuditStore audit) : AgentFileStore
 {
+    private static readonly string[] WriteToolNames =
+    [
+        AliCapabilityCatalog.FileWriteName,
+        AliCapabilityCatalog.FileReplaceName,
+        AliCapabilityCatalog.FileReplaceLinesName
+    ];
+
+    private static readonly string[] ReadAndEditToolNames =
+    [
+        AliCapabilityCatalog.FileReadName,
+        AliCapabilityCatalog.FileReplaceName,
+        AliCapabilityCatalog.FileReplaceLinesName
+    ];
+
+    private readonly object _outcomeBindingSync = new();
+    private OutcomeBinding? _outcomeBinding;
+
+    internal void ConfigureOutcomeReporting(AliFrameworkToolOutcomeSidecar outcomes)
+    {
+        ArgumentNullException.ThrowIfNull(outcomes);
+        lock (_outcomeBindingSync)
+        {
+            if (_outcomeBinding is not null)
+            {
+                throw new InvalidOperationException(
+                    "Workstation file outcome reporting was already configured.");
+            }
+
+            _outcomeBinding = new OutcomeBinding(outcomes);
+        }
+    }
+
     public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default) =>
         AuditAsync("write", path, async () =>
         {
@@ -125,10 +158,12 @@ public sealed class AuditedAgentFileStore(
                 succeeded: true,
                 Describe(result),
                 cancellationToken).ConfigureAwait(false);
+            ReportCompleted(operation, result);
             return result;
         }
         catch (Exception ex)
         {
+            ReportFailed(operation);
             try
             {
                 await audit.AppendAsync(
@@ -155,4 +190,83 @@ public sealed class AuditedAgentFileStore(
         IReadOnlyCollection<FileSearchResult> matches => $"matches:{matches.Count}",
         _ => "completed"
     };
+
+    private void ReportCompleted<T>(string operation, T result)
+    {
+        switch (operation)
+        {
+            case "write":
+                Report(WriteToolNames, AliFrameworkToolOutcomeSignal.Completed);
+                break;
+            case "read":
+                Report(
+                    result is null
+                        ? ReadAndEditToolNames
+                        : [AliCapabilityCatalog.FileReadName],
+                    result is null
+                        ? AliFrameworkToolOutcomeSignal.NotFound
+                        : AliFrameworkToolOutcomeSignal.Found);
+                break;
+            case "delete" when result is bool deleted:
+                Report(
+                    [AliCapabilityCatalog.FileDeleteName],
+                    deleted
+                        ? AliFrameworkToolOutcomeSignal.Completed
+                        : AliFrameworkToolOutcomeSignal.NotFound);
+                break;
+            case "list" when result is IReadOnlyCollection<FileStoreEntry> entries:
+                Report(
+                    [AliCapabilityCatalog.FileListName],
+                    entries.Count == 0
+                        ? AliFrameworkToolOutcomeSignal.NoMatches
+                        : AliFrameworkToolOutcomeSignal.Completed);
+                break;
+            case "search" when result is IReadOnlyCollection<FileSearchResult> matches:
+                Report(
+                    [AliCapabilityCatalog.FileSearchName],
+                    matches.Count == 0
+                        ? AliFrameworkToolOutcomeSignal.NoMatches
+                        : AliFrameworkToolOutcomeSignal.Completed);
+                break;
+        }
+    }
+
+    private void ReportFailed(string operation)
+    {
+        var toolNames = operation switch
+        {
+            "write" or "exists" or "create-directory" => WriteToolNames,
+            "read" => ReadAndEditToolNames,
+            "delete" => [AliCapabilityCatalog.FileDeleteName],
+            "list" => [AliCapabilityCatalog.FileListName],
+            "search" => [AliCapabilityCatalog.FileSearchName],
+            _ => []
+        };
+        Report(toolNames, AliFrameworkToolOutcomeSignal.Failed);
+    }
+
+    private void Report(
+        IReadOnlyList<string> eligibleToolNames,
+        AliFrameworkToolOutcomeSignal signal)
+    {
+        var binding = Volatile.Read(ref _outcomeBinding);
+        if (binding is null || eligibleToolNames.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            binding.Outcomes.TryRecordActive(
+                eligibleToolNames,
+                signal);
+        }
+        catch
+        {
+            // Outcome observation never changes the file operation. A missing signal
+            // remains fail-closed as Unreported at the planning boundary.
+        }
+    }
+
+    private sealed record OutcomeBinding(AliFrameworkToolOutcomeSidecar Outcomes);
 }

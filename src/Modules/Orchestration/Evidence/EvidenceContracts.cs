@@ -35,6 +35,7 @@ public sealed record EvidenceSourceProjection(
 
 public sealed record ProtectedEvidenceIdentity(
     string CallId,
+    string? WorkItemId,
     string ToolName,
     string CapabilityGroup,
     string ProviderId,
@@ -50,7 +51,19 @@ public sealed record ProtectedEvidenceIdentity(
 /// </summary>
 public sealed record EvidenceDraft
 {
+    /// <summary>
+    /// Optional stable ID supplied by the authoritative action journal. When present, an
+    /// interrupted retry reuses the committed evidence instead of advancing the ledger again.
+    /// </summary>
+    public string? EvidenceId { get; init; }
+
     public required string CallId { get; init; }
+
+    /// <summary>
+    /// Exact authoritative work item selected before production execution. Shadow and other
+    /// observational evidence may remain unbound by leaving this value null.
+    /// </summary>
+    public string? WorkItemId { get; init; }
 
     public required string ToolName { get; init; }
 
@@ -105,6 +118,7 @@ public sealed class EvidenceRecord
     {
         EvidenceId = stored.EvidenceId;
         TurnBindingDigest = stored.TurnBindingDigest;
+        WorkItemIdDigest = stored.WorkItemIdDigest;
         CallIdDigest = stored.CallIdDigest;
         ToolNameDigest = stored.ToolNameDigest;
         CapabilityGroupDigest = stored.CapabilityGroupDigest;
@@ -136,6 +150,7 @@ public sealed class EvidenceRecord
 
     public string EvidenceId { get; }
     public string TurnBindingDigest { get; }
+    public string? WorkItemIdDigest { get; }
     public string CallIdDigest { get; }
     public string ToolNameDigest { get; }
     public string CapabilityGroupDigest { get; }
@@ -168,6 +183,7 @@ public sealed class EvidenceRecord
 internal sealed record StoredEvidenceRecord(
     string EvidenceId,
     string TurnBindingDigest,
+    string? WorkItemIdDigest,
     string CallIdDigest,
     string ToolNameDigest,
     string CapabilityGroupDigest,

@@ -282,7 +282,7 @@ internal sealed class TurnDenialGuardAIFunction(
             return;
         }
 
-        if (!turn.TryGetCurrentToolCallId(Name, out var callId)
+        if (!turn.TryGetActiveToolCallId(Name, out var callId)
             || string.IsNullOrWhiteSpace(callId)
             || turn.WasShadowObserved(callId))
         {

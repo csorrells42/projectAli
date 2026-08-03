@@ -258,7 +258,8 @@ public sealed class AliToolCallingChatClientTests
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
-            () => turn);
+            () => turn,
+            semanticToolCatalog: new BoundedLiveRegistryTestCatalog());
         using var activeTurn = client.BeginTurn(turn);
         var write = AIFunctionFactory.Create(
             (string fileName, string content) => $"wrote {fileName}",
@@ -788,7 +789,8 @@ public sealed class AliToolCallingChatClientTests
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
-            () => null);
+            () => null,
+            semanticToolCatalog: new BoundedLiveRegistryTestCatalog());
         var read = AIFunctionFactory.Create(() => "ok", "read_current_state", "Read state.");
         var write = AIFunctionFactory.Create(() => "ok", "write_current_state", "Write state.");
 
@@ -1316,7 +1318,7 @@ public sealed class AliToolCallingChatClientTests
     }
 
     [Fact]
-    public async Task LargeDynamicToolCatalog_IsCompactedWithoutDroppingToolNames()
+    public async Task LargeDynamicToolCatalog_UsesBoundedManifestAndReportsOmittedDrawers()
     {
         using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
             AIChatRole.Assistant,
@@ -1342,7 +1344,8 @@ public sealed class AliToolCallingChatClientTests
         var prompt = string.Join("\n", inner.ObservedMessages[0].Select(message => message.Text));
         Assert.True(prompt.Length < 50_000, $"Dynamic tool catalog remained too large: {prompt.Length} characters.");
         Assert.Contains("dynamic_tool_000", prompt, StringComparison.Ordinal);
-        Assert.Contains("dynamic_tool_112", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("dynamic_tool_112", prompt, StringComparison.Ordinal);
+        Assert.Contains("additional drawer(s) omitted", prompt, StringComparison.Ordinal);
         Assert.DoesNotContain(new string('x', 300), prompt, StringComparison.Ordinal);
     }
 
@@ -2155,7 +2158,7 @@ public sealed class AliToolCallingChatClientTests
 
         Assert.Equal("Hello! How can I help?", response.Text);
         Assert.Equal(1, inner.CallCount);
-        Assert.Same(ChatToolMode.Auto, Assert.Single(inner.ToolModes));
+        Assert.Same(ChatToolMode.None, Assert.Single(inner.ToolModes));
     }
 
     [Fact]
@@ -2264,7 +2267,8 @@ public sealed class AliToolCallingChatClientTests
             inner,
             new DevelopmentLocalModelRuntime(),
             "Ali",
-            () => null);
+            () => null,
+            semanticToolCatalog: new BoundedLiveRegistryTestCatalog());
         var delete = AIFunctionFactory.Create(
             (Func<string, bool>)(_ => true),
             AliCapabilityCatalog.FileDeleteName,
@@ -2539,5 +2543,41 @@ public sealed class AliToolCallingChatClientTests
                 "Native tool test runtime is ready.",
                 DateTimeOffset.UtcNow,
                 TimeSpan.Zero));
+    }
+}
+
+internal sealed class BoundedLiveRegistryTestCatalog : ISemanticToolCatalog
+{
+    public Task<SemanticToolSelection> SelectAsync(
+        string need,
+        IReadOnlyList<AIFunctionDeclaration> liveTools,
+        IReadOnlyCollection<string> retainedToolNames,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (liveTools.Count > SafeSemanticToolFallback.MaximumToolSchemas)
+        {
+            throw new InvalidOperationException(
+                "This focused test catalog cannot expose more schemas than the production fallback bound.");
+        }
+
+        return Task.FromResult(new SemanticToolSelection(
+            liveTools.ToArray(),
+            ["Focused test selection"],
+            "Focused tests explicitly selected this bounded live registry.",
+            UsedSemanticIndex: false,
+            "All focused test schemas were selected."));
+    }
+
+    public Task<SemanticToolDiscoveryResult> DiscoverAsync(
+        string need,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new SemanticToolDiscoveryResult(
+            need,
+            [],
+            [],
+            "Not used by this focused test catalog."));
     }
 }

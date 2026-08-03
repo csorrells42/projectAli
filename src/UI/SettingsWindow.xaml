@@ -2163,9 +2163,9 @@
                                                                        FontSize="11"
                                                                        TextWrapping="Wrap"
                                                                        Margin="0,2,0,0">
-                                                                <Run Text="{Binding ToolName}" />
+                                                                <Run Text="{Binding ToolName, Mode=OneWay}" />
                                                                 <Run Text=": " />
-                                                                <Run Text="{Binding Message}" />
+                                                                <Run Text="{Binding Message, Mode=OneWay}" />
                                                             </TextBlock>
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
@@ -2202,9 +2202,9 @@
                                                            TextAlignment="Right"
                                                            TextWrapping="Wrap"
                                                            Margin="0,3,0,0">
-                                                    <Run Text="{Binding CallableToolCount}" />
+                                                    <Run Text="{Binding CallableToolCount, Mode=OneWay}" />
                                                     <Run Text=" of " />
-                                                    <Run Text="{Binding DeclaredToolCount}" />
+                                                    <Run Text="{Binding DeclaredToolCount, Mode=OneWay}" />
                                                     <Run Text=" tools ready" />
                                                 </TextBlock>
                                             </StackPanel>

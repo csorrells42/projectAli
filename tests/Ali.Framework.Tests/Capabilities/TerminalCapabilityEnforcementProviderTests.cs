@@ -592,6 +592,193 @@ public sealed class TerminalCapabilityEnforcementProviderTests
     }
 
     [Fact]
+    public async Task InvocationLease_CompletesLiveValidationBeforeAwaitingActionExecutionBoundary()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var canonical = Function(AliCapabilityCatalog.GitStatusName, "git schema");
+        var fixture = new Fixture([canonical]);
+        var runtimeSamples = 0;
+        var samplesObservedAtBoundary = 0;
+        var invoked = 0;
+        var boundaryEntered = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBoundary = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new TerminalCapabilityEnforcementProvider(
+            fixture.Owner,
+            () =>
+            {
+                Interlocked.Increment(ref runtimeSamples);
+                return fixture.State;
+            },
+            actionExecutionBoundary: async (_, _, _, token) =>
+            {
+                samplesObservedAtBoundary = Volatile.Read(ref runtimeSamples);
+                boundaryEntered.TrySetResult(true);
+                await releaseBoundary.Task.WaitAsync(token);
+                return CapabilityInvocationAuthorization.Allow();
+            });
+        var output = await provider.ApplyTerminalContextAsync(
+            new AIContext
+            {
+                Tools = new AITool[]
+                {
+                    Function(AliCapabilityCatalog.GitStatusName, "git schema", () => invoked++)
+                }
+            },
+            cancellationToken);
+        var guarded = Assert.IsAssignableFrom<AIFunction>(Assert.Single(output.Tools!));
+
+        var invocation = guarded.InvokeAsync(
+                new AIFunctionArguments(),
+                cancellationToken)
+            .AsTask();
+        await boundaryEntered.Task.WaitAsync(cancellationToken);
+
+        Assert.True(samplesObservedAtBoundary >= 2);
+        Assert.Equal(0, invoked);
+        Assert.False(invocation.IsCompleted);
+
+        releaseBoundary.TrySetResult(true);
+        await invocation;
+
+        Assert.Equal(1, invoked);
+    }
+
+    [Fact]
+    public async Task InvocationLease_LiveValidationBlockNeverReachesActionExecutionBoundary()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var canonical = Function(AliCapabilityCatalog.GitStatusName, "git schema");
+        var fixture = new Fixture([canonical]);
+        var boundaryCalls = 0;
+        var invoked = 0;
+        var provider = new TerminalCapabilityEnforcementProvider(
+            fixture.Owner,
+            () => fixture.State,
+            actionExecutionBoundary: (_, _, _, _) =>
+            {
+                Interlocked.Increment(ref boundaryCalls);
+                return ValueTask.FromResult(CapabilityInvocationAuthorization.Allow());
+            });
+        var output = await provider.ApplyTerminalContextAsync(
+            new AIContext
+            {
+                Tools = new AITool[]
+                {
+                    Function(AliCapabilityCatalog.GitStatusName, "git schema", () => invoked++)
+                }
+            },
+            cancellationToken);
+        var guarded = Assert.IsAssignableFrom<AIFunction>(Assert.Single(output.Tools!));
+
+        DisableGroup(fixture.Owner, CapabilityGroupIds.DevOpsArchitectureQuality);
+        var result = await guarded.InvokeAsync(new AIFunctionArguments(), cancellationToken);
+
+        Assert.IsType<CapabilityInvocationBlockedResult>(result);
+        Assert.Equal(0, boundaryCalls);
+        Assert.Equal(0, invoked);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvocationLease_ActionBoundaryBlockOrFaultNeverInvokesInnerEffect(
+        bool boundaryFaults)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var canonical = Function(AliCapabilityCatalog.GitStatusName, "git schema");
+        var fixture = new Fixture([canonical]);
+        var boundaryCalls = 0;
+        var invoked = 0;
+        var provider = new TerminalCapabilityEnforcementProvider(
+            fixture.Owner,
+            () => fixture.State,
+            actionExecutionBoundary: (_, _, _, _) =>
+            {
+                Interlocked.Increment(ref boundaryCalls);
+                if (boundaryFaults)
+                {
+                    return ValueTask.FromException<CapabilityInvocationAuthorization>(
+                        new InvalidOperationException("boundary fault"));
+                }
+
+                return ValueTask.FromResult(CapabilityInvocationAuthorization.Block(
+                    new CapabilityAvailabilityReason(
+                        CapabilityAvailabilityReasonCode.InvocationLeaseStale,
+                        "test-action-boundary",
+                        "The test boundary withheld execution.")));
+            });
+        var output = await provider.ApplyTerminalContextAsync(
+            new AIContext
+            {
+                Tools = new AITool[]
+                {
+                    Function(AliCapabilityCatalog.GitStatusName, "git schema", () => invoked++)
+                }
+            },
+            cancellationToken);
+        var guarded = Assert.IsAssignableFrom<AIFunction>(Assert.Single(output.Tools!));
+
+        if (boundaryFaults)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => guarded.InvokeAsync(
+                    new AIFunctionArguments(),
+                    cancellationToken)
+                .AsTask());
+        }
+        else
+        {
+            var result = await guarded.InvokeAsync(new AIFunctionArguments(), cancellationToken);
+            var blocked = Assert.IsType<CapabilityInvocationBlockedResult>(result);
+            Assert.Contains(blocked.Reasons, reason =>
+                reason.DependencyId == "test-action-boundary");
+        }
+
+        Assert.Equal(1, boundaryCalls);
+        Assert.Equal(0, invoked);
+    }
+
+    [Theory]
+    [InlineData(AliCapabilityCatalog.GitStatusName, false, false)]
+    [InlineData(AliCapabilityCatalog.GitStatusName, true, true)]
+    [InlineData(AliCapabilityCatalog.FileDeleteName, false, true)]
+    public async Task InvocationLease_PassesEffectiveApprovalRequirementToActionBoundary(
+        string toolName,
+        bool incomingHasApprovalMarker,
+        bool expectedRequiresApproval)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var canonical = Function(toolName, "canonical schema");
+        var fixture = new Fixture([canonical]);
+        bool? observedRequiresApproval = null;
+        var actual = Function(toolName, "canonical schema");
+        if (incomingHasApprovalMarker)
+        {
+            actual = new TestDelegatingAIFunction(new ApprovalRequiredAIFunction(actual));
+        }
+
+        var provider = new TerminalCapabilityEnforcementProvider(
+            fixture.Owner,
+            () => fixture.State,
+            actionExecutionBoundary: (_, _, requiresApproval, _) =>
+            {
+                observedRequiresApproval = requiresApproval;
+                return ValueTask.FromResult(CapabilityInvocationAuthorization.Allow());
+            });
+        var output = await provider.ApplyTerminalContextAsync(
+            new AIContext { Tools = new AITool[] { actual } },
+            cancellationToken);
+        var enforced = Assert.IsAssignableFrom<AIFunction>(Assert.Single(output.Tools!));
+        var leaseGuard = Assert.IsType<CapabilityInvocationLeaseAIFunction>(
+            enforced.GetService<CapabilityInvocationLeaseAIFunction>());
+
+        await leaseGuard.InvokeAsync(new AIFunctionArguments(), cancellationToken);
+
+        Assert.Equal(expectedRequiresApproval, observedRequiresApproval);
+    }
+
+    [Fact]
     public async Task MatchingRuntimeRevision_UsesNoPublicationHotPath()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

@@ -20,10 +20,15 @@ public sealed record AssistantStreamChunk(
     double? ElapsedMilliseconds = null,
     AgentToolApprovalPrompt? ApprovalPrompt = null,
     string? ActivityKey = null,
-    AgentToolExecutionReceipt? ExecutionReceipt = null)
+    AgentToolExecutionReceipt? ExecutionReceipt = null,
+    AgentRecoveryPrompt? RecoveryPrompt = null)
 {
     public bool ReachedOutputLimit =>
         string.Equals(FinishReason, "length", StringComparison.OrdinalIgnoreCase);
+
+    internal FinalAnswerPublicationDelivery? FinalPublicationDelivery { get; init; }
+
+    internal bool IsInterimPause { get; init; }
 }
 
 /// <summary>
@@ -49,6 +54,38 @@ public sealed class ConversationOrchestrator(
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision) =>
         coordinator.ResolveToolApproval(decision);
+
+    public async IAsyncEnumerable<AssistantStreamChunk> StreamRecoveryDecisionAsync(
+        string conversationId,
+        string userMessageId,
+        string assistantMessageId,
+        AgentRecoveryDecision decision,
+        IReadOnlyList<ChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var chunk in coordinator.StreamRecoveryDecisionAsync(
+                           conversationId,
+                           userMessageId,
+                           assistantMessageId,
+                           decision,
+                           history,
+                           attachments,
+                           cancellationToken)
+                           .ConfigureAwait(false))
+        {
+            yield return chunk;
+        }
+    }
+
+    public Task CancelRecoveryDecisionAsync(
+        string conversationId,
+        AgentRecoveryPrompt prompt,
+        CancellationToken cancellationToken) =>
+        coordinator.CancelRecoveryDecisionAsync(
+            conversationId,
+            prompt,
+            cancellationToken);
 
     public async IAsyncEnumerable<AssistantStreamChunk> StreamAnswerAsync(
         string conversationId,

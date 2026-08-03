@@ -408,7 +408,8 @@ public sealed class AliServices
                 () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
                 semanticToolCatalog,
                 shadowObserver,
-                dataRoot);
+                dataRoot,
+                conversations);
             var capabilitySettings = coordinator.CapabilitySettings
                 ?? throw new InvalidOperationException(
                     "Production capability settings were not initialized.");

@@ -42,6 +42,7 @@ public sealed class MainWindowViewModel : ObservableObject
 {
     private const string RuntimeTopPModelDefault = "Model default";
     internal const int MaximumRuntimeModelInventoryResponseBytes = LocalRuntimeModelInventory.MaximumResponseBytes;
+    internal const int MaximumRetainedTurnExecutionReceipts = 16;
     private const int StreamingTextFlushCharacters = 32;
     private const int StreamingTextDisplaySliceCharacters = 72;
     private const string PermissionAllowed = "allowed";
@@ -213,6 +214,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _isAgentActivityExpanded = true;
     private string _agentActivitySummary = "Ready for the next request.";
     private AgentToolApprovalPrompt? _activeBridgeApproval;
+    private ActiveRecoveryPromptContext? _activeRecoveryPrompt;
     private readonly StackComponentStatusViewModel _memoryStackStatus = new("Memory");
     private readonly StackComponentStatusViewModel _ragStackStatus = new("RAG");
     private readonly StackComponentStatusViewModel _speechStackStatus = new("Speech");
@@ -260,9 +262,18 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SendCommand = CreateAsyncCommand(
             SendAsync,
-            () => IsBusy || IsSpeaking || !string.IsNullOrWhiteSpace(ComposerText),
+            () => IsBusy
+                || IsSpeaking
+                || IsRecoveryDecisionRequired
+                || !string.IsNullOrWhiteSpace(ComposerText),
             allowExecutionWhileRunning: true);
         StopCommand = CreateCommand(_ => Stop(), _ => IsBusy);
+        ResolvePrimaryRecoveryDecisionCommand = CreateAsyncCommand(
+            () => ResolveRecoveryDecisionAsync(primaryChoice: true),
+            () => IsRecoveryDecisionRequired && !IsBusy);
+        ResolveSecondaryRecoveryDecisionCommand = CreateAsyncCommand(
+            () => ResolveRecoveryDecisionAsync(primaryChoice: false),
+            () => IsRecoveryDecisionRequired && !IsBusy);
         ClearAgentActivityCommand = CreateCommand(_ => ClearAgentActivity());
         CopyAgentActivityCommand = CreateCommand(_ => CopyAgentActivityLog());
         NewChatCommand = CreateCommand(_ => StartNewChat());
@@ -287,11 +298,23 @@ public sealed class MainWindowViewModel : ObservableObject
         ActivateRuntimeCommand = CreateCommand(_ => ActivateRuntime(), _ => CanActivateRuntime && !IsBusy);
         RevertToStubCommand = CreateAsyncCommand(RevertToStubAsync, () => !IsBusy);
         RevertToLastKnownGoodCommand = CreateAsyncCommand(RevertToLastKnownGoodAsync, () => CanRevertToLastKnownGood && !IsBusy);
-        PasteImageCommand = CreateAsyncCommand(AddClipboardImageAsync);
-        RemoveAttachmentCommand = CreateCommand(RemoveAttachment);
+        PasteImageCommand = CreateAsyncCommand(
+            AddClipboardImageAsync,
+            () => !IsRecoveryDecisionRequired);
+        RemoveAttachmentCommand = CreateCommand(
+            RemoveAttachment,
+            _ => !IsRecoveryDecisionRequired);
         BeginAssignPushToTalkKeyCommand = CreateCommand(_ => BeginAssignPushToTalkKey());
-        TogglePushToTalkCommand = CreateAsyncCommand(TogglePushToTalkAsync, () => AutoSendVoiceTranscripts && !IsBusy);
-        SendTranscriptCommand = CreateAsyncCommand(SendTranscriptAsync, () => !IsBusy && !IsRecording && !IsTranscribing && !string.IsNullOrWhiteSpace(EditableTranscript));
+        TogglePushToTalkCommand = CreateAsyncCommand(
+            TogglePushToTalkAsync,
+            () => AutoSendVoiceTranscripts && !IsBusy && !IsRecoveryDecisionRequired);
+        SendTranscriptCommand = CreateAsyncCommand(
+            SendTranscriptAsync,
+            () => !IsBusy
+                && !IsRecoveryDecisionRequired
+                && !IsRecording
+                && !IsTranscribing
+                && !string.IsNullOrWhiteSpace(EditableTranscript));
         StopSpeakingCommand = CreateCommand(_ => StopSpeaking(), _ => IsSpeaking);
         OpenSettingsCommand = CreateAsyncCommand(OpenSettingsAsync);
         RefreshTechnologyAcknowledgementsCommand = CreateCommand(_ => RefreshTechnologyAcknowledgements());
@@ -621,6 +644,10 @@ public sealed class MainWindowViewModel : ObservableObject
     public ICommand SendCommand { get; }
 
     public ICommand StopCommand { get; }
+
+    public ICommand ResolvePrimaryRecoveryDecisionCommand { get; }
+
+    public ICommand ResolveSecondaryRecoveryDecisionCommand { get; }
 
     public ICommand ClearAgentActivityCommand { get; }
 
@@ -1961,6 +1988,33 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public bool IsRecoveryDecisionRequired => _activeRecoveryPrompt is not null;
+
+    public bool IsComposerReadOnly => IsRecoveryDecisionRequired;
+
+    public string RecoveryDecisionQuestion => _activeRecoveryPrompt?.Prompt.Kind switch
+    {
+        AgentRecoveryPromptKind.ActionReconciliation =>
+            "Did the interrupted action finish?",
+        AgentRecoveryPromptKind.FinalPublicationReconciliation =>
+            "Did Ali's saved answer appear?",
+        _ => string.Empty
+    };
+
+    public string PrimaryRecoveryDecisionText => _activeRecoveryPrompt?.Prompt.Kind switch
+    {
+        AgentRecoveryPromptKind.ActionReconciliation => "The action happened",
+        AgentRecoveryPromptKind.FinalPublicationReconciliation => "I saw the answer",
+        _ => string.Empty
+    };
+
+    public string SecondaryRecoveryDecisionText => _activeRecoveryPrompt?.Prompt.Kind switch
+    {
+        AgentRecoveryPromptKind.ActionReconciliation => "The action did not happen",
+        AgentRecoveryPromptKind.FinalPublicationReconciliation => "I did not see it",
+        _ => string.Empty
+    };
+
     public bool IsCommandExplorerOpen
     {
         get => _isCommandExplorerOpen;
@@ -2011,17 +2065,29 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    public string SendButtonText => IsBusy || IsSpeaking ? "Stop" : "Send";
+    public string SendButtonText => IsBusy || IsSpeaking
+        ? "Stop"
+        : IsRecoveryDecisionRequired
+            ? "Cancel turn"
+            : "Send";
 
     public string SendButtonToolTip => IsBusy
         ? "Stop the current response"
         : IsSpeaking
             ? "Stop speaking"
-            : "Send chat";
+            : IsRecoveryDecisionRequired
+                ? "Cancel this recovered turn without selecting an outcome"
+                : "Send chat";
 
-    public System.Windows.Media.Brush SendButtonBackground => IsBusy || IsSpeaking ? MediaBrushes.DarkRed : MediaBrushes.DarkGreen;
+    public System.Windows.Media.Brush SendButtonBackground =>
+        IsBusy || IsSpeaking || IsRecoveryDecisionRequired
+            ? MediaBrushes.DarkRed
+            : MediaBrushes.DarkGreen;
 
-    public System.Windows.Media.Brush SendButtonBorderBrush => IsBusy || IsSpeaking ? MediaBrushes.IndianRed : MediaBrushes.LimeGreen;
+    public System.Windows.Media.Brush SendButtonBorderBrush =>
+        IsBusy || IsSpeaking || IsRecoveryDecisionRequired
+            ? MediaBrushes.IndianRed
+            : MediaBrushes.LimeGreen;
 
     public string StatusText
     {
@@ -2352,6 +2418,12 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        if (IsRecoveryDecisionRequired)
+        {
+            await CancelActiveRecoveryDecisionAsync().ConfigureAwait(true);
+            return;
+        }
+
         var text = ComposerText.Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -2360,6 +2432,86 @@ public sealed class MainWindowViewModel : ObservableObject
 
         ComposerText = string.Empty;
         await SendTextAsync(text, VoiceInputOrigin.Typed, voiceMetadata: null).ConfigureAwait(true);
+    }
+
+    private async Task ResolveRecoveryDecisionAsync(bool primaryChoice)
+    {
+        var context = _activeRecoveryPrompt;
+        if (context is null || IsBusy)
+        {
+            return;
+        }
+
+        var choice = (context.Prompt.Kind, primaryChoice) switch
+        {
+            (AgentRecoveryPromptKind.ActionReconciliation, true) =>
+                AgentRecoveryDecisionChoice.ConfirmApplied,
+            (AgentRecoveryPromptKind.ActionReconciliation, false) =>
+                AgentRecoveryDecisionChoice.ConfirmAbsent,
+            (AgentRecoveryPromptKind.FinalPublicationReconciliation, true) =>
+                AgentRecoveryDecisionChoice.ConfirmDisplayed,
+            (AgentRecoveryPromptKind.FinalPublicationReconciliation, false) =>
+                AgentRecoveryDecisionChoice.ConfirmNotDisplayed,
+            _ => throw new InvalidDataException("The active recovery prompt kind is invalid.")
+        };
+        var decision = new AgentRecoveryDecision(context.Prompt, choice);
+        decision.Validate();
+        await SendTextAsync(
+                string.Empty,
+                VoiceInputOrigin.Typed,
+                voiceMetadata: null,
+                recoveryContext: context,
+                recoveryDecision: decision)
+            .ConfigureAwait(true);
+    }
+
+    private async Task CancelActiveRecoveryDecisionAsync()
+    {
+        var context = _activeRecoveryPrompt;
+        if (context is null || IsBusy)
+        {
+            return;
+        }
+
+        context.Prompt.Validate();
+        IsBusy = true;
+        StatusText = "Cancelling the recovered turn...";
+        var responseCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _lifetimeCancellation.Token);
+        _activeResponse = responseCancellation;
+        try
+        {
+            await _services.Orchestrator.CancelRecoveryDecisionAsync(
+                    _conversationId,
+                    context.Prompt,
+                    responseCancellation.Token)
+                .ConfigureAwait(true);
+            ClearActiveRecoveryPrompt(context);
+            ClearTemporaryAttachments();
+            StatusText = "Recovered turn cancelled.";
+            AddAgentActivity(new AssistantStreamChunk(
+                _conversationId,
+                context.UserMessageId,
+                context.AssistantMessageId,
+                "Recovered turn cancelled",
+                EvidenceStatus.Unknown,
+                IsActivity: true,
+                ActivityKind: AgentActivityKind.Warning,
+                ActivityDetail: "Ali cancelled only the preserved turn."));
+        }
+        catch (OperationCanceledException) when (responseCancellation.IsCancellationRequested)
+        {
+            StatusText = "Recovery cancellation stopped; a decision is still required.";
+        }
+        finally
+        {
+            responseCancellation.Dispose();
+            if (ReferenceEquals(_activeResponse, responseCancellation))
+            {
+                _activeResponse = null;
+            }
+            IsBusy = false;
+        }
     }
 
     private async Task RunCommandExplorerNodeSafelyAsync(object? parameter)
@@ -2376,8 +2528,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task RunCommandExplorerNodeAsync(object? parameter)
     {
-        if (IsBusy)
+        if (IsBusy || IsRecoveryDecisionRequired)
         {
+            if (IsRecoveryDecisionRequired)
+            {
+                StatusText = "Use the recovery choices above or cancel the recovered turn.";
+            }
             return;
         }
 
@@ -2398,7 +2554,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private bool CanRunCommandExplorerNode(object? parameter)
     {
-        if (IsBusy)
+        if (IsBusy || IsRecoveryDecisionRequired)
         {
             return false;
         }
@@ -2411,46 +2567,94 @@ public sealed class MainWindowViewModel : ObservableObject
         string text,
         VoiceInputOrigin inputOrigin,
         VoiceTurnMetadata? voiceMetadata,
-        CancellationToken externalCancellationToken = default)
+        CancellationToken externalCancellationToken = default,
+        ActiveRecoveryPromptContext? recoveryContext = null,
+        AgentRecoveryDecision? recoveryDecision = null)
     {
-        if (string.IsNullOrWhiteSpace(text) || IsBusy)
+        var isRecoveryDecision = recoveryContext is not null || recoveryDecision is not null;
+        if (IsBusy
+            || (!isRecoveryDecision && string.IsNullOrWhiteSpace(text))
+            || (!isRecoveryDecision && IsRecoveryDecisionRequired))
         {
+            if (!isRecoveryDecision && IsRecoveryDecisionRequired)
+            {
+                StatusText = "Use the recovery choices above or cancel the recovered turn.";
+            }
             return;
         }
 
+        if (isRecoveryDecision)
+        {
+            if (recoveryContext is null
+                || recoveryDecision is null
+                || !ReferenceEquals(recoveryContext, _activeRecoveryPrompt)
+                || !Equals(recoveryContext.Prompt, recoveryDecision.Prompt))
+            {
+                throw new InvalidOperationException(
+                    "The recovery decision no longer matches the active recovery prompt.");
+            }
+
+            recoveryDecision.Validate();
+        }
+
         IsBusy = true;
-        StatusText = "Streaming local response...";
-        var previousTurnExecutionReceipts = _currentTurnExecutionReceipts.TakeLast(16).ToArray();
+        StatusText = isRecoveryDecision
+            ? "Applying the recovery decision..."
+            : "Streaming local response...";
+        var previousTurnExecutionReceipts = _currentTurnExecutionReceipts
+            .TakeLast(MaximumRetainedTurnExecutionReceipts)
+            .ToArray();
         _currentTurnExecutionReceipts.Clear();
         EnsureActiveConversationHistoryItem();
-        ApplyFirstMessageTitleIfNeeded(text);
+        if (!isRecoveryDecision)
+        {
+            ApplyFirstMessageTitleIfNeeded(text);
+        }
 
-        var userMessageId = $"msg_user_{Guid.NewGuid():N}";
-        var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
+        var userMessageId = recoveryContext?.UserMessageId ?? $"msg_user_{Guid.NewGuid():N}";
+        var assistantMessageId = recoveryContext?.AssistantMessageId
+            ?? $"msg_asst_{Guid.NewGuid():N}";
         var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
         var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
-        var userMessage = new ChatMessageViewModel(
-            userMessageId,
-            ChatRole.User,
-            text,
-            DateTimeOffset.UtcNow,
-            EvidenceStatus.Verified,
-            attachmentMetadata: attachmentMetadata.Count == 0 ? null : attachmentMetadata);
+        ChatMessageViewModel? userMessage = null;
+        ChatMessageViewModel assistantMessage;
+        if (isRecoveryDecision)
+        {
+            assistantMessage = Messages.SingleOrDefault(message =>
+                    string.Equals(message.Id, assistantMessageId, StringComparison.Ordinal)
+                    && message.Role == ChatRole.Assistant)
+                ?? throw new InvalidOperationException(
+                    "The visible recovery response is no longer available in this chat.");
+            assistantMessage.IsResponseComplete = false;
+        }
+        else
+        {
+            userMessage = new ChatMessageViewModel(
+                userMessageId,
+                ChatRole.User,
+                text,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Verified,
+                attachmentMetadata: attachmentMetadata.Count == 0 ? null : attachmentMetadata);
+            assistantMessage = new ChatMessageViewModel(
+                assistantMessageId,
+                ChatRole.Assistant,
+                string.Empty,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Unknown,
+                sourceAttachmentCount: attachments.Count,
+                sourceInputOrigin: inputOrigin,
+                sourceVoiceMetadata: voiceMetadata,
+                sourceUserMessageId: userMessageId,
+                sourceQuestion: text,
+                isResponseComplete: false);
+        }
 
-        var assistantMessage = new ChatMessageViewModel(
-            assistantMessageId,
-            ChatRole.Assistant,
-            string.Empty,
-            DateTimeOffset.UtcNow,
-            EvidenceStatus.Unknown,
-            sourceAttachmentCount: attachments.Count,
-            sourceInputOrigin: inputOrigin,
-            sourceVoiceMetadata: voiceMetadata,
-            sourceUserMessageId: userMessageId,
-            sourceQuestion: text,
-            isResponseComplete: false);
-
-        var history = Messages.Select(message => message.ToCoreMessage()).ToList();
+        var history = Messages
+            .Where(message => !isRecoveryDecision
+                || !string.Equals(message.Id, assistantMessageId, StringComparison.Ordinal))
+            .Select(message => message.ToCoreMessage())
+            .ToList();
         if (previousTurnExecutionReceipts.Length > 0)
         {
             history.Add(new ChatMessage(
@@ -2460,15 +2664,20 @@ public sealed class MainWindowViewModel : ObservableObject
                 DateTimeOffset.UtcNow,
                 EvidenceStatus.Verified));
         }
-        Messages.Add(userMessage);
-        Messages.Add(assistantMessage);
+        if (userMessage is not null)
+        {
+            Messages.Add(userMessage);
+            Messages.Add(assistantMessage);
+        }
 
-        _activeResponse = CancellationTokenSource.CreateLinkedTokenSource(
+        var responseCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _lifetimeCancellation.Token,
             externalCancellationToken);
+        _activeResponse = responseCancellation;
         var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
         var reachedOutputLimit = false;
+        var durableTurnPaused = false;
         var pendingVisibleText = new StringBuilder();
         var answerStarted = false;
         var lastVisibleTextFlush = DateTimeOffset.UtcNow;
@@ -2501,14 +2710,23 @@ public sealed class MainWindowViewModel : ObservableObject
 
         try
         {
-            var responseStream = _services.Orchestrator.StreamAnswerAsync(
-                _conversationId,
-                userMessageId,
-                assistantMessageId,
-                text,
-                history,
-                attachments,
-                _activeResponse.Token);
+            var responseStream = isRecoveryDecision
+                ? _services.Orchestrator.StreamRecoveryDecisionAsync(
+                    _conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    recoveryDecision!,
+                    history,
+                    attachments,
+                    responseCancellation.Token)
+                : _services.Orchestrator.StreamAnswerAsync(
+                    _conversationId,
+                    userMessageId,
+                    assistantMessageId,
+                    text,
+                    history,
+                    attachments,
+                    responseCancellation.Token);
             await foreach (var chunk in responseStream)
             {
                 if (chunk.IsActivity)
@@ -2555,20 +2773,75 @@ public sealed class MainWindowViewModel : ObservableObject
 
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
                 reachedOutputLimit |= chunk.ReachedOutputLimit;
+                durableTurnPaused |= chunk.IsInterimPause;
                 QueueStreamingSpeech(streamingSpeech, chunk.Text);
-
-                foreach (var textSlice in SplitStreamingTextForDisplay(chunk.Text))
+                var finalDelivery = chunk.FinalPublicationDelivery;
+                try
                 {
-                    pendingVisibleText.Append(textSlice);
-                    await FlushVisibleTextAsync(
-                        force: pendingVisibleText.Length >= StreamingTextFlushCharacters,
-                        pace: true).ConfigureAwait(true);
+                    foreach (var textSlice in SplitStreamingTextForDisplay(chunk.Text))
+                    {
+                        pendingVisibleText.Append(textSlice);
+                        await FlushVisibleTextAsync(
+                            force: pendingVisibleText.Length >= StreamingTextFlushCharacters,
+                            pace: true).ConfigureAwait(true);
+                    }
+
+                    if (finalDelivery is not null)
+                    {
+                        await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
+                        assistantMessage.IsResponseComplete = true;
+                        var saved = SaveActiveConversation()
+                            ?? throw new InvalidOperationException(
+                                "The exact final answer could not be saved to the active conversation.");
+                        var persisted = saved.Messages.SingleOrDefault(message =>
+                            string.Equals(
+                                message.MessageId,
+                                assistantMessage.Id,
+                                StringComparison.Ordinal));
+                        if (persisted is null
+                            || persisted.Role != ChatRole.Assistant
+                            || !string.Equals(
+                                persisted.Text,
+                                assistantMessage.Text,
+                                StringComparison.Ordinal))
+                        {
+                            throw new InvalidDataException(
+                                "The conversation store returned a different final assistant message.");
+                        }
+
+                        finalDelivery.AcknowledgePersisted(
+                            saved.ConversationId,
+                            persisted.MessageId,
+                            persisted.Text);
+                    }
+                }
+                catch
+                {
+                    finalDelivery?.Reject(
+                        "The desktop conversation sink did not persist the exact final answer.");
+                    throw;
                 }
             }
 
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             CompleteStreamingSpeechInput(streamingSpeech);
-            if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
+            if (isRecoveryDecision)
+            {
+                ClearActiveRecoveryPrompt(recoveryContext!);
+            }
+
+            if (durableTurnPaused)
+            {
+                if (!_services.RuntimeController.IsUsingFallback)
+                {
+                    SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
+                }
+
+                StatusText = IsRecoveryDecisionRequired
+                    ? "Recovery decision required. Choose one of the two options below."
+                    : "Turn paused; send another message to continue.";
+            }
+            else if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
             {
                 SetModelConnectionStatus("model offline", MediaBrushes.Red);
                 StatusText = "Local model communication failed.";
@@ -2591,22 +2864,33 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
-            assistantMessage.Text += "\n\nStopped by user.";
+            if (!isRecoveryDecision)
+            {
+                assistantMessage.Text += "\n\nStopped by user.";
+            }
             AddAgentActivity(new AssistantStreamChunk(
                 _conversationId,
                 userMessageId,
                 assistantMessageId,
-                "Stopped by user",
+                isRecoveryDecision ? "Recovery decision stopped" : "Stopped by user",
                 EvidenceStatus.Unknown,
                 IsActivity: true,
-                ActivityKind: AgentActivityKind.Warning));
+                ActivityKind: AgentActivityKind.Warning,
+                ActivityDetail: isRecoveryDecision
+                    ? "The recovery choice remains available and no ordinary message was sent."
+                    : null));
             CancelStreamingSpeech(streamingSpeech);
-            StatusText = "Response stopped.";
+            StatusText = isRecoveryDecision
+                ? "Recovery decision stopped; a decision is still required."
+                : "Response stopped.";
         }
         catch (HttpRequestException ex)
         {
             await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
-            assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            if (!isRecoveryDecision)
+            {
+                assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            }
             AddAgentActivity(new AssistantStreamChunk(
                 _conversationId,
                 userMessageId,
@@ -2629,10 +2913,26 @@ public sealed class MainWindowViewModel : ObservableObject
                 CancelStreamingSpeech(streamingSpeech);
             }
 
-            _activeResponse.Dispose();
-            _activeResponse = null;
+            responseCancellation.Dispose();
+            if (ReferenceEquals(_activeResponse, responseCancellation))
+            {
+                _activeResponse = null;
+            }
             IsBusy = false;
-            ClearTemporaryAttachments();
+            if (durableTurnPaused)
+            {
+                AttachmentStatus = Attachments.Count == 0
+                    ? IsRecoveryDecisionRequired
+                        ? "Recovery decision required. Choose an option above or cancel the turn."
+                        : "Turn paused. Send another message to continue."
+                    : IsRecoveryDecisionRequired
+                        ? $"Recovery decision required. Preserving {Attachments.Count} attachment(s)."
+                        : $"Turn paused. Preserving {Attachments.Count} attachment(s) for the next message.";
+            }
+            else if (completed || !isRecoveryDecision)
+            {
+                ClearTemporaryAttachments();
+            }
             SaveActiveConversation();
             UpdateRuntimeStatus();
             RefreshMemoryReminders();
@@ -2665,9 +2965,25 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void AddAgentActivity(AssistantStreamChunk chunk)
     {
+        if (chunk.RecoveryPrompt is { } recoveryPrompt)
+        {
+            recoveryPrompt.Validate();
+            if (!string.Equals(chunk.ConversationId, _conversationId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            SetActiveRecoveryPrompt(new ActiveRecoveryPromptContext(
+                recoveryPrompt,
+                chunk.UserMessageId,
+                chunk.AssistantMessageId));
+        }
+
         if (chunk.ExecutionReceipt is not null)
         {
-            _currentTurnExecutionReceipts.Add(chunk.ExecutionReceipt);
+            RetainCurrentTurnExecutionReceipt(
+                _currentTurnExecutionReceipts,
+                chunk.ExecutionReceipt);
         }
 
         var item = new AgentActivityItemViewModel(chunk);
@@ -2693,6 +3009,74 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         AgentActivitySummary = item.SummaryText;
+    }
+
+    internal static void RetainCurrentTurnExecutionReceipt(
+        List<AgentToolExecutionReceipt> receipts,
+        AgentToolExecutionReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipts);
+        ArgumentNullException.ThrowIfNull(receipt);
+
+        receipts.Add(receipt);
+        var overflow = receipts.Count - MaximumRetainedTurnExecutionReceipts;
+        if (overflow > 0)
+        {
+            receipts.RemoveRange(0, overflow);
+        }
+    }
+
+    private void SetActiveRecoveryPrompt(ActiveRecoveryPromptContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        context.Prompt.Validate();
+        if (string.IsNullOrWhiteSpace(context.UserMessageId)
+            || string.IsNullOrWhiteSpace(context.AssistantMessageId))
+        {
+            throw new InvalidDataException(
+                "A recovery prompt did not carry its exact visible message identities.");
+        }
+
+        _activeRecoveryPrompt = context;
+        IsAgentActivityExpanded = true;
+        StatusText = "Recovery decision required. Choose one option below or cancel the turn.";
+        OnRecoveryPromptChanged();
+    }
+
+    private void ClearActiveRecoveryPrompt(ActiveRecoveryPromptContext expected)
+    {
+        if (!ReferenceEquals(_activeRecoveryPrompt, expected))
+        {
+            return;
+        }
+
+        _activeRecoveryPrompt = null;
+        OnRecoveryPromptChanged();
+    }
+
+    private void ClearActiveRecoveryPrompt()
+    {
+        if (_activeRecoveryPrompt is null)
+        {
+            return;
+        }
+
+        _activeRecoveryPrompt = null;
+        OnRecoveryPromptChanged();
+    }
+
+    private void OnRecoveryPromptChanged()
+    {
+        OnPropertyChanged(nameof(IsRecoveryDecisionRequired));
+        OnPropertyChanged(nameof(IsComposerReadOnly));
+        OnPropertyChanged(nameof(RecoveryDecisionQuestion));
+        OnPropertyChanged(nameof(PrimaryRecoveryDecisionText));
+        OnPropertyChanged(nameof(SecondaryRecoveryDecisionText));
+        OnPropertyChanged(nameof(SendButtonText));
+        OnPropertyChanged(nameof(SendButtonToolTip));
+        OnPropertyChanged(nameof(SendButtonBackground));
+        OnPropertyChanged(nameof(SendButtonBorderBrush));
+        RaiseCommandStates();
     }
 
     private void OnBackgroundAgentActivity(AssistantStreamChunk chunk)
@@ -2990,6 +3374,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Attachments.Clear();
         Messages.Clear();
         ClearAgentActivity();
+        ClearActiveRecoveryPrompt();
         _currentTurnExecutionReceipts.Clear();
         _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
         _activeConversationHistoryItem = null;
@@ -3071,6 +3456,7 @@ public sealed class MainWindowViewModel : ObservableObject
         Attachments.Clear();
         Messages.Clear();
         ClearAgentActivity();
+        ClearActiveRecoveryPrompt();
         _currentTurnExecutionReceipts.Clear();
         var session = ConversationSessionFactory.Reopen(conversation);
         foreach (var message in session.Messages)
@@ -3089,16 +3475,17 @@ public sealed class MainWindowViewModel : ObservableObject
         StatusText = $"Loaded saved chat: {conversation.Title}";
     }
 
-    private void SaveActiveConversation()
+    private StoredConversation? SaveActiveConversation()
     {
         if (_activeConversationHistoryItem is null || !Messages.Any(message => message.Role == ChatRole.User))
         {
-            return;
+            return null;
         }
 
         var conversation = BuildStoredConversation(_activeConversationHistoryItem);
-        _services.Conversations.Save(conversation);
+        var saved = _services.Conversations.Save(conversation);
         RefreshConversationHistory();
+        return saved;
     }
 
     private void RefreshMemoryReminders()
@@ -5135,6 +5522,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task AddClipboardImageAsync()
     {
+        if (IsRecoveryDecisionRequired)
+        {
+            AttachmentStatus = "Resolve or cancel the recovered turn before changing attachments.";
+            return;
+        }
+
         if (!System.Windows.Clipboard.ContainsImage())
         {
             AttachmentStatus = "Clipboard does not contain an image.";
@@ -5187,6 +5580,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void RemoveAttachment(object? parameter)
     {
+        if (IsRecoveryDecisionRequired)
+        {
+            AttachmentStatus = "Resolve or cancel the recovered turn before changing attachments.";
+            return;
+        }
+
         if (parameter is not ImageAttachmentViewModel attachment)
         {
             return;
@@ -7065,6 +7464,26 @@ public sealed class MainWindowViewModel : ObservableObject
             stop.RaiseCanExecuteChanged();
         }
 
+        if (ResolvePrimaryRecoveryDecisionCommand is AsyncRelayCommand primaryRecovery)
+        {
+            primaryRecovery.RaiseCanExecuteChanged();
+        }
+
+        if (ResolveSecondaryRecoveryDecisionCommand is AsyncRelayCommand secondaryRecovery)
+        {
+            secondaryRecovery.RaiseCanExecuteChanged();
+        }
+
+        if (PasteImageCommand is AsyncRelayCommand pasteImage)
+        {
+            pasteImage.RaiseCanExecuteChanged();
+        }
+
+        if (RemoveAttachmentCommand is RelayCommand removeAttachment)
+        {
+            removeAttachment.RaiseCanExecuteChanged();
+        }
+
         if (CheckRuntimeCommand is AsyncRelayCommand checkRuntime)
         {
             checkRuntime.RaiseCanExecuteChanged();
@@ -8001,6 +8420,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
         return int.TryParse(numberText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out deviceNumber);
     }
+
+    private sealed record ActiveRecoveryPromptContext(
+        AgentRecoveryPrompt Prompt,
+        string UserMessageId,
+        string AssistantMessageId);
 
     private sealed record DiagnosticCommandResult(bool Handled, bool Succeeded, string Message);
 }

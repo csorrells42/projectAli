@@ -377,12 +377,28 @@ public static class AliProductionCapabilityCatalog
             }
         }
 
-        var descriptors = functions
-            .Where(function => Definitions.ContainsKey(function.Name))
+        var taskDescriptors = functions
+            .Where(function => Definitions.ContainsKey(function.Name)
+                && AliProductionToolOutcomeRegistry.HasContract(function.Name))
             .Select(CreateDescriptor)
             .ToArray();
+        var protocolFunction = functions
+            .SingleOrDefault(function => string.Equals(
+                function.Name,
+                OrchestrationProtocolCapability.ToolName,
+                StringComparison.Ordinal));
+        var descriptors = protocolFunction is null
+            ? taskDescriptors
+            : taskDescriptors
+                .Append(CreateProtocolDescriptor(protocolFunction))
+                .ToArray();
         var quarantinedNames = functions
-            .Where(function => !Definitions.ContainsKey(function.Name))
+            .Where(function => (!Definitions.ContainsKey(function.Name)
+                    || !AliProductionToolOutcomeRegistry.HasContract(function.Name))
+                && !string.Equals(
+                    function.Name,
+                    OrchestrationProtocolCapability.ToolName,
+                    StringComparison.Ordinal))
             .Select(function => function.Name)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -392,9 +408,61 @@ public static class AliProductionCapabilityCatalog
             Array.AsReadOnly(quarantinedNames));
     }
 
+    private static CapabilityDescriptor CreateProtocolDescriptor(
+        AIFunctionDeclaration function) =>
+        CapabilityDescriptor.Create(
+            id: "ali.protocol.orchestration-decision",
+            toolName: OrchestrationProtocolCapability.ToolName,
+            displayName: "Ali orchestration protocol",
+            description: function.Description,
+            tier: CapabilityTier.Protocol,
+            groupId: null,
+            providerId: ProviderId,
+            registrationKind: CapabilityRegistrationKind.Native,
+            schemaFactoryId: "ali.protocol.orchestration-decision.invariant-v1",
+            schemaFactory: () => function,
+            providerGate: new CapabilityProviderGate(
+                CapabilityProviderGateKind.OwnerOnly,
+                []),
+            prerequisiteGroupIds: [],
+            presetIds: [],
+            permission: new CapabilityPermissionDescriptor(
+                "ali-orchestration-protocol-v1",
+                RequiresApproval: false,
+                Risk: CapabilityRiskLevel.None),
+            semanticSearchText: "internal orchestration decision protocol",
+            semanticMetadata: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["tier"] = "protocol",
+                ["schema-source"] = "dynamic-per-planning-pass"
+            },
+                visibleInCapabilityReport: true,
+                visibleInCriticInventory: true,
+            mcpExposure: new CapabilityMcpExposure(false, null),
+            effect: new CapabilityEffectDescriptor(
+                CapabilityEffectKind.None,
+                "Commits one validated orchestration transition without performing a task-domain effect.",
+                CapabilityMutationBoundary.None,
+                SupportsIdempotency: false,
+                ReconcilerId: null,
+                ReadsLocalData: false,
+                WritesLocalData: false,
+                UsesNetwork: false,
+                StartsProcesses: false,
+                ChangesSystemState: false));
+
     private static CapabilityDescriptor CreateDescriptor(AIFunctionDeclaration function)
     {
         var definition = Definitions[function.Name];
+        if (!AliProductionToolOutcomeRegistry.TryGetContractId(
+                function.Name,
+                out var outcomeContractId)
+            || outcomeContractId is null)
+        {
+            throw new InvalidOperationException(
+                $"Tool '{function.Name}' has no production outcome contract.");
+        }
+
         var effect = CreateEffect(function.Name, definition.GroupId);
         var providerBound = ResolvedLanguageTargetToolNames.Contains(function.Name);
         var registrationKind = providerBound
@@ -441,7 +509,8 @@ public static class AliProductionCapabilityCatalog
                 ["group"] = definition.GroupId,
                 ["provider"] = ProviderId,
                 ["registration-kind"] = registrationKind.ToString(),
-                ["schema-source"] = "actual-runtime-declaration"
+                ["schema-source"] = "actual-runtime-declaration",
+                ["outcome-contract"] = outcomeContractId
             },
             visibleInCapabilityReport: true,
             visibleInCriticInventory: true,

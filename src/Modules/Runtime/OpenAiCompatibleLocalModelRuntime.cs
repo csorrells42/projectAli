@@ -13,7 +13,7 @@ using Ali;
 
 namespace Ali.Modules.Runtime;
 
-public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient
+public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
 {
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
@@ -76,6 +76,38 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         Volatile.Write(
             ref _reasoningEffort,
             OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(effort));
+    }
+
+    BoundModelDispatchSnapshot IBoundModelDispatchSource.CaptureBoundModelDispatch()
+    {
+        var profile = ActiveProfile with { };
+        var reasoningEffort = ReasoningEffort;
+        return new BoundModelDispatchSnapshot(
+            this,
+            profile,
+            new BoundRuntimeBindingMaterial(
+                LocalRuntimeEngines.Normalize(_options.Engine),
+                GetType().FullName ?? GetType().Name,
+                profile.RuntimeKind,
+                profile.RuntimeLocation,
+                _options.Endpoint.ToString()),
+            new BoundModelBindingMaterial(
+                profile.ProfileId,
+                _options.Model,
+                _options.Family,
+                _options.Size,
+                _options.Quantization,
+                _options.SupportsVision,
+                _options.SupportsToolCalls),
+            new BoundGenerationSettingsBindingMaterial(
+                _options.ContextTokens,
+                _options.OutputTokenLimit,
+                _options.Temperature,
+                _options.TopP,
+                _options.StreamingEnabled,
+                ThinkingControl.ToString(),
+                _options.ThinkingEnabled,
+                reasoningEffort));
     }
 
     public async IAsyncEnumerable<ModelToken> StreamChatAsync(
@@ -1247,17 +1279,19 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         return messages;
     }
 
-    private void ValidateNativeOllamaPayload(string payload)
+    private void ValidateNativeOllamaPayload(
+        string payload,
+        string? reasoningEffortOverride = null)
     {
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
-        var expectedThinking = ResolveNativeThinkingValue();
+        var expectedThinking = ResolveNativeThinkingValue(reasoningEffortOverride);
         if (expectedThinking is not null
             && (!root.TryGetProperty("think", out var think)
-                || !IsExpectedNativeThinkingValue(think)))
+                || !IsExpectedNativeThinkingValue(think, reasoningEffortOverride)))
         {
             throw new InvalidOperationException(
-                $"Refusing to send Ollama request without the required thinking mode ({ResolveNativeThinkingDescription()}).");
+                $"Refusing to send Ollama request without the required thinking mode ({ResolveNativeThinkingDescription(reasoningEffortOverride)}).");
         }
 
         if (expectedThinking is null && root.TryGetProperty("think", out _))
@@ -1282,7 +1316,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         }
     }
 
-    private void ValidateOpenAiCompatiblePayload(string payload)
+    private void ValidateOpenAiCompatiblePayload(
+        string payload,
+        string? reasoningEffortOverride = null)
     {
         if (ThinkingControl is ModelThinkingControl.None or ModelThinkingControl.GemmaSystemPromptToken)
         {
@@ -1300,7 +1336,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
         if (ThinkingControl == ModelThinkingControl.GptOssReasoningEffort)
         {
-            var expectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(ReasoningEffort);
+            var expectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(
+                reasoningEffortOverride ?? ReasoningEffort);
             if (!templateArguments.TryGetProperty("reasoning_effort", out var reasoningEffort)
                 || reasoningEffort.ValueKind != JsonValueKind.String
                 || !string.Equals(reasoningEffort.GetString(), expectedReasoningEffort, StringComparison.OrdinalIgnoreCase))

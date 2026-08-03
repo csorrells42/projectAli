@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Threading.Channels;
 using Ali.Modules.AgentWorkMemory;
 using Ali.Modules.Capabilities;
 using Ali.Modules.Coding;
+using Ali.Modules.Conversation;
 using Ali.Modules.Evidence;
 using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
@@ -28,9 +28,9 @@ namespace Ali.Modules.Coordinator;
 /// </summary>
 public sealed class AliToolCoordinator : IDisposable
 {
-    private const int MaximumVisibleSources = 5;
     private readonly AliAgentHarnessRunner _harness;
     private readonly CoordinatorTurnLease _turn = new();
+    private readonly AliFrameworkToolOutcomeSidecar _toolOutcomes;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<UserMemorySettings>? _memorySettings;
     private readonly AliUserMemoryReviewQueue? _memoryReviewQueue;
@@ -52,13 +52,15 @@ public sealed class AliToolCoordinator : IDisposable
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
         AliAgentWorkMemory workMemory,
+        string capabilitySettingsDataRoot,
         AliCodingModule? codingModule = null,
         IUserMemoryService? userMemories = null,
         IActiveUserSession? activeUsers = null,
         Func<UserMemorySettings>? memorySettings = null,
         string? workflowCheckpointPath = null,
         Func<AgentOrchestrationSettings>? orchestrationSettings = null,
-        ISemanticToolCatalog? semanticToolCatalog = null)
+        ISemanticToolCatalog? semanticToolCatalog = null,
+        IConversationPublicationProbe? conversationPublicationProbe = null)
         : this(
             runtime,
             chatClient,
@@ -80,7 +82,9 @@ public sealed class AliToolCoordinator : IDisposable
             orchestrationSettings,
             semanticToolCatalog,
             shadowObserver: null,
-            capabilitySettingsDataRoot: null)
+            capabilitySettingsDataRoot: RequireCapabilitySettingsDataRoot(
+                capabilitySettingsDataRoot),
+            conversationPublicationProbe)
     {
     }
 
@@ -105,12 +109,16 @@ public sealed class AliToolCoordinator : IDisposable
         Func<AgentOrchestrationSettings>? orchestrationSettings,
         ISemanticToolCatalog? semanticToolCatalog,
         IShadowToolObserver? shadowObserver,
-        string? capabilitySettingsDataRoot)
+        string? capabilitySettingsDataRoot,
+        IConversationPublicationProbe? conversationPublicationProbe = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
         _memorySettings = memorySettings;
         _memoryReviewQueue = userMemories is null ? null : new AliUserMemoryReviewQueue(userMemories);
+        _toolOutcomes = new AliFrameworkToolOutcomeSidecar();
+        fileAccess.ConfigureOutcomeReporting(_toolOutcomes);
+        workMemory.ConfigureOutcomeReporting(_toolOutcomes);
         codingModule ??= new AliCodingModule(fileAccess);
         var catalog = new AliToolCatalog(
             localLibrary,
@@ -148,10 +156,21 @@ public sealed class AliToolCoordinator : IDisposable
             orchestrationSettings ?? (() => new AgentOrchestrationSettings()),
             semanticToolCatalog,
             shadowObserver,
-            capabilitySettingsDataRoot);
+            capabilitySettingsDataRoot,
+            conversationPublicationProbe is null
+                ? null
+                : new ConversationStoreFinalPublicationReconciler(
+                    conversationPublicationProbe),
+            toolOutcomes: _toolOutcomes);
     }
 
     internal CapabilitySettingsSnapshotOwner? CapabilitySettings => _harness.CapabilitySettings;
+
+    private static string RequireCapabilitySettingsDataRoot(string capabilitySettingsDataRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(capabilitySettingsDataRoot);
+        return capabilitySettingsDataRoot;
+    }
 
     public bool ResolveToolApproval(AgentToolApprovalDecision decision)
     {
@@ -179,6 +198,7 @@ public sealed class AliToolCoordinator : IDisposable
             SingleWriter = false,
             AllowSynchronousContinuations = false
         });
+        using var streamLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var producer = ProduceAgentTurnAsync(
             conversationId,
             userMessageId,
@@ -187,14 +207,147 @@ public sealed class AliToolCoordinator : IDisposable
             history,
             attachments,
             channel.Writer,
-            cancellationToken);
+            streamLifetime.Token);
 
-        await foreach (var chunk in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            yield return chunk;
+            await foreach (var chunk in channel.Reader
+                               .ReadAllAsync(streamLifetime.Token)
+                               .ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+
+            await producer.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!producer.IsCompleted)
+            {
+                streamLifetime.Cancel();
+                try
+                {
+                    await producer.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (streamLifetime.IsCancellationRequested)
+                {
+                    // Consumer disposal revokes any publication that was not yet durably
+                    // acknowledged by the conversation sink.
+                }
+            }
+        }
+    }
+
+    public async IAsyncEnumerable<AssistantStreamChunk> StreamRecoveryDecisionAsync(
+        string conversationId,
+        string userMessageId,
+        string assistantMessageId,
+        AgentRecoveryDecision decision,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userMessageId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(assistantMessageId);
+        ArgumentNullException.ThrowIfNull(decision);
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(attachments);
+        decision.Validate();
+        if (!string.Equals(
+                conversationId,
+                decision.Prompt.DurableIdentity.ConversationId,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "A recovery stream cannot cross its durable conversation boundary.");
         }
 
-        await producer.ConfigureAwait(false);
+        var channel = Channel.CreateUnbounded<AssistantStreamChunk>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false
+        });
+        using var streamLifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var producer = ProduceRecoveryDecisionAsync(
+            conversationId,
+            userMessageId,
+            assistantMessageId,
+            decision,
+            history,
+            attachments,
+            channel.Writer,
+            streamLifetime.Token);
+
+        try
+        {
+            await foreach (var chunk in channel.Reader
+                               .ReadAllAsync(streamLifetime.Token)
+                               .ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+
+            await producer.ConfigureAwait(false);
+        }
+        finally
+        {
+            if (!producer.IsCompleted)
+            {
+                streamLifetime.Cancel();
+                try
+                {
+                    await producer.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (streamLifetime.IsCancellationRequested)
+                {
+                    // Consumer disposal revokes any publication that was not yet durably
+                    // acknowledged by the conversation sink.
+                }
+            }
+        }
+    }
+
+    public async Task CancelRecoveryDecisionAsync(
+        string conversationId,
+        AgentRecoveryPrompt prompt,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentNullException.ThrowIfNull(prompt);
+        prompt.Validate();
+        if (!string.Equals(
+                conversationId,
+                prompt.DurableIdentity.ConversationId,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "A recovery cancellation cannot cross its durable conversation boundary.");
+        }
+
+        var (capturedUserSelection, observationIdentity) = CaptureTurnAdmissionIdentity(
+            _activeUsers,
+            conversationId,
+            prompt.DurableIdentity.AssistantMessageId);
+        var turn = new CoordinatorTurnContext(
+            conversationId,
+            prompt.PromptPublicationId,
+            prompt.DurableIdentity.AssistantMessageId,
+            string.Empty,
+            _ => { },
+            capturedUserSelection,
+            observationIdentity);
+        using var turnScope = _turn.Enter(turn);
+        try
+        {
+            await _harness.CancelRecoveryAsync(turn, prompt, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _toolOutcomes.DiscardCoordinatorTurn(turn);
+        }
     }
 
     private async Task ProduceAgentTurnAsync(
@@ -224,31 +377,75 @@ public sealed class AliToolCoordinator : IDisposable
         _memoryReviewQueue?.BeginForegroundTurn();
         try
         {
-            var result = await _harness.RunAsync(
-                turn,
-                userText,
-                history,
-                attachments,
-                chunk =>
-                {
-                    writer.TryWrite(chunk);
-                },
-                cancellationToken).ConfigureAwait(false);
-            PublishSourceAppendix(turn, result.FinishReason, writer);
-            if (!result.WroteAnswer)
+            var resumeIdentity = await _harness
+                .FindPausedTurnAsync(turn, cancellationToken)
+                .ConfigureAwait(false);
+            async ValueTask<FinalAnswerPublicationAcknowledgment> PublishFinalAsync(
+                FinalAnswerPublication publication,
+                CancellationToken publicationCancellation)
             {
-                writer.TryWrite(new AssistantStreamChunk(
-                    conversationId,
-                    userMessageId,
-                    assistantMessageId,
-                    "I could not complete that answer from the available local tools and model response.",
-                    EvidenceStatus.Unverified,
-                    result.FinishReason));
+                publicationCancellation.ThrowIfCancellationRequested();
+                var delivery = new FinalAnswerPublicationDelivery(publication);
+                var accepted = writer.TryWrite(new AssistantStreamChunk(
+                    publication.ConversationId,
+                    publication.UserMessageId,
+                    publication.AssistantMessageId,
+                    publication.AnswerText,
+                    publication.EvidenceStatus,
+                    publication.FinishReason)
+                {
+                    FinalPublicationDelivery = delivery
+                });
+                if (!accepted)
+                {
+                    return FinalAnswerPublicationAcknowledgment.Rejected(publication);
+                }
+
+                return await delivery.WaitAsync(publicationCancellation).ConfigureAwait(false);
             }
 
-            QueueIncomingUserMemoryReview(turn, userText);
+            var result = resumeIdentity is null
+                ? await _harness.RunAsync(
+                    turn,
+                    userText,
+                    history,
+                    attachments,
+                    PublishFinalAsync,
+                    cancellationToken).ConfigureAwait(false)
+                : await _harness.ResumeAsync(
+                    turn,
+                    resumeIdentity,
+                    userText,
+                    history,
+                    attachments,
+                    PublishFinalAsync,
+                    cancellationToken).ConfigureAwait(false);
 
-            turn.Report(AgentActivityKind.Complete, "Response complete", $"{_assistantName} finished the agent run.");
+            if (result.Paused)
+            {
+                if (result.ResumeIdentity is null)
+                {
+                    throw new InvalidDataException(
+                        "A paused agent run did not retain its durable turn identity.");
+                }
+                turn.Report(
+                    AgentActivityKind.Status,
+                    result.StructuredRecoveryRequired
+                        ? "Recovery decision required"
+                        : "Turn paused",
+                    result.StructuredRecoveryRequired
+                        ? "Choose one of the recovery buttons; Ali will not infer the answer from chat text."
+                        : $"{_assistantName} preserved the work and is waiting for your next message.");
+            }
+            else
+            {
+                QueueIncomingUserMemoryReview(turn, userText);
+                turn.Report(
+                    AgentActivityKind.Complete,
+                    "Response complete",
+                    $"{_assistantName} finished the agent run.");
+            }
+
             writer.TryComplete();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -262,6 +459,114 @@ public sealed class AliToolCoordinator : IDisposable
         }
         finally
         {
+            _toolOutcomes.DiscardCoordinatorTurn(turn);
+            _memoryReviewQueue?.EndForegroundTurn();
+        }
+    }
+
+    private async Task ProduceRecoveryDecisionAsync(
+        string conversationId,
+        string userMessageId,
+        string assistantMessageId,
+        AgentRecoveryDecision decision,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        ChannelWriter<AssistantStreamChunk> writer,
+        CancellationToken cancellationToken)
+    {
+        var (capturedUserSelection, observationIdentity) = CaptureTurnAdmissionIdentity(
+            _activeUsers,
+            conversationId,
+            assistantMessageId);
+        var turn = new CoordinatorTurnContext(
+            conversationId,
+            userMessageId,
+            assistantMessageId,
+            string.Empty,
+            chunk => writer.TryWrite(chunk),
+            capturedUserSelection,
+            observationIdentity);
+        using var turnScope = _turn.Enter(turn);
+        _memoryReviewQueue?.BeginForegroundTurn();
+        try
+        {
+            async ValueTask<FinalAnswerPublicationAcknowledgment> PublishFinalAsync(
+                FinalAnswerPublication publication,
+                CancellationToken publicationCancellation)
+            {
+                publicationCancellation.ThrowIfCancellationRequested();
+                var delivery = new FinalAnswerPublicationDelivery(publication);
+                var accepted = writer.TryWrite(new AssistantStreamChunk(
+                    publication.ConversationId,
+                    publication.UserMessageId,
+                    publication.AssistantMessageId,
+                    publication.AnswerText,
+                    publication.EvidenceStatus,
+                    publication.FinishReason)
+                {
+                    FinalPublicationDelivery = delivery
+                });
+                if (!accepted)
+                {
+                    return FinalAnswerPublicationAcknowledgment.Rejected(publication);
+                }
+
+                return await delivery.WaitAsync(publicationCancellation).ConfigureAwait(false);
+            }
+
+            var result = await _harness.ResolveRecoveryAsync(
+                turn,
+                decision,
+                history,
+                attachments,
+                PublishFinalAsync,
+                cancellationToken).ConfigureAwait(false);
+            if (result.Paused)
+            {
+                if (result.ResumeIdentity is null)
+                {
+                    throw new InvalidDataException(
+                        "A paused recovery run did not retain its durable turn identity.");
+                }
+
+                turn.Report(
+                    AgentActivityKind.Status,
+                    result.StructuredRecoveryRequired
+                        ? "Recovery decision required"
+                        : "Turn paused",
+                    result.StructuredRecoveryRequired
+                        ? "Choose one of the two recovery options; Ali will not infer the answer from chat text."
+                        : $"{_assistantName} preserved the work and is waiting for your next message.");
+            }
+            else if (decision.Choice == AgentRecoveryDecisionChoice.ConfirmDisplayed)
+            {
+                turn.Report(
+                    AgentActivityKind.Complete,
+                    "Answer display confirmed",
+                    "Ali closed the recovered turn without publishing a duplicate answer.");
+            }
+            else
+            {
+                turn.Report(
+                    AgentActivityKind.Complete,
+                    "Recovery complete",
+                    $"{_assistantName} applied the explicit recovery decision and finished the agent run.");
+            }
+
+            writer.TryComplete();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            writer.TryComplete();
+        }
+        catch (Exception ex)
+        {
+            turn.Report(AgentActivityKind.Error, "Recovery failed safely", ex.Message);
+            writer.TryComplete(ex);
+        }
+        finally
+        {
+            _toolOutcomes.DiscardCoordinatorTurn(turn);
             _memoryReviewQueue?.EndForegroundTurn();
         }
     }
@@ -373,46 +678,6 @@ public sealed class AliToolCoordinator : IDisposable
             IsActivity: true,
             ActivityKind: result.Success ? AgentActivityKind.Status : AgentActivityKind.Warning,
             ActivityDetail: $"{result.Message}{changed}"));
-    }
-
-    private static void PublishSourceAppendix(
-        CoordinatorTurnContext turn,
-        string? finishReason,
-        ChannelWriter<AssistantStreamChunk> writer)
-    {
-        var usableSources = turn.WebSources
-            .Where(source => Uri.TryCreate(source.Url, UriKind.Absolute, out var uri)
-                && (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
-                    || uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
-            .DistinctBy(source => source.Url, StringComparer.OrdinalIgnoreCase)
-            .Take(MaximumVisibleSources)
-            .ToList();
-        if (usableSources.Count == 0)
-        {
-            return;
-        }
-
-        var appendix = new StringBuilder()
-            .AppendLine()
-            .AppendLine()
-            .AppendLine("Sources checked:");
-        foreach (var source in usableSources)
-        {
-            var safeName = source.Name.Replace('[', '(').Replace(']', ')').Trim();
-            appendix.Append("- [")
-                .Append(string.IsNullOrWhiteSpace(safeName) ? source.Url : safeName)
-                .Append("](")
-                .Append(source.Url)
-                .AppendLine(")");
-        }
-
-        writer.TryWrite(new AssistantStreamChunk(
-            turn.ConversationId,
-            turn.UserMessageId,
-            turn.AssistantMessageId,
-            appendix.ToString().TrimEnd(),
-            EvidenceStatus.Verified,
-            finishReason));
     }
 
     public void Dispose()

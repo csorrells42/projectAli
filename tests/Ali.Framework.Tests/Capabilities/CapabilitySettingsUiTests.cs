@@ -57,6 +57,23 @@ public sealed class CapabilitySettingsUiTests
     }
 
     [Fact]
+    public void CapabilitiesTab_UsesOneWayBindingsForReadOnlyRunText()
+    {
+        var tab = LoadCapabilitiesTab();
+        var boundRuns = tab
+            .Descendants(Presentation + "Run")
+            .Select(run => Attribute(run, "Text"))
+            .Where(text => text?.StartsWith("{Binding ", StringComparison.Ordinal) == true)
+            .Cast<string>()
+            .ToArray();
+
+        Assert.NotEmpty(boundRuns);
+        Assert.All(
+            boundRuns,
+            binding => Assert.Contains("Mode=OneWay", binding, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void CapabilitiesTab_ShowsFilenameOnlyAndExplicitMutationStates()
     {
         var tab = LoadCapabilitiesTab();
