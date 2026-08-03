@@ -228,6 +228,12 @@ public sealed record CapabilityEffectDescriptor(
         or CapabilityEffectKind.ProcessControl
         or CapabilityEffectKind.ExternalMutation
         or CapabilityEffectKind.Destructive;
+
+    public bool RequiresDurableEffectAdapter => IsMutation
+        || WritesLocalData
+        || StartsProcesses
+        || ChangesSystemState
+        || (UsesNetwork && !SupportsIdempotency);
 }
 
 public sealed record CapabilityDescriptor(

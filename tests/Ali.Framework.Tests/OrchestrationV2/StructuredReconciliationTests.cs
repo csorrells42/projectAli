@@ -685,7 +685,9 @@ public sealed class StructuredReconciliationTests
         Digest("target-version"),
         Digest("permission-receipt"),
         Digest("registry"),
+        Digest("execution-registry"),
         "filesystem-observer",
+        "root-binding",
         RequiresApproval: true);
 
     private static TurnRuntimeBindings Bindings() => new(

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Ali.Modules.Coding.Execution;
 using Ali.Modules.Coding.Infrastructure;
 using Ali.Modules.Coding.Languages;
 
@@ -160,7 +161,15 @@ internal sealed class AliWebLanguageProvider : IAliLanguageProvider
         if (!File.Exists(manifest)) return false;
         try
         {
-            using var json = JsonDocument.Parse(File.ReadAllText(manifest));
+            using var stream = AliCodingExecutionAssetFingerprint.OpenRegularFileNoFollow(
+                manifest,
+                "The web package manifest is not a regular local file.");
+            if (stream.Length > 4L * 1024 * 1024)
+            {
+                throw new InvalidDataException(
+                    "The web package manifest exceeds the fixed 4 MiB bound.");
+            }
+            using var json = JsonDocument.Parse(stream);
             return json.RootElement.TryGetProperty("scripts", out var scripts)
                 && scripts.TryGetProperty(name, out var script)
                 && !string.IsNullOrWhiteSpace(script.GetString());

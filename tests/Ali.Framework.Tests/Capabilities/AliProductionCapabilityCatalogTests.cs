@@ -1,6 +1,9 @@
 using Ali.Modules.Capabilities;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Mcp;
+using Ali.Modules.Orchestration;
+using Ali.Modules.Orchestration.Contracts;
+using Ali.Modules.Orchestration.State;
 using Ali.Modules.Permissions;
 using Microsoft.Extensions.AI;
 
@@ -8,7 +11,7 @@ namespace Ali.Framework.Tests.Capabilities;
 
 public sealed class AliProductionCapabilityCatalogTests
 {
-    private static readonly string[] RetiredToolNames =
+    private static readonly string[] CatalogDeclaredRetiredToolNames =
     [
         AliCapabilityCatalog.CodingAgentStatusName,
         AliCapabilityCatalog.CodingAgentExecuteName,
@@ -20,6 +23,13 @@ public sealed class AliProductionCapabilityCatalogTests
         AliCapabilityCatalog.RunMagenticOrchestrationName,
         AliCapabilityCatalog.ListRecoverableWorkflowsName,
         AliCapabilityCatalog.ResumeWorkflowCheckpointName
+    ];
+
+    private static readonly string[] RetiredToolNames =
+    [
+        .. CatalogDeclaredRetiredToolNames,
+        AliCapabilityCatalog.RoslynPreviewRenameName,
+        AliCapabilityCatalog.RoslynApplyRenameName
     ];
 
     [Fact]
@@ -34,13 +44,13 @@ public sealed class AliProductionCapabilityCatalogTests
             .ToArray();
 
         Assert.Equal(catalogNames.Length, catalogNames.Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(114, activeCatalogNames.Length);
-        Assert.True(RetiredToolNames.ToHashSet(StringComparer.Ordinal)
+        Assert.Equal(117, activeCatalogNames.Length);
+        Assert.True(CatalogDeclaredRetiredToolNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(retiredCatalogNames));
         Assert.Equal(activeCatalogNames.Length, AliProductionCapabilityCatalog.KnownToolNames.Count);
         Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionCapabilityCatalog.KnownToolNames));
-        Assert.Equal(114, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
+        Assert.Equal(117, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
         Assert.True(activeCatalogNames.ToHashSet(StringComparer.Ordinal)
             .SetEquals(AliProductionToolOutcomeRegistry.ContractedToolNames));
         Assert.All(activeCatalogNames, name =>
@@ -48,8 +58,9 @@ public sealed class AliProductionCapabilityCatalogTests
             Assert.True(AliProductionCapabilityCatalog.TryGetGroupId(name, out var groupId));
             Assert.Contains(groupId, CapabilityGroupIds.All);
         });
-        Assert.All(retiredCatalogNames, name =>
+        Assert.All(RetiredToolNames, name =>
         {
+            Assert.True(AliProductionCapabilityCatalog.IsRetiredToolName(name));
             Assert.DoesNotContain(name, AliProductionCapabilityCatalog.KnownToolNames);
             Assert.False(AliProductionCapabilityCatalog.TryGetGroupId(name, out var groupId));
             Assert.Null(groupId);
@@ -135,8 +146,11 @@ public sealed class AliProductionCapabilityCatalogTests
             AliCapabilityCatalog.RoslynInspectDocumentName,
             AliCapabilityCatalog.RoslynInspectPositionName,
             AliCapabilityCatalog.RoslynFindReferencesName,
-            AliCapabilityCatalog.RoslynPreviewRenameName,
-            AliCapabilityCatalog.RoslynApplyRenameName,
+            AliCapabilityCatalog.RoslynInspectTargetName,
+            AliCapabilityCatalog.RoslynListActionsName,
+            AliCapabilityCatalog.RoslynPreviewActionName,
+            AliCapabilityCatalog.RoslynApplyActionName,
+            AliCapabilityCatalog.RoslynVerifyChangesetName,
             AliCapabilityCatalog.DotNetBuildName,
             AliCapabilityCatalog.DotNetRunName,
             AliCapabilityCatalog.DotNetStopProjectName,
@@ -210,7 +224,7 @@ public sealed class AliProductionCapabilityCatalogTests
         var result = AliProductionCapabilityCatalog.Build(actualFunctions);
 
         Assert.Empty(result.QuarantinedToolNames);
-        Assert.Equal(114, actualFunctions.Length);
+        Assert.Equal(117, actualFunctions.Length);
         Assert.Equal(actualFunctions.Length, result.Registry.Descriptors.Count);
         Assert.Equal(
             new[]
@@ -284,6 +298,88 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
+    public void RoslynActionDeck_ReplacesRawRenameToolsWithExactStagedApplyMetadata()
+    {
+        var actionDeckNames = new[]
+        {
+            AliCapabilityCatalog.RoslynInspectTargetName,
+            AliCapabilityCatalog.RoslynListActionsName,
+            AliCapabilityCatalog.RoslynPreviewActionName,
+            AliCapabilityCatalog.RoslynApplyActionName,
+            AliCapabilityCatalog.RoslynVerifyChangesetName
+        };
+        var retiredRenameNames = new[]
+        {
+            AliCapabilityCatalog.RoslynPreviewRenameName,
+            AliCapabilityCatalog.RoslynApplyRenameName
+        };
+        var result = AliProductionCapabilityCatalog.Build(
+            actionDeckNames.Concat(retiredRenameNames).Select(name => Function(name)));
+
+        Assert.True(actionDeckNames.ToHashSet(StringComparer.Ordinal).SetEquals(
+            result.Registry.Descriptors.Select(descriptor => descriptor.ToolName)));
+        Assert.True(retiredRenameNames.ToHashSet(StringComparer.Ordinal).SetEquals(
+            result.QuarantinedToolNames));
+        Assert.All(result.Registry.Descriptors, descriptor =>
+            Assert.Equal(CapabilityGroupIds.CSharpDotNetRoslyn, descriptor.GroupId));
+        Assert.All(retiredRenameNames, retiredName =>
+        {
+            Assert.True(AliProductionCapabilityCatalog.IsRetiredToolName(retiredName));
+            Assert.DoesNotContain(retiredName, AliProductionCapabilityCatalog.KnownToolNames);
+            Assert.False(AliProductionCapabilityCatalog.TryGetGroupId(retiredName, out _));
+        });
+
+        var apply = Assert.Single(result.Registry.Descriptors, descriptor =>
+            descriptor.ToolName == AliCapabilityCatalog.RoslynApplyActionName);
+        Assert.Equal(CapabilityEffectKind.SourceMutation, apply.Effect.Kind);
+        Assert.Equal(
+            CapabilityMutationBoundary.StagedWorkspace,
+            apply.Effect.MutationBoundary);
+        Assert.Equal(
+            "ali.reconcile." + AliCapabilityCatalog.RoslynApplyActionName,
+            apply.Effect.ReconcilerId);
+        Assert.True(apply.Permission.RequiresApproval);
+    }
+
+    [Fact]
+    public void SourceMutations_RemainUnavailableUnlessTheirExactAdapterMetadataIsRegistered()
+    {
+        var sourceMutations = CreateDescriptorsByName().Values
+            .Where(descriptor => descriptor.Effect.Kind == CapabilityEffectKind.SourceMutation)
+            .OrderBy(descriptor => descriptor.ToolName, StringComparer.Ordinal)
+            .ToArray();
+        Assert.NotEmpty(sourceMutations);
+        Assert.All(sourceMutations, descriptor =>
+        {
+            Assert.Equal(
+                CapabilityMutationBoundary.StagedWorkspace,
+                descriptor.Effect.MutationBoundary);
+            Assert.False(
+                AliExecutionEffectAdapterRegistry.Empty.TryResolve(descriptor, out _),
+                descriptor.ToolName);
+        });
+
+        var apply = Assert.Single(sourceMutations, descriptor =>
+            descriptor.ToolName == AliCapabilityCatalog.RoslynApplyActionName);
+        var exactAdapter = new MetadataOnlyEffectAdapter(apply);
+        var adapters = new AliExecutionEffectAdapterRegistry([exactAdapter]);
+        foreach (var descriptor in sourceMutations)
+        {
+            var resolved = adapters.TryResolve(descriptor, out var adapter);
+            if (descriptor.ToolName == AliCapabilityCatalog.RoslynApplyActionName)
+            {
+                Assert.True(resolved);
+                Assert.Same(exactAdapter, adapter);
+            }
+            else
+            {
+                Assert.False(resolved, descriptor.ToolName);
+                Assert.Null(adapter);
+            }
+        }
+    }
+
+    [Fact]
     public void RegistrationKinds_ReflectFrameworkOwnershipExactly()
     {
         var registry = AliProductionCapabilityCatalog.CreateRegistry(
@@ -318,6 +414,12 @@ public sealed class AliProductionCapabilityCatalogTests
             Assert.False(string.IsNullOrWhiteSpace(descriptor.Effect.ReconcilerId));
             Assert.NotEqual(CapabilityRiskLevel.None, descriptor.Permission.Risk);
         }
+        Assert.All(
+            registry.Descriptors.Where(descriptor =>
+                descriptor.Effect.Kind == CapabilityEffectKind.SourceMutation),
+            descriptor => Assert.Equal(
+                CapabilityMutationBoundary.StagedWorkspace,
+                descriptor.Effect.MutationBoundary));
         foreach (var policy in McpServerToolCatalog.CreateDefaultPolicies().Where(policy => policy.WritesLocalData))
         {
             if (byName.TryGetValue(policy.Name, out var descriptor))
@@ -451,7 +553,10 @@ public sealed class AliProductionCapabilityCatalogTests
             AliCapabilityCatalog.RoslynInspectDocumentName,
             AliCapabilityCatalog.RoslynInspectPositionName,
             AliCapabilityCatalog.RoslynFindReferencesName,
-            AliCapabilityCatalog.RoslynPreviewRenameName,
+            AliCapabilityCatalog.RoslynInspectTargetName,
+            AliCapabilityCatalog.RoslynListActionsName,
+            AliCapabilityCatalog.RoslynPreviewActionName,
+            AliCapabilityCatalog.RoslynVerifyChangesetName,
             AliCapabilityCatalog.ArchitectureInspectName,
             AliCapabilityCatalog.ArchitectureCheckName,
             AliCapabilityCatalog.DotNetArchitectureReportName
@@ -470,12 +575,12 @@ public sealed class AliProductionCapabilityCatalogTests
         foreach (var toolName in new[]
                  {
                      AliCapabilityCatalog.RoslynFormatProjectName,
-                     AliCapabilityCatalog.RoslynApplyRenameName
+                     AliCapabilityCatalog.RoslynApplyActionName
                  })
         {
             var descriptor = byName[toolName];
             Assert.Equal(CapabilityEffectKind.SourceMutation, descriptor.Effect.Kind);
-            Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, descriptor.Effect.MutationBoundary);
+            Assert.Equal(CapabilityMutationBoundary.StagedWorkspace, descriptor.Effect.MutationBoundary);
             Assert.False(descriptor.Effect.SupportsIdempotency);
             Assert.True(descriptor.Effect.ReadsLocalData);
             Assert.True(descriptor.Effect.WritesLocalData);
@@ -642,7 +747,7 @@ public sealed class AliProductionCapabilityCatalogTests
         {
             var descriptor = byName[toolName];
             Assert.Equal(CapabilityEffectKind.SourceMutation, descriptor.Effect.Kind);
-            Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, descriptor.Effect.MutationBoundary);
+            Assert.Equal(CapabilityMutationBoundary.StagedWorkspace, descriptor.Effect.MutationBoundary);
             Assert.True(descriptor.Effect.WritesLocalData, toolName);
             Assert.False(descriptor.Effect.SupportsIdempotency, toolName);
             Assert.False(string.IsNullOrWhiteSpace(descriptor.Effect.ReconcilerId));
@@ -795,8 +900,11 @@ public sealed class AliProductionCapabilityCatalogTests
             AliCapabilityCatalog.RoslynInspectDocumentName,
             AliCapabilityCatalog.RoslynInspectPositionName,
             AliCapabilityCatalog.RoslynFindReferencesName,
-            AliCapabilityCatalog.RoslynPreviewRenameName,
-            AliCapabilityCatalog.RoslynApplyRenameName,
+            AliCapabilityCatalog.RoslynInspectTargetName,
+            AliCapabilityCatalog.RoslynListActionsName,
+            AliCapabilityCatalog.RoslynPreviewActionName,
+            AliCapabilityCatalog.RoslynApplyActionName,
+            AliCapabilityCatalog.RoslynVerifyChangesetName,
             AliCapabilityCatalog.ArchitectureInspectName,
             AliCapabilityCatalog.ArchitectureCheckName,
             AliCapabilityCatalog.DotNetArchitectureReportName
@@ -848,4 +956,30 @@ public sealed class AliProductionCapabilityCatalogTests
             () => "ok",
             name,
             description ?? $"schema for {name}");
+
+    private sealed class MetadataOnlyEffectAdapter(
+        CapabilityDescriptor descriptor) : IAliExecutionEffectAdapter
+    {
+        public string ToolName { get; } = descriptor.ToolName;
+
+        public string CapabilityId { get; } = descriptor.Id;
+
+        public string ReconcilerId { get; } = descriptor.Effect.ReconcilerId
+            ?? throw new ArgumentException(
+                "The metadata-only adapter requires an exact reconciler identity.",
+                nameof(descriptor));
+
+        public ValueTask<AliExecutionPreparation> PrepareAsync(
+            AliExecutionPreparationRequest request,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromException<AliExecutionPreparation>(
+                new InvalidOperationException("Metadata-only test adapters cannot prepare effects."));
+
+        public ValueTask<ActionReconciliationResult> ReconcileAsync(
+            TurnIdentity identity,
+            PreparedActionIntent intent,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(
+                ActionReconciliationResult.Unknown("metadata-only-test-adapter"));
+    }
 }

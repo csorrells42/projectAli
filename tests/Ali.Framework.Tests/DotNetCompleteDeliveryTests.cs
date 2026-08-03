@@ -1,4 +1,6 @@
 using Ali.Modules.Coding;
+using Ali.Modules.Coding.Architecture;
+using Ali.Modules.Coding.Delivery;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Permissions;
 using Ali.Modules.WorkstationFiles;
@@ -8,6 +10,58 @@ namespace Ali.Framework.Tests;
 [Collection(ProcessEnvironmentIntegrationCollection.Name)]
 public sealed class DotNetCompleteDeliveryTests
 {
+    [Fact]
+    public async Task ArchitectureFailureStopsBeforeEveryLaterDeliveryStage()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "AliDeliveryArchitectureFailure", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var workspace = Path.Combine(root, "workspace");
+            var access = CreateAccess(root, workspace);
+            await access.Store.WriteAsync(
+                "Workspace/App/App.csproj",
+                """<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>""",
+                TestContext.Current.CancellationToken);
+            await access.Store.WriteAsync(
+                "Workspace/App/Program.cs",
+                """namespace App; public static class Program { public static void Main() { } }""",
+                TestContext.Current.CancellationToken);
+            await using var module = new AliCodingModule(access);
+            var delivery = new AliAutonomousDelivery(
+                module.Architecture,
+                module.Quality,
+                module.EngineeringLoop,
+                module.Tools,
+                module.Verification,
+                module.Release,
+                (_, _) => Task.FromResult(new ArchitectureInspectionResult(
+                    false,
+                    "Architecture inspection failed.",
+                    [],
+                    [],
+                    [],
+                    [])));
+
+            var result = await delivery.VerifyDeliveryAsync(
+                "Workspace/App/App.csproj",
+                null,
+                "Release",
+                verifyApplication: true,
+                publishRelease: true,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.Success);
+            var stage = Assert.Single(result.Stages);
+            Assert.Equal("architecture", stage.Name);
+            Assert.False(stage.Success);
+            Assert.False(Directory.Exists(Path.Combine(workspace, "App", ".ali", "quality")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task PerformanceApplicationReleaseReportAndDelivery_RunEndToEnd()
     {
@@ -44,7 +98,7 @@ public sealed class DotNetCompleteDeliveryTests
             Assert.Equal(0, comparison.PercentChange);
 
             var running = await module.Tools.RunAsync("Workspace/App/App.csproj", "Release", TestContext.Current.CancellationToken);
-            Assert.True(running.Success);
+            Assert.True(running.Success, running.Summary);
             var trace = await module.Performance.CaptureTraceAsync("Workspace/App/App.csproj", running.ProcessId!.Value, 1, TestContext.Current.CancellationToken);
             Assert.True(trace.Success);
             Assert.True(trace.TraceSizeBytes > 0);

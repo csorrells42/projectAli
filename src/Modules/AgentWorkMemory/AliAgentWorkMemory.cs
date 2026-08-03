@@ -3,6 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Ali.Modules.Coordinator;
+using Ali.Modules.Orchestration;
+using Ali.Modules.Orchestration.Evidence;
+using Ali.Modules.Orchestration.Work;
 using Ali.Modules.UserMemory;
 using Microsoft.Agents.AI;
 
@@ -30,6 +33,19 @@ public sealed class AliAgentWorkMemory
     private readonly ScopedAgentWorkMemoryStore _store;
 
     public AliAgentWorkMemory(string userDataRoot)
+        : this(
+            userDataRoot,
+            durableOrchestrationRoot: null,
+            assistantProfileBinding: null,
+            evidence: null)
+    {
+    }
+
+    internal AliAgentWorkMemory(
+        string userDataRoot,
+        string? durableOrchestrationRoot,
+        string? assistantProfileBinding,
+        EvidenceLedger? evidence = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userDataRoot);
         var fullRoot = Path.GetFullPath(userDataRoot);
@@ -43,10 +59,34 @@ public sealed class AliAgentWorkMemory
             RecoverableTrashPath,
             AuditPath,
             () => _scope.Value?.Scope);
-        Store = _store;
+        if (string.IsNullOrWhiteSpace(durableOrchestrationRoot)
+            || string.IsNullOrWhiteSpace(assistantProfileBinding))
+        {
+            Store = _store;
+            ExecutionEffectAdapters = [];
+            TargetStateAdapters = [];
+        }
+        else
+        {
+            var coordinator = new AliAgentWorkMemoryExecutionCoordinator(
+                _store,
+                RootPath,
+                RecoverableTrashPath,
+                () => _scope.Value?.Scope,
+                durableOrchestrationRoot,
+                assistantProfileBinding,
+                evidence);
+            Store = new AliBrokeredAgentWorkMemoryStore(_store, coordinator);
+            ExecutionEffectAdapters = coordinator.ExecutionEffectAdapters;
+            TargetStateAdapters = coordinator.TargetStateAdapters;
+        }
     }
 
     public AgentFileStore Store { get; }
+
+    internal IReadOnlyList<IAliExecutionEffectAdapter> ExecutionEffectAdapters { get; }
+
+    internal IReadOnlyList<IActionTargetStateAdapter> TargetStateAdapters { get; }
 
     public string RootPath { get; }
 
@@ -182,6 +222,44 @@ internal sealed class ScopedAgentWorkMemoryStore : AgentFileStore
 
             _outcomeBinding = new OutcomeBinding(outcomes);
         }
+    }
+
+    internal void ReportExactDurableOutcome(
+        string toolName,
+        AliFrameworkToolOutcomeSignal signal)
+    {
+        if (toolName is not (
+                AliCapabilityCatalog.WorkMemoryWriteName
+                or AliCapabilityCatalog.WorkMemoryReplaceName
+                or AliCapabilityCatalog.WorkMemoryReplaceLinesName
+                or AliCapabilityCatalog.WorkMemoryDeleteName))
+        {
+            throw new ArgumentException(
+                "Only an explicitly registered work-memory mutation can report a durable outcome.",
+                nameof(toolName));
+        }
+        Report([toolName], signal);
+    }
+
+    internal Task AppendExactDurableAuditAsync(
+        AgentWorkMemoryScope scope,
+        string operation,
+        string path,
+        bool succeeded,
+        string outcome,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outcome);
+        return AppendAuditAsync(
+            scope,
+            operation,
+            path,
+            succeeded,
+            outcome,
+            cancellationToken);
     }
 
     public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default) =>

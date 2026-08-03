@@ -1740,6 +1740,20 @@ internal sealed class TurnTransitionJournal
             return true;
         }
 
+        if (transition is InterimPublicationDisplayMarkedInDoubtTransition displayInDoubt
+            && cache.State.InterimPublication is
+                { Status: InterimPublicationStatus.DisplayInDoubt } existingDisplayInDoubt)
+        {
+            EnsureSameInterimPublication(
+                existingDisplayInDoubt,
+                displayInDoubt.PublicationId,
+                displayInDoubt.Kind,
+                reason: null,
+                subjectId: null,
+                textDigest: displayInDoubt.TextDigest);
+            return true;
+        }
+
         if (transition is FinalPublicationCommittedTransition committedPublication
             && cache.State.FinalPublication is { Status: FinalPublicationStatus.Committed } existingCommitted)
         {

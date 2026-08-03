@@ -10,6 +10,7 @@ using Ali.Modules.Identity;
 using Ali.Modules.Internet;
 using Ali.Modules.Memory;
 using Ali.Modules.Mcp;
+using Ali.Modules.Orchestration;
 using Ali.Modules.Permissions;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Observation;
@@ -141,6 +142,14 @@ public sealed class AliToolCoordinator : IDisposable
                 : cancellationToken => _memoryReviewQueue.DrainAsync(cancellationToken),
             semanticToolCatalog,
             shadowObserver);
+        var targetStateAdapters = fileAccess.TargetStateAdapters
+            .Concat(workMemory.TargetStateAdapters)
+            .Concat(codingModule.TargetStateAdapters)
+            .ToArray();
+        var executionEffectAdapters = fileAccess.ExecutionEffectAdapters
+            .Concat(workMemory.ExecutionEffectAdapters)
+            .Concat(codingModule.ExecutionEffectAdapters)
+            .ToArray();
         _harness = new AliAgentHarnessRunner(
             chatClient,
             runtime,
@@ -161,6 +170,11 @@ public sealed class AliToolCoordinator : IDisposable
                 ? null
                 : new ConversationStoreFinalPublicationReconciler(
                     conversationPublicationProbe),
+            targetStates: AliProductionTargetStateAdapters.Create(
+                fileAccess,
+                targetStateAdapters),
+            executionAdapters: new AliExecutionEffectAdapterRegistry(
+                executionEffectAdapters),
             toolOutcomes: _toolOutcomes);
     }
 

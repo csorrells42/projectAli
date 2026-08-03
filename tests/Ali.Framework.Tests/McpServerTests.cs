@@ -793,15 +793,26 @@ public sealed class McpServerTests
                 activeUsers: null,
                 workspace);
 
-            await access.Store.WriteAsync(
-                "Workspace/GothicTicTacToe/MainWindow.xaml",
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                access.Store.WriteAsync(
+                    "Workspace/GothicTicTacToe/MainWindow.xaml",
+                    "<Window />",
+                    TestContext.Current.CancellationToken));
+
+            var expectedFile = Path.Combine(
+                workspace,
+                "GothicTicTacToe",
+                "MainWindow.xaml");
+            Directory.CreateDirectory(Path.GetDirectoryName(expectedFile)!);
+            await File.WriteAllTextAsync(
+                expectedFile,
                 "<Window />",
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(
                 "<Window />",
-                await File.ReadAllTextAsync(
-                    Path.Combine(workspace, "GothicTicTacToe", "MainWindow.xaml"),
+                await access.Store.ReadAsync(
+                    "Workspace/GothicTicTacToe/MainWindow.xaml",
                     TestContext.Current.CancellationToken));
             Assert.False(File.Exists(Path.Combine(root, "data", "Workspace", "GothicTicTacToe", "MainWindow.xaml")));
         }

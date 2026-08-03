@@ -58,6 +58,21 @@ internal sealed class AliRoslynDocumentIntelligence(AliRoslynWorkspaceLoader loa
         CancellationToken cancellationToken)
     {
         using var session = await loader.LoadAsync(targetPath, cancellationToken).ConfigureAwait(false);
+        return await InspectDocumentAsync(
+                session,
+                targetPath,
+                documentPath,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<RoslynDocumentResult> InspectDocumentAsync(
+        AliRoslynWorkspaceSession session,
+        string targetPath,
+        string documentPath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
         var (document, _) = await loader.ResolvePositionAsync(session, documentPath, 1, 1, cancellationToken).ConfigureAwait(false);
         var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false)
@@ -121,6 +136,25 @@ internal sealed class AliRoslynDocumentIntelligence(AliRoslynWorkspaceLoader loa
         CancellationToken cancellationToken)
     {
         using var session = await loader.LoadAsync(targetPath, cancellationToken).ConfigureAwait(false);
+        return await InspectPositionAsync(
+                session,
+                targetPath,
+                documentPath,
+                line,
+                column,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<RoslynPositionResult> InspectPositionAsync(
+        AliRoslynWorkspaceSession session,
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
         var (document, position) = await loader.ResolvePositionAsync(
             session,
             documentPath,

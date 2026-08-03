@@ -20,6 +20,7 @@ internal enum McpCapabilityPublicationIssueCode
     MissingCanonicalDescriptor,
     CapabilityUnavailable,
     ApprovalUnavailable,
+    MutationBoundaryUnavailable,
     MissingFunctionImplementation,
     SchemaIdentityMismatch
 }
@@ -128,6 +129,20 @@ internal static class McpCapabilityPublicationGate
             if (!outgoingByName.TryGetValue(toolName, out var descriptor))
             {
                 issues.Add(CreateUnavailableIssue(toolName, planning));
+                continue;
+            }
+
+            // The non-interactive outgoing server has no durable turn/call authority and no
+            // staged-workspace publication scope. Approval classification is not a mutation
+            // boundary: even a future policy change that removes an approval requirement must
+            // never expose a canonical writer through this path.
+            if (descriptor.Effect.RequiresDurableEffectAdapter
+                || descriptor.Effect.MutationBoundary == CapabilityMutationBoundary.StagedWorkspace)
+            {
+                issues.Add(new McpCapabilityPublicationIssue(
+                    toolName,
+                    McpCapabilityPublicationIssueCode.MutationBoundaryUnavailable,
+                    $"Enabled MCP tool '{toolName}' requires a durable effect or staged-workspace boundary that the non-interactive outgoing server does not provide and was not published."));
                 continue;
             }
 

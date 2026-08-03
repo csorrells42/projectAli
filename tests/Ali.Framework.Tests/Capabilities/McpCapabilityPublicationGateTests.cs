@@ -420,30 +420,138 @@ public sealed class McpCapabilityPublicationGateTests
     }
 
     [Fact]
-    public void ApprovalBearingRead_IsWithheldWithoutAnOutgoingApprovalBridge()
+    public void EveryOutgoingDurableEffectCapability_IsWithheldByMutationBoundary()
     {
         var root = CreateTemporaryRoot();
         try
         {
-            var research = AIFunctionFactory.Create(
-                (Func<string, string>)(question => question),
-                AliCapabilityCatalog.ResearchWebName,
-                "Metered web research.");
+            var names = McpServerToolCatalog.CreateDefaultPolicies()
+                .Select(policy => policy.Name)
+                .Where(AliProductionCapabilityCatalog.KnownToolNames.Contains)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var functions = names
+                .Select(name => AIFunctionFactory.Create(
+                    (Func<string>)(() => name),
+                    name,
+                    $"Canonical schema for {name}."))
+                .ToArray();
             var owner = CreateOwner(
                 root,
-                [research],
-                [research.Name],
+                functions,
+                names,
                 includeReconcilers: true);
+            var planning = owner.CapturePlanning();
+            var effectCapable = planning.Resolution.OutgoingMcpDescriptors
+                .Where(descriptor => descriptor.Effect.RequiresDurableEffectAdapter
+                    || descriptor.Effect.MutationBoundary
+                        == CapabilityMutationBoundary.StagedWorkspace)
+                .ToArray();
+            Assert.NotEmpty(effectCapable);
+            Assert.Contains(effectCapable, descriptor =>
+                !descriptor.Permission.RequiresApproval);
+            Assert.All(
+                effectCapable.Where(descriptor => descriptor.Effect.ReconcilerId is not null),
+                descriptor => Assert.Contains(
+                    descriptor.Effect.ReconcilerId!,
+                    planning.Runtime.AvailableReconcilerIds));
 
             var publication = McpCapabilityPublicationGate.Publish(
-                Catalog([research], [research.Name]),
+                Catalog(functions, names),
+                owner,
+                TestContext.Current.CancellationToken);
+            var issueByName = publication.Issues.ToDictionary(
+                issue => issue.ToolName,
+                StringComparer.Ordinal);
+            var publishedNames = publication.PublishedFunctions
+                .Select(function => function.Name)
+                .ToHashSet(StringComparer.Ordinal);
+
+            Assert.All(effectCapable, descriptor =>
+            {
+                Assert.DoesNotContain(descriptor.ToolName, publishedNames);
+                Assert.True(issueByName.TryGetValue(descriptor.ToolName, out var issue));
+                Assert.NotNull(issue);
+                Assert.Equal(
+                    McpCapabilityPublicationIssueCode.MutationBoundaryUnavailable,
+                    issue.Code);
+            });
+        }
+        finally
+        {
+            DeleteTemporaryRoot(root);
+        }
+    }
+
+    [Fact]
+    public void NonIdempotentNetworkOperationWithoutApproval_IsStillWithheldByMutationBoundary()
+    {
+        var root = CreateTemporaryRoot();
+        try
+        {
+            var search = AIFunctionFactory.Create(
+                (Func<string, string>)(topic => topic),
+                AliCapabilityCatalog.SearchCurrentWebName,
+                "Search current web sources.");
+            var owner = CreateOwner(
+                root,
+                [search],
+                [search.Name],
+                includeReconcilers: true);
+            var descriptor = Assert.Single(owner.CapturePlanning().Registry.Descriptors);
+            Assert.Equal(CapabilityEffectKind.LocalMutation, descriptor.Effect.Kind);
+            Assert.True(descriptor.Effect.UsesNetwork);
+            Assert.False(descriptor.Effect.SupportsIdempotency);
+            Assert.True(descriptor.Effect.RequiresDurableEffectAdapter);
+            Assert.False(descriptor.Permission.RequiresApproval);
+
+            var publication = McpCapabilityPublicationGate.Publish(
+                Catalog([search], [search.Name]),
+                owner,
+                TestContext.Current.CancellationToken);
+
+            Assert.Empty(publication.PublishedFunctions);
+            var issue = Assert.Single(publication.Issues);
+            Assert.Equal(search.Name, issue.ToolName);
+            Assert.Equal(
+                McpCapabilityPublicationIssueCode.MutationBoundaryUnavailable,
+                issue.Code);
+        }
+        finally
+        {
+            DeleteTemporaryRoot(root);
+        }
+    }
+
+    [Fact]
+    public void ApprovalBearingPureRead_IsWithheldWithoutAnOutgoingApprovalBridge()
+    {
+        var root = CreateTemporaryRoot();
+        try
+        {
+            var read = AIFunctionFactory.Create(
+                (Func<string, string>)(path => path),
+                AliCapabilityCatalog.FileReadName,
+                "Read one exact local file.");
+            var owner = CreateOwner(
+                root,
+                [read],
+                [read.Name]);
+            var descriptor = Assert.Single(owner.CapturePlanning().Registry.Descriptors);
+            Assert.False(descriptor.Effect.IsMutation);
+            Assert.False(descriptor.Effect.WritesLocalData);
+            Assert.False(descriptor.Effect.StartsProcesses);
+            Assert.False(descriptor.Effect.ChangesSystemState);
+
+            var publication = McpCapabilityPublicationGate.Publish(
+                Catalog([read], [read.Name]),
                 owner,
                 TestContext.Current.CancellationToken);
 
             Assert.Empty(publication.Tools);
             Assert.Empty(publication.PublishedFunctions);
             var issue = Assert.Single(publication.Issues);
-            Assert.Equal(research.Name, issue.ToolName);
+            Assert.Equal(read.Name, issue.ToolName);
             Assert.Equal(McpCapabilityPublicationIssueCode.ApprovalUnavailable, issue.Code);
             Assert.Contains("approval", issue.Message, StringComparison.OrdinalIgnoreCase);
         }

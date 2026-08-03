@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Ali.Modules.Coding.Execution;
 using Ali.Modules.WorkstationFiles;
 
 namespace Ali.Modules.Coding;
@@ -140,7 +141,7 @@ internal sealed class AliDotNetProjectScaffolder
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = ResolveDotNetHost(),
+            FileName = AliCodingInvocationExecutionContext.ResolveDotNetHostForExecution(),
             WorkingDirectory = FindExistingParent(project.ProjectDirectory),
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -224,14 +225,6 @@ internal sealed class AliDotNetProjectScaffolder
             "console" => "console",
             _ => throw new ArgumentException("Template must be wpf or console.", nameof(template))
         };
-    }
-
-    private static string ResolveDotNetHost()
-    {
-        var configured = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        return !string.IsNullOrWhiteSpace(configured) && File.Exists(configured)
-            ? configured
-            : "dotnet";
     }
 
     private async Task WriteAuditAsync(

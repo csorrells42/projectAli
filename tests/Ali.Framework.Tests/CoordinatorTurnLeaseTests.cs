@@ -6,7 +6,7 @@ namespace Ali.Framework.Tests;
 public sealed class CoordinatorTurnLeaseTests
 {
     [Fact]
-    public async Task Active_turn_is_visible_when_execution_context_flow_is_suppressed()
+    public async Task Suppressed_execution_context_cannot_inherit_the_only_active_turn()
     {
         var lease = new CoordinatorTurnLease();
         var turn = CreateTurn();
@@ -18,11 +18,9 @@ public sealed class CoordinatorTurnLeaseTests
             _ => completion.TrySetResult(lease.Current),
             null);
 
-        Assert.Same(
-            turn,
-            await completion.Task.WaitAsync(
-                TimeSpan.FromSeconds(5),
-                TestContext.Current.CancellationToken));
+        Assert.Null(await completion.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken));
     }
 
     [Fact]

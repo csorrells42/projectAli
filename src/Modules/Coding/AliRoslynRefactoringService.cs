@@ -1,5 +1,4 @@
 using System.Text;
-using Ali.Modules.Coding.Changesets;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -36,18 +35,10 @@ internal sealed class AliRoslynRefactoringService
 {
     private const int MaximumReportedChanges = 300;
     private readonly AliRoslynWorkspaceLoader _loader;
-    private readonly AliSourceChangeSetStore _changeSetStore;
-    private readonly AliSourceChangeSetPublisher _publisher;
 
-    public AliRoslynRefactoringService(
-        AliRoslynWorkspaceLoader loader,
-        AliSourceChangeSetStore? changeSetStore = null,
-        AliSourceChangeSetPublisher? publisher = null)
+    public AliRoslynRefactoringService(AliRoslynWorkspaceLoader loader)
     {
-        _loader = loader;
-        _changeSetStore = changeSetStore ?? new AliSourceChangeSetStore(
-            Path.Combine(Path.GetTempPath(), "ProjectAli", "RoslynChangeSets"));
-        _publisher = publisher ?? new AliSourceChangeSetPublisher(new AliSourceChangeSetValidator());
+        _loader = loader ?? throw new ArgumentNullException(nameof(loader));
     }
 
     public Task<RoslynRenameResult> PreviewRenameAsync(
@@ -65,8 +56,17 @@ internal sealed class AliRoslynRefactoringService
         int line,
         int column,
         string newName,
-        CancellationToken cancellationToken) =>
-        RenameAsync(targetPath, documentPath, line, column, newName, apply: true, cancellationToken);
+        CancellationToken cancellationToken) => Task.FromResult(new RoslynRenameResult(
+            Success: false,
+            Applied: false,
+            targetPath,
+            documentPath,
+            OriginalSymbol: null,
+            newName,
+            "Direct Roslyn apply is retired. Use the Action Deck preview, verification, and handle-only apply pipeline.",
+            ChangedFiles: [],
+            Changes: [],
+            WorkspaceWarnings: []));
 
     private async Task<RoslynRenameResult> RenameAsync(
         string targetPath,
@@ -122,12 +122,6 @@ internal sealed class AliRoslynRefactoringService
             renamed,
             session.Target,
             cancellationToken).ConfigureAwait(false);
-
-        if (apply)
-        {
-            await VerifyChangedSolutionAsync(session.Solution, renamed, cancellationToken).ConfigureAwait(false);
-            await PublishChangedDocumentsAsync(session.Solution, renamed, session.Target, cancellationToken).ConfigureAwait(false);
-        }
 
         var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
         return new RoslynRenameResult(
@@ -190,80 +184,6 @@ internal sealed class AliRoslynRefactoringService
         }
 
         return (files.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), changes);
-    }
-
-    private async Task PublishChangedDocumentsAsync(
-        Solution original,
-        Solution changed,
-        AliResolvedCodingTarget target,
-        CancellationToken cancellationToken)
-    {
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var projectChange in changed.GetChanges(original).GetProjectChanges())
-        {
-            foreach (var documentId in projectChange.GetChangedDocuments())
-            {
-                var oldDocument = original.GetDocument(documentId);
-                var newDocument = changed.GetDocument(documentId);
-                if (oldDocument?.FilePath is null || newDocument is null)
-                {
-                    continue;
-                }
-
-                var physicalPath = ValidateChangedPath(target, oldDocument.FilePath);
-                var text = await newDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
-                replacements[physicalPath] = text.ToString();
-            }
-        }
-
-        if (replacements.Count == 0)
-        {
-            return;
-        }
-
-        var changeSet = await _changeSetStore
-            .CreateAsync(target.RootDirectory, replacements, cancellationToken)
-            .ConfigureAwait(false);
-        var receipt = await _publisher.PublishAsync(changeSet, cancellationToken).ConfigureAwait(false);
-        if (receipt.State != AliSourcePublicationState.Committed)
-        {
-            throw new InvalidOperationException(receipt.Summary);
-        }
-    }
-
-    private static async Task VerifyChangedSolutionAsync(
-        Solution original,
-        Solution changed,
-        CancellationToken cancellationToken)
-    {
-        foreach (var projectChange in changed.GetChanges(original).GetProjectChanges())
-        {
-            var originalProject = original.GetProject(projectChange.ProjectId);
-            var changedProject = changed.GetProject(projectChange.ProjectId);
-            if (originalProject is null || changedProject is null)
-            {
-                continue;
-            }
-
-            var originalCompilation = await originalProject.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
-            var changedCompilation = await changedProject.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
-            if (originalCompilation is null || changedCompilation is null)
-            {
-                throw new InvalidOperationException("Roslyn could not compile the staged rename for verification.");
-            }
-
-            var originalErrors = originalCompilation.GetDiagnostics(cancellationToken)
-                .Count(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-            var changedErrors = changedCompilation.GetDiagnostics(cancellationToken)
-                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-                .ToArray();
-            if (changedErrors.Length > originalErrors)
-            {
-                throw new InvalidOperationException(
-                    "Roslyn rejected the staged rename because it introduced compiler errors: "
-                    + string.Join(" | ", changedErrors.Take(10).Select(diagnostic => diagnostic.ToString())));
-            }
-        }
     }
 
     private static string ValidateChangedPath(AliResolvedCodingTarget target, string filePath)

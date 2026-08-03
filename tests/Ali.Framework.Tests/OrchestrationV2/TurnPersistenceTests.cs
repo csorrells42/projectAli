@@ -621,6 +621,35 @@ public sealed class TurnPersistenceTests
     }
 
     [Fact]
+    public async Task PreparedActionIntent_RoundTripsExactAuthorizationRecoveryIdentity()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = Identity();
+        var intent = Intent("authorization-round-trip", requiresApproval: true) with
+        {
+            ExecutionRegistryIdentityDigest = Digest("exact-execution-registry"),
+            RootBinding = "exact-root-binding"
+        };
+        using (var writer = Writer(directory.Path))
+        {
+            await StartAsync(writer, identity);
+            await writer.PrepareActionAsync(
+                identity,
+                expectedRevision: 1,
+                intent,
+                "prepare-authorization-round-trip",
+                TestContext.Current.CancellationToken);
+        }
+
+        using var reopened = Writer(directory.Path);
+        var state = await reopened.ReadAsync(identity, TestContext.Current.CancellationToken);
+        var recovered = Assert.Single(state!.PendingActions).Intent;
+
+        Assert.Equal(intent.ExecutionRegistryIdentityDigest, recovered.ExecutionRegistryIdentityDigest);
+        Assert.Equal(intent.RootBinding, recovered.RootBinding);
+    }
+
+    [Fact]
     public async Task ReferenceTransitions_FailClosedUntilTheSourceConfirmsCommit()
     {
         using var directory = new TemporaryDirectory();
@@ -1568,7 +1597,9 @@ public sealed class TurnPersistenceTests
             Digest("target-" + key),
             Digest("permission-" + key),
             Digest("registry"),
+            Digest("execution-registry"),
             "reconciler-" + key,
+            "root-binding-" + key,
             requiresApproval);
 
     private static AcceptedCallRecoveryPayload AcceptedCall(string callId, string toolName)

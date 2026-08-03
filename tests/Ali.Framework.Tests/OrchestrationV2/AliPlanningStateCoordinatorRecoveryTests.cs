@@ -779,7 +779,7 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
     }
 
     [Fact]
-    public async Task PreparedUserPause_RestartRedisplaysBeforeCommittingWaitingControl()
+    public async Task PreparedUserPause_RestartMarksDisplayInDoubtBeforeRedisplayAndCommitsWaitingControl()
     {
         using var directory = new TemporaryDirectory();
         var identity = Identity();
@@ -847,9 +847,19 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             recoveredState.InterimPublication!.PreparedAtRevision,
             recovered.SubjectPreparedRevision);
         Assert.Equal(TurnControlState.Running, recoveredState.Control);
+        Assert.Equal(recoveredState.Revision, recovered.DisplayClaimRevision);
         Assert.Equal(
-            InterimPublicationStatus.Prepared,
+            InterimPublicationStatus.DisplayInDoubt,
             recoveredState.InterimPublication.Status);
+
+        using (var attemptReader = new TurnTransitionWriter(directory.Path, "profile"))
+        {
+            var replay = await attemptReader.ReplayAsync(
+                identity,
+                TestContext.Current.CancellationToken);
+            Assert.IsType<InterimPublicationDisplayMarkedInDoubtTransition>(
+                replay.Entries[^1].Transition);
+        }
 
         var committedState = await reopened.CommitRecoveredInterimPublicationAsync(
             recovered,
@@ -860,6 +870,91 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         var paused = await reader.ReadAsync(identity, TestContext.Current.CancellationToken);
         Assert.Equal(TurnControlState.AwaitingUser, paused!.Control);
         Assert.Equal(InterimPublicationStatus.Committed, paused.InterimPublication!.Status);
+    }
+
+    [Fact]
+    public async Task CrashBeforeRecoveredInterimAcknowledgment_DoesNotAutomaticallyRedisplayAgain()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = Identity();
+        var bindings = Bindings();
+        const string prompt = "Choose the exact recovery option.";
+        const string publicationId = "interim-display-crash-window";
+        var promptDigest = Digest(prompt);
+        await StartTurnAsync(directory.Path, identity, bindings);
+
+        using (var writer = new TurnTransitionWriter(directory.Path, "profile"))
+        {
+            var prepared = await writer.PrepareInterimPublicationAsync(
+                identity,
+                expectedRevision: 1,
+                publicationId,
+                InterimPublicationKind.AwaitingUser,
+                InterimPublicationReason.PlannerAwaitingUser,
+                publicationId,
+                prompt,
+                promptDigest,
+                "prepare-interim-display-crash-window",
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TurnTransitionWriteStatus.Committed, prepared.Status);
+        }
+
+        using (var firstRecovery = new AliPlanningStateCoordinator(directory.Path, "profile"))
+        {
+            var firstAttempt = await firstRecovery.ResumeTurnAsync(
+                Context(new TurnIdentity(
+                    identity.UserId,
+                    identity.ConversationId,
+                    "visible-first-interim-attempt")),
+                identity,
+                bindings,
+                "Redisplay the exact prompt.",
+                "first-interim-redisplay-trigger",
+                capabilityRegistry: null,
+                liveBindingsAccessor: null,
+                TestContext.Current.CancellationToken);
+            var firstRecovered = Assert.IsType<AliRecoveredInterimPublication>(
+                firstAttempt.RecoveredInterimPublication);
+            Assert.Equal(prompt, firstRecovered.Text);
+            Assert.Equal(
+                InterimPublicationStatus.DisplayInDoubt,
+                firstAttempt.Recovery.State!.InterimPublication!.Status);
+            // Simulate a crash either immediately before or immediately after the UI consumes
+            // firstRecovered: no display acknowledgment is committed.
+        }
+
+        using var reopened = new AliPlanningStateCoordinator(directory.Path, "profile");
+        var secondAttempt = await reopened.ResumeTurnAsync(
+            Context(new TurnIdentity(
+                identity.UserId,
+                identity.ConversationId,
+                "visible-second-interim-attempt")),
+            identity,
+            bindings,
+            "Continue after the interrupted redisplay.",
+            "second-interim-redisplay-trigger",
+            capabilityRegistry: null,
+            liveBindingsAccessor: null,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(secondAttempt.IsReady);
+        Assert.Equal("interim-redisplay-outcome-unknown", secondAttempt.FailureCode);
+        Assert.Null(secondAttempt.RecoveredInterimPublication);
+        Assert.Null(secondAttempt.RecoveredPublication);
+        Assert.Equal(
+            InterimPublicationStatus.DisplayInDoubt,
+            secondAttempt.Recovery.State!.InterimPublication!.Status);
+
+        using var auditReader = new TurnTransitionWriter(directory.Path, "profile");
+        var audit = await auditReader.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken);
+        Assert.Single(audit.Entries
+            .Select(entry => entry.Transition)
+            .OfType<InterimPublicationDisplayMarkedInDoubtTransition>());
+        Assert.DoesNotContain(
+            audit.Entries,
+            entry => entry.Transition is InterimPublicationCommittedTransition);
     }
 
     [Fact]
@@ -878,7 +973,9 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             Digest("target-version"),
             Digest("permission-receipt"),
             bindings.CapabilityRegistryDigest,
+            Digest("execution-registry"),
             "filesystem-observer",
+            "root-binding",
             RequiresApproval: true);
         long subjectPreparedRevision;
 
@@ -936,6 +1033,10 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         Assert.Equal(InterimPublicationReason.ActionReconciliationRequired, recovered.Reason);
         Assert.Equal(intent.IdempotencyKey, recovered.SubjectId);
         Assert.Equal(subjectPreparedRevision, recovered.SubjectPreparedRevision);
+        Assert.Equal(TurnControlState.Running, attempt.Recovery.State!.Control);
+        Assert.Equal(
+            InterimPublicationStatus.DisplayInDoubt,
+            attempt.Recovery.State.InterimPublication!.Status);
         var committedState = await reopened.CommitRecoveredInterimPublicationAsync(
             recovered,
             TestContext.Current.CancellationToken);
@@ -1023,14 +1124,15 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         Assert.Equal(visibleAssistantMessageId, recovered.AssistantMessageId);
         Assert.Equal(answer, recovered.AnswerText);
         Assert.Equal(answerDigest, recovered.AnswerDigest);
-        Assert.Equal(FinalPublicationStatus.Prepared, attempt.Recovery.State!.FinalPublication!.Status);
+        Assert.Equal(attempt.Recovery.State!.Revision, recovered.DisplayClaimRevision);
+        Assert.Equal(FinalPublicationStatus.InDoubt, attempt.Recovery.State!.FinalPublication!.Status);
 
         using (var reader = new TurnTransitionWriter(directory.Path, "profile"))
         {
             var state = await reader.ReadAsync(identity, TestContext.Current.CancellationToken);
             Assert.Equal(expectedPublicationId, state!.FinalPublication!.PublicationId);
             Assert.Equal(visibleAssistantMessageId, state.FinalPublication.AssistantMessageId);
-            Assert.Equal(FinalPublicationStatus.Prepared, state.FinalPublication.Status);
+            Assert.Equal(FinalPublicationStatus.InDoubt, state.FinalPublication.Status);
             Assert.Equal(
                 answer,
                 await reader.ReadFinalPublicationAnswerAsync(
@@ -1048,6 +1150,12 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             Assert.Equal(expectedPublicationId, retargeted.NewPublicationId);
             Assert.Equal(visibleAssistantMessageId, retargeted.NewAssistantMessageId);
             Assert.Equal(answerDigest, retargeted.AnswerDigest);
+            Assert.Equal(2, replay.Entries
+                .Select(entry => entry.Transition)
+                .OfType<FinalPublicationMarkedInDoubtTransition>()
+                .Count());
+            Assert.IsType<FinalPublicationMarkedInDoubtTransition>(
+                replay.Entries[^1].Transition);
             Assert.Empty(replay.Entries
                 .Select(entry => entry.Transition)
                 .OfType<FinalPublicationAbandonedTransition>());
@@ -1065,7 +1173,102 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
     }
 
     [Fact]
-    public async Task ConfirmedAbsentFinalPublication_WithExactVisibleIds_ReturnsWithoutRetargetRewrite()
+    public async Task CrashAfterFinalRetargetBeforeDisplayMarker_ReconcilesBeforeAnyRedisplay()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = Identity();
+        var bindings = Bindings();
+        const string answer = "The retargeted answer is not yet safe to display.";
+        var answerDigest = Digest(answer);
+        await StartTurnAsync(directory.Path, identity, bindings);
+
+        using (var writer = new TurnTransitionWriter(directory.Path, "profile"))
+        {
+            var prepared = await writer.PrepareFinalPublicationAsync(
+                identity,
+                expectedRevision: 1,
+                "publication-before-retarget-crash",
+                identity.AssistantMessageId,
+                answer,
+                answerDigest,
+                "prepare-final-before-retarget-crash",
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TurnTransitionWriteStatus.Committed, prepared.Status);
+            var absent = await new TurnRecoveryService(
+                    writer,
+                    [],
+                    new AbsentPublicationReconciler())
+                .RecoverAsync(
+                    identity,
+                    bindings,
+                    explicitlyRequested: true,
+                    TestContext.Current.CancellationToken);
+            var absentState = Assert.IsType<TurnState>(absent.State);
+            var confirmedAbsent = Assert.IsType<FinalPublicationState>(
+                absentState.FinalPublication);
+            Assert.Equal(
+                FinalPublicationStatus.ConfirmedAbsent,
+                confirmedAbsent.Status);
+
+            var retargeted = await writer.RetargetFinalPublicationAsync(
+                identity,
+                absentState.Revision,
+                confirmedAbsent.PublicationId,
+                confirmedAbsent.AssistantMessageId,
+                "publication_visible-before-marker-crash",
+                "visible-before-marker-crash",
+                answerDigest,
+                "retarget-before-display-marker-crash",
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TurnTransitionWriteStatus.Committed, retargeted.Status);
+            Assert.Equal(
+                FinalPublicationStatus.Prepared,
+                retargeted.State!.FinalPublication!.Status);
+            // Simulate a crash after the exact target changed but before the coordinator
+            // can persist the display-in-doubt marker or return any visible content.
+        }
+
+        using var reopened = new AliPlanningStateCoordinator(
+            directory.Path,
+            "profile",
+            new UnknownPublicationReconciler());
+        var attempt = await reopened.ResumeTurnAsync(
+            Context(new TurnIdentity(
+                identity.UserId,
+                identity.ConversationId,
+                "visible-after-before-marker-crash")),
+            identity,
+            bindings,
+            "Recover the interrupted retarget.",
+            "recover-before-marker-crash",
+            capabilityRegistry: null,
+            liveBindingsAccessor: null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(attempt.RecoveredPublication);
+        var reconciliation = Assert.IsType<AliRecoveredInterimPublication>(
+            attempt.RecoveredInterimPublication);
+        Assert.Equal(
+            InterimPublicationReason.FinalPublicationReconciliationRequired,
+            reconciliation.Reason);
+        Assert.Equal(FinalPublicationStatus.InDoubt, attempt.Recovery.State!.FinalPublication!.Status);
+        Assert.Equal(
+            InterimPublicationStatus.DisplayInDoubt,
+            attempt.Recovery.State.InterimPublication!.Status);
+
+        using var auditReader = new TurnTransitionWriter(directory.Path, "profile");
+        var audit = await auditReader.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(
+            audit.Entries,
+            entry => entry.Transition is FinalPublicationCommittedTransition);
+        Assert.IsType<InterimPublicationDisplayMarkedInDoubtTransition>(
+            audit.Entries[^1].Transition);
+    }
+
+    [Fact]
+    public async Task ConfirmedAbsentFinalPublication_WithExactVisibleIds_WritesFreshDisplayAttemptMarker()
     {
         using var directory = new TemporaryDirectory();
         var identity = Identity();
@@ -1132,7 +1335,7 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         Assert.Equal(visibleAssistantMessageId, recovered.AssistantMessageId);
         Assert.Equal(answer, recovered.AnswerText);
         Assert.Equal(
-            FinalPublicationStatus.ConfirmedAbsent,
+            FinalPublicationStatus.InDoubt,
             attempt.Recovery.State!.FinalPublication!.Status);
 
         using (var reader = new TurnTransitionWriter(directory.Path, "profile"))
@@ -1140,11 +1343,19 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             var replay = await reader.ReplayAsync(
                 identity,
                 TestContext.Current.CancellationToken);
-            Assert.IsType<FinalPublicationConfirmedAbsentTransition>(
-                replay.Entries[^1].Transition);
-            Assert.Empty(replay.Entries
+            var retargeted = Assert.Single(replay.Entries
                 .Select(entry => entry.Transition)
                 .OfType<FinalPublicationRetargetedTransition>());
+            Assert.Equal(publicationId, retargeted.PreviousPublicationId);
+            Assert.Equal(publicationId, retargeted.NewPublicationId);
+            Assert.Equal(visibleAssistantMessageId, retargeted.PreviousAssistantMessageId);
+            Assert.Equal(visibleAssistantMessageId, retargeted.NewAssistantMessageId);
+            Assert.Equal(2, replay.Entries
+                .Select(entry => entry.Transition)
+                .OfType<FinalPublicationMarkedInDoubtTransition>()
+                .Count());
+            Assert.IsType<FinalPublicationMarkedInDoubtTransition>(
+                replay.Entries[^1].Transition);
             Assert.Empty(replay.Entries
                 .Select(entry => entry.Transition)
                 .OfType<FinalPublicationAbandonedTransition>());
@@ -1154,6 +1365,188 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         await reopened.CommitRecoveredFinalPublicationAsync(
             recovered,
             TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task CrashAfterRecoveredFinalDisplayBeforeCommit_RequiresReconciliationInsteadOfDuplicatingAnswer()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = Identity();
+        var bindings = Bindings();
+        const string answer = "The recovered answer must not be rendered twice.";
+        var answerDigest = Digest(answer);
+        await StartTurnAsync(directory.Path, identity, bindings);
+
+        using (var writer = new TurnTransitionWriter(directory.Path, "profile"))
+        {
+            var prepared = await writer.PrepareFinalPublicationAsync(
+                identity,
+                expectedRevision: 1,
+                "publication-before-recovered-display-crash",
+                identity.AssistantMessageId,
+                answer,
+                answerDigest,
+                "prepare-final-before-recovered-display-crash",
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TurnTransitionWriteStatus.Committed, prepared.Status);
+        }
+
+        using (var firstRecovery = new AliPlanningStateCoordinator(
+                   directory.Path,
+                   "profile",
+                   new AbsentPublicationReconciler()))
+        {
+            var firstAttempt = await firstRecovery.ResumeTurnAsync(
+                Context(new TurnIdentity(
+                    identity.UserId,
+                    identity.ConversationId,
+                    "visible-recovered-final-before-crash")),
+                identity,
+                bindings,
+                "Redisplay the recovered final answer.",
+                "first-final-redisplay-trigger",
+                capabilityRegistry: null,
+                liveBindingsAccessor: null,
+                TestContext.Current.CancellationToken);
+            var recovered = Assert.IsType<AliRecoveredFinalPublication>(
+                firstAttempt.RecoveredPublication);
+            Assert.Equal(answer, recovered.AnswerText);
+            Assert.Equal(
+                FinalPublicationStatus.InDoubt,
+                firstAttempt.Recovery.State!.FinalPublication!.Status);
+            // Simulate a crash after the UI may have consumed recovered but before its
+            // acknowledgment can commit. The durable state must remain ambiguous.
+        }
+
+        using var reopened = new AliPlanningStateCoordinator(
+            directory.Path,
+            "profile",
+            new UnknownPublicationReconciler());
+        var secondAttempt = await reopened.ResumeTurnAsync(
+            Context(new TurnIdentity(
+                identity.UserId,
+                identity.ConversationId,
+                "visible-after-recovered-final-crash")),
+            identity,
+            bindings,
+            "Continue after the interrupted final display.",
+            "second-final-redisplay-trigger",
+            capabilityRegistry: null,
+            liveBindingsAccessor: null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(secondAttempt.RecoveredPublication);
+        var reconciliation = Assert.IsType<AliRecoveredInterimPublication>(
+            secondAttempt.RecoveredInterimPublication);
+        Assert.Equal(
+            InterimPublicationReason.FinalPublicationReconciliationRequired,
+            reconciliation.Reason);
+        Assert.Equal(FinalPublicationStatus.InDoubt, secondAttempt.Recovery.State!.FinalPublication!.Status);
+        Assert.Equal(
+            InterimPublicationStatus.DisplayInDoubt,
+            secondAttempt.Recovery.State.InterimPublication!.Status);
+
+        using var auditReader = new TurnTransitionWriter(directory.Path, "profile");
+        var audit = await auditReader.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken);
+        Assert.Single(audit.Entries
+            .Select(entry => entry.Transition)
+            .OfType<FinalPublicationRetargetedTransition>());
+        Assert.Equal(2, audit.Entries
+            .Select(entry => entry.Transition)
+            .OfType<FinalPublicationMarkedInDoubtTransition>()
+            .Count());
+        Assert.DoesNotContain(
+            audit.Entries,
+            entry => entry.Transition is FinalPublicationCommittedTransition);
+    }
+
+    [Fact]
+    public async Task CrashAfterRecoveredFinalDisplay_AuthoritativeAppliedProbeCompletesWithoutRedisplay()
+    {
+        using var directory = new TemporaryDirectory();
+        var identity = Identity();
+        var bindings = Bindings();
+        const string answer = "The authoritative display probe owns the recovery decision.";
+        var answerDigest = Digest(answer);
+        await StartTurnAsync(directory.Path, identity, bindings);
+
+        using (var writer = new TurnTransitionWriter(directory.Path, "profile"))
+        {
+            var prepared = await writer.PrepareFinalPublicationAsync(
+                identity,
+                expectedRevision: 1,
+                "publication-before-applied-probe",
+                identity.AssistantMessageId,
+                answer,
+                answerDigest,
+                "prepare-final-before-applied-probe",
+                TestContext.Current.CancellationToken);
+            Assert.Equal(TurnTransitionWriteStatus.Committed, prepared.Status);
+        }
+
+        using (var firstRecovery = new AliPlanningStateCoordinator(
+                   directory.Path,
+                   "profile",
+                   new AbsentPublicationReconciler()))
+        {
+            var firstAttempt = await firstRecovery.ResumeTurnAsync(
+                Context(new TurnIdentity(
+                    identity.UserId,
+                    identity.ConversationId,
+                    "visible-before-applied-probe")),
+                identity,
+                bindings,
+                "Redisplay once before the simulated crash.",
+                "first-applied-probe-trigger",
+                capabilityRegistry: null,
+                liveBindingsAccessor: null,
+                TestContext.Current.CancellationToken);
+            Assert.IsType<AliRecoveredFinalPublication>(firstAttempt.RecoveredPublication);
+            Assert.Equal(
+                FinalPublicationStatus.InDoubt,
+                firstAttempt.Recovery.State!.FinalPublication!.Status);
+            // Simulate a crash after the conversation accepted the display but before Ali
+            // committed the local acknowledgment.
+        }
+
+        var appliedProbe = new AppliedPublicationReconciler();
+        using var reopened = new AliPlanningStateCoordinator(
+            directory.Path,
+            "profile",
+            appliedProbe);
+        var secondAttempt = await reopened.ResumeTurnAsync(
+            Context(new TurnIdentity(
+                identity.UserId,
+                identity.ConversationId,
+                "visible-after-applied-probe")),
+            identity,
+            bindings,
+            "Recover after the display was authoritatively observed.",
+            "second-applied-probe-trigger",
+            capabilityRegistry: null,
+            liveBindingsAccessor: null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(secondAttempt.RecoveredPublication);
+        Assert.Null(secondAttempt.RecoveredInterimPublication);
+        Assert.Equal(1, appliedProbe.CallCount);
+        Assert.Equal(TurnControlState.Completed, secondAttempt.Recovery.State!.Control);
+        Assert.Equal(
+            FinalPublicationStatus.Committed,
+            secondAttempt.Recovery.State.FinalPublication!.Status);
+
+        using var auditReader = new TurnTransitionWriter(directory.Path, "profile");
+        var audit = await auditReader.ReplayAsync(
+            identity,
+            TestContext.Current.CancellationToken);
+        Assert.Single(audit.Entries
+            .Select(entry => entry.Transition)
+            .OfType<FinalPublicationCommittedTransition>());
+        Assert.Single(audit.Entries
+            .Select(entry => entry.Transition)
+            .OfType<FinalPublicationRetargetedTransition>());
     }
 
     [Fact]
@@ -1245,7 +1638,7 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         Assert.Equal(answer, recovered.AnswerText);
         Assert.Equal(answerDigest, recovered.AnswerDigest);
         Assert.Equal(
-            FinalPublicationStatus.Prepared,
+            FinalPublicationStatus.InDoubt,
             attempt.Recovery.State!.FinalPublication!.Status);
 
         using var auditReader = new TurnTransitionWriter(directory.Path, "profile");
@@ -1258,6 +1651,10 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
         Assert.Single(replay.Entries
             .Select(entry => entry.Transition)
             .OfType<FinalPublicationRetargetedTransition>());
+        Assert.Equal(2, replay.Entries
+            .Select(entry => entry.Transition)
+            .OfType<FinalPublicationMarkedInDoubtTransition>()
+            .Count());
         Assert.DoesNotContain(
             replay.Entries,
             entry => entry.Transition is SteeringAppendedTransition);
@@ -1279,7 +1676,9 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             Digest("target-version"),
             Digest("permission-receipt"),
             bindings.CapabilityRegistryDigest,
+            Digest("execution-registry"),
             "filesystem-observer",
+            "root-binding",
             RequiresApproval: true);
 
         using (var writer = new TurnTransitionWriter(directory.Path, "profile"))
@@ -1333,7 +1732,9 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             Digest("target-version"),
             Digest("permission-receipt"),
             bindings.CapabilityRegistryDigest,
+            Digest("execution-registry"),
             "filesystem-observer",
+            "root-binding",
             RequiresApproval: true);
         const string sourceCommandId = "structured-command-confirm-absent";
         long resolutionRevision;
@@ -1614,7 +2015,9 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
                 Digest("target-version"),
                 Digest("permission-receipt"),
                 bindings.CapabilityRegistryDigest,
+                Digest("execution-registry"),
                 "filesystem-observer",
+                "root-binding",
                 RequiresApproval: true);
             await writer.PrepareActionAsync(
                 identity,
@@ -1717,7 +2120,9 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
                     Digest("target-version"),
                     Digest("permission-receipt"),
                     bindings.CapabilityRegistryDigest,
+                    Digest("execution-registry"),
                     "filesystem-observer",
+                    "root-binding",
                     RequiresApproval: true),
                 "prepare-action",
                 TestContext.Current.CancellationToken);
@@ -1846,6 +2251,35 @@ public sealed class AliPlanningStateCoordinatorRecoveryTests
             ValueTask.FromResult(new PublicationReconciliationResult(
                 PublicationReconciliationDisposition.Absent,
                 "conversation-proved-absent"));
+    }
+
+    private sealed class UnknownPublicationReconciler : ITurnPublicationReconciler
+    {
+        public ValueTask<PublicationReconciliationResult> ReconcileAsync(
+            TurnIdentity identity,
+            FinalPublicationState publication,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new PublicationReconciliationResult(
+                PublicationReconciliationDisposition.Unknown,
+                "conversation-display-outcome-unknown"));
+    }
+
+    private sealed class AppliedPublicationReconciler : ITurnPublicationReconciler
+    {
+        private int _callCount;
+
+        internal int CallCount => Volatile.Read(ref _callCount);
+
+        public ValueTask<PublicationReconciliationResult> ReconcileAsync(
+            TurnIdentity identity,
+            FinalPublicationState publication,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _callCount);
+            return ValueTask.FromResult(new PublicationReconciliationResult(
+                PublicationReconciliationDisposition.Applied,
+                "conversation-proved-display-applied"));
+        }
     }
 
     private sealed class TemporaryDirectory : IDisposable

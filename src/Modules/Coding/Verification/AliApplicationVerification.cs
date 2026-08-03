@@ -4,38 +4,95 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Xml.Linq;
+using Ali.Modules.Coding.Execution;
+using Ali.Modules.Orchestration.Evidence;
 
 namespace Ali.Modules.Coding.Verification;
 
 public sealed record ApplicationVerificationResult(bool Success, string Summary, string ProjectPath, string ApplicationKind, int? ExitCode, int? ProcessId, string Output, string? ScreenshotPath, bool HealthCheckPassed, long DurationMilliseconds);
 
-internal sealed partial class AliApplicationVerification(AliCodingProjectResolver resolver)
+internal sealed partial class AliApplicationVerification
 {
+    private readonly AliCodingProjectResolver _resolver;
+    private readonly Action? _beforeProcessStart;
+
+    internal AliApplicationVerification(AliCodingProjectResolver resolver)
+        : this(resolver, beforeProcessStart: null)
+    {
+    }
+
+    internal AliApplicationVerification(
+        AliCodingProjectResolver resolver,
+        Action? beforeProcessStart)
+    {
+        _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        _beforeProcessStart = beforeProcessStart;
+    }
+
     public async Task<ApplicationVerificationResult> SmokeTestAsync(string projectPath, string? configuration, string? healthUrl, CancellationToken cancellationToken)
     {
-        var project = resolver.ResolveExistingProject(projectPath);
+        var project = _resolver.ResolveExistingProject(projectPath);
         var normalized = NormalizeConfiguration(configuration);
-        var artifact = AliRoslynCodingTools.FindBuiltArtifact(project.PhysicalPath, normalized)
-            ?? throw new FileNotFoundException("Build the project before application verification.");
-        AliCodingProjectResolver.RejectReparsePoints(project.MountRoot, artifact);
+        var exactProcess = AliExactProcessExecutionContext.Current;
+        var artifact = ResolveApplicationArtifactForLaunch(
+            project,
+            normalized,
+            exactProcess);
         var kind = DetectKind(project.PhysicalPath);
         var health = ValidateHealthUrl(healthUrl);
+        var principal = exactProcess?.ApplicationArtifact
+            ?? AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+                artifact,
+                "The selected application verification artifact");
+        var closure = exactProcess?.ApplicationLaunchClosure
+            ?? AliApplicationLaunchClosure.Capture(principal);
+        using var launchLease = AliApplicationLaunchLease.Acquire(principal, closure);
+        AliBoundExecutionFile? host = null;
+        if (Path.GetExtension(artifact).Equals(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            host = exactProcess is null
+                ? AliExactDotNetHost.CaptureCurrent()
+                : exactProcess.DotNetHost
+                  ?? throw new InvalidOperationException(
+                      "The exact application launch did not bind its .NET host executable.");
+        }
+        using var hostLease = host is null
+            ? null
+            : AliExecutionFileLease.Acquire(host, "The exact application .NET host executable");
         var started = Stopwatch.StartNew();
-        var info = CreateStartInfo(artifact);
+        var info = CreateStartInfo(artifact, host?.PhysicalPath);
         using var process = new Process { StartInfo = info };
         var output = new StringBuilder();
         process.OutputDataReceived += (_, args) => { if (args.Data is not null) output.AppendLine(args.Data); };
         process.ErrorDataReceived += (_, args) => { if (args.Data is not null) output.AppendLine(args.Data); };
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        var processId = process.Id;
+        var processStarted = false;
+        int? processId = null;
         string? screenshot = null;
         var healthPassed = false;
         var success = false;
         int? exitCode = null;
         try
         {
+            RevalidateLaunchInputs(exactProcess, artifact);
+            launchLease.RequireStable();
+            hostLease?.RequireStable();
+            _beforeProcessStart?.Invoke();
+            launchLease.RequireStable();
+            hostLease?.RequireStable();
+            RevalidateLaunchInputs(exactProcess, artifact);
+            process.Start();
+            processStarted = true;
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            if (hostLease is not null)
+            {
+                hostLease.RequireStartedProcessImage(process);
+            }
+            else
+            {
+                launchLease.RequireStartedPrincipalProcessImage(process);
+            }
+            processId = process.Id;
             if (health is not null)
             {
                 using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
@@ -69,7 +126,7 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
         }
         finally
         {
-            if (!process.HasExited)
+            if (processStarted && !process.HasExited)
             {
                 try { process.CloseMainWindow(); } catch { }
                 await Task.Delay(300, CancellationToken.None).ConfigureAwait(false);
@@ -80,6 +137,25 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
         return new ApplicationVerificationResult(success,
             success ? $"{kind} application smoke verification passed." : $"{kind} application smoke verification failed.",
             projectPath, kind, exitCode, processId, output.ToString().Trim(), screenshot, healthPassed, started.ElapsedMilliseconds);
+    }
+
+    internal static string ResolveApplicationArtifactForLaunch(
+        AliResolvedCodingProject project,
+        string configuration,
+        AliExactProcessExecutionBinding? exactProcess)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        var artifact = exactProcess is null
+            ? AliRoslynCodingTools.FindBuiltArtifact(project.PhysicalPath, configuration)
+                ?? throw new FileNotFoundException(
+                    "Build the project before application verification.")
+            : exactProcess.RequireStableApplicationArtifact();
+        AliCodingProjectResolver.RejectReparsePoints(project.MountRoot, artifact);
+        if (exactProcess is not null)
+        {
+            _ = exactProcess.RequireStableApplicationLaunchClosure();
+        }
+        return artifact;
     }
 
     private static Uri? ValidateHealthUrl(string? value)
@@ -107,16 +183,33 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
         using var bitmap = new Bitmap(width, height);
         using (var graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height));
         var directory = Path.Combine(projectDirectory, ".ali", "verification");
-        Directory.CreateDirectory(directory);
+        WindowsOrchestrationFileBoundary.EnsureRegularDirectoryPath(
+            directory,
+            "The application-verification path is not a regular local directory.");
         var path = Path.Combine(directory, $"window-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.png");
-        bitmap.Save(path, ImageFormat.Png);
+        using (var stream = WindowsOrchestrationFileBoundary.OpenRegularFile(
+                   path,
+                   FileMode.CreateNew,
+                   FileAccess.Write,
+                   FileShare.None,
+                   writeThrough: true,
+                   "The application-verification image is not a regular local file."))
+        {
+            bitmap.Save(stream, ImageFormat.Png);
+            stream.Flush(flushToDisk: true);
+        }
         return path;
     }
 
-    private static ProcessStartInfo CreateStartInfo(string artifact)
+    private static ProcessStartInfo CreateStartInfo(string artifact, string? dotNetHost)
     {
         var dll = Path.GetExtension(artifact).Equals(".dll", StringComparison.OrdinalIgnoreCase);
-        var info = new ProcessStartInfo(dll ? ResolveDotNet() : artifact)
+        var executable = dll
+            ? dotNetHost
+              ?? throw new InvalidOperationException(
+                  "The application launch requires an exact .NET host executable.")
+            : artifact;
+        var info = new ProcessStartInfo(executable)
         {
             WorkingDirectory = Path.GetDirectoryName(artifact)!, UseShellExecute = false, CreateNoWindow = false,
             RedirectStandardOutput = true, RedirectStandardError = true
@@ -124,7 +217,31 @@ internal sealed partial class AliApplicationVerification(AliCodingProjectResolve
         if (dll) info.ArgumentList.Add(artifact);
         return info;
     }
-    private static string ResolveDotNet() => Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } path && File.Exists(path) ? path : "dotnet";
+    private static void RevalidateLaunchInputs(
+        AliExactProcessExecutionBinding? exactProcess,
+        string artifact)
+    {
+        if (exactProcess is null)
+        {
+            return;
+        }
+        var approvedArtifact = exactProcess.RequireStableApplicationArtifact();
+        if (!string.Equals(
+                Path.GetFullPath(approvedArtifact),
+                Path.GetFullPath(artifact),
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The application launch artifact no longer matches its exact authorization.");
+        }
+        if (Path.GetExtension(artifact).Equals(".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            _ = exactProcess.RequireStableDotNetHost();
+        }
+        _ = exactProcess.RequireStableApplicationLaunchClosure();
+    }
     private static string NormalizeConfiguration(string? value) => string.IsNullOrWhiteSpace(value) ? "Release" : value.Trim() switch
     {
         var text when text.Equals("Debug", StringComparison.OrdinalIgnoreCase) => "Debug", var text when text.Equals("Release", StringComparison.OrdinalIgnoreCase) => "Release",

@@ -1,5 +1,6 @@
 using Ali.Modules.Coding.Architecture;
 using Ali.Modules.Coding.Engineering;
+using Ali.Modules.Coding.Execution;
 using Ali.Modules.Coding.Quality;
 using Ali.Modules.Coding.Release;
 using Ali.Modules.Coding.Verification;
@@ -19,8 +20,12 @@ internal sealed class AliAutonomousDelivery(
     AliDotNetEngineeringLoop engineering,
     AliRoslynCodingTools roslyn,
     AliApplicationVerification verification,
-    AliReleaseEngineering release)
+    AliReleaseEngineering release,
+    Func<string, CancellationToken, Task<ArchitectureInspectionResult>>? architectureInspector = null)
 {
+    private readonly Func<string, CancellationToken, Task<ArchitectureInspectionResult>> _inspectArchitecture =
+        architectureInspector ?? architecture.InspectAsync;
+
     public async Task<AutonomousDeliveryResult> VerifyDeliveryAsync(
         string projectPath,
         string? testTargetPath,
@@ -29,10 +34,12 @@ internal sealed class AliAutonomousDelivery(
         bool publishRelease,
         CancellationToken cancellationToken)
     {
+        var normalizedConfiguration = NormalizeConfiguration(configuration);
         var stages = new List<DeliveryStage>();
         var architectureStarted = DateTime.UtcNow;
-        var graph = await architecture.InspectAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        var graph = await _inspectArchitecture(projectPath, cancellationToken).ConfigureAwait(false);
         stages.Add(new DeliveryStage("architecture", graph.Success, graph.Summary, Elapsed(architectureStarted)));
+        if (!graph.Success) return Failed(projectPath, stages, "Delivery stopped at the architecture evidence gate.");
 
         var qualityStarted = DateTime.UtcNow;
         var qualityResult = await quality.ScanAsync(projectPath, cancellationToken).ConfigureAwait(false);
@@ -41,7 +48,7 @@ internal sealed class AliAutonomousDelivery(
 
         var engineeringStarted = DateTime.UtcNow;
         var verificationTarget = string.IsNullOrWhiteSpace(testTargetPath) ? projectPath : testTargetPath;
-        var engineeringResult = await engineering.VerifyAsync(verificationTarget, configuration, roslyn.BuildAsync, cancellationToken).ConfigureAwait(false);
+        var engineeringResult = await engineering.VerifyAsync(verificationTarget, normalizedConfiguration, roslyn.BuildAsync, cancellationToken).ConfigureAwait(false);
         stages.Add(new DeliveryStage("build-and-test", engineeringResult.Success,
             $"{engineeringResult.Summary} Test artifact: {engineeringResult.Tests?.ResultsPath ?? "none"}", Elapsed(engineeringStarted)));
         if (!engineeringResult.Success) return Failed(projectPath, stages, "Delivery stopped at the build-and-test evidence gate.");
@@ -49,7 +56,14 @@ internal sealed class AliAutonomousDelivery(
         if (verifyApplication)
         {
             var applicationStarted = DateTime.UtcNow;
-            var application = await verification.SmokeTestAsync(projectPath, configuration, null, cancellationToken).ConfigureAwait(false);
+            var exactProcess = AliExactProcessExecutionContext.Current;
+            using var postBuildArtifact = exactProcess is null
+                ? null
+                : AliExactProcessExecutionContext.Enter(
+                    exactProcess.BindPostBuildApplicationArtifact(
+                        projectPath,
+                        normalizedConfiguration));
+            var application = await verification.SmokeTestAsync(projectPath, normalizedConfiguration, null, cancellationToken).ConfigureAwait(false);
             stages.Add(new DeliveryStage("application-smoke", application.Success,
                 $"{application.Summary} Screenshot: {application.ScreenshotPath ?? "not applicable"}", Elapsed(applicationStarted)));
             if (!application.Success) return Failed(projectPath, stages, "Delivery stopped at the actual-application evidence gate.");
@@ -71,4 +85,15 @@ internal sealed class AliAutonomousDelivery(
 
     private static AutonomousDeliveryResult Failed(string target, IReadOnlyList<DeliveryStage> stages, string summary) => new(false, summary, target, stages, null);
     private static long Elapsed(DateTime started) => (long)(DateTime.UtcNow - started).TotalMilliseconds;
+    private static string NormalizeConfiguration(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? "Release"
+            : value.Trim() switch
+            {
+                var text when text.Equals("Debug", StringComparison.OrdinalIgnoreCase) => "Debug",
+                var text when text.Equals("Release", StringComparison.OrdinalIgnoreCase) => "Release",
+                _ => throw new ArgumentException(
+                    "Configuration must be Debug or Release.",
+                    nameof(value))
+            };
 }

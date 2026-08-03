@@ -115,7 +115,9 @@ public sealed class TurnTransitionJournalBoundedTests
             Digest("target-version"),
             Digest("permission-receipt"),
             Bindings().CapabilityRegistryDigest,
+            Digest("execution-registry"),
             "filesystem-observer",
+            "root-binding",
             RequiresApproval: true);
         var recovery = new TurnRecoveryService(
             writer,
@@ -816,7 +818,9 @@ public sealed class TurnTransitionJournalBoundedTests
             Digest("target-" + idempotencyKey),
             Digest("permission-" + idempotencyKey),
             Bindings().CapabilityRegistryDigest,
+            Digest("execution-registry-" + idempotencyKey),
             "test-reconciler",
+            "root-binding-" + idempotencyKey,
             RequiresApproval: false);
 
     private static CommittedEvidenceReference Evidence(string id, long cursor) =>

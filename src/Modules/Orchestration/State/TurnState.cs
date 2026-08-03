@@ -65,8 +65,9 @@ internal static class InterimPublicationReasonPolicy
 
 public enum InterimPublicationStatus
 {
-    Prepared,
-    Committed
+    Prepared = 0,
+    Committed = 1,
+    DisplayInDoubt = 2
 }
 
 public enum AcceptedCallExecutionClass
@@ -350,9 +351,12 @@ public sealed record PreparedActionIntent(
     string TargetVersionDigest,
     string PermissionReceiptDigest,
     string RegistryRevisionDigest,
+    string ExecutionRegistryIdentityDigest,
     string ReconcilerId,
+    string RootBinding,
     bool RequiresApproval,
-    string? AcceptedCallId = null)
+    string? AcceptedCallId = null,
+    string? PreparationIdentity = null)
 {
     internal void Validate()
     {
@@ -364,8 +368,16 @@ public sealed record PreparedActionIntent(
         TurnStateIntegrity.RequireDigest(TargetVersionDigest, nameof(TargetVersionDigest));
         TurnStateIntegrity.RequireDigest(PermissionReceiptDigest, nameof(PermissionReceiptDigest));
         TurnStateIntegrity.RequireDigest(RegistryRevisionDigest, nameof(RegistryRevisionDigest));
+        TurnStateIntegrity.RequireDigest(
+            ExecutionRegistryIdentityDigest,
+            nameof(ExecutionRegistryIdentityDigest));
         TurnStateIntegrity.RequireBoundedValue(ReconcilerId, 256, nameof(ReconcilerId));
+        TurnStateIntegrity.RequireBoundedValue(RootBinding, 2048, nameof(RootBinding));
         TurnStateIntegrity.RequireOptionalIdentifier(AcceptedCallId, 256, nameof(AcceptedCallId));
+        TurnStateIntegrity.RequireOptionalIdentifier(
+            PreparationIdentity,
+            256,
+            nameof(PreparationIdentity));
     }
 }
 

@@ -781,6 +781,24 @@ public sealed class TurnTransitionWriter : IDisposable
                 textDigest),
             cancellationToken);
 
+    public Task<TurnTransitionWriteResult> MarkInterimPublicationDisplayInDoubtAsync(
+        TurnIdentity identity,
+        long expectedRevision,
+        string publicationId,
+        InterimPublicationKind kind,
+        string textDigest,
+        string correlationKey,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            identity,
+            expectedRevision,
+            new InterimPublicationDisplayMarkedInDoubtTransition(
+                correlationKey,
+                publicationId,
+                kind,
+                textDigest),
+            cancellationToken);
+
     public Task<TurnTransitionWriteResult> ClearInterimPublicationAsync(
         TurnIdentity identity,
         long expectedRevision,

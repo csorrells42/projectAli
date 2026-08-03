@@ -361,6 +361,13 @@ internal static class TurnStateReducer
             case InterimPublicationPreparedTransition publication:
                 next = PrepareInterimPublication(current, next, publication, nextRevision);
                 break;
+            case InterimPublicationDisplayMarkedInDoubtTransition publication:
+                next = MarkInterimPublicationDisplayInDoubt(
+                    current,
+                    next,
+                    publication,
+                    nextRevision);
+                break;
             case InterimPublicationCommittedTransition publication:
                 next = CommitInterimPublication(current, next, publication, nextRevision);
                 break;
@@ -1104,6 +1111,45 @@ internal static class TurnStateReducer
                 Status = InterimPublicationStatus.Committed,
                 LastTransitionRevision = revision
             }
+        };
+    }
+
+    private static TurnState MarkInterimPublicationDisplayInDoubt(
+        TurnState current,
+        TurnState next,
+        InterimPublicationDisplayMarkedInDoubtTransition publication,
+        long revision)
+    {
+        var existing = RequireMatchingInterimPublication(
+            current,
+            publication.PublicationId,
+            publication.Kind,
+            publication.TextDigest);
+        if (existing.Status is not (
+                InterimPublicationStatus.Prepared or InterimPublicationStatus.Committed))
+        {
+            throw new InvalidDataException(
+                "Only a prepared or previously committed interim publication may begin a display attempt.");
+        }
+
+        var control = current.Control switch
+        {
+            TurnControlState.AwaitingUser when existing.Kind == InterimPublicationKind.AwaitingUser =>
+                TurnControlState.Running,
+            TurnControlState.AwaitingEvent when existing.Kind == InterimPublicationKind.AwaitingEvent =>
+                TurnControlState.Running,
+            TurnControlState.SuspendedRuntime when existing.Kind == InterimPublicationKind.SuspendedRuntime =>
+                TurnControlState.Running,
+            _ => next.Control
+        };
+        return next with
+        {
+            InterimPublication = existing with
+            {
+                Status = InterimPublicationStatus.DisplayInDoubt,
+                LastTransitionRevision = revision
+            },
+            Control = control
         };
     }
 

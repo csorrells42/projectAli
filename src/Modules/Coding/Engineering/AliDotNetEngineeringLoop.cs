@@ -1,6 +1,8 @@
 using System.Diagnostics;
-using System.Text;
 using System.Xml.Linq;
+using Ali.Modules.Coding.Execution;
+using Ali.Modules.Coding.Infrastructure;
+using Ali.Modules.Orchestration.Evidence;
 
 namespace Ali.Modules.Coding.Engineering;
 
@@ -41,57 +43,74 @@ public sealed record DotNetVerificationResult(
 /// A bounded build/test verification loop shared by future language adapters. It accepts
 /// only approved .NET targets and fixed SDK verbs; source repair stays with Roslyn and the agent.
 /// </summary>
-internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver)
+internal sealed class AliDotNetEngineeringLoop
 {
     private const int MaximumOutputCharacters = 24_000;
     private static readonly SemaphoreSlim TestLock = new(1, 1);
+    private static readonly TimeSpan TestProcessTimeout = TimeSpan.FromHours(24);
+    private readonly AliCodingProjectResolver _resolver;
+    private readonly Action? _beforeTestProcessStart;
+
+    internal AliDotNetEngineeringLoop(
+        AliCodingProjectResolver resolver,
+        Action? beforeTestProcessStart = null)
+    {
+        _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        _beforeTestProcessStart = beforeTestProcessStart;
+    }
 
     public async Task<DotNetTestResult> TestAsync(
         string targetPath,
         string? configuration,
         CancellationToken cancellationToken)
     {
-        var target = resolver.ResolveExistingTarget(targetPath);
+        var target = _resolver.ResolveExistingTarget(targetPath);
         var normalizedConfiguration = NormalizeConfiguration(configuration);
         var started = Stopwatch.StartNew();
         var resultDirectory = Path.Combine(target.RootDirectory, ".ali", "test-results");
-        Directory.CreateDirectory(resultDirectory);
+        WindowsOrchestrationFileBoundary.EnsureRegularDirectoryPath(
+            resultDirectory,
+            "The .NET test-results path is not a regular local directory.");
         var trxName = $"ali-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.trx";
         var trxPath = Path.Combine(resultDirectory, trxName);
 
         await TestLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = ResolveDotNetHost(),
-                WorkingDirectory = target.RootDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            foreach (var argument in new[]
+            var arguments = new[]
             {
                 "test", target.PhysicalPath, "--configuration", normalizedConfiguration,
                 "--logger", $"trx;LogFileName={trxName}", "--results-directory", resultDirectory,
                 "--nologo"
-            })
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-
-            using var process = new Process { StartInfo = startInfo };
-            var output = new StringBuilder();
-            process.OutputDataReceived += (_, args) => { if (args.Data is not null) output.AppendLine(args.Data); };
-            process.ErrorDataReceived += (_, args) => { if (args.Data is not null) output.AppendLine(args.Data); };
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            };
+            var exactHost = AliCodingInvocationExecutionContext
+                .ResolveDotNetHostBindingForExecution();
+            var execution = _beforeTestProcessStart is null
+                ? await AliBoundedProcessRunner.RunAsync(
+                        exactHost,
+                        target.RootDirectory,
+                        arguments,
+                        TestProcessTimeout,
+                        cancellationToken)
+                    .ConfigureAwait(false)
+                : await AliBoundedProcessRunner.RunAsync(
+                        exactHost,
+                        target.RootDirectory,
+                        arguments,
+                        TestProcessTimeout,
+                        cancellationToken,
+                        _beforeTestProcessStart)
+                    .ConfigureAwait(false);
 
             started.Stop();
-            return ParseResult(targetPath, normalizedConfiguration, trxPath, process.ExitCode, output.ToString(), started.ElapsedMilliseconds);
+            return ParseResult(
+                targetPath,
+                normalizedConfiguration,
+                trxPath,
+                execution.ExitCode,
+                execution.Output,
+                started.ElapsedMilliseconds,
+                execution.TimedOut);
         }
         finally
         {
@@ -122,14 +141,29 @@ internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver
             buildResult, tests, tests.Failures, started.ElapsedMilliseconds);
     }
 
-    private static DotNetTestResult ParseResult(string targetPath, string configuration, string trxPath, int exitCode, string output, long duration)
+    private static DotNetTestResult ParseResult(
+        string targetPath,
+        string configuration,
+        string trxPath,
+        int exitCode,
+        string output,
+        long duration,
+        bool timedOut)
     {
         if (!File.Exists(trxPath))
         {
             return new DotNetTestResult(false, targetPath, configuration, 0, 0, 0, 0,
-                "The test host did not produce a TRX result artifact.",
-                [new EngineeringFailure("test", null, "No TRX result was produced.", Compact(output), null, null)],
-                null, Compact(output), duration, false);
+                timedOut
+                    ? "The bounded test process timed out before producing a TRX result artifact."
+                    : "The test host did not produce a TRX result artifact.",
+                [new EngineeringFailure(
+                    "test",
+                    null,
+                    timedOut ? "The bounded test process timed out." : "No TRX result was produced.",
+                    Compact(output),
+                    null,
+                    null)],
+                null, Compact(output), duration, timedOut);
         }
 
         var document = XDocument.Load(trxPath);
@@ -154,7 +188,7 @@ internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver
             success ? $"All {passed} discovered test(s) passed."
                 : total == 0 ? "No tests were discovered; verification cannot claim success."
                 : $"{failed} of {total} discovered test(s) failed.",
-            failures, trxPath, Compact(output), duration, false);
+            failures, trxPath, Compact(output), duration, timedOut);
     }
 
     private static int ReadInt(XElement? element, string name) =>
@@ -166,17 +200,6 @@ internal sealed class AliDotNetEngineeringLoop(AliCodingProjectResolver resolver
         var text when text.Equals("Release", StringComparison.OrdinalIgnoreCase) => "Release",
         _ => throw new ArgumentException("Configuration must be Debug or Release.", nameof(value))
     };
-
-    private static string ResolveDotNetHost()
-    {
-        var configured = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        return !string.IsNullOrWhiteSpace(configured) && File.Exists(configured) ? configured : "dotnet";
-    }
-
-    private static void TryKill(Process process)
-    {
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-    }
 
     private static string Compact(string output)
     {

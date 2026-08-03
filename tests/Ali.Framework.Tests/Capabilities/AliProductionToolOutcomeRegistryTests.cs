@@ -9,13 +9,13 @@ namespace Ali.Framework.Tests.Capabilities;
 public sealed class AliProductionToolOutcomeRegistryTests
 {
     [Fact]
-    public void Contracts_CoverTheExact114ToolProductionCatalog()
+    public void Contracts_CoverTheExact117ToolProductionCatalog()
     {
-        Assert.Equal(114, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
+        Assert.Equal(117, AliProductionToolOutcomeRegistry.ContractedToolNames.Count);
         Assert.True(AliProductionCapabilityCatalog.KnownToolNames.SetEquals(
             AliProductionToolOutcomeRegistry.ContractedToolNames));
         Assert.Equal(
-            95,
+            98,
             AliProductionToolOutcomeRegistry.ContractedToolNames.Count(toolName =>
                 AliProductionToolOutcomeRegistry.GetContractKind(toolName)
                 == AliToolOutcomeContractKind.TypedReturn));

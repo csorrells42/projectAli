@@ -203,8 +203,6 @@ internal static class SemanticToolBuckets
                 AliCapabilityCatalog.RoslynInspectDocumentName,
                 AliCapabilityCatalog.RoslynInspectPositionName,
                 AliCapabilityCatalog.RoslynFindReferencesName,
-                AliCapabilityCatalog.RoslynPreviewRenameName,
-                AliCapabilityCatalog.RoslynApplyRenameName,
                 AliCapabilityCatalog.RoslynInspectTargetName,
                 AliCapabilityCatalog.RoslynListActionsName,
                 AliCapabilityCatalog.RoslynPreviewActionName,

@@ -299,6 +299,7 @@ public sealed class AliServices
         var dataRoot = DesktopDataRoot;
         var userDataRoot = DesktopUserDataRoot;
         var profile = (assistantProfile ?? AssistantProfileStore.LoadOrDefault(dataRoot)).Normalize();
+        var assistantProfileBinding = profile.AssistantName;
         var profileDataRoot = GetProfileDataRoot(profile);
 
         var correctionStore = new FileCorrectionQueueStore(profileDataRoot);
@@ -340,13 +341,25 @@ public sealed class AliServices
             userMemories.BeginWarmup(initialUserSelection.SelectedUser!);
         }
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
+        var workflowCheckpointPath = AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot);
+        var durableOrchestrationRoot = Path.Combine(
+            workflowCheckpointPath,
+            "OrchestrationV2");
         var fileAccess = AliWorkstationFileAccess.CreateDefault(
             userDataRoot,
             profileDataRoot,
             toolPermissions,
-            activeUsers);
-        var agentWorkMemory = new AliAgentWorkMemory(userDataRoot);
-        var codingModule = new AliCodingModule(fileAccess);
+            activeUsers,
+            durableOrchestrationRoot: durableOrchestrationRoot,
+            assistantProfileBinding: assistantProfileBinding);
+        var agentWorkMemory = new AliAgentWorkMemory(
+            userDataRoot,
+            durableOrchestrationRoot,
+            assistantProfileBinding);
+        var codingModule = new AliCodingModule(
+            fileAccess,
+            durableOrchestrationRoot: durableOrchestrationRoot,
+            assistantProfileBinding: assistantProfileBinding);
         var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
         localLibrary.WriteExample();
         // Capability Phase 2 uses the live in-memory registry only. Qdrant semantic
@@ -404,7 +417,7 @@ public sealed class AliServices
                 userMemories,
                 activeUsers,
                 () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-                AgentOrchestrationSettingsStore.GetCheckpointPath(userDataRoot),
+                workflowCheckpointPath,
                 () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
                 semanticToolCatalog,
                 shadowObserver,

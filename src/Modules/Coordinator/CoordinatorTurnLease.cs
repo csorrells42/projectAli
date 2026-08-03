@@ -3,8 +3,8 @@ using System.Collections.Concurrent;
 namespace Ali.Modules.Coordinator;
 
 /// <summary>
-/// Publishes the flow-bound foreground turn. A suppressed ExecutionContext may use
-/// the process fallback only when exactly one turn is active; ambiguity fails closed.
+/// Publishes only the flow-bound foreground turn. Losing ExecutionContext flow also
+/// loses turn authority; process-wide active-turn state is never an identity fallback.
 /// </summary>
 internal sealed class CoordinatorTurnLease
 {
@@ -12,20 +12,7 @@ internal sealed class CoordinatorTurnLease
     private readonly ConcurrentDictionary<string, CoordinatorTurnContext> _active =
         new(StringComparer.Ordinal);
 
-    public CoordinatorTurnContext? Current
-    {
-        get
-        {
-            var ambient = _ambient.Value;
-            if (ambient is not null)
-            {
-                return ambient;
-            }
-
-            var candidates = _active.Values.Take(2).ToArray();
-            return candidates.Length == 1 ? candidates[0] : null;
-        }
-    }
+    public CoordinatorTurnContext? Current => _ambient.Value;
 
     public IDisposable Enter(CoordinatorTurnContext turn)
     {

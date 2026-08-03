@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Ali.Modules.Coding.Execution;
 using Ali.Modules.Coding.Infrastructure;
 
 namespace Ali.Modules.Coding.Dependencies;
@@ -26,12 +27,12 @@ internal sealed partial class AliDependencyEngineering(AliCodingProjectResolver 
                 (string?)element.Attribute("Version") ?? element.Elements().FirstOrDefault(child => child.Name.LocalName == "Version")?.Value,
                 false, null, null)).ToList();
         var vulnerabilityAudit = await AliBoundedProcessRunner.RunAsync(
-            ResolveDotNet(),
+            AliCodingInvocationExecutionContext.ResolveDotNetHostForExecution(),
             project.ProjectDirectory,
             BuildVulnerabilityInspectionArguments(project.PhysicalPath),
             TimeSpan.FromMinutes(3), cancellationToken).ConfigureAwait(false);
         var deprecationAudit = await AliBoundedProcessRunner.RunAsync(
-            ResolveDotNet(),
+            AliCodingInvocationExecutionContext.ResolveDotNetHostForExecution(),
             project.ProjectDirectory,
             BuildDeprecationInspectionArguments(project.PhysicalPath),
             TimeSpan.FromMinutes(3), cancellationToken).ConfigureAwait(false);
@@ -123,5 +124,4 @@ internal sealed partial class AliDependencyEngineering(AliCodingProjectResolver 
     private static string FindPackageLine(string text, string packageId) =>
         text.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Contains(packageId, StringComparison.OrdinalIgnoreCase)) ?? "(no package reference)";
 
-    private static string ResolveDotNet() => Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } path && File.Exists(path) ? path : "dotnet";
 }

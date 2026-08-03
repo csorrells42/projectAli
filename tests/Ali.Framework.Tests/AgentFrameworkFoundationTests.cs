@@ -46,7 +46,9 @@ public sealed class AgentFrameworkFoundationTests
         Assert.DoesNotContain("CreateMagenticTool(", runner, StringComparison.Ordinal);
         Assert.DoesNotContain("new AliExternalCodingAgents", coding, StringComparison.Ordinal);
         Assert.DoesNotContain("ProgressReported +=", catalog, StringComparison.Ordinal);
-        Assert.Contains("new AliCodingModule(fileAccess)", services, StringComparison.Ordinal);
+        Assert.Contains("var codingModule = new AliCodingModule(", services, StringComparison.Ordinal);
+        Assert.Contains("durableOrchestrationRoot:", services, StringComparison.Ordinal);
+        Assert.Contains("assistantProfileBinding:", services, StringComparison.Ordinal);
         Assert.Contains("new AliCodingModule(fileAccess)", headless, StringComparison.Ordinal);
     }
 
@@ -60,7 +62,7 @@ public sealed class AgentFrameworkFoundationTests
             });
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(114, names.Length);
+        Assert.Equal(117, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
         var retiredNames = new[]
         {

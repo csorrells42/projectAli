@@ -44,7 +44,9 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.RunProgrammingGroupChatName,
         AliCapabilityCatalog.RunMagenticOrchestrationName,
         AliCapabilityCatalog.ListRecoverableWorkflowsName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName);
+        AliCapabilityCatalog.ResumeWorkflowCheckpointName,
+        AliCapabilityCatalog.RoslynPreviewRenameName,
+        AliCapabilityCatalog.RoslynApplyRenameName);
 
     private static readonly IReadOnlySet<string> ResolvedLanguageTargetToolNames = ToolSet(
         AliCapabilityCatalog.CodingAnalyzeProjectName,
@@ -102,7 +104,7 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.ArduinoCreateCompileName,
         AliCapabilityCatalog.DotNetCreateProjectName,
         AliCapabilityCatalog.RoslynFormatProjectName,
-        AliCapabilityCatalog.RoslynApplyRenameName,
+        AliCapabilityCatalog.RoslynApplyActionName,
         AliCapabilityCatalog.DotNetDependencyApplyName);
 
     private static readonly IReadOnlySet<string> ExplicitlyNonIdempotentToolNames = ToolSet(
@@ -117,7 +119,10 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.RoslynInspectDocumentName,
         AliCapabilityCatalog.RoslynInspectPositionName,
         AliCapabilityCatalog.RoslynFindReferencesName,
-        AliCapabilityCatalog.RoslynPreviewRenameName,
+        AliCapabilityCatalog.RoslynInspectTargetName,
+        AliCapabilityCatalog.RoslynListActionsName,
+        AliCapabilityCatalog.RoslynPreviewActionName,
+        AliCapabilityCatalog.RoslynVerifyChangesetName,
         AliCapabilityCatalog.ArchitectureInspectName,
         AliCapabilityCatalog.ArchitectureCheckName,
         AliCapabilityCatalog.DotNetArchitectureReportName);
@@ -125,7 +130,7 @@ public static class AliProductionCapabilityCatalog
     private static readonly IReadOnlySet<string> MsBuildWorkspaceToolNames =
         MsBuildWorkspaceReadOrPreviewToolNames
             .Append(AliCapabilityCatalog.RoslynFormatProjectName)
-            .Append(AliCapabilityCatalog.RoslynApplyRenameName)
+            .Append(AliCapabilityCatalog.RoslynApplyActionName)
             .ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly IReadOnlySet<string> ProjectControlledExecutionToolNames = ToolSet(
@@ -539,8 +544,8 @@ public static class AliProductionCapabilityCatalog
                                 : CapabilityEffectKind.Read;
         var boundary = kind switch
         {
-            CapabilityEffectKind.SourceMutation
-                or CapabilityEffectKind.ExternalMutation
+            CapabilityEffectKind.SourceMutation => CapabilityMutationBoundary.StagedWorkspace,
+            CapabilityEffectKind.ExternalMutation
                 or CapabilityEffectKind.LocalMutation
                 or CapabilityEffectKind.ProcessControl
                 or CapabilityEffectKind.Destructive => CapabilityMutationBoundary.PermissionGuarded,
@@ -687,8 +692,11 @@ public static class AliProductionCapabilityCatalog
             AliCapabilityCatalog.RoslynInspectDocumentName,
             AliCapabilityCatalog.RoslynInspectPositionName,
             AliCapabilityCatalog.RoslynFindReferencesName,
-            AliCapabilityCatalog.RoslynPreviewRenameName,
-            AliCapabilityCatalog.RoslynApplyRenameName,
+            AliCapabilityCatalog.RoslynInspectTargetName,
+            AliCapabilityCatalog.RoslynListActionsName,
+            AliCapabilityCatalog.RoslynPreviewActionName,
+            AliCapabilityCatalog.RoslynApplyActionName,
+            AliCapabilityCatalog.RoslynVerifyChangesetName,
             AliCapabilityCatalog.DotNetBuildName,
             AliCapabilityCatalog.DotNetRunName,
             AliCapabilityCatalog.DotNetStopProjectName,

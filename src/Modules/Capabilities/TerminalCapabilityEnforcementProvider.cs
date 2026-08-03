@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using System.Security;
+using Ali.Modules.Orchestration;
 
 namespace Ali.Modules.Capabilities;
 
@@ -13,8 +14,18 @@ public sealed record CapabilityInvocationAuthorization(
     bool Allowed,
     IReadOnlyList<CapabilityAvailabilityReason> Reasons)
 {
+    internal AliExecutionInvocationScope? InvocationScope { get; init; }
+
     public static CapabilityInvocationAuthorization Allow() =>
         new(true, Array.Empty<CapabilityAvailabilityReason>());
+
+    internal static CapabilityInvocationAuthorization Allow(
+        AliExecutionInvocationScope invocationScope) =>
+        new(true, Array.Empty<CapabilityAvailabilityReason>())
+        {
+            InvocationScope = invocationScope
+                ?? throw new ArgumentNullException(nameof(invocationScope))
+        };
 
     public static CapabilityInvocationAuthorization Block(
         params CapabilityAvailabilityReason[] reasons) =>
@@ -490,6 +501,7 @@ internal sealed class CapabilityInvocationLeaseAIFunction(
                 reasons);
         }
 
+        AliExecutionInvocationScope? invocationScope = null;
         if (actionExecutionBoundary is not null)
         {
             var authorization = await actionExecutionBoundary(
@@ -519,6 +531,38 @@ internal sealed class CapabilityInvocationLeaseAIFunction(
                     validation.CurrentResolutionRevision,
                     reasons);
             }
+
+            invocationScope = authorization.InvocationScope;
+        }
+
+        if (invocationScope is not null)
+        {
+            await using var activation = invocationScope.Enter(arguments);
+            object? result;
+            try
+            {
+                result = await InnerFunction.InvokeAsync(arguments, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                try
+                {
+                    await activation.FailAsync(exception, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // The original invocation failure remains authoritative. A missing
+                    // terminal receipt leaves the durable invocation Started/Unknown.
+                }
+
+                throw;
+            }
+
+            await activation.CompleteAsync(result, CancellationToken.None)
+                .ConfigureAwait(false);
+            return result;
         }
 
         return await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);

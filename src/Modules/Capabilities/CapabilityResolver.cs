@@ -742,14 +742,18 @@ public sealed class CapabilityResolver
         ICollection<CapabilityAvailabilityReason> reasons)
     {
         if (runtime.EnforceReconcilerAvailability
-            && descriptor.Effect.IsMutation
-            && !runtime.AvailableReconcilerIds.Contains(descriptor.Effect.ReconcilerId!))
+            && descriptor.Effect.RequiresDurableEffectAdapter
+            && (descriptor.Effect.ReconcilerId is null
+                || !runtime.AvailableReconcilerIds.Contains(descriptor.Effect.ReconcilerId)))
         {
+            var dependencyId = descriptor.Effect.ReconcilerId ?? "effect-adapter";
             AddReason(
                 reasons,
                 CapabilityAvailabilityReasonCode.ReconcilerUnavailable,
-                descriptor.Effect.ReconcilerId!,
-                $"Reconciler '{descriptor.Effect.ReconcilerId}' is unavailable.");
+                dependencyId,
+                descriptor.Effect.ReconcilerId is null
+                    ? "No exact durable effect adapter is registered for this capability."
+                    : $"Reconciler '{descriptor.Effect.ReconcilerId}' is unavailable.");
         }
     }
 

@@ -36,7 +36,7 @@ internal static class AliFrameworkCapabilityProbe
                 // The provider needs a store to compose its schemas. A non-persistent
                 // empty store avoids touching or auditing user work memory at startup.
                 FileMemoryStore = new CapabilityProbeFileStore(),
-                FileAccessStore = fileAccess.Store,
+                FileAccessStore = fileAccess.FrameworkStore,
                 FileAccessProviderOptions = new FileAccessProviderOptions
                 {
                     Instructions = fileAccess.Instructions,

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Work;
 using Ali.Modules.WorkstationFiles;
 
@@ -7,10 +8,22 @@ namespace Ali.Modules.Coordinator;
 
 internal static class AliProductionTargetStateAdapters
 {
-    internal static TargetStateRegistry Create(AliWorkstationFileAccess fileAccess) => new(
-    [
-        new WorkstationFileTargetStateAdapter(fileAccess)
-    ]);
+    internal static TargetStateRegistry Create(
+        AliWorkstationFileAccess fileAccess,
+        IEnumerable<IActionTargetStateAdapter>? additionalAdapters = null)
+    {
+        ArgumentNullException.ThrowIfNull(fileAccess);
+        var adapters = new List<IActionTargetStateAdapter>
+        {
+            new WorkstationFileTargetStateAdapter(fileAccess)
+        };
+        if (additionalAdapters is not null)
+        {
+            adapters.AddRange(additionalAdapters);
+        }
+
+        return new TargetStateRegistry(adapters);
+    }
 
     private sealed class WorkstationFileTargetStateAdapter(
         AliWorkstationFileAccess fileAccess) : IActionTargetStateAdapter
@@ -22,7 +35,6 @@ internal static class AliProductionTargetStateAdapters
         [
             AliCapabilityCatalog.FileWriteName,
             AliCapabilityCatalog.FileReadName,
-            AliCapabilityCatalog.FileDeleteName,
             AliCapabilityCatalog.FileReplaceName,
             AliCapabilityCatalog.FileReplaceLinesName
         ];
@@ -45,20 +57,44 @@ internal static class AliProductionTargetStateAdapters
 
         private static string CaptureExactFileVersion(string path)
         {
-            if (!File.Exists(path))
-            {
-                return "absent";
-            }
-
             try
             {
-                using var stream = new FileStream(
-                    path,
+                var fullPath = Path.GetFullPath(path);
+                var parent = Path.GetDirectoryName(fullPath)
+                    ?? throw new InvalidDataException(
+                        "The workstation target has no parent directory.");
+                WindowsOrchestrationFileBoundary.ValidateRegularDirectoryPath(
+                    parent,
+                    "The workstation target parent is not a regular local directory.");
+                try
+                {
+                    var attributes = File.GetAttributes(fullPath);
+                    if ((attributes & (FileAttributes.ReparsePoint
+                                       | FileAttributes.Directory
+                                       | FileAttributes.Device)) != 0)
+                    {
+                        throw new InvalidDataException(
+                            "The workstation target is a reparse point or non-regular entry.");
+                    }
+                }
+                catch (FileNotFoundException)
+                {
+                }
+                catch (DirectoryNotFoundException)
+                {
+                }
+                if (!File.Exists(fullPath))
+                {
+                    return "absent";
+                }
+
+                using var stream = WindowsOrchestrationFileBoundary.OpenRegularFile(
+                    fullPath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.Read,
-                    64 * 1024,
-                    FileOptions.SequentialScan);
+                    writeThrough: false,
+                    "The workstation target is not a regular local file.");
                 var hash = SHA256.HashData(stream);
                 try
                 {

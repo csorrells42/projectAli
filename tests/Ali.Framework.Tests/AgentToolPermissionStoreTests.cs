@@ -99,7 +99,8 @@ public sealed class AgentToolPermissionStoreTests
             AgentPermissionProfile.LockedDown));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetCreateProjectName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFormatProjectName));
-        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynApplyRenameName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynApplyActionName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynVerifyChangesetName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetBuildName));
         Assert.True(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.DotNetRunName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.FileReadName));
@@ -110,7 +111,18 @@ public sealed class AgentToolPermissionStoreTests
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynInspectDocumentName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynInspectPositionName));
         Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynFindReferencesName));
-        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynPreviewRenameName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynInspectTargetName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynListActionsName));
+        Assert.False(AliToolPermissionPolicy.RequiresApproval(AliCapabilityCatalog.RoslynPreviewActionName));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.RoslynInspectTargetName,
+            AgentPermissionProfile.LockedDown));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.RoslynListActionsName,
+            AgentPermissionProfile.LockedDown));
+        Assert.True(AliToolPermissionPolicy.RequiresApproval(
+            AliCapabilityCatalog.RoslynPreviewActionName,
+            AgentPermissionProfile.LockedDown));
         Assert.All(
             AliToolPermissionPolicy.ProtectedTools,
             policy =>

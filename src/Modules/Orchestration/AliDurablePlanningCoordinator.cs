@@ -30,6 +30,8 @@ internal sealed partial class AliPlanningStateCoordinator : IDisposable
     private readonly DurablePausedTurnCatalog _pausedTurnCatalog;
     private readonly EffectNormalizationRegistry _effectNormalizations;
     private readonly TargetStateRegistry _targetStates;
+    private readonly AliExecutionEffectAdapterRegistry _executionAdapters;
+    private readonly AliExecutionBroker _executionBroker;
     private int _disposed;
 
     internal AliPlanningStateCoordinator(
@@ -37,7 +39,8 @@ internal sealed partial class AliPlanningStateCoordinator : IDisposable
         string assistantProfileBinding,
         ITurnPublicationReconciler? publicationReconciler = null,
         EffectNormalizationRegistry? effectNormalizations = null,
-        TargetStateRegistry? targetStates = null)
+        TargetStateRegistry? targetStates = null,
+        AliExecutionEffectAdapterRegistry? executionAdapters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(assistantProfileBinding);
@@ -54,9 +57,11 @@ internal sealed partial class AliPlanningStateCoordinator : IDisposable
         _pausedTurnCatalog = new DurablePausedTurnCatalog(root, assistantProfileBinding);
         _effectNormalizations = effectNormalizations ?? EffectNormalizationRegistry.Empty;
         _targetStates = targetStates ?? TargetStateRegistry.Empty;
+        _executionAdapters = executionAdapters ?? AliExecutionEffectAdapterRegistry.Empty;
+        _executionBroker = new AliExecutionBroker(_executionAdapters);
         _recoveryService = new TurnRecoveryService(
             _transitionWriter,
-            Array.Empty<ITurnActionReconciler>(),
+            _executionAdapters.Reconcilers,
             publicationReconciler);
     }
 
@@ -169,6 +174,7 @@ internal sealed partial class AliPlanningStateCoordinator : IDisposable
             _transitionWriter,
             _effectNormalizations,
             _targetStates,
+            _executionBroker,
             liveBindingsAccessor ?? (() => bindings));
     }
 
@@ -226,6 +232,7 @@ internal sealed partial class AliDurablePlanningTurn :
     private readonly TurnTransitionWriter _writer;
     private readonly EffectNormalizationRegistry _effectNormalizations;
     private readonly TargetStateRegistry _targetStates;
+    private readonly AliExecutionBroker _executionBroker;
     private readonly Func<TurnRuntimeBindings> _liveBindingsAccessor;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, PreparedCall> _preparedCalls = new(StringComparer.Ordinal);
@@ -259,6 +266,7 @@ internal sealed partial class AliDurablePlanningTurn :
         TurnTransitionWriter writer,
         EffectNormalizationRegistry effectNormalizations,
         TargetStateRegistry targetStates,
+        AliExecutionBroker executionBroker,
         Func<TurnRuntimeBindings> liveBindingsAccessor)
     {
         _turn = turn;
@@ -278,6 +286,8 @@ internal sealed partial class AliDurablePlanningTurn :
             ?? throw new ArgumentNullException(nameof(effectNormalizations));
         _targetStates = targetStates
             ?? throw new ArgumentNullException(nameof(targetStates));
+        _executionBroker = executionBroker
+            ?? throw new ArgumentNullException(nameof(executionBroker));
         _liveBindingsAccessor = liveBindingsAccessor
             ?? throw new ArgumentNullException(nameof(liveBindingsAccessor));
     }
@@ -622,7 +632,12 @@ internal sealed partial class AliDurablePlanningTurn :
                 }
                 else
                 {
-                    _preparedCalls.Add(callPreparation.Call.CallId, callPreparation.Call);
+                    _preparedCalls.Add(
+                        callPreparation.Call.CallId,
+                        callPreparation.Call with
+                        {
+                            DecisionStateRevision = _state.Revision
+                        });
                 }
             }
 
@@ -647,15 +662,37 @@ internal sealed partial class AliDurablePlanningTurn :
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ValidateEventIdentity(
-                observed.ConversationId,
-                observed.AssistantMessageId,
-                observed.ExpectedStateRevision);
+            if (!string.Equals(
+                    observed.ConversationId,
+                    _identity.ConversationId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    observed.AssistantMessageId,
+                    _identity.AssistantMessageId,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "A tool terminal crossed its visible-turn identity boundary.");
+            }
             if (!_preparedCalls.TryGetValue(observed.CallId, out var prepared)
                 || !string.Equals(prepared.ToolName, observed.ToolName, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
                     "A tool terminal cannot be committed without its matching prepared action.");
+            }
+
+            var matchesCurrentRevision = observed.ExpectedStateRevision == _state.Revision;
+            var matchesSoleDurablePreparation = prepared.Intent is { } preparedIntent
+                && observed.ExpectedStateRevision == prepared.DecisionStateRevision
+                && _state.Revision == prepared.DecisionStateRevision + 1
+                && _state.TryGetPendingAction(preparedIntent.IdempotencyKey, out var pending)
+                && pending is not null
+                && pending.State == ActionIntentState.Prepared
+                && pending.Intent == preparedIntent;
+            if (!matchesCurrentRevision && !matchesSoleDurablePreparation)
+            {
+                throw new InvalidDataException(
+                    $"A tool terminal expected revision {observed.ExpectedStateRevision}, but authoritative revision is {_state.Revision}.");
             }
 
             var observedArguments = CanonicalEvidenceJson.SerializeToUtf8Bytes(observed.Arguments);
@@ -1323,9 +1360,15 @@ internal sealed partial class AliDurablePlanningTurn :
                 _state.Revision,
                 null,
                 false);
-        var executionClass = descriptor is null || RequiresDurableEffectAdapter(descriptor)
-            ? AcceptedCallExecutionClass.Unavailable
-            : AcceptedCallExecutionClass.NonMutating;
+        var executionClass = descriptor switch
+        {
+            null => AcceptedCallExecutionClass.Unavailable,
+            _ when RequiresDurableEffectAdapter(descriptor) =>
+                _executionBroker.TryResolve(descriptor, out _)
+                    ? AcceptedCallExecutionClass.PreparedEffectRequired
+                    : AcceptedCallExecutionClass.Unavailable,
+            _ => AcceptedCallExecutionClass.NonMutating
+        };
         var recovery = new AcceptedCallRecoveryPayload(
             callId,
             workItemId,
@@ -1385,6 +1428,9 @@ internal sealed partial class AliDurablePlanningTurn :
                     "The live capability identity differs from the accepted planner call.");
             }
 
+            var effectiveRequiresApproval = requiresApproval
+                || descriptor.Permission.RequiresApproval;
+
             var invocationArguments = JsonSerializer.SerializeToElement(arguments).Clone();
             var argumentBytes = CanonicalEvidenceJson.SerializeToUtf8Bytes(invocationArguments);
             string argumentsDigest;
@@ -1430,7 +1476,7 @@ internal sealed partial class AliDurablePlanningTurn :
             }
 
             CoordinatorPermissionDecisionReceipt permissionReceipt;
-            if (requiresApproval)
+            if (effectiveRequiresApproval)
             {
                 if (!_turn.TryGetPermissionReceipt(callId, out var exactPermission)
                     || exactPermission is null
@@ -1462,7 +1508,7 @@ internal sealed partial class AliDurablePlanningTurn :
                 lease.ActiveUserId,
                 lease.PermissionRevision,
                 argumentsDigest,
-                requiresApproval
+                effectiveRequiresApproval
             });
             var registryIdentityDigest = DigestCanonicalValue(new
             {
@@ -1492,13 +1538,59 @@ internal sealed partial class AliDurablePlanningTurn :
 
             if (RequiresDurableEffectAdapter(descriptor))
             {
-                // Checkpoint 7 publishes typed target/version adapters. Until one owns
-                // compare-and-act plus reconciliation, side effects are withheld here;
-                // a catalog reconciler name alone is deliberately not execution authority.
-                return BlockExecution(
-                    CapabilityAvailabilityReasonCode.ReconcilerUnavailable,
-                    descriptor.Effect.ReconcilerId ?? "effect-adapter",
-                    "No live target/version effect adapter owns this side effect.");
+                if (!_executionBroker.TryResolve(descriptor, out var adapter)
+                    || adapter is null
+                    || descriptor.Effect.ReconcilerId is null)
+                {
+                    return BlockExecution(
+                        CapabilityAvailabilityReasonCode.ReconcilerUnavailable,
+                        descriptor.Effect.ReconcilerId ?? "effect-adapter",
+                        "No exact target/version effect adapter owns this side effect.");
+                }
+
+                AliPreparedExecution durablePreparation;
+                try
+                {
+                    durablePreparation = await _executionBroker.PrepareAsync(
+                        adapter,
+                        new AliExecutionPreparationRequest(
+                            _identity,
+                            callId,
+                            prepared.WorkItemId,
+                            prepared.ToolName,
+                            descriptor.Id,
+                            descriptor.Effect.ReconcilerId,
+                            invocationArguments,
+                            prepared.ArgumentsDigest,
+                            prepared.ActionIdentity.Fingerprint,
+                            prepared.ActionIdentity.TargetVersionsDigest,
+                            permissionReceiptDigest,
+                            _bindings.CapabilityRegistryDigest,
+                            registryIdentityDigest),
+                        effectiveRequiresApproval,
+                        _writer,
+                        _state.Revision,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (AliExecutionPreparationException)
+                {
+                    return BlockExecution(
+                        CapabilityAvailabilityReasonCode.ReconcilerUnavailable,
+                        descriptor.Effect.ReconcilerId,
+                        "The exact effect adapter could not establish matching preparation metadata.");
+                }
+
+                _state = durablePreparation.State;
+                _preparedCalls[callId] = prepared with
+                {
+                    Intent = durablePreparation.Intent,
+                    Permission = permissionReceipt.Permission with { },
+                    ExecutionRegistryIdentityDigest = registryIdentityDigest,
+                    ExecutionPermissionReceiptDigest = permissionReceiptDigest,
+                    ExecutionAuthorized = true
+                };
+                return CapabilityInvocationAuthorization.Allow(
+                    durablePreparation.InvocationScope);
             }
 
             _preparedCalls[callId] = prepared with
@@ -1526,12 +1618,8 @@ internal sealed partial class AliDurablePlanningTurn :
     private static bool IsApprovedPermission(EvidencePermissionMetadata permission) =>
         permission.Decision is "approved-once" or "approved-standing" or "approved-policy";
 
-    private static bool RequiresDurableEffectAdapter(CapabilityDescriptor descriptor) =>
-        descriptor.Effect.IsMutation
-        || descriptor.Effect.WritesLocalData
-        || descriptor.Effect.StartsProcesses
-        || descriptor.Effect.ChangesSystemState
-        || (descriptor.Effect.UsesNetwork && !descriptor.Effect.SupportsIdempotency);
+    internal static bool RequiresDurableEffectAdapter(CapabilityDescriptor descriptor) =>
+        descriptor.Effect.RequiresDurableEffectAdapter;
 
     private static string DigestCanonicalValue<T>(T value)
     {

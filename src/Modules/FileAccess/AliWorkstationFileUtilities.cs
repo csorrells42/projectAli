@@ -46,6 +46,15 @@ public sealed class AliWorkstationFileUtilities(AliWorkstationFileAccess access)
         string destinationPath,
         CancellationToken cancellationToken)
     {
+        if (access.HasDurableTreeMutationBoundary)
+        {
+            return await access.CopyDurablyAsync(
+                    sourcePath,
+                    destinationPath,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         string? staging = null;
         try
         {
@@ -84,6 +93,12 @@ public sealed class AliWorkstationFileUtilities(AliWorkstationFileAccess access)
         string path,
         CancellationToken cancellationToken)
     {
+        if (access.HasDurableTreeMutationBoundary)
+        {
+            return await access.CreateDirectoryDurablyAsync(path, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         try
         {
             var resolved = access.ResolvePhysicalDirectoryPath(path);

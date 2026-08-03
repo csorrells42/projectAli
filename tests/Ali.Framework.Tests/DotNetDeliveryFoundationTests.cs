@@ -1,6 +1,7 @@
 using Ali.Modules.Coding;
 using Ali.Modules.Coding.Architecture;
 using Ali.Modules.Coding.Dependencies;
+using Ali.Modules.Coding.SourceControl;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Permissions;
 using Ali.Modules.WorkstationFiles;
@@ -63,6 +64,7 @@ public sealed class DotNetDeliveryFoundationTests
                 namespace Foundation.Core { public static class Service { public static void Work() { } } }
                 namespace Foundation.UI { public static class Screen { public static void Show() => Foundation.Core.Service.Work(); } }
                 """, TestContext.Current.CancellationToken);
+            await InitializeRepositoryAsync(workspace);
             await using var module = new AliCodingModule(access);
 
             var preview = await module.Dependencies.PreviewChangeAsync("Workspace/App/App.csproj", "update", "Example.Package", "2.0.0", TestContext.Current.CancellationToken);
@@ -83,9 +85,9 @@ public sealed class DotNetDeliveryFoundationTests
             Assert.True(File.Exists(quality.SarifPath));
             Assert.Contains("2.1.0", await File.ReadAllTextAsync(quality.SarifPath, TestContext.Current.CancellationToken));
 
-            var repoAccess = CreateAccess(root, RepositoryRoot);
-            await using var repoModule = new AliCodingModule(repoAccess);
-            var status = await repoModule.SourceControl.StatusAsync("Workspace/src/Ali.csproj", TestContext.Current.CancellationToken);
+            var status = await module.SourceControl.StatusAsync(
+                "Workspace/App/App.csproj",
+                TestContext.Current.CancellationToken);
             Assert.True(status.Success, status.Output);
             Assert.Contains("##", status.Output);
         }
@@ -124,13 +126,24 @@ public sealed class DotNetDeliveryFoundationTests
         return new AliWorkstationFileAccess(store, new AgentFileActionAuditStore(dataRoot, null), permissions);
     }
 
-    private static string RepositoryRoot
+    private static async Task InitializeRepositoryAsync(string workspace)
     {
-        get
+        var provider = AliGitProviderIdentity.Pin();
+        var startInfo = provider.CreateStartInfo(workspace);
+        startInfo.ArgumentList.Add("init");
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Git did not start for the isolated test repository.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        var output = string.Join(
+            Environment.NewLine,
+            await standardOutput,
+            await standardError);
+        if (process.ExitCode != 0)
         {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Ali.sln"))) directory = directory.Parent;
-            return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root not found.");
+            throw new InvalidOperationException(
+                $"Git init failed for the isolated test repository: {output}");
         }
     }
 }

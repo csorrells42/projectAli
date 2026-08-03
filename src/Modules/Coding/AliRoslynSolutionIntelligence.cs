@@ -48,6 +48,14 @@ internal sealed class AliRoslynSolutionIntelligence(AliRoslynWorkspaceLoader loa
         CancellationToken cancellationToken)
     {
         using var session = await loader.LoadAsync(targetPath, cancellationToken).ConfigureAwait(false);
+        return Inspect(session, targetPath);
+    }
+
+    internal RoslynSolutionOverviewResult Inspect(
+        AliRoslynWorkspaceSession session,
+        string targetPath)
+    {
+        ArgumentNullException.ThrowIfNull(session);
         var projects = session.Solution.Projects
             .Where(project => project.Language == LanguageNames.CSharp)
             .OrderBy(project => project.Name, StringComparer.OrdinalIgnoreCase)
@@ -79,6 +87,25 @@ internal sealed class AliRoslynSolutionIntelligence(AliRoslynWorkspaceLoader loa
         CancellationToken cancellationToken)
     {
         using var session = await loader.LoadAsync(targetPath, cancellationToken).ConfigureAwait(false);
+        return await FindReferencesAsync(
+                session,
+                targetPath,
+                documentPath,
+                line,
+                column,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<RoslynReferenceResult> FindReferencesAsync(
+        AliRoslynWorkspaceSession session,
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
         var (document, position) = await loader.ResolvePositionAsync(
             session,
             documentPath,

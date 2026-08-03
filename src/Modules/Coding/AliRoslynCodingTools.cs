@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Xml.Linq;
+using Ali.Modules.Coding.Execution;
 
 namespace Ali.Modules.Coding;
 
@@ -54,6 +55,7 @@ internal sealed class AliRoslynCodingTools
     private readonly AliRoslynDocumentIntelligence _documentIntelligence;
     private readonly AliRoslynRefactoringService _refactoring;
     private readonly string _auditPath;
+    private readonly Action? _beforeRunProcessStart;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private readonly ConcurrentDictionary<string, TrackedProjectProcess> _runningProjects =
         new(StringComparer.OrdinalIgnoreCase);
@@ -61,7 +63,8 @@ internal sealed class AliRoslynCodingTools
     public AliRoslynCodingTools(
         AliCodingProjectResolver resolver,
         AliCodingProjectTracker projectTracker,
-        string auditPath)
+        string auditPath,
+        Action? beforeRunProcessStart = null)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _projectTracker = projectTracker ?? throw new ArgumentNullException(nameof(projectTracker));
@@ -72,6 +75,62 @@ internal sealed class AliRoslynCodingTools
         _refactoring = new AliRoslynRefactoringService(workspaceLoader);
         ArgumentException.ThrowIfNullOrWhiteSpace(auditPath);
         _auditPath = Path.GetFullPath(auditPath);
+        _beforeRunProcessStart = beforeRunProcessStart;
+    }
+
+    internal AliDotNetRunExecutionBinding CaptureRunExecutionBinding(
+        string physicalProjectPath,
+        string? configuration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(physicalProjectPath);
+        var projectPath = Path.GetFullPath(physicalProjectPath);
+        var normalizedConfiguration = NormalizeConfiguration(configuration);
+        var artifactPath = FindBuiltArtifact(projectPath, normalizedConfiguration);
+        if (artifactPath is null)
+        {
+            return new AliDotNetRunExecutionBinding(null, null, null);
+        }
+        var projectRoot = Path.GetDirectoryName(projectPath)
+            ?? throw new InvalidDataException(
+                "The exact .NET run project has no parent directory.");
+        AliCodingProjectResolver.RejectReparsePoints(projectRoot, artifactPath);
+        var artifact = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+            artifactPath,
+            "The selected built .NET artifact");
+        var host = Path.GetExtension(artifact.PhysicalPath).Equals(
+                ".dll",
+                StringComparison.OrdinalIgnoreCase)
+            ? AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+                ResolveExactDotNetHostPath(),
+                "The selected .NET runtime host")
+            : artifact;
+        var launchClosure = AliApplicationLaunchClosure.Capture(artifact);
+        return new AliDotNetRunExecutionBinding(artifact, host, launchClosure);
+    }
+
+    internal AliDotNetStopExecutionBinding CaptureStopExecutionBinding(
+        string physicalProjectPath,
+        string? configuration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(physicalProjectPath);
+        var projectPath = Path.GetFullPath(physicalProjectPath);
+        var normalizedConfiguration = NormalizeConfiguration(configuration);
+        var artifactPath = FindBuiltArtifact(projectPath, normalizedConfiguration);
+        AliBoundExecutionFile? artifact = null;
+        if (artifactPath is not null)
+        {
+            var projectRoot = Path.GetDirectoryName(projectPath)
+                ?? throw new InvalidDataException(
+                    "The exact .NET stop project has no parent directory.");
+            AliCodingProjectResolver.RejectReparsePoints(projectRoot, artifactPath);
+            artifact = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+                artifactPath,
+                "The selected .NET stop artifact");
+        }
+        var running = FindRunningTarget(projectPath, artifact?.PhysicalPath);
+        return new AliDotNetStopExecutionBinding(
+            artifact,
+            running is null ? null : CaptureProcessState(running));
     }
 
     public Task<RoslynAnalysisResult> AnalyzeAsync(string projectPath, CancellationToken cancellationToken)
@@ -80,6 +139,14 @@ internal sealed class AliRoslynCodingTools
         // This call must occur before the CLR resolves MSBuildWorkspace implementation types.
         AliMsBuildRuntime.EnsureRegistered();
         return _intelligence.AnalyzeAsync(projectPath, cancellationToken);
+    }
+
+    internal Task<RoslynAnalysisResult> AnalyzeCompilerOnlyAsync(
+        string projectPath,
+        CancellationToken cancellationToken)
+    {
+        AliMsBuildRuntime.EnsureRegistered();
+        return _intelligence.AnalyzeCompilerOnlyAsync(projectPath, cancellationToken);
     }
 
     public async Task<RoslynFormatResult> FormatAsync(string projectPath, CancellationToken cancellationToken)
@@ -162,6 +229,80 @@ internal sealed class AliRoslynCodingTools
         AliMsBuildRuntime.EnsureRegistered();
         return _documentIntelligence.InspectPositionAsync(targetPath, documentPath, line, column, cancellationToken);
     }
+
+    internal Task<RoslynAnalysisResult> AnalyzeLoadedAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        CancellationToken cancellationToken) =>
+        _intelligence.AnalyzeAsync(session, projectPath, cancellationToken);
+
+    internal Task<RoslynSymbolResult> FindSymbolLoadedAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        string query,
+        CancellationToken cancellationToken) =>
+        _intelligence.FindSymbolAsync(session, projectPath, query, cancellationToken);
+
+    internal Task<RoslynCompletionResult> GetCompletionsLoadedAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken) =>
+        _intelligence.GetCompletionsAsync(
+            session,
+            projectPath,
+            documentPath,
+            line,
+            column,
+            cancellationToken);
+
+    internal RoslynSolutionOverviewResult InspectSolutionLoaded(
+        AliRoslynWorkspaceSession session,
+        string targetPath) =>
+        _solutionIntelligence.Inspect(session, targetPath);
+
+    internal Task<RoslynReferenceResult> FindReferencesLoadedAsync(
+        AliRoslynWorkspaceSession session,
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken) =>
+        _solutionIntelligence.FindReferencesAsync(
+            session,
+            targetPath,
+            documentPath,
+            line,
+            column,
+            cancellationToken);
+
+    internal Task<RoslynDocumentResult> InspectDocumentLoadedAsync(
+        AliRoslynWorkspaceSession session,
+        string targetPath,
+        string documentPath,
+        CancellationToken cancellationToken) =>
+        _documentIntelligence.InspectDocumentAsync(
+            session,
+            targetPath,
+            documentPath,
+            cancellationToken);
+
+    internal Task<RoslynPositionResult> InspectPositionLoadedAsync(
+        AliRoslynWorkspaceSession session,
+        string targetPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken) =>
+        _documentIntelligence.InspectPositionAsync(
+            session,
+            targetPath,
+            documentPath,
+            line,
+            column,
+            cancellationToken);
 
     public Task<RoslynRenameResult> PreviewRenameAsync(
         string targetPath,
@@ -341,7 +482,17 @@ internal sealed class AliRoslynCodingTools
         }
 
         var normalizedConfiguration = NormalizeConfiguration(configuration);
-        var artifact = FindBuiltArtifact(project.PhysicalPath, normalizedConfiguration);
+        var approved = AliCodingInvocationExecutionContext.Current?.RuntimeBinding.DotNetRun;
+        var liveBinding = CaptureRunExecutionBinding(
+            project.PhysicalPath,
+            normalizedConfiguration);
+        if (approved is not null && approved != liveBinding)
+        {
+            throw new InvalidOperationException(
+                "The exact built artifact or runtime host changed after durable authorization.");
+        }
+        var executionBinding = approved ?? liveBinding;
+        var artifact = executionBinding.Artifact?.PhysicalPath;
         if (artifact is null)
         {
             await WriteAuditAsync("run", projectPath, false, null, 0, "No built artifact was found.", cancellationToken)
@@ -363,23 +514,91 @@ internal sealed class AliRoslynCodingTools
             return new DotNetRunResult(false, projectPath, runtimeFailure, artifact, null);
         }
 
+        AliApplicationLaunchLease? launchLease = null;
+        AliExecutionFileLease? hostLease = null;
+        TrackedProjectProcess? pendingTracked = null;
         try
         {
             var started = Stopwatch.StartNew();
-            var startInfo = CreateLaunchStartInfo(artifact);
+            var boundArtifact = executionBinding.Artifact
+                ?? throw new InvalidDataException(
+                    "The exact .NET run binding has no application artifact.");
+            var boundHost = executionBinding.HostExecutable
+                ?? throw new InvalidDataException(
+                    "The exact .NET run binding has no host executable.");
+            var boundClosure = executionBinding.LaunchClosure
+                ?? throw new InvalidDataException(
+                    "The exact .NET run binding has no application launch closure.");
+            launchLease = AliApplicationLaunchLease.Acquire(
+                boundArtifact,
+                boundClosure);
+            hostLease = AliExecutionFileLease.Acquire(
+                boundHost,
+                "The exact .NET run host executable");
+            var projectDirectoryBinding = AliExecutionDirectoryBinding.Capture(
+                project.ProjectDirectory,
+                "The exact .NET run project-directory spine");
+            using var projectDirectoryLease = projectDirectoryBinding.Acquire(
+                "The exact .NET run project-directory spine");
+            RequireRunExecutionBindingStable(executionBinding);
+            launchLease.RequireStable();
+            hostLease.RequireStable();
+            projectDirectoryLease.RequireStable();
+            _beforeRunProcessStart?.Invoke();
+            RequireRunExecutionBindingStable(executionBinding);
+            launchLease.RequireStable();
+            hostLease.RequireStable();
+            projectDirectoryLease.RequireStable();
+            var startInfo = CreateLaunchStartInfo(
+                artifact,
+                boundHost.PhysicalPath);
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("Windows did not start the compiled application.");
             var processId = process.Id;
-            _runningProjects[project.PhysicalPath] = new TrackedProjectProcess(
-                processId,
-                artifact,
-                process.StartTime.ToUniversalTime().Ticks);
-            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken).ConfigureAwait(false);
+            var trackedRegistered = false;
+            try
+            {
+                RequireStartedRunProcess(
+                    process,
+                    boundArtifact,
+                    launchLease,
+                    hostLease);
+                pendingTracked = await CaptureStartedProcessAsync(
+                        process,
+                        executionBinding,
+                        launchLease,
+                        hostLease,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (pendingTracked is not null)
+                {
+                    launchLease = null;
+                    hostLease = null;
+                    RegisterTrackedProcess(project.PhysicalPath, pendingTracked);
+                    pendingTracked = null;
+                    trackedRegistered = true;
+                }
+            }
+            catch
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                throw;
+            }
+            if (trackedRegistered)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken).ConfigureAwait(false);
+            }
             var exited = process.HasExited;
             var exitCode = exited ? process.ExitCode : (int?)null;
+            if (exited)
+            {
+                RemoveTrackedProcess(project.PhysicalPath, processId);
+            }
             if (exited && exitCode != 0)
             {
-                _runningProjects.TryRemove(project.PhysicalPath, out _);
                 var failure = $"The compiled application exited during startup with code {exitCode}.";
                 await WriteAuditAsync("run", projectPath, false, exitCode, started.ElapsedMilliseconds, failure, cancellationToken)
                     .ConfigureAwait(false);
@@ -404,6 +623,12 @@ internal sealed class AliRoslynCodingTools
                 artifact,
                 null);
         }
+        finally
+        {
+            pendingTracked?.Dispose();
+            hostLease?.Dispose();
+            launchLease?.Dispose();
+        }
     }
 
     public async Task<DotNetStopProjectResult> StopProjectAsync(
@@ -414,8 +639,18 @@ internal sealed class AliRoslynCodingTools
         cancellationToken.ThrowIfCancellationRequested();
         var project = _resolver.ResolveExistingProject(projectPath);
         var normalizedConfiguration = NormalizeConfiguration(configuration);
-        var artifact = FindBuiltArtifact(project.PhysicalPath, normalizedConfiguration);
-        var runningTarget = FindRunningTarget(project.PhysicalPath, artifact);
+        var approved = AliCodingInvocationExecutionContext.Current?.RuntimeBinding.DotNetStop;
+        var liveBinding = CaptureStopExecutionBinding(
+            project.PhysicalPath,
+            normalizedConfiguration);
+        if (approved is not null && approved != liveBinding)
+        {
+            throw new InvalidOperationException(
+                "The exact tracked process state changed after durable authorization.");
+        }
+        var executionBinding = approved ?? liveBinding;
+        var artifact = executionBinding.Artifact?.PhysicalPath;
+        var runningTarget = executionBinding.Process;
         if (runningTarget is null)
         {
             var summary = "No running target application was found for the approved project; it is already safe to rebuild.";
@@ -429,20 +664,7 @@ internal sealed class AliRoslynCodingTools
         try
         {
             using var process = Process.GetProcessById(runningTarget.ProcessId);
-            if (process.StartTime.ToUniversalTime().Ticks != runningTarget.StartTimeUtcTicks)
-            {
-                _runningProjects.TryRemove(project.PhysicalPath, out _);
-                var reusedSummary = "The previously identified target process had already exited. Its old process ID now belongs to a different process, which was left untouched. The project can be rebuilt.";
-                await WriteAuditAsync("stop-project", projectPath, true, 0, started.ElapsedMilliseconds, reusedSummary, cancellationToken)
-                    .ConfigureAwait(false);
-                return new DotNetStopProjectResult(
-                    true,
-                    projectPath,
-                    reusedSummary,
-                    runningTarget.ArtifactPath,
-                    runningTarget.ProcessId,
-                    false);
-            }
+            RequireProcessStateStable(process, runningTarget);
 
             if (!process.HasExited)
             {
@@ -463,13 +685,14 @@ internal sealed class AliRoslynCodingTools
 
                 if (!process.HasExited)
                 {
+                    RequireProcessStateStable(process, runningTarget);
                     forced = true;
                     process.Kill(entireProcessTree: true);
                     await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
 
-            _runningProjects.TryRemove(project.PhysicalPath, out _);
+            RemoveTrackedProcess(project.PhysicalPath, runningTarget.ProcessId);
             started.Stop();
             var summary = forced
                 ? $"Stopped running target process {runningTarget.ProcessId} after it did not close gracefully. The project can be rebuilt."
@@ -480,13 +703,26 @@ internal sealed class AliRoslynCodingTools
                 true,
                 projectPath,
                 summary,
-                runningTarget.ArtifactPath,
+                artifact,
                 runningTarget.ProcessId,
                 forced);
         }
         catch (ArgumentException)
         {
-            _runningProjects.TryRemove(project.PhysicalPath, out _);
+            RemoveTrackedProcess(project.PhysicalPath, runningTarget.ProcessId);
+            if (approved?.Process is not null)
+            {
+                var missing = "The exact authorized target process disappeared before it could be stopped; no replacement process was touched.";
+                await WriteAuditAsync("stop-project", projectPath, false, null, started.ElapsedMilliseconds, missing, cancellationToken)
+                    .ConfigureAwait(false);
+                return new DotNetStopProjectResult(
+                    false,
+                    projectPath,
+                    missing,
+                    artifact,
+                    runningTarget.ProcessId,
+                    false);
+            }
             var summary = "The previously identified target process had already exited. The project can be rebuilt.";
             await WriteAuditAsync("stop-project", projectPath, true, 0, started.ElapsedMilliseconds, summary, cancellationToken)
                 .ConfigureAwait(false);
@@ -494,7 +730,7 @@ internal sealed class AliRoslynCodingTools
                 true,
                 projectPath,
                 summary,
-                runningTarget.ArtifactPath,
+                artifact,
                 runningTarget.ProcessId,
                 false);
         }
@@ -508,7 +744,7 @@ internal sealed class AliRoslynCodingTools
                 false,
                 projectPath,
                 summary,
-                runningTarget.ArtifactPath,
+                artifact,
                 runningTarget.ProcessId,
                 forced);
         }
@@ -530,10 +766,15 @@ internal sealed class AliRoslynCodingTools
         {
             if (IsTrackedProcessRunning(tracked))
             {
-                return tracked;
+                return string.IsNullOrWhiteSpace(artifactPath)
+                       || Path.GetFullPath(artifactPath).Equals(
+                           tracked.ArtifactPath,
+                           StringComparison.OrdinalIgnoreCase)
+                    ? tracked
+                    : null;
             }
 
-            _runningProjects.TryRemove(physicalProjectPath, out _);
+            RemoveTrackedProcess(physicalProjectPath, tracked.ProcessId);
         }
 
         if (string.IsNullOrWhiteSpace(artifactPath)
@@ -554,17 +795,58 @@ internal sealed class AliRoslynCodingTools
                         && Path.GetFullPath(executable).Equals(expected, StringComparison.OrdinalIgnoreCase)
                         && !process.HasExited)
                     {
-                        var discovered = new TrackedProjectProcess(
-                            process.Id,
+                        var artifact = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
                             expected,
-                            process.StartTime.ToUniversalTime().Ticks);
-                        _runningProjects[physicalProjectPath] = discovered;
-                        return discovered;
+                            "The discovered .NET target artifact");
+                        var closure = AliApplicationLaunchClosure.Capture(artifact);
+                        AliApplicationLaunchLease? launchLease = null;
+                        AliExecutionFileLease? hostLease = null;
+                        TrackedProjectProcess? discovered = null;
+                        try
+                        {
+                            launchLease = AliApplicationLaunchLease.Acquire(
+                                artifact,
+                                closure);
+                            hostLease = AliExecutionFileLease.Acquire(
+                                artifact,
+                                "The discovered .NET target executable");
+                            hostLease.RequireStartedProcessImage(process);
+                            launchLease.RequireStartedPrincipalProcessImage(process);
+                            discovered = new TrackedProjectProcess(
+                                process.Id,
+                                artifact.PhysicalPath,
+                                artifact.Identity,
+                                process.StartTime.ToUniversalTime().Ticks,
+                                artifact.PhysicalPath,
+                                artifact.Identity,
+                                launchLease,
+                                hostLease);
+                            launchLease = null;
+                            hostLease = null;
+                            RegisterTrackedProcess(physicalProjectPath, discovered);
+                            return _runningProjects.TryGetValue(
+                                       physicalProjectPath,
+                                       out var current)
+                                   && ReferenceEquals(current, discovered)
+                                ? discovered
+                                : null;
+                        }
+                        finally
+                        {
+                            hostLease?.Dispose();
+                            launchLease?.Dispose();
+                        }
                     }
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+                catch (Exception ex) when (ex is ArgumentException
+                                               or IOException
+                                               or InvalidOperationException
+                                               or System.ComponentModel.Win32Exception
+                                               or NotSupportedException
+                                               or UnauthorizedAccessException)
                 {
-                    // A process that cannot be inspected is not attributed to this approved project.
+                    // A recovered process that cannot reacquire the exact host and full output
+                    // closure leases is not attributed to this approved project.
                 }
             }
         }
@@ -572,17 +854,299 @@ internal sealed class AliRoslynCodingTools
         return null;
     }
 
+    private void RegisterTrackedProcess(
+        string physicalProjectPath,
+        TrackedProjectProcess tracked)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(physicalProjectPath);
+        ArgumentNullException.ThrowIfNull(tracked);
+        try
+        {
+            while (true)
+            {
+                if (_runningProjects.TryGetValue(physicalProjectPath, out var prior))
+                {
+                    if (IsTrackedProcessRunning(prior))
+                    {
+                        throw new InvalidOperationException(
+                            "An exact application process is already running for the selected project.");
+                    }
+                    RemoveTrackedProcess(physicalProjectPath, prior);
+                    continue;
+                }
+                if (_runningProjects.TryAdd(physicalProjectPath, tracked))
+                {
+                    break;
+                }
+            }
+
+            tracked.StartMonitoring(
+                exited => RemoveTrackedProcess(physicalProjectPath, exited));
+        }
+        catch
+        {
+            RemoveTrackedProcess(physicalProjectPath, tracked);
+            tracked.Dispose();
+            throw;
+        }
+    }
+
+    private void RemoveTrackedProcess(string physicalProjectPath, int processId)
+    {
+        if (_runningProjects.TryGetValue(physicalProjectPath, out var tracked)
+            && tracked.ProcessId == processId)
+        {
+            RemoveTrackedProcess(physicalProjectPath, tracked);
+        }
+    }
+
+    private void RemoveTrackedProcess(
+        string physicalProjectPath,
+        TrackedProjectProcess tracked)
+    {
+        var removed = ((ICollection<KeyValuePair<string, TrackedProjectProcess>>)
+                _runningProjects)
+            .Remove(new KeyValuePair<string, TrackedProjectProcess>(
+                physicalProjectPath,
+                tracked));
+        if (removed)
+        {
+            tracked.Dispose();
+        }
+    }
+
     private static bool IsTrackedProcessRunning(TrackedProjectProcess tracked)
     {
         try
         {
-            using var process = Process.GetProcessById(tracked.ProcessId);
-            return !process.HasExited
-                && process.StartTime.ToUniversalTime().Ticks == tracked.StartTimeUtcTicks;
+            tracked.RequireStable();
+            var state = CaptureProcessState(tracked);
+            return state.ProcessId == tracked.ProcessId
+                && state.StartTimeUtcTicks == tracked.StartTimeUtcTicks
+                && string.Equals(
+                    state.Executable.PhysicalPath,
+                    tracked.ExecutablePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    state.Executable.Identity,
+                    tracked.ExecutableIdentity,
+                    StringComparison.Ordinal);
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException
+                                       or IOException
+                                       or InvalidOperationException
+                                       or System.ComponentModel.Win32Exception
+                                       or NotSupportedException)
         {
             return false;
+        }
+    }
+
+    private static async Task<TrackedProjectProcess?> CaptureStartedProcessAsync(
+        Process process,
+        AliDotNetRunExecutionBinding binding,
+        AliApplicationLaunchLease launchLease,
+        AliExecutionFileLease hostLease,
+        CancellationToken cancellationToken)
+    {
+        var inspectionWindow = Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (process.HasExited)
+            {
+                // A short-lived application still launched through the exact pinned ProcessStartInfo.
+                // Revalidate the complete launch closure again after exit before accepting its result.
+                RequireRunExecutionBindingStable(binding);
+                return null;
+            }
+
+            string? executablePath = null;
+            try
+            {
+                process.Refresh();
+                executablePath = process.MainModule?.FileName;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException
+                                               or System.ComponentModel.Win32Exception)
+            {
+                if (process.HasExited)
+                {
+                    RequireRunExecutionBindingStable(binding);
+                    return null;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(executablePath))
+            {
+                try
+                {
+                    return CaptureStartedProcess(
+                        process,
+                        binding,
+                        executablePath,
+                        launchLease,
+                        hostLease);
+                }
+                catch (Exception exception) when (
+                    (exception is ArgumentException
+                        or InvalidOperationException
+                        or System.ComponentModel.Win32Exception)
+                    && process.HasExited)
+                {
+                    RequireRunExecutionBindingStable(binding);
+                    launchLease.RequireStable();
+                    hostLease.RequireStable();
+                    return null;
+                }
+            }
+            if (inspectionWindow.Elapsed >= TimeSpan.FromSeconds(1))
+            {
+                throw new InvalidOperationException(
+                    "The started .NET process executable could not be inspected within the bounded launch window.");
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static TrackedProjectProcess CaptureStartedProcess(
+        Process process,
+        AliDotNetRunExecutionBinding binding,
+        string executablePath,
+        AliApplicationLaunchLease launchLease,
+        AliExecutionFileLease hostLease)
+    {
+        var artifact = binding.Artifact
+            ?? throw new InvalidDataException(
+                "A started .NET process has no exact artifact binding.");
+        var expectedHost = binding.HostExecutable
+            ?? throw new InvalidDataException(
+                "A started .NET process has no exact host binding.");
+        var executable = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+            executablePath,
+            "The started .NET process executable");
+        if (!string.Equals(
+                executable.PhysicalPath,
+                expectedHost.PhysicalPath,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                executable.Identity,
+                expectedHost.Identity,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The started process does not match the exact authorized host executable.");
+        }
+        return new TrackedProjectProcess(
+            process.Id,
+            artifact.PhysicalPath,
+            artifact.Identity,
+            process.StartTime.ToUniversalTime().Ticks,
+            executable.PhysicalPath,
+            executable.Identity,
+            launchLease,
+            hostLease);
+    }
+
+    private static AliBoundProcessState CaptureProcessState(TrackedProjectProcess tracked)
+    {
+        using var process = Process.GetProcessById(tracked.ProcessId);
+        if (process.HasExited)
+        {
+            throw new InvalidOperationException(
+                "The exact tracked process has already exited.");
+        }
+        var executablePath = process.MainModule?.FileName
+            ?? throw new InvalidOperationException(
+                "The exact tracked process executable could not be inspected.");
+        var executable = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+            executablePath,
+            "The exact tracked process executable");
+        var state = new AliBoundProcessState(
+            process.Id,
+            process.StartTime.ToUniversalTime().Ticks,
+            executable);
+        if (state.ProcessId != tracked.ProcessId
+            || state.StartTimeUtcTicks != tracked.StartTimeUtcTicks
+            || !string.Equals(
+                state.Executable.PhysicalPath,
+                tracked.ExecutablePath,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                state.Executable.Identity,
+                tracked.ExecutableIdentity,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The exact tracked process identity is no longer stable.");
+        }
+        return state;
+    }
+
+    private static void RequireProcessStateStable(
+        Process process,
+        AliBoundProcessState expected)
+        => expected.RequireStable(process);
+
+    private static void RequireRunExecutionBindingStable(
+        AliDotNetRunExecutionBinding expected)
+    {
+        if (expected.Artifact is null
+            || expected.HostExecutable is null
+            || expected.LaunchClosure is null)
+        {
+            throw new InvalidOperationException(
+                "The exact .NET run binding has no launchable artifact, host, and output closure.");
+        }
+        var artifact = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+            expected.Artifact.PhysicalPath,
+            "The exact authorized .NET run artifact");
+        var host = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+            expected.HostExecutable.PhysicalPath,
+            "The exact authorized .NET run host");
+        if (artifact != expected.Artifact || host != expected.HostExecutable)
+        {
+            throw new InvalidOperationException(
+                "The exact .NET run artifact or host changed immediately before launch.");
+        }
+        _ = expected.LaunchClosure.RequireStable();
+    }
+
+    private static void RequireStartedRunProcess(
+        Process process,
+        AliBoundExecutionFile artifact,
+        AliApplicationLaunchLease launchLease,
+        AliExecutionFileLease hostLease)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(artifact);
+        ArgumentNullException.ThrowIfNull(launchLease);
+        ArgumentNullException.ThrowIfNull(hostLease);
+        try
+        {
+            hostLease.RequireStartedProcessImage(process);
+            if (Path.GetExtension(artifact.PhysicalPath).Equals(
+                    ".exe",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                launchLease.RequireStartedPrincipalProcessImage(process);
+            }
+            else
+            {
+                launchLease.RequireStable();
+            }
+        }
+        catch (Exception exception) when (
+            (exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception)
+            && process.HasExited)
+        {
+            // CreateProcess consumed a fixed no-follow pathname while both the host and
+            // complete output closure were held no-write/no-delete. A very short-lived
+            // child can retire before Windows returns its image path; the still-held
+            // identities therefore remain the authoritative fail-closed proof.
+            hostLease.RequireStable();
+            launchLease.RequireStable();
         }
     }
 
@@ -590,10 +1154,151 @@ internal sealed class AliRoslynCodingTools
         output.Contains("MSB3021", StringComparison.OrdinalIgnoreCase)
         || output.Contains("MSB3027", StringComparison.OrdinalIgnoreCase);
 
-    private sealed record TrackedProjectProcess(
-        int ProcessId,
-        string ArtifactPath,
-        long StartTimeUtcTicks);
+    private sealed class TrackedProjectProcess : IDisposable
+    {
+        private readonly Process _monitor;
+        private readonly AliApplicationLaunchLease _launchLease;
+        private readonly AliExecutionFileLease _hostLease;
+        private EventHandler? _exitHandler;
+        private int _monitoring;
+        private int _disposed;
+
+        internal TrackedProjectProcess(
+            int processId,
+            string artifactPath,
+            string artifactIdentity,
+            long startTimeUtcTicks,
+            string executablePath,
+            string executableIdentity,
+            AliApplicationLaunchLease launchLease,
+            AliExecutionFileLease hostLease)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(artifactPath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(artifactIdentity);
+            ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(executableIdentity);
+            ProcessId = processId;
+            ArtifactPath = Path.GetFullPath(artifactPath);
+            ArtifactIdentity = artifactIdentity;
+            StartTimeUtcTicks = startTimeUtcTicks;
+            ExecutablePath = Path.GetFullPath(executablePath);
+            ExecutableIdentity = executableIdentity;
+            _launchLease = launchLease
+                ?? throw new ArgumentNullException(nameof(launchLease));
+            _hostLease = hostLease
+                ?? throw new ArgumentNullException(nameof(hostLease));
+
+            var monitor = Process.GetProcessById(processId);
+            try
+            {
+                if (monitor.HasExited
+                    || monitor.StartTime.ToUniversalTime().Ticks != startTimeUtcTicks)
+                {
+                    throw new ArgumentException(
+                        "The exact process exited or its PID was reused before tracking began.",
+                        nameof(processId));
+                }
+                _monitor = monitor;
+            }
+            catch
+            {
+                monitor.Dispose();
+                throw;
+            }
+        }
+
+        internal int ProcessId { get; }
+
+        internal string ArtifactPath { get; }
+
+        internal string ArtifactIdentity { get; }
+
+        internal long StartTimeUtcTicks { get; }
+
+        internal string ExecutablePath { get; }
+
+        internal string ExecutableIdentity { get; }
+
+        internal void StartMonitoring(Action<TrackedProjectProcess> exited)
+        {
+            ArgumentNullException.ThrowIfNull(exited);
+            ObjectDisposedException.ThrowIf(
+                Volatile.Read(ref _disposed) != 0,
+                this);
+            if (Interlocked.CompareExchange(ref _monitoring, 1, 0) != 0)
+            {
+                throw new InvalidOperationException(
+                    "The exact tracked process already has an exit monitor.");
+            }
+
+            EventHandler handler = (_, _) => exited(this);
+            _exitHandler = handler;
+            _monitor.Exited += handler;
+            _monitor.EnableRaisingEvents = true;
+            try
+            {
+                if (_monitor.HasExited)
+                {
+                    exited(this);
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // The exit callback already removed and disposed this exact tracker.
+            }
+        }
+
+        internal void RequireStable()
+        {
+            ObjectDisposedException.ThrowIf(
+                Volatile.Read(ref _disposed) != 0,
+                this);
+            _monitor.Refresh();
+            if (_monitor.HasExited
+                || _monitor.Id != ProcessId
+                || _monitor.StartTime.ToUniversalTime().Ticks != StartTimeUtcTicks)
+            {
+                throw new InvalidOperationException(
+                    "The exact tracked process exited or its PID/start time changed.");
+            }
+            _hostLease.RequireStartedProcessImage(_monitor);
+            _launchLease.RequireStable();
+            var artifact = AliCodingExecutionAssetFingerprint.CaptureRequiredFile(
+                ArtifactPath,
+                "The exact tracked .NET artifact");
+            if (!string.Equals(
+                    artifact.Identity,
+                    ArtifactIdentity,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The exact tracked application artifact changed while its process was running.");
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+            var handler = Interlocked.Exchange(ref _exitHandler, null);
+            if (handler is not null)
+            {
+                try
+                {
+                    _monitor.Exited -= handler;
+                }
+                catch (InvalidOperationException)
+                {
+                    // The process handle exited while the exact tracker was being removed.
+                }
+            }
+            _monitor.Dispose();
+            _hostLease.Dispose();
+            _launchLease.Dispose();
+        }
+    }
 
     internal static string? FindBuiltArtifact(string projectPath, string configuration)
     {
@@ -605,16 +1310,67 @@ internal sealed class AliRoslynCodingTools
         }
 
         var assemblyName = ReadAssemblyName(projectPath) ?? Path.GetFileNameWithoutExtension(projectPath);
-        var executable = Directory.EnumerateFiles(outputRoot, assemblyName + ".exe", SearchOption.AllDirectories)
+        var candidates = EnumerateBuildArtifactsNoFollow(outputRoot)
             .Where(path => HasConfigurationSegment(outputRoot, path, configuration))
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            .Where(path => !path.Contains(
+                $"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        return Select(assemblyName + ".exe") ?? Select(assemblyName + ".dll");
+
+        string? Select(string fileName) => candidates
+            .Where(path => Path.GetFileName(path).Equals(
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(File.GetLastWriteTimeUtc)
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
-        return executable ?? Directory.EnumerateFiles(outputRoot, assemblyName + ".dll", SearchOption.AllDirectories)
-            .Where(path => HasConfigurationSegment(outputRoot, path, configuration))
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
+    }
+
+    private static IReadOnlyList<string> EnumerateBuildArtifactsNoFollow(string outputRoot)
+    {
+        const int maximumEntries = 50_000;
+        AliGeneratedOutputLayoutFingerprint.CaptureDirectoryLayout(
+            outputRoot,
+            "The .NET build output tree");
+        var files = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(Path.GetFullPath(outputRoot));
+        var entriesSeen = 0;
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            var children = new List<string>();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory)
+                         .Order(StringComparer.OrdinalIgnoreCase))
+            {
+                entriesSeen = checked(entriesSeen + 1);
+                if (entriesSeen > maximumEntries)
+                {
+                    throw new InvalidDataException(
+                        "The .NET build output exceeds the exact entry-count bound.");
+                }
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Device)) != 0)
+                {
+                    throw new InvalidDataException(
+                        "The .NET build output contains a reparse point or device entry.");
+                }
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    children.Add(entry);
+                }
+                else
+                {
+                    files.Add(entry);
+                }
+            }
+            for (var index = children.Count - 1; index >= 0; index--)
+            {
+                pending.Push(children[index]);
+            }
+        }
+        return files;
     }
 
     private static bool HasConfigurationSegment(string outputRoot, string path, string configuration) =>
@@ -638,7 +1394,9 @@ internal sealed class AliRoslynCodingTools
         }
     }
 
-    private static ProcessStartInfo CreateLaunchStartInfo(string artifact)
+    private static ProcessStartInfo CreateLaunchStartInfo(
+        string artifact,
+        string hostExecutable)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -649,7 +1407,7 @@ internal sealed class AliRoslynCodingTools
         };
         if (Path.GetExtension(artifact).Equals(".dll", StringComparison.OrdinalIgnoreCase))
         {
-            startInfo.FileName = ResolveDotNetHost();
+            startInfo.FileName = hostExecutable;
             startInfo.ArgumentList.Add(artifact);
         }
         else
@@ -780,10 +1538,13 @@ internal sealed class AliRoslynCodingTools
         return Version.TryParse(stablePrefix, out version);
     }
 
-    private static string ResolveDotNetHost()
+    private static string ResolveExactDotNetHostPath()
     {
         var configured = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        return !string.IsNullOrWhiteSpace(configured) && File.Exists(configured) ? configured : "dotnet";
+        return !string.IsNullOrWhiteSpace(configured)
+            ? AliCodingExecutionAssetFingerprint.ResolveRequiredExecutable(configured)
+            : AliCodingExecutionAssetFingerprint.ResolveRequiredExecutable(
+                OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
     }
 
     private AliRoslynProjectIntelligence PrepareRoslyn()

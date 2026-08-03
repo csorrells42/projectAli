@@ -40,6 +40,23 @@ internal static class WindowsOrchestrationFileBoundary
     private const uint MoveFileWriteThrough = 0x00000008;
     private const int ErrorFileNotFound = 2;
     private const int ErrorPathNotFound = 3;
+    private const int ErrorNoMoreFiles = 18;
+    private const int ErrorHandleEof = 38;
+    private static readonly IntPtr InvalidFindHandle = new(-1);
+
+    internal readonly record struct RegularFileIdentity(
+        uint VolumeSerialNumber,
+        ulong FileId,
+        uint NumberOfLinks,
+        string HardLinkSetDigest)
+    {
+        internal string CanonicalIdentity => string.Join(
+            ":",
+            VolumeSerialNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            FileId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            NumberOfLinks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            HardLinkSetDigest);
+    }
 
     internal static void EnsureRegularDirectoryPath(string directory, string invalidMessage)
     {
@@ -173,6 +190,72 @@ internal static class WindowsOrchestrationFileBoundary
             handle.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Captures the stable Windows volume/file identity and hard-link topology for an already
+    /// opened no-follow regular file. Multi-link files fail closed unless a provider caller supplies
+    /// one statically pinned installation root and every stable alias is proven within that root.
+    /// </summary>
+    internal static RegularFileIdentity CaptureRegularFileIdentity(
+        FileStream stream,
+        string path,
+        string invalidMessage,
+        string? allowedHardLinkRoot = null)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(invalidMessage);
+        var fullPath = Path.GetFullPath(path);
+        var first = ReadFileIdentity(stream.SafeFileHandle, invalidMessage);
+        if (first.NumberOfLinks == 0)
+        {
+            throw new InvalidDataException(invalidMessage);
+        }
+
+        string linkSetDigest;
+        if (first.NumberOfLinks == 1)
+        {
+            linkSetDigest = DigestNormalizedPaths([fullPath]);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(allowedHardLinkRoot))
+            {
+                throw new InvalidDataException(
+                    invalidMessage + " A file with more than one hard-link alias is not accepted.");
+            }
+            var firstAliases = CaptureHardLinkAliases(
+                fullPath,
+                allowedHardLinkRoot,
+                first.NumberOfLinks,
+                invalidMessage);
+            RequireSameFileIdentity(
+                first,
+                ReadFileIdentity(stream.SafeFileHandle, invalidMessage),
+                invalidMessage);
+            var secondAliases = CaptureHardLinkAliases(
+                fullPath,
+                allowedHardLinkRoot,
+                first.NumberOfLinks,
+                invalidMessage);
+            var firstDigest = DigestNormalizedPaths(firstAliases);
+            var secondDigest = DigestNormalizedPaths(secondAliases);
+            if (!string.Equals(firstDigest, secondDigest, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    invalidMessage + " The hard-link alias set changed while it was captured.");
+            }
+            linkSetDigest = secondDigest;
+        }
+
+        var final = ReadFileIdentity(stream.SafeFileHandle, invalidMessage);
+        RequireSameFileIdentity(first, final, invalidMessage);
+        return new RegularFileIdentity(
+            final.VolumeSerialNumber,
+            final.FileId,
+            final.NumberOfLinks,
+            linkSetDigest);
     }
 
     internal static void MoveRegularFile(
@@ -338,6 +421,107 @@ internal static class WindowsOrchestrationFileBoundary
         }
     }
 
+    private static ByHandleFileInformation ReadFileIdentity(
+        SafeFileHandle handle,
+        string invalidMessage)
+    {
+        if (!GetFileInformationByHandle(handle, out var information))
+        {
+            ThrowIo(invalidMessage, Marshal.GetLastWin32Error());
+        }
+        return information;
+    }
+
+    private static void RequireSameFileIdentity(
+        ByHandleFileInformation expected,
+        ByHandleFileInformation actual,
+        string invalidMessage)
+    {
+        if (expected.VolumeSerialNumber != actual.VolumeSerialNumber
+            || expected.FileIndexHigh != actual.FileIndexHigh
+            || expected.FileIndexLow != actual.FileIndexLow
+            || expected.NumberOfLinks != actual.NumberOfLinks)
+        {
+            throw new InvalidDataException(
+                invalidMessage + " The file identity or hard-link count changed while it was captured.");
+        }
+    }
+
+    private static IReadOnlyList<string> CaptureHardLinkAliases(
+        string path,
+        string allowedRoot,
+        uint expectedCount,
+        string invalidMessage)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(allowedRoot));
+        var volumeRoot = Path.GetPathRoot(fullPath)
+            ?? throw new InvalidDataException(invalidMessage);
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        const int capacity = 32_768;
+        var buffer = new StringBuilder(capacity);
+        uint length = capacity;
+        var find = FindFirstFileNameW(fullPath, 0, ref length, buffer);
+        if (find == InvalidFindHandle)
+        {
+            ThrowIo(invalidMessage, Marshal.GetLastWin32Error());
+        }
+        try
+        {
+            while (true)
+            {
+                var alias = Path.GetFullPath(Path.Combine(
+                    volumeRoot,
+                    buffer.ToString().TrimStart('\\', '/')));
+                if (!IsWithin(root, alias))
+                {
+                    throw new InvalidDataException(
+                        invalidMessage + " A hard-link alias leaves the pinned provider root.");
+                }
+                aliases.Add(alias);
+                buffer.Clear();
+                length = capacity;
+                if (FindNextFileNameW(find, ref length, buffer))
+                {
+                    continue;
+                }
+                var error = Marshal.GetLastWin32Error();
+                if (error is ErrorNoMoreFiles or ErrorHandleEof)
+                {
+                    break;
+                }
+                ThrowIo(invalidMessage, error);
+            }
+        }
+        finally
+        {
+            _ = FindClose(find);
+        }
+        if (aliases.Count != expectedCount || !aliases.Contains(fullPath))
+        {
+            throw new InvalidDataException(
+                invalidMessage + " The complete hard-link alias set could not be proven.");
+        }
+        return aliases.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string DigestNormalizedPaths(IEnumerable<string> paths)
+    {
+        var material = string.Join(
+            "\0",
+            paths.Select(path =>
+                    OperatingSystem.IsWindows()
+                        ? Path.GetFullPath(path).ToUpperInvariant()
+                        : Path.GetFullPath(path))
+                .OrderBy(path => path, StringComparer.Ordinal));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)))
+            .ToLowerInvariant();
+    }
+
+    private static bool IsWithin(string root, string path) =>
+        string.Equals(root, path, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
     internal static string ToExtendedLengthWin32Path(string path)
     {
         var fullPath = Path.GetFullPath(path);
@@ -371,6 +555,30 @@ internal static class WindowsOrchestrationFileBoundary
         public byte DeleteFile;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime
+    {
+        public uint LowDateTime;
+        public uint HighDateTime;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public FileTime CreationTime;
+        public FileTime LastAccessTime;
+        public FileTime LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+
+        public readonly ulong FileId => ((ulong)FileIndexHigh << 32) | FileIndexLow;
+    }
+
     [DllImport(
         "kernel32.dll",
         EntryPoint = "CreateFileW",
@@ -385,6 +593,40 @@ internal static class WindowsOrchestrationFileBoundary
         uint creationDisposition,
         uint flagsAndAttributes,
         IntPtr templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle fileHandle,
+        out ByHandleFileInformation fileInformation);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "FindFirstFileNameW",
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true,
+        SetLastError = true)]
+    private static extern IntPtr FindFirstFileNameW(
+        string fileName,
+        uint flags,
+        ref uint stringLength,
+        StringBuilder linkName);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "FindNextFileNameW",
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true,
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FindNextFileNameW(
+        IntPtr findStream,
+        ref uint stringLength,
+        StringBuilder linkName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FindClose(IntPtr findFile);
 
     [DllImport(
         "kernel32.dll",

@@ -65,6 +65,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private readonly TerminalCapabilityEnforcementProvider? _capabilityEnforcementProvider;
     private readonly AliFrameworkToolOutcomeSidecar _toolOutcomes;
     private readonly AliProductionToolOutcomeRegistry _toolOutcomeRegistry;
+    private readonly AliExecutionEffectAdapterRegistry _executionAdapters;
+    private readonly IReadOnlyList<string> _executionReconcilerIds;
+    private readonly string _executionReconcilerRevision;
     private readonly ConcurrentDictionary<string, PendingApproval> _pendingApprovals = new(StringComparer.Ordinal);
     private readonly object _lifetimeSync = new();
     private AgentToolPermissionSnapshot? _projectionPermissionSnapshot;
@@ -91,6 +94,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         ITurnPublicationReconciler? publicationReconciler = null,
         EffectNormalizationRegistry? effectNormalizations = null,
         TargetStateRegistry? targetStates = null,
+        AliExecutionEffectAdapterRegistry? executionAdapters = null,
         AliFrameworkToolOutcomeSidecar? toolOutcomes = null)
     {
         _modelClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
@@ -99,13 +103,21 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         _semanticToolCatalog = semanticToolCatalog ?? new RegistryOnlySemanticToolCatalog();
         _toolOutcomes = toolOutcomes ?? new AliFrameworkToolOutcomeSidecar();
         _toolOutcomeRegistry = new AliProductionToolOutcomeRegistry(_toolOutcomes);
+        _executionAdapters = executionAdapters ?? AliExecutionEffectAdapterRegistry.Empty;
+        _executionReconcilerIds = _executionAdapters.Reconcilers
+            .Select(reconciler => reconciler.ReconcilerId)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        _executionReconcilerRevision = ReconcilerRevision(_executionReconcilerIds);
         ArgumentException.ThrowIfNullOrWhiteSpace(checkpointPath);
         _planningStateCoordinator = new AliPlanningStateCoordinator(
             Path.Combine(Path.GetFullPath(checkpointPath), "OrchestrationV2"),
             _assistantProfile.AssistantName,
             publicationReconciler,
             effectNormalizations ?? AliProductionEffectNormalizations.Create(),
-            targetStates ?? AliProductionTargetStateAdapters.Create(fileAccess));
+            targetStates ?? AliProductionTargetStateAdapters.Create(fileAccess),
+            _executionAdapters);
         try
         {
             _baseTools = catalog.Tools.ToArray();
@@ -318,7 +330,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             // unfinished list, so keep that overlapping provider out of the conversation.
             DisableTodoProvider = true,
             FileMemoryStore = _workMemory.Store,
-            FileAccessStore = _fileAccess.Store,
+            FileAccessStore = _fileAccess.FrameworkStore,
             FileAccessProviderOptions = new FileAccessProviderOptions
             {
                 Instructions = _fileAccess.Instructions,
@@ -369,9 +381,22 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             mcpRevision: McpCapabilityPublicationGate.CalculateMcpRevision([], outgoingToolNames),
             readyIncomingMcpToolNames: [],
             enabledOutgoingMcpToolNames: outgoingToolNames,
-            reconcilerRevision: "ali-reconciler-v1:none",
-            availableReconcilerIds: [],
+            reconcilerRevision: _executionReconcilerRevision,
+            availableReconcilerIds: _executionReconcilerIds,
             enforceReconcilerAvailability: true);
+    }
+
+    private static string ReconcilerRevision(IReadOnlyList<string> reconcilerIds)
+    {
+        var bytes = Encoding.UTF8.GetBytes(string.Join("\n", reconcilerIds));
+        try
+        {
+            return "ali-reconciler-v1:" + Convert.ToHexString(SHA256.HashData(bytes));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
     }
 
     private string CaptureActiveUserId()

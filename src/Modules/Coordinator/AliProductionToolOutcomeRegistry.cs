@@ -14,6 +14,7 @@ using Ali.Modules.Coding.Operations;
 using Ali.Modules.Coding.Performance;
 using Ali.Modules.Coding.Quality;
 using Ali.Modules.Coding.Release;
+using Ali.Modules.Coding.RoslynActions;
 using Ali.Modules.Coding.SourceControl;
 using Ali.Modules.Coding.Verification;
 using Ali.Modules.Coding.VisualStudio;
@@ -204,8 +205,15 @@ internal sealed class AliProductionToolOutcomeRegistry
         Success<RoslynDocumentResult>(AliCapabilityCatalog.RoslynInspectDocumentName, result => result.Success);
         Success<RoslynPositionResult>(AliCapabilityCatalog.RoslynInspectPositionName, result => result.Success);
         Success<RoslynReferenceResult>(AliCapabilityCatalog.RoslynFindReferencesName, result => result.Success);
-        Success<RoslynRenameResult>(AliCapabilityCatalog.RoslynPreviewRenameName, result => result.Success);
-        Success<RoslynRenameResult>(AliCapabilityCatalog.RoslynApplyRenameName, result => result.Success && result.Applied);
+        Success<AliRoslynTargetInspection>(AliCapabilityCatalog.RoslynInspectTargetName, result => result.Success);
+        Success<AliRoslynActionListResult>(AliCapabilityCatalog.RoslynListActionsName, result => result.Success);
+        Success<AliRoslynActionPreview>(AliCapabilityCatalog.RoslynPreviewActionName, result => result.Success);
+        Success<AliRoslynActionApplication>(
+            AliCapabilityCatalog.RoslynApplyActionName,
+            result => result.Success && result.Applied);
+        Success<AliRoslynActionVerification>(
+            AliCapabilityCatalog.RoslynVerifyChangesetName,
+            result => result.Success);
         Success<DotNetBuildResult>(AliCapabilityCatalog.DotNetBuildName, result => result.Success);
         Success<DotNetRunResult>(AliCapabilityCatalog.DotNetRunName, result => result.Success);
         Success<DotNetStopProjectResult>(AliCapabilityCatalog.DotNetStopProjectName, result => result.Success);

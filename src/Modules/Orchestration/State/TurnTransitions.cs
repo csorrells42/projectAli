@@ -42,6 +42,7 @@ public enum PlanningAcceptedActionKind
 [JsonDerivedType(typeof(InDoubtActionCancelledTransition), "in-doubt-action-cancelled")]
 [JsonDerivedType(typeof(InDoubtFinalPublicationCancelledTransition), "in-doubt-publication-cancelled")]
 [JsonDerivedType(typeof(InterimPublicationPreparedTransition), "interim-publication-prepared")]
+[JsonDerivedType(typeof(InterimPublicationDisplayMarkedInDoubtTransition), "interim-publication-display-in-doubt")]
 [JsonDerivedType(typeof(InterimPublicationCommittedTransition), "interim-publication-committed")]
 [JsonDerivedType(typeof(InterimPublicationClearedTransition), "interim-publication-cleared")]
 [JsonDerivedType(typeof(FinalPublicationPreparedTransition), "publication-prepared")]
@@ -545,6 +546,19 @@ public sealed record InterimPublicationPreparedTransition(
 }
 
 public sealed record InterimPublicationCommittedTransition(
+    string CorrelationKey,
+    string PublicationId,
+    InterimPublicationKind Kind,
+    string TextDigest) : TurnTransition(CorrelationKey)
+{
+    internal override void ValidateShape()
+    {
+        base.ValidateShape();
+        InterimPublicationPreparedTransition.ValidatePublication(PublicationId, Kind, TextDigest);
+    }
+}
+
+public sealed record InterimPublicationDisplayMarkedInDoubtTransition(
     string CorrelationKey,
     string PublicationId,
     InterimPublicationKind Kind,

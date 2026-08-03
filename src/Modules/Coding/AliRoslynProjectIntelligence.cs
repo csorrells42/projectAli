@@ -1,6 +1,9 @@
+using System.Collections.Immutable;
+using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Completion;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Formatting;
 
@@ -62,10 +65,59 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
     public async Task<RoslynAnalysisResult> AnalyzeAsync(string projectPath, CancellationToken cancellationToken)
     {
         using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
-        var diagnostics = new List<RoslynDiagnosticItem>();
+        return await AnalyzeAsync(session, projectPath, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<RoslynAnalysisResult> AnalyzeCompilerOnlyAsync(
+        string projectPath,
+        CancellationToken cancellationToken)
+    {
+        using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        return await AnalyzeCompilerOnlyAsync(session, projectPath, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal Task<RoslynAnalysisResult> AnalyzeAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        CancellationToken cancellationToken) =>
+        AnalyzeCoreAsync(
+            session,
+            projectPath,
+            includeProjectAnalyzers: true,
+            cancellationToken);
+
+    internal Task<RoslynAnalysisResult> AnalyzeCompilerOnlyAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        CancellationToken cancellationToken) =>
+        AnalyzeCoreAsync(
+            session,
+            projectPath,
+            includeProjectAnalyzers: false,
+            cancellationToken);
+
+    private static async Task<RoslynAnalysisResult> AnalyzeCoreAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        bool includeProjectAnalyzers,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var analysisSolution = includeProjectAnalyzers
+            ? session.Solution
+            : RemoveExecutableAnalysisReferences(session.Solution);
+        var boundedDiagnostics = new PriorityQueue<RoslynDiagnosticItem, RoslynDiagnosticItem>(
+            MaximumDiagnostics,
+            WorstDiagnosticFirstComparer.Instance);
         var documentCount = 0;
-        foreach (var project in session.Solution.Projects.Where(project => project.Language == LanguageNames.CSharp))
+        var errorCount = 0L;
+        var warningCount = 0L;
+        foreach (var project in analysisSolution.Projects
+                     .Where(project => project.Language == LanguageNames.CSharp)
+                     .OrderBy(ProjectIdentity, StringComparer.Ordinal))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             documentCount += project.DocumentIds.Count;
             var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
             if (compilation is null)
@@ -73,26 +125,188 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
                 continue;
             }
 
-            diagnostics.AddRange(compilation.GetDiagnostics(cancellationToken)
-                .Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
-                .Select(ToDiagnosticItem));
+            var projectDiagnostics = includeProjectAnalyzers
+                ? await GetProjectDiagnosticsAsync(
+                        project,
+                        compilation,
+                        cancellationToken)
+                    .ConfigureAwait(false)
+                : compilation.GetDiagnostics(cancellationToken);
+            foreach (var diagnostic in projectDiagnostics)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                {
+                    errorCount++;
+                }
+                else if (diagnostic.Severity == DiagnosticSeverity.Warning)
+                {
+                    warningCount++;
+                }
+                else
+                {
+                    continue;
+                }
+
+                AddBoundedDiagnostic(boundedDiagnostics, ToDiagnosticItem(diagnostic));
+            }
         }
 
-        diagnostics = diagnostics
-            .OrderByDescending(diagnostic => diagnostic.Severity == "Error")
-            .ThenBy(diagnostic => diagnostic.File, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(diagnostic => diagnostic.Line)
-            .Take(MaximumDiagnostics)
-            .ToList();
-        var errors = diagnostics.Count(item => item.Severity == "Error");
-        var warnings = diagnostics.Count - errors;
+        var diagnostics = boundedDiagnostics.UnorderedItems
+            .Select(item => item.Element)
+            .Order(DiagnosticOrderComparer.Instance)
+            .ToArray();
+        var totalDiagnosticCount = errorCount + warningCount;
+        var truncationSummary = totalDiagnosticCount > diagnostics.Length
+            ? $" The bounded result contains the first {diagnostics.Length} diagnostic(s) in deterministic order."
+            : string.Empty;
         return new RoslynAnalysisResult(
-            errors == 0,
+            errorCount == 0,
             projectPath,
-            $"Roslyn loaded {documentCount} C# document(s) and found {errors} error(s) and {warnings} warning(s).",
+            $"Roslyn loaded {documentCount} C# document(s) and found {errorCount} error(s) "
+            + $"and {warningCount} warning(s), "
+            + (includeProjectAnalyzers
+                ? "including any diagnostics from the target's loaded analyzers."
+                : "using compiler diagnostics only; project analyzers and source generators were excluded.")
+            + truncationSummary,
             documentCount,
             diagnostics,
             session.Warnings);
+    }
+
+    private static Solution RemoveExecutableAnalysisReferences(Solution solution)
+    {
+        var compilerOnlySolution = solution.WithAnalyzerReferences(
+            ImmutableArray<AnalyzerReference>.Empty);
+        foreach (var projectId in compilerOnlySolution.ProjectIds)
+        {
+            compilerOnlySolution = compilerOnlySolution.WithProjectAnalyzerReferences(
+                projectId,
+                ImmutableArray<AnalyzerReference>.Empty);
+        }
+
+        return compilerOnlySolution;
+    }
+
+    private static async Task<ImmutableArray<Diagnostic>> GetProjectDiagnosticsAsync(
+        Project project,
+        Compilation compilation,
+        CancellationToken cancellationToken)
+    {
+        var analyzers = project.AnalyzerReferences
+            .SelectMany(reference => reference.GetAnalyzers(project.Language))
+            .Distinct()
+            .OrderBy(
+                analyzer => analyzer.GetType().AssemblyQualifiedName,
+                StringComparer.Ordinal)
+            .ToImmutableArray();
+        if (analyzers.IsDefaultOrEmpty)
+        {
+            return compilation.GetDiagnostics(cancellationToken);
+        }
+
+        var withAnalyzers = new CompilationWithAnalyzers(
+            compilation,
+            analyzers,
+            project.AnalyzerOptions);
+        return await withAnalyzers.GetAllDiagnosticsAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static void AddBoundedDiagnostic(
+        PriorityQueue<RoslynDiagnosticItem, RoslynDiagnosticItem> diagnostics,
+        RoslynDiagnosticItem candidate)
+    {
+        if (diagnostics.Count < MaximumDiagnostics)
+        {
+            diagnostics.Enqueue(candidate, candidate);
+            return;
+        }
+
+        var currentWorst = diagnostics.Peek();
+        if (DiagnosticOrderComparer.Instance.Compare(candidate, currentWorst) < 0)
+        {
+            _ = diagnostics.Dequeue();
+            diagnostics.Enqueue(candidate, candidate);
+        }
+    }
+
+    private static string ProjectIdentity(Project project)
+    {
+        var path = string.IsNullOrWhiteSpace(project.FilePath)
+            ? string.Empty
+            : Path.GetFullPath(project.FilePath);
+        if (OperatingSystem.IsWindows())
+        {
+            path = path.ToUpperInvariant();
+        }
+
+        return string.Join("|", path, project.Name, project.AssemblyName, project.Language);
+    }
+
+    private sealed class DiagnosticOrderComparer : IComparer<RoslynDiagnosticItem>
+    {
+        internal static DiagnosticOrderComparer Instance { get; } = new();
+
+        public int Compare(RoslynDiagnosticItem? left, RoslynDiagnosticItem? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+            if (left is null)
+            {
+                return -1;
+            }
+            if (right is null)
+            {
+                return 1;
+            }
+
+            var comparison = SeverityRank(left.Severity).CompareTo(SeverityRank(right.Severity));
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = StringComparer.OrdinalIgnoreCase.Compare(left.File, right.File);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = Nullable.Compare(left.Line, right.Line);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = Nullable.Compare(left.Column, right.Column);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = StringComparer.Ordinal.Compare(left.Id, right.Id);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+            comparison = StringComparer.Ordinal.Compare(left.Message, right.Message);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+
+            return StringComparer.Ordinal.Compare(left.File, right.File);
+        }
+
+        private static int SeverityRank(string severity) =>
+            severity == nameof(DiagnosticSeverity.Error) ? 0 : 1;
+    }
+
+    private sealed class WorstDiagnosticFirstComparer : IComparer<RoslynDiagnosticItem>
+    {
+        internal static WorstDiagnosticFirstComparer Instance { get; } = new();
+
+        public int Compare(RoslynDiagnosticItem? left, RoslynDiagnosticItem? right) =>
+            DiagnosticOrderComparer.Instance.Compare(right, left);
     }
 
     public async Task<RoslynFormatResult> FormatAsync(string projectPath, CancellationToken cancellationToken)
@@ -148,6 +362,18 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
         using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        return await FindSymbolAsync(session, projectPath, query, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<RoslynSymbolResult> FindSymbolAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        string query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentException.ThrowIfNullOrWhiteSpace(query);
         var symbols = await SymbolFinder.FindSourceDeclarationsAsync(
                 session.Solution,
                 query.Trim(),
@@ -172,6 +398,25 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
         CancellationToken cancellationToken)
     {
         using var session = await _loader.LoadAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        return await GetCompletionsAsync(
+                session,
+                projectPath,
+                documentPath,
+                line,
+                column,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    internal async Task<RoslynCompletionResult> GetCompletionsAsync(
+        AliRoslynWorkspaceSession session,
+        string projectPath,
+        string documentPath,
+        int line,
+        int column,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
         var (document, position) = await _loader.ResolvePositionAsync(
             session,
             documentPath,
@@ -206,7 +451,7 @@ internal sealed class AliRoslynProjectIntelligence(AliCodingProjectResolver reso
         return new RoslynDiagnosticItem(
             diagnostic.Id,
             diagnostic.Severity.ToString(),
-            diagnostic.GetMessage(),
+            diagnostic.GetMessage(CultureInfo.InvariantCulture),
             diagnostic.Location.IsInSource ? span.Path : null,
             diagnostic.Location.IsInSource ? span.StartLinePosition.Line + 1 : null,
             diagnostic.Location.IsInSource ? span.StartLinePosition.Character + 1 : null);

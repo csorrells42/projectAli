@@ -101,7 +101,8 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             profileDataRoot,
             toolPermissions,
             activeUsers,
-            workspaceRoot);
+            workspaceRoot,
+            profile.AssistantName);
         var codingModule = new AliCodingModule(fileAccess);
         var localLibrary = new LocalVectorLibraryRetriever(
             dataRoot,
@@ -147,28 +148,16 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
         string profileDataRoot,
         AgentToolPermissionStore permissions,
         IActiveUserSession? activeUsers,
-        string? workspaceRoot)
-    {
-        var defaultAccess = AliWorkstationFileAccess.CreateDefault(
+        string? workspaceRoot,
+        string? assistantProfileBinding = null) =>
+        AliWorkstationFileAccess.CreateDefault(
             userDataRoot,
             profileDataRoot,
             permissions,
-            activeUsers);
-        if (string.IsNullOrWhiteSpace(workspaceRoot))
-        {
-            return defaultAccess;
-        }
-
-        var resolvedWorkspaceRoot = Path.GetFullPath(
-            Environment.ExpandEnvironmentVariables(workspaceRoot));
-        var mounts = defaultAccess.Mounts
-            .Select(mount => mount.Name.Equals("Workspace", StringComparison.OrdinalIgnoreCase)
-                ? new AliWorkstationFileMount("Workspace", resolvedWorkspaceRoot)
-                : mount)
-            .ToArray();
-        var store = new AliWorkstationFileStore(mounts, defaultAccess.RecoverableTrashPath);
-        return new AliWorkstationFileAccess(store, defaultAccess.Audit, permissions);
-    }
+            activeUsers,
+            durableOrchestrationRoot: Path.Combine(userDataRoot, "OrchestrationV2"),
+            assistantProfileBinding: assistantProfileBinding,
+            workspaceRootOverride: workspaceRoot);
 
     public async ValueTask DisposeAsync()
     {

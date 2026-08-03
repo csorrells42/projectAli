@@ -118,7 +118,7 @@ public sealed class DotNetCodingToolsTests
     }
 
     [Fact]
-    public async Task RoslynLayersOneThroughFive_LoadNavigateClassifyPreviewAndRenameAcrossSolution()
+    public async Task RoslynLayersOneThroughFive_LoadNavigateClassifyPreviewAndRejectDirectRenameAcrossSolution()
     {
         await WithCodingToolsAsync(async (root, access, tools, auditPath) =>
         {
@@ -231,12 +231,13 @@ public sealed class DotNetCodingToolsTests
                 16,
                 "Sum",
                 TestContext.Current.CancellationToken);
-            Assert.True(applied.Success, applied.Summary);
-            Assert.True(applied.Applied);
-            Assert.Contains("Sum", await access.Store.ReadAsync(
+            Assert.False(applied.Success);
+            Assert.False(applied.Applied);
+            Assert.Contains("Action Deck", applied.Summary, StringComparison.Ordinal);
+            Assert.Contains("Add", await access.Store.ReadAsync(
                 "Workspace/SemanticSolution/Library/Calculator.cs",
                 TestContext.Current.CancellationToken), StringComparison.Ordinal);
-            Assert.Contains("calculator.Sum", await access.Store.ReadAsync(
+            Assert.Contains("calculator.Add", await access.Store.ReadAsync(
                 "Workspace/SemanticSolution/App/Program.cs",
                 TestContext.Current.CancellationToken), StringComparison.Ordinal);
             var audit = await File.ReadAllTextAsync(auditPath, TestContext.Current.CancellationToken);
@@ -744,8 +745,13 @@ public sealed class DotNetCodingToolsTests
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynInspectDocumentName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynInspectPositionName);
             Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynFindReferencesName);
-            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynPreviewRenameName);
-            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynApplyRenameName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynInspectTargetName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynListActionsName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynPreviewActionName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynVerifyChangesetName);
+            Assert.Contains(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynApplyActionName);
+            Assert.DoesNotContain(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynPreviewRenameName);
+            Assert.DoesNotContain(AliCapabilityCatalog.Tools, tool => tool.Name == AliCapabilityCatalog.RoslynApplyRenameName);
         });
     }
 

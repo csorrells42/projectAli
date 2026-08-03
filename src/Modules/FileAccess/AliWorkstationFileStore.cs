@@ -78,6 +78,107 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             resolved.Mount.ResolvePhysicalPath(resolved.RelativePath));
     }
 
+    internal AliResolvedWorkstationPath ResolveExistingItemPath(string path)
+    {
+        var resolved = ResolveExistingBareItemOrPath(path);
+        return ResolvedWorkstationPath(resolved);
+    }
+
+    internal AliResolvedWorkstationPath ResolveItemDestinationPath(
+        string path,
+        string sourceMountName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceMountName);
+        if (!_mounts.TryGetValue(sourceMountName, out var sourceMount))
+        {
+            throw new ArgumentException(
+                "The source workstation mount is not registered.",
+                nameof(sourceMountName));
+        }
+
+        return ResolvedWorkstationPath(ResolveDestinationFile(path, sourceMount));
+    }
+
+    internal string ResolveExactTrashPath(
+        AliResolvedWorkstationPath source,
+        string transactionId)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (transactionId is null
+            || transactionId.Length != 32
+            || transactionId.Any(character =>
+                character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+        {
+            throw new ArgumentException(
+                "A lowercase 128-bit transaction identity is required.",
+                nameof(transactionId));
+        }
+
+        return Path.GetFullPath(Path.Combine(
+            _trashRoot,
+            "Transactions",
+            transactionId,
+            source.MountName,
+            source.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+    }
+
+    internal Task<bool> DeleteToExactTrashAsync(
+        string path,
+        string expectedSourcePath,
+        string exactTrashPath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var resolved = ResolveExistingBareItemOrPath(path);
+        if (string.IsNullOrWhiteSpace(resolved.RelativePath))
+        {
+            throw new ArgumentException(
+                "An item name is required beneath the workstation mount.",
+                nameof(path));
+        }
+
+        var source = resolved.Mount.ResolvePhysicalPath(resolved.RelativePath);
+        if (!Path.GetFullPath(source).Equals(
+                Path.GetFullPath(expectedSourcePath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The exact delete grant does not authorize the resolved source path.");
+        }
+
+        var expectedTrashRoot = Path.Combine(_trashRoot, "Transactions")
+            + Path.DirectorySeparatorChar;
+        var trash = Path.GetFullPath(exactTrashPath);
+        if (!trash.StartsWith(expectedTrashRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The exact delete destination escaped Ali's recoverable trash.");
+        }
+
+        var isFile = File.Exists(source);
+        var isDirectory = Directory.Exists(source);
+        if (!isFile && !isDirectory)
+        {
+            return Task.FromResult(false);
+        }
+        if (File.Exists(trash) || Directory.Exists(trash))
+        {
+            throw new IOException(
+                "The exact recoverable-trash destination already exists.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(trash)!);
+        if (isFile)
+        {
+            File.Move(source, trash, overwrite: false);
+        }
+        else
+        {
+            Directory.Move(source, trash);
+        }
+        return Task.FromResult(true);
+    }
+
     internal bool TryNormalizeApprovedAbsolutePath(
         string path,
         bool allowMountRoot,
@@ -328,6 +429,13 @@ public sealed class AliWorkstationFileStore : AgentFileStore
 
         return Resolve(trimmed, allowMountRoot: false);
     }
+
+    private static AliResolvedWorkstationPath ResolvedWorkstationPath(ResolvedPath resolved) =>
+        new(
+            resolved.Mount.Name,
+            resolved.Mount.RootPath,
+            resolved.RelativePath,
+            resolved.Mount.ResolvePhysicalPath(resolved.RelativePath));
 
     private ResolvedPath ResolveDirectory(string path) => Resolve(path, allowMountRoot: true);
 

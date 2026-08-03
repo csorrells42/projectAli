@@ -26,7 +26,8 @@ internal sealed record AliRecoveredFinalPublication(
     string PublicationId,
     string AssistantMessageId,
     string AnswerText,
-    string AnswerDigest);
+    string AnswerDigest,
+    long DisplayClaimRevision);
 
 internal sealed record AliRecoveredInterimPublication(
     TurnIdentity DurableIdentity,
@@ -36,7 +37,8 @@ internal sealed record AliRecoveredInterimPublication(
     string SubjectId,
     long SubjectPreparedRevision,
     string Text,
-    string TextDigest);
+    string TextDigest,
+    long DisplayClaimRevision);
 
 internal sealed partial class AliPlanningStateCoordinator
 {
@@ -200,6 +202,15 @@ internal sealed partial class AliPlanningStateCoordinator
         }
 
         var state = recovery.State;
+        if (state.InterimPublication is
+            { Status: InterimPublicationStatus.DisplayInDoubt })
+        {
+            return new AliPlanningResumeAttempt(
+                Turn: null,
+                recovery,
+                FailureCode: "interim-redisplay-outcome-unknown");
+        }
+
         if (state.InterimPublication is { } interim
             && (interim.Status == InterimPublicationStatus.Prepared
                 || interim.Status == InterimPublicationStatus.Committed
@@ -217,6 +228,34 @@ internal sealed partial class AliPlanningStateCoordinator
                     "The recovered interim response differs from its exact durable digest.");
             }
 
+            var displayInDoubt = await _transitionWriter
+                .MarkInterimPublicationDisplayInDoubtAsync(
+                    durableIdentity,
+                    state.Revision,
+                    interim.PublicationId,
+                    interim.Kind,
+                    interim.TextDigest,
+                    Correlation(
+                        durableIdentity,
+                        "recovered-interim-display-in-doubt",
+                        interim.PublicationId + ":" + interim.TextDigest,
+                        state.Revision),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (displayInDoubt.Status != TurnTransitionWriteStatus.Committed
+                || displayInDoubt.State is null)
+            {
+                return new AliPlanningResumeAttempt(
+                    Turn: null,
+                    recovery with { State = displayInDoubt.State },
+                    FailureCode: displayInDoubt.Status == TurnTransitionWriteStatus.AlreadyRecorded
+                        ? "interim-redisplay-claim-not-acquired"
+                        : "concurrent-transition");
+            }
+
+            state = displayInDoubt.State;
+            recovery = recovery with { State = state };
+
             return new AliPlanningResumeAttempt(
                 Turn: null,
                 recovery,
@@ -230,7 +269,8 @@ internal sealed partial class AliPlanningStateCoordinator
                     interim.SubjectId,
                     ResolveSubjectPreparedRevision(state, interim),
                     text,
-                    interim.TextDigest));
+                    interim.TextDigest,
+                    state.Revision));
         }
 
         if (recovery.Publication is { SafeToPublishIdempotently: true }
@@ -659,39 +699,58 @@ internal sealed partial class AliPlanningStateCoordinator
         }
 
         var publicationId = "publication_" + visibleTurn.AssistantMessageId;
-        if (!string.Equals(absent.PublicationId, publicationId, StringComparison.Ordinal)
-            || !string.Equals(
-                absent.AssistantMessageId,
-                visibleTurn.AssistantMessageId,
-                StringComparison.Ordinal))
-        {
-            var retargeted = await _transitionWriter.RetargetFinalPublicationAsync(
+        var retargeted = await _transitionWriter.RetargetFinalPublicationAsync(
+            durableIdentity,
+            state.Revision,
+            absent.PublicationId,
+            absent.AssistantMessageId,
+            publicationId,
+            visibleTurn.AssistantMessageId,
+            absent.AnswerDigest,
+            Correlation(
                 durableIdentity,
-                state.Revision,
-                absent.PublicationId,
-                absent.AssistantMessageId,
-                publicationId,
-                visibleTurn.AssistantMessageId,
-                absent.AnswerDigest,
+                "publication-redisplay-retarget",
+                absent.PublicationId + ":" + absent.AssistantMessageId + ":"
+                + publicationId + ":" + visibleTurn.AssistantMessageId + ":"
+                + absent.AnswerDigest,
+                state.Revision),
+            cancellationToken).ConfigureAwait(false);
+        if (retargeted.Status == TurnTransitionWriteStatus.RevisionConflict
+            || retargeted.State is null)
+        {
+            return new AliPlanningResumeAttempt(
+                Turn: null,
+                recovery with { State = retargeted.State },
+                FailureCode: "concurrent-transition");
+        }
+
+        state = retargeted.State;
+        var displayInDoubt = await _transitionWriter.WriteAsync(
+            durableIdentity,
+            state.Revision,
+            new FinalPublicationMarkedInDoubtTransition(
                 Correlation(
                     durableIdentity,
-                    "publication-retarget",
-                    absent.PublicationId + ":" + absent.AssistantMessageId + ":"
-                    + publicationId + ":" + visibleTurn.AssistantMessageId + ":"
+                    "recovered-publication-display-in-doubt",
+                    publicationId + ":" + visibleTurn.AssistantMessageId + ":"
                     + absent.AnswerDigest,
-                    revision: 0),
-                cancellationToken).ConfigureAwait(false);
-            if (retargeted.Status == TurnTransitionWriteStatus.RevisionConflict
-                || retargeted.State is null)
-            {
-                return new AliPlanningResumeAttempt(
-                    Turn: null,
-                    recovery with { State = retargeted.State },
-                    FailureCode: "concurrent-transition");
-            }
-
-            state = retargeted.State;
+                    state.Revision),
+                publicationId,
+                visibleTurn.AssistantMessageId,
+                absent.AnswerDigest),
+            cancellationToken).ConfigureAwait(false);
+        if (displayInDoubt.Status != TurnTransitionWriteStatus.Committed
+            || displayInDoubt.State is null)
+        {
+            return new AliPlanningResumeAttempt(
+                Turn: null,
+                recovery with { State = displayInDoubt.State },
+                FailureCode: displayInDoubt.Status == TurnTransitionWriteStatus.AlreadyRecorded
+                    ? "final-redisplay-claim-not-acquired"
+                    : "concurrent-transition");
         }
+
+        state = displayInDoubt.State;
 
         return new AliPlanningResumeAttempt(
             Turn: null,
@@ -702,7 +761,8 @@ internal sealed partial class AliPlanningStateCoordinator
                 publicationId,
                 visibleTurn.AssistantMessageId,
                 answer,
-                absent.AnswerDigest));
+                absent.AnswerDigest,
+                state.Revision));
     }
 
     private static bool IsStructuredReconciliation(InterimPublicationReason reason) =>
@@ -786,6 +846,7 @@ internal sealed partial class AliPlanningStateCoordinator
             _transitionWriter,
             _effectNormalizations,
             _targetStates,
+            _executionBroker,
             liveBindingsAccessor ?? (() => currentBindings));
         resumed.HydrateRecoveredState(
             recovery.OriginalRequest!,
@@ -814,6 +875,8 @@ internal sealed partial class AliPlanningStateCoordinator
         if (state.PendingActions.Length != 0
             || state.PendingAcceptedCall is not null
             || state.InterimPublication is not null
+            || state.Revision != recovered.DisplayClaimRevision
+            || publication.Status != FinalPublicationStatus.InDoubt
             || !string.Equals(publication.PublicationId, recovered.PublicationId, StringComparison.Ordinal)
             || !string.Equals(publication.AssistantMessageId, recovered.AssistantMessageId, StringComparison.Ordinal)
             || !string.Equals(publication.AnswerDigest, recovered.AnswerDigest, StringComparison.Ordinal))
@@ -878,6 +941,7 @@ internal sealed partial class AliPlanningStateCoordinator
         if (!string.Equals(interim.PublicationId, recovered.PublicationId, StringComparison.Ordinal)
             || interim.Kind != recovered.Kind
             || interim.Reason != recovered.Reason
+            || state.Revision != recovered.DisplayClaimRevision
             || !string.Equals(interim.SubjectId, recovered.SubjectId, StringComparison.Ordinal)
             || ResolveSubjectPreparedRevision(state, interim)
                 != recovered.SubjectPreparedRevision
@@ -891,38 +955,32 @@ internal sealed partial class AliPlanningStateCoordinator
                 "The displayed recovered interim response differs from durable state.");
         }
 
-        TurnState committedState;
-        if (interim.Status == InterimPublicationStatus.Prepared)
+        if (interim.Status != InterimPublicationStatus.DisplayInDoubt)
         {
-            var committed = await _transitionWriter.CommitInterimPublicationAsync(
-                recovered.DurableIdentity,
-                state.Revision,
-                recovered.PublicationId,
-                recovered.Kind,
-                recovered.TextDigest,
-                Correlation(
-                    recovered.DurableIdentity,
-                    "recovered-interim-publication-commit",
-                    recovered.PublicationId + ":" + recovered.TextDigest,
-                    revision: 0),
-                cancellationToken).ConfigureAwait(false);
-            if (committed.Status == TurnTransitionWriteStatus.RevisionConflict
-                || committed.State is null)
-            {
-                throw new InvalidOperationException(
-                    "The recovered interim response changed before its display committed.");
-            }
+            throw new InvalidDataException(
+                "A recovered interim response cannot commit without its durable display-attempt marker.");
+        }
 
-            committedState = committed.State;
-        }
-        else if (interim.Status == InterimPublicationStatus.Committed)
+        var committed = await _transitionWriter.CommitInterimPublicationAsync(
+            recovered.DurableIdentity,
+            state.Revision,
+            recovered.PublicationId,
+            recovered.Kind,
+            recovered.TextDigest,
+            Correlation(
+                recovered.DurableIdentity,
+                "recovered-interim-publication-commit",
+                recovered.PublicationId + ":" + recovered.TextDigest,
+                state.Revision),
+            cancellationToken).ConfigureAwait(false);
+        if (committed.Status == TurnTransitionWriteStatus.RevisionConflict
+            || committed.State is null)
         {
-            committedState = state;
+            throw new InvalidOperationException(
+                "The recovered interim response changed before its display committed.");
         }
-        else
-        {
-            throw new InvalidDataException("The recovered interim publication status is invalid.");
-        }
+
+        var committedState = committed.State;
 
         var control = recovered.Kind switch
         {
@@ -945,7 +1003,7 @@ internal sealed partial class AliPlanningStateCoordinator
                 recovered.DurableIdentity,
                 "recovered-interim-publication-control",
                 recovered.PublicationId + ":" + recovered.Reason + ":" + control,
-                revision: 0),
+                committedState.Revision),
             cancellationToken).ConfigureAwait(false);
 
         if (changed.Status == TurnTransitionWriteStatus.RevisionConflict
