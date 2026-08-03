@@ -1,4 +1,5 @@
 using System.Text;
+using Ali.Modules.Coding.Changesets;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -31,9 +32,23 @@ public sealed record RoslynRenameResult(
 /// Performs Roslyn's semantic solution-wide rename with an exact dry-run preview.
 /// Application writes only already-approved source documents beneath the target root.
 /// </summary>
-internal sealed class AliRoslynRefactoringService(AliRoslynWorkspaceLoader loader)
+internal sealed class AliRoslynRefactoringService
 {
     private const int MaximumReportedChanges = 300;
+    private readonly AliRoslynWorkspaceLoader _loader;
+    private readonly AliSourceChangeSetStore _changeSetStore;
+    private readonly AliSourceChangeSetPublisher _publisher;
+
+    public AliRoslynRefactoringService(
+        AliRoslynWorkspaceLoader loader,
+        AliSourceChangeSetStore? changeSetStore = null,
+        AliSourceChangeSetPublisher? publisher = null)
+    {
+        _loader = loader;
+        _changeSetStore = changeSetStore ?? new AliSourceChangeSetStore(
+            Path.Combine(Path.GetTempPath(), "ProjectAli", "RoslynChangeSets"));
+        _publisher = publisher ?? new AliSourceChangeSetPublisher(new AliSourceChangeSetValidator());
+    }
 
     public Task<RoslynRenameResult> PreviewRenameAsync(
         string targetPath,
@@ -68,8 +83,8 @@ internal sealed class AliRoslynRefactoringService(AliRoslynWorkspaceLoader loade
             throw new ArgumentException("The replacement must be a valid C# identifier.", nameof(newName));
         }
 
-        using var session = await loader.LoadAsync(targetPath, cancellationToken).ConfigureAwait(false);
-        var (document, position) = await loader.ResolvePositionAsync(
+        using var session = await _loader.LoadAsync(targetPath, cancellationToken).ConfigureAwait(false);
+        var (document, position) = await _loader.ResolvePositionAsync(
             session,
             documentPath,
             line,
@@ -110,7 +125,8 @@ internal sealed class AliRoslynRefactoringService(AliRoslynWorkspaceLoader loade
 
         if (apply)
         {
-            await ApplyChangedDocumentsAsync(session.Solution, renamed, session.Target, cancellationToken).ConfigureAwait(false);
+            await VerifyChangedSolutionAsync(session.Solution, renamed, cancellationToken).ConfigureAwait(false);
+            await PublishChangedDocumentsAsync(session.Solution, renamed, session.Target, cancellationToken).ConfigureAwait(false);
         }
 
         var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
@@ -176,12 +192,13 @@ internal sealed class AliRoslynRefactoringService(AliRoslynWorkspaceLoader loade
         return (files.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), changes);
     }
 
-    private async Task ApplyChangedDocumentsAsync(
+    private async Task PublishChangedDocumentsAsync(
         Solution original,
         Solution changed,
         AliResolvedCodingTarget target,
         CancellationToken cancellationToken)
     {
+        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var projectChange in changed.GetChanges(original).GetProjectChanges())
         {
             foreach (var documentId in projectChange.GetChangedDocuments())
@@ -195,8 +212,56 @@ internal sealed class AliRoslynRefactoringService(AliRoslynWorkspaceLoader loade
 
                 var physicalPath = ValidateChangedPath(target, oldDocument.FilePath);
                 var text = await newDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
-                var encoding = text.Encoding ?? new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-                await File.WriteAllTextAsync(physicalPath, text.ToString(), encoding, cancellationToken).ConfigureAwait(false);
+                replacements[physicalPath] = text.ToString();
+            }
+        }
+
+        if (replacements.Count == 0)
+        {
+            return;
+        }
+
+        var changeSet = await _changeSetStore
+            .CreateAsync(target.RootDirectory, replacements, cancellationToken)
+            .ConfigureAwait(false);
+        var receipt = await _publisher.PublishAsync(changeSet, cancellationToken).ConfigureAwait(false);
+        if (receipt.State != AliSourcePublicationState.Committed)
+        {
+            throw new InvalidOperationException(receipt.Summary);
+        }
+    }
+
+    private static async Task VerifyChangedSolutionAsync(
+        Solution original,
+        Solution changed,
+        CancellationToken cancellationToken)
+    {
+        foreach (var projectChange in changed.GetChanges(original).GetProjectChanges())
+        {
+            var originalProject = original.GetProject(projectChange.ProjectId);
+            var changedProject = changed.GetProject(projectChange.ProjectId);
+            if (originalProject is null || changedProject is null)
+            {
+                continue;
+            }
+
+            var originalCompilation = await originalProject.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+            var changedCompilation = await changedProject.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+            if (originalCompilation is null || changedCompilation is null)
+            {
+                throw new InvalidOperationException("Roslyn could not compile the staged rename for verification.");
+            }
+
+            var originalErrors = originalCompilation.GetDiagnostics(cancellationToken)
+                .Count(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+            var changedErrors = changedCompilation.GetDiagnostics(cancellationToken)
+                .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+                .ToArray();
+            if (changedErrors.Length > originalErrors)
+            {
+                throw new InvalidOperationException(
+                    "Roslyn rejected the staged rename because it introduced compiler errors: "
+                    + string.Join(" | ", changedErrors.Take(10).Select(diagnostic => diagnostic.ToString())));
             }
         }
     }

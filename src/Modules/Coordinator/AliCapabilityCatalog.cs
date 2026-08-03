@@ -91,6 +91,11 @@ public static class AliCapabilityCatalog
     public const string RoslynFindReferencesName = "roslyn_find_references";
     public const string RoslynPreviewRenameName = "roslyn_preview_rename";
     public const string RoslynApplyRenameName = "roslyn_apply_rename";
+    public const string RoslynInspectTargetName = "roslyn_inspect_target";
+    public const string RoslynListActionsName = "roslyn_list_actions";
+    public const string RoslynPreviewActionName = "roslyn_preview_action";
+    public const string RoslynApplyActionName = "roslyn_apply_action";
+    public const string RoslynVerifyChangesetName = "roslyn_verify_changeset";
     public const string DotNetBuildName = "dotnet_build_project";
     public const string DotNetRunName = "dotnet_run_project";
     public const string DotNetStopProjectName = "dotnet_stop_project";
@@ -218,6 +223,11 @@ public static class AliCapabilityCatalog
         new(RoslynFindReferencesName, "Find all semantic references to the C# symbol at a source position.", "Microsoft Roslyn solution intelligence"),
         new(RoslynPreviewRenameName, "Preview a Roslyn solution-wide semantic rename without changing files.", "Microsoft Roslyn refactoring"),
         new(RoslynApplyRenameName, "Apply a Roslyn solution-wide semantic rename after user approval.", "Microsoft Roslyn refactoring"),
+        new(RoslynInspectTargetName, "Inspect an exact C# project or solution with the loaded public Roslyn providers before selecting a semantic action.", "Ali Roslyn Action Deck"),
+        new(RoslynListActionsName, "List the semantic source actions Ali's loaded Roslyn Action Deck can actually perform.", "Ali Roslyn Action Deck"),
+        new(RoslynPreviewActionName, "Preview a version-bound Roslyn semantic source action and return a durable action handle without changing canonical source.", "Ali Roslyn Action Deck"),
+        new(RoslynApplyActionName, "Apply a previously previewed Roslyn action through staged validation and all-or-reconciled publication after approval.", "Ali Roslyn Action Deck"),
+        new(RoslynVerifyChangesetName, "Reload canonical source after a Roslyn action and return compiler diagnostics for the published result.", "Ali Roslyn Action Deck"),
         new(DotNetBuildName, "Restore and compile an approved C# .csproj through Microsoft's MSBuild API after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
         new(DotNetRunName, "Launch a successfully built .NET application from an approved project folder after user approval.", "Microsoft Roslyn/MSBuild coding tools"),
         new(DotNetStopProjectName, "Close the running compiled application for one approved .NET project after user approval so its output can be rebuilt.", "Microsoft Roslyn/MSBuild coding tools"),
