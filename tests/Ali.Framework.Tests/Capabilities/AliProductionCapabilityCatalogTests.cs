@@ -65,7 +65,7 @@ public sealed class AliProductionCapabilityCatalogTests
         AssertGroup(CapabilityGroupIds.PersonalContextAndMemory,
             AliCapabilityCatalog.GetActiveUserProfileName,
             AliCapabilityCatalog.RecallUserMemoryName,
-            AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+            AliCapabilityCatalog.MutateParticipantMemoryName,
             AliCapabilityCatalog.ListCurrentUserMemoriesName,
             AliCapabilityCatalog.GetAssistantIdentityName,
             AliCapabilityCatalog.GetCurrentLocalTimeName);
@@ -528,17 +528,17 @@ public sealed class AliProductionCapabilityCatalogTests
             Assert.False(descriptor.Effect.ChangesSystemState);
         }
 
-        var forget = byName[AliCapabilityCatalog.ForgetCurrentUserMemoryName];
-        Assert.Equal(CapabilityEffectKind.Destructive, forget.Effect.Kind);
-        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, forget.Effect.MutationBoundary);
-        Assert.False(forget.Effect.SupportsIdempotency);
-        Assert.True(forget.Effect.ReadsLocalData);
-        Assert.True(forget.Effect.WritesLocalData);
-        Assert.True(forget.Effect.UsesNetwork);
-        Assert.True(forget.Effect.StartsProcesses);
-        Assert.True(forget.Effect.ChangesSystemState);
-        Assert.True(forget.Permission.RequiresApproval);
-        Assert.False(string.IsNullOrWhiteSpace(forget.Effect.ReconcilerId));
+        var mutation = byName[AliCapabilityCatalog.MutateParticipantMemoryName];
+        Assert.Equal(CapabilityEffectKind.Destructive, mutation.Effect.Kind);
+        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, mutation.Effect.MutationBoundary);
+        Assert.False(mutation.Effect.SupportsIdempotency);
+        Assert.True(mutation.Effect.ReadsLocalData);
+        Assert.True(mutation.Effect.WritesLocalData);
+        Assert.True(mutation.Effect.UsesNetwork);
+        Assert.True(mutation.Effect.StartsProcesses);
+        Assert.True(mutation.Effect.ChangesSystemState);
+        Assert.True(mutation.Permission.RequiresApproval);
+        Assert.False(string.IsNullOrWhiteSpace(mutation.Effect.ReconcilerId));
     }
 
     [Fact]

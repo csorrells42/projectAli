@@ -786,6 +786,7 @@ internal sealed partial class AliPlanningStateCoordinator
             _transitionWriter,
             _effectNormalizations,
             _targetStates,
+            _durableEffects,
             liveBindingsAccessor ?? (() => currentBindings));
         resumed.HydrateRecoveredState(
             recovery.OriginalRequest!,

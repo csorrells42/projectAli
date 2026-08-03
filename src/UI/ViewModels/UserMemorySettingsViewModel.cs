@@ -21,13 +21,29 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
     private string _collectionStatus = "Memory count has not been loaded.";
     private string _statusText = "Per-user memory settings loaded.";
     private bool _isBusy;
+    private IReadOnlyList<string> _repairPointIds = [];
+    private string _reconcileRequestId = string.Empty;
 
     public UserMemorySettingsViewModel(AliServices services)
     {
         _services = services;
         SaveCommand = new AsyncRelayCommand(SaveAsync, () => !IsBusy, HandleError);
         TestCommand = new AsyncRelayCommand(TestAsync, () => !IsBusy, HandleError);
+        RepairCommand = new AsyncRelayCommand(
+            RepairAsync,
+            () => !IsBusy && SelectedUser is not null && _repairPointIds.Count != 0,
+            HandleError);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsBusy, HandleError);
+        LoadSensitiveCommand = new AsyncRelayCommand(
+            LoadSensitiveAsync,
+            () => !IsBusy && SelectedUser is not null,
+            HandleError);
+        ReconcileCommand = new AsyncRelayCommand(
+            ReconcileAsync,
+            () => !IsBusy
+                && SelectedUser is not null
+                && !string.IsNullOrWhiteSpace(ReconcileRequestId),
+            HandleError);
         SearchCommand = new AsyncRelayCommand(SearchAsync, () => !IsBusy, HandleError);
         CorrectCommand = new AsyncRelayCommand(CorrectAsync, () => !IsBusy && SelectedMemory is not null, HandleError);
         ForgetCommand = new AsyncRelayCommand(ForgetAsync, () => !IsBusy && SelectedMemory is not null, HandleError);
@@ -67,6 +83,17 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
     public string SearchText { get => _searchText; set => SetProperty(ref _searchText, value); }
     public string CategoryFilter { get => _categoryFilter; set => SetProperty(ref _categoryFilter, value); }
     public string CorrectionText { get => _correctionText; set => SetProperty(ref _correctionText, value); }
+    public string ReconcileRequestId
+    {
+        get => _reconcileRequestId;
+        set
+        {
+            if (SetProperty(ref _reconcileRequestId, value))
+            {
+                RaiseCommandStates();
+            }
+        }
+    }
     public string RuntimeStatus { get => _runtimeStatus; private set => SetProperty(ref _runtimeStatus, value); }
     public string CollectionStatus { get => _collectionStatus; private set => SetProperty(ref _collectionStatus, value); }
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
@@ -78,10 +105,16 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
             ? $"{SelectedUser.DisplayName} — test profile ({SelectedUser.StableId})"
             : $"{SelectedUser.DisplayName} ({SelectedUser.StableId})";
     public string SettingsPath => _services.UserMemorySettingsPath;
+    public string RepairButtonText => _repairPointIds.Count == 0
+        ? "No Repair Needed"
+        : $"Repair {_repairPointIds.Count} Failed Point(s)";
 
     public ICommand SaveCommand { get; }
     public ICommand TestCommand { get; }
+    public ICommand RepairCommand { get; }
     public ICommand RefreshCommand { get; }
+    public ICommand LoadSensitiveCommand { get; }
+    public ICommand ReconcileCommand { get; }
     public ICommand SearchCommand { get; }
     public ICommand CorrectCommand { get; }
     public ICommand ForgetCommand { get; }
@@ -117,9 +150,37 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         await WithBusyAsync(async () =>
         {
             var status = await _services.UserMemories.TestAsync(SelectedUser, CancellationToken.None);
+            var health = await _services.UserMemories.CheckDesktopParticipantHealthAsync(
+                SelectedUser,
+                CancellationToken.None);
+            SetRepairPointIds(health.FailedPointIds);
             RuntimeStatus = $"{status.State}: {status.Message}";
-            CollectionStatus = $"{status.CurrentUserMemoryCount} memories for the active user in ali_user_memories.";
+            CollectionStatus = $"{status.CurrentUserMemoryCount} authorized participant memories loaded; {health.DegradedPointCount} point(s) degraded.";
             StatusText = status.RuntimeAvailable ? "Local memory connection passed." : "Memory is unavailable; chat remains operational.";
+        });
+    }
+
+    private async Task RepairAsync()
+    {
+        if (SelectedUser is null || _repairPointIds.Count == 0) return;
+        if (WpfMessageBox.Show(
+                $"Repair exactly {_repairPointIds.Count} failed participant-memory vector point(s)? Windows will ask for the current account credential.",
+                "Repair participant memory",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+        await WithBusyAsync(async () =>
+        {
+            var result = await _services.UserMemories.RepairDesktopParticipantPointsAsync(
+                SelectedUser,
+                _repairPointIds,
+                CancellationToken.None);
+            SetRepairPointIds(result.FailedPointIds);
+            StatusText = result.Success
+                ? $"Repaired {result.UpdatedPointCount} exact participant-memory point(s); {result.FailedPointCount} remain failed."
+                : result.Failure?.SafeMessage ?? "Participant-memory repair failed safely.";
         });
     }
 
@@ -132,6 +193,40 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
             SetMemories(values);
             CollectionStatus = $"{values.Count} current-user memories loaded.";
             StatusText = $"Memory review refreshed for {SelectedUser.DisplayName} with strict stable-ID filtering.";
+        });
+    }
+
+    private async Task LoadSensitiveAsync()
+    {
+        if (SelectedUser is null
+            || _services.UserMemories is not IParticipantMemoryDesktopReviewService review)
+        {
+            return;
+        }
+        if (WpfMessageBox.Show(
+                "Load sensitive memories for the selected profile? Windows will request the current account credential. This is available only when that profile is the sole registered local owner.",
+                "Load sensitive participant memory",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+        await WithBusyAsync(async () =>
+        {
+            var result = await review.ReviewDesktopParticipantsAsync(
+                SelectedUser,
+                CategoryFilter,
+                includeSensitive: true,
+                CancellationToken.None);
+            if (!result.Success)
+            {
+                CollectionStatus = "Sensitive memories were not loaded.";
+                StatusText = result.Message;
+                return;
+            }
+            SetMemories(result.Memories);
+            CollectionStatus = $"{result.Memories.Count} authorized memories loaded after explicit sensitive review.";
+            StatusText = result.Message;
         });
     }
 
@@ -153,7 +248,7 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         await WithBusyAsync(async () =>
         {
             var result = await _services.UserMemories.CorrectAsync(SelectedUser, SelectedMemory.Id, CorrectionText, CancellationToken.None);
-            StatusText = result.Message;
+            ApplyMutationResult(result);
             await RefreshCoreAsync();
         });
     }
@@ -161,19 +256,57 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
     private async Task ForgetAsync()
     {
         if (SelectedUser is null || SelectedMemory is null) return;
-        if (WpfMessageBox.Show($"Permanently forget this memory for {SelectedUser.DisplayName}?\n\n{SelectedMemory.Text}", "Forget memory", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (WpfMessageBox.Show(
+                $"Remove this memory from active participant recall for {SelectedUser.DisplayName}?\n\n{SelectedMemory.Text}\n\nThe active point and participant journal copies are removed, but physical storage history or backups are not claimed erased.",
+                "Remove active memory",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await WithBusyAsync(async () =>
         {
             var result = await _services.UserMemories.DeleteAsync(SelectedUser, SelectedMemory.Id, CancellationToken.None);
-            StatusText = result.Message;
+            ApplyMutationResult(result);
             await RefreshCoreAsync();
+        });
+    }
+
+    private async Task ReconcileAsync()
+    {
+        if (SelectedUser is null
+            || string.IsNullOrWhiteSpace(ReconcileRequestId)
+            || _services.UserMemories is not IParticipantMemoryDesktopReviewService review)
+        {
+            return;
+        }
+        var exactRequestId = ReconcileRequestId.Trim();
+        if (WpfMessageBox.Show(
+                $"Reconcile exactly this participant-memory request without reapplying it?\n\n{exactRequestId}\n\nWindows will request the current account credential.",
+                "Reconcile participant memory",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+        await WithBusyAsync(async () =>
+        {
+            var result = await review.ReconcileDesktopParticipantMutationAsync(
+                SelectedUser,
+                exactRequestId,
+                CancellationToken.None);
+            StatusText = result.Success
+                ? $"Request {result.MutationRequestId} is {result.MutationStatus} by exact bounded recovery; the original mutation was not reapplied."
+                : $"Request {result.MutationRequestId} remains unresolved: {result.Failure?.SafeMessage ?? "reconciliation failed safely"}";
+            if (result.Success)
+            {
+                ReconcileRequestId = string.Empty;
+                await RefreshCoreAsync();
+            }
         });
     }
 
     private async Task ExportAsync()
     {
         if (SelectedUser is null) return;
-        if (WpfMessageBox.Show($"Export all private memories for {SelectedUser.DisplayName} to a local JSON file?", "Export memories", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (WpfMessageBox.Show($"Export the currently authorized low-sensitivity memories for {SelectedUser.DisplayName} to a local JSON file?", "Export memories", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         await WithBusyAsync(async () =>
         {
             var values = await _services.UserMemories.ListAsync(SelectedUser, null, CancellationToken.None);
@@ -181,23 +314,52 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"{SelectedUser.StableId}-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json");
             await File.WriteAllTextAsync(path, JsonSerializer.Serialize(values, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
-            StatusText = $"Exported {values.Count} current-user memories to {path}.";
+            StatusText = $"Exported {values.Count} authorized low-sensitivity current-user memories to {path}.";
         });
     }
 
     private async Task ClearTestProfileAsync()
     {
         if (SelectedUser?.IsTestProfile != true) return;
-        if (WpfMessageBox.Show("Permanently clear only the John Doe test profile's memories?", "Clear test memories", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (WpfMessageBox.Show(
+                "Remove the John Doe test profile's current memories from active participant recall? Participant journal copies are redacted; physical storage history or backups are not claimed erased.",
+                "Clear active test memories",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await WithBusyAsync(async () =>
         {
             var values = await _services.UserMemories.ListAsync(SelectedUser, null, CancellationToken.None);
+            var deletedIds = new HashSet<string>(StringComparer.Ordinal);
+            var failures = new List<string>();
             foreach (var memory in values)
             {
-                await _services.UserMemories.DeleteAsync(SelectedUser, memory.MemoryId, CancellationToken.None);
+                var result = await _services.UserMemories.DeleteAsync(
+                    SelectedUser,
+                    memory.MemoryId,
+                    CancellationToken.None);
+                if (result.Success)
+                {
+                    deletedIds.Add(memory.MemoryId);
+                }
+                else
+                {
+                    failures.Add(result.Message);
+                    if (string.Equals(result.MutationStatus, "in_doubt", StringComparison.Ordinal)
+                        && !string.IsNullOrWhiteSpace(result.RequestId))
+                    {
+                        ReconcileRequestId = result.RequestId;
+                    }
+                }
             }
-            StatusText = $"Cleared {values.Count} John Doe test-profile memories.";
-            SetMemories([]);
+            SetMemories(values
+                .Where(memory => !deletedIds.Contains(memory.MemoryId))
+                .ToArray());
+            CollectionStatus = failures.Count == 0
+                ? "No John Doe test-profile memories remain in the authorized review set."
+                : $"{failures.Count} John Doe test-profile memory deletion(s) did not complete.";
+            StatusText = failures.Count == 0
+                ? $"Cleared {deletedIds.Count} John Doe test-profile memories."
+                : $"Cleared {deletedIds.Count}; {failures.Count} were not deleted. {failures[0]}";
         });
     }
 
@@ -213,6 +375,24 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         Memories.Clear();
         foreach (var value in values) Memories.Add(new UserMemoryItemViewModel(value));
         SelectedMemory = Memories.FirstOrDefault();
+    }
+
+    private void ApplyMutationResult(MemoryOperationResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (!result.Success
+            && string.Equals(result.MutationStatus, "in_doubt", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(result.RequestId))
+        {
+            ReconcileRequestId = result.RequestId;
+        }
+        else if (result.Success)
+        {
+            ReconcileRequestId = string.Empty;
+        }
+        StatusText = string.IsNullOrWhiteSpace(result.RequestId)
+            ? result.Message
+            : $"{result.Message} Request ID: {result.RequestId}. Durable status: {result.MutationStatus ?? "unknown"}.";
     }
 
     private void LoadUsers(ActiveUser selected)
@@ -251,9 +431,20 @@ public sealed class UserMemorySettingsViewModel : ObservableObject
         StatusText = $"Memory failed safely: {exception.Message}";
     }
 
+    private void SetRepairPointIds(IReadOnlyList<string>? pointIds)
+    {
+        _repairPointIds = (pointIds ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .Take(ParticipantMemoryLimits.MaximumRepairPointIds)
+            .ToArray();
+        OnPropertyChanged(nameof(RepairButtonText));
+        RaiseCommandStates();
+    }
+
     private void RaiseCommandStates()
     {
-        foreach (var command in new[] { SaveCommand, TestCommand, RefreshCommand, SearchCommand, CorrectCommand, ForgetCommand, ExportCommand, ClearTestProfileCommand })
+        foreach (var command in new[] { SaveCommand, TestCommand, RepairCommand, RefreshCommand, LoadSensitiveCommand, ReconcileCommand, SearchCommand, CorrectCommand, ForgetCommand, ExportCommand, ClearTestProfileCommand })
         {
             if (command is AsyncRelayCommand asyncCommand) asyncCommand.RaiseCanExecuteChanged();
         }

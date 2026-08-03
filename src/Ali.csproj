@@ -44,6 +44,7 @@
     <None Update="Modules\Coding\Agents\Tools\ali_openhands_launcher.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\Coding\Agents\Tools\ali_aider_launcher.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\UserMemory\Tools\mem0_service.py" TargetPath="lib\memory\mem0_service.py" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <None Update="Modules\UserMemory\Tools\local_qdrant.py" TargetPath="lib\memory\local_qdrant.py" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
     <None Update="Modules\UserMemory\Tools\openai_compatible_llm.py" TargetPath="lib\memory\openai_compatible_llm.py" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
   </ItemGroup>
   <ItemGroup>

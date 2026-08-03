@@ -58,60 +58,7 @@ public sealed class McpServerTests
     }
 
     [Fact]
-    public async Task UserMemoryFunctionCatalog_BindsTheExactUserAcrossAConcurrentSelectionChange()
-    {
-        var root = CreateTemporaryRoot();
-        try
-        {
-            var userA = new ActiveUser("user-a", "User A", true, "test");
-            var userB = new ActiveUser("user-b", "User B", true, "test");
-            var activeUsers = new SwitchingActiveUserSession(userA, userB);
-            var memories = new RecordingUserMemoryService();
-            var sources = new EmptySourceRetriever();
-            var factory = new AliMcpServerToolFactory(
-                sources,
-                sources,
-                new McpWebResearchClient(static () => new WebSourceBackendSettings { UseMcpResearch = false }),
-                new FileMemoryStore(root),
-                new FileReminderStore(root),
-                AssistantProfile.Create("Ali"),
-                memories,
-                activeUsers,
-                static () => new UserMemorySettings { Enabled = true });
-            var settings = new McpServerSettings
-            {
-                Enabled = true,
-                Tools =
-                [
-                    new McpServerToolPolicy
-                    {
-                        Name = AliCapabilityCatalog.RecallUserMemoryName,
-                        Enabled = true,
-                        ReadsPrivateData = true
-                    }
-                ]
-            };
-            var catalog = factory.CreateFunctionCatalog(settings);
-            Assert.Equal(userA.StableId, catalog.BoundActiveUserId);
-            var recall = catalog.Functions[AliCapabilityCatalog.RecallUserMemoryName];
-
-            activeUsers.SwitchAfterNextSnapshot();
-            activeUsers.CaptureSelectionSnapshot();
-            await recall.InvokeAsync(
-                new AIFunctionArguments { ["query"] = "test" },
-                TestContext.Current.CancellationToken);
-
-            Assert.Equal(userB.StableId, activeUsers.Current.StableId);
-            Assert.Equal([userA.StableId], memories.RecalledUserIds);
-        }
-        finally
-        {
-            DeleteTemporaryRoot(root);
-        }
-    }
-
-    [Fact]
-    public async Task RawOutgoingForgetFunction_IsBoundToItsCatalogUserSnapshot()
+    public void LegacyFileMemoryNamesCannotBeEnabledInTheProductionMcpCatalog()
     {
         var root = CreateTemporaryRoot();
         try
@@ -136,23 +83,22 @@ public sealed class McpServerTests
                 Enabled = true,
                 Tools =
                 [
-                    new McpServerToolPolicy
-                    {
-                        Name = AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-                        Enabled = true,
-                        WritesLocalData = true,
-                        ReadsPrivateData = true
-                    }
+                    new() { Name = AliCapabilityCatalog.RecallUserMemoryName, Enabled = true },
+                    new() { Name = AliCapabilityCatalog.ListCurrentUserMemoriesName, Enabled = true },
+                    new() { Name = AliCapabilityCatalog.ForgetCurrentUserMemoryName, Enabled = true }
                 ]
             });
 
-            activeUsers.Select(userB.StableId);
-            await catalog.Functions[AliCapabilityCatalog.ForgetCurrentUserMemoryName].InvokeAsync(
-                new AIFunctionArguments { ["memoryId"] = "memory-a" },
-                TestContext.Current.CancellationToken);
-
-            Assert.Equal([userA.StableId], memories.DeletedUserIds);
-            Assert.DoesNotContain(userB.StableId, memories.DeletedUserIds);
+            var retiredNames = new[]
+            {
+                AliCapabilityCatalog.RecallUserMemoryName,
+                AliCapabilityCatalog.ListCurrentUserMemoriesName,
+                AliCapabilityCatalog.ForgetCurrentUserMemoryName
+            };
+            Assert.All(retiredNames, name => Assert.False(catalog.Functions.ContainsKey(name)));
+            Assert.DoesNotContain(catalog.EnabledPolicies, policy => retiredNames.Contains(
+                policy.Name,
+                StringComparer.Ordinal));
         }
         finally
         {
@@ -445,9 +391,9 @@ public sealed class McpServerTests
             Assert.True(Assert.Single(
                 restored.Tools,
                 tool => tool.Name == AliCapabilityCatalog.GetCurrentLocalTimeName).Enabled);
-            Assert.False(Assert.Single(
+            Assert.DoesNotContain(
                 restored.Tools,
-                tool => tool.Name == AliCapabilityCatalog.RecallUserMemoryName).Enabled);
+                tool => tool.Name == AliCapabilityCatalog.RecallUserMemoryName);
         }
         finally
         {
@@ -752,8 +698,6 @@ public sealed class McpServerTests
             Assert.DoesNotContain(AliCapabilityCatalog.ResearchWebName, actual);
             Assert.DoesNotContain(AliCapabilityCatalog.RoslynInspectSolutionName, actual);
             Assert.DoesNotContain(AliCapabilityCatalog.GetAssistantIdentityName, actual);
-            Assert.Contains(expectedPublication.Issues, issue =>
-                issue.ToolName == AliCapabilityCatalog.RecallUserMemoryName);
 
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.ListAvailableToolsName, []);
             await CallSuccessfullyAsync(client, AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName, new()

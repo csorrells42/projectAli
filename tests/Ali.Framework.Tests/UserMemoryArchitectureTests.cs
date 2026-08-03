@@ -186,6 +186,54 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
+    public void ActiveUserSelectionGenerationChangesWhenRegistryMembershipChanges()
+    {
+        var root = TemporaryRoot();
+        try
+        {
+            var profiles = new FakeIdentityProfiles([Person("person-a", "Alice")]);
+            var session = new ActiveUserSession(root, profiles);
+            var rosters = new SelectedParticipantRosterAuthority(session, "tenant");
+            var admitted = rosters.CaptureAtAdmission(
+                "turn",
+                "conversation",
+                session.CaptureSelectionSnapshot(),
+                session.CaptureSelectionRevision(),
+                DateTimeOffset.UtcNow);
+            var before = session.CaptureSelectionRevision();
+
+            profiles.Items = [Person("person-a", "Alice"), Person("person-b", "Bob")];
+            session.Refresh();
+
+            Assert.Equal("person-a", session.Current.StableId);
+            Assert.NotEqual(before, session.CaptureSelectionRevision());
+            Assert.False(rosters.CheckCurrent(admitted).IsCurrent);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void GeneratedTestProfileCannotBecomeRegisteredUnderTheSameIdWithoutGenerationChange()
+    {
+        var root = TemporaryRoot();
+        try
+        {
+            var profiles = new FakeIdentityProfiles([]);
+            var session = new ActiveUserSession(root, profiles);
+            var testId = session.Current.StableId;
+            var before = session.CaptureSelectionRevision();
+
+            profiles.Items = [Person(testId, "Registered Alice")];
+            session.Refresh();
+
+            Assert.Equal(testId, session.Current.StableId);
+            Assert.False(session.Current.IsTestProfile);
+            Assert.NotEqual(before, session.CaptureSelectionRevision());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void ActiveUserSelectionSnapshot_IsAtomicAndNeverExposesAProvisionalUser()
     {
         var root = TemporaryRoot();
@@ -486,26 +534,30 @@ public sealed class UserMemoryArchitectureTests
     {
         var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
         var source = File.ReadAllText(path);
-        var correctBlock = source[source.IndexOf("if operation == \"correct\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"forget\":", StringComparison.Ordinal)];
-        var forgetBlock = source[source.IndexOf("if operation == \"forget\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"delete\":", StringComparison.Ordinal)];
+        var mutationBlock = source[
+            source.IndexOf("def handle_participant_mutation", StringComparison.Ordinal)..
+            source.IndexOf("def handle_participant_repair", StringComparison.Ordinal)];
 
-        Assert.DoesNotContain("self.memory.search", correctBlock, StringComparison.Ordinal);
-        Assert.DoesNotContain("self.memory.search", forgetBlock, StringComparison.Ordinal);
-        Assert.Contains("request.get(\"memoryId\"", correctBlock, StringComparison.Ordinal);
-        Assert.Contains("request.get(\"memoryId\"", forgetBlock, StringComparison.Ordinal);
-        Assert.Contains("self.owns(stable_id, memory_id)", correctBlock, StringComparison.Ordinal);
-        Assert.Contains("self.owns(stable_id, memory_id)", forgetBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("self.memory.search", mutationBlock, StringComparison.Ordinal);
+        Assert.Contains("proposal.get(\"targetMemoryId\")", mutationBlock, StringComparison.Ordinal);
+        Assert.Contains("self.participant_owned(tenant_id, target_id)", mutationBlock, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Mem0WorkerTreatsNullListCategoryAsAnUnfilteredInventory()
+    public void ParticipantWorkerInventoryIsUnfilteredByModelSelectedCategory()
     {
         var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
         var source = File.ReadAllText(path);
-        var listBlock = source[source.IndexOf("if operation == \"list\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"remember\":", StringComparison.Ordinal)];
+        var listBlock = source[
+            source.IndexOf("if operation == \"participant_list\":", StringComparison.Ordinal)..
+            source.IndexOf("if operation == \"participant_recall\":", StringComparison.Ordinal)];
 
-        Assert.Contains("request.get(\"category\") or \"\"", listBlock, StringComparison.Ordinal);
-        Assert.DoesNotContain("str(request.get(\"category\", \"\"))", listBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("category", listBlock, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("metadata.state\": \"confirmed\"", listBlock, StringComparison.Ordinal);
+        Assert.Contains("scroll_exact_filters(", listBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("maximum=maximum", listBlock, StringComparison.Ordinal);
+        Assert.Contains("if len(eligible) > maximum:", listBlock, StringComparison.Ordinal);
+        Assert.Contains("ordered = sorted(", listBlock, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -513,11 +565,112 @@ public sealed class UserMemoryArchitectureTests
     {
         var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
         var source = File.ReadAllText(path);
-        var recallBlock = source[source.IndexOf("if operation == \"recall\":", StringComparison.Ordinal)..source.IndexOf("if operation == \"list\":", StringComparison.Ordinal)];
+        var recallBlock = source[
+            source.IndexOf("if operation == \"participant_recall\":", StringComparison.Ordinal)..
+            source.IndexOf("if operation == \"participant_mutate\":", StringComparison.Ordinal)];
 
-        Assert.Contains("explain=True", recallBlock, StringComparison.Ordinal);
+        Assert.Contains("search_exact_hybrid", recallBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("self.memory.search", recallBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("extract_entities", recallBlock, StringComparison.Ordinal);
         Assert.Contains("\"semanticScore\"", source, StringComparison.Ordinal);
         Assert.Contains("\"keywordScore\"", source, StringComparison.Ordinal);
+
+        var adapter = File.ReadAllText(FindRepositoryFile(
+            "src", "Modules", "UserMemory", "Tools", "local_qdrant.py"));
+        var hybrid = adapter[
+            adapter.IndexOf("def search_exact_hybrid", StringComparison.Ordinal)..
+            adapter.IndexOf("def set_exact_metadata", StringComparison.Ordinal)];
+        Assert.Contains("internal_limit = max(maximum * 4, 60)", hybrid, StringComparison.Ordinal);
+        Assert.Contains("semantic_score < 0.1", hybrid, StringComparison.Ordinal);
+        Assert.Contains("divisor = 2.0 if bm25_scores else 1.0", hybrid, StringComparison.Ordinal);
+        Assert.Contains("(-float(value[\"score\"]), value[\"id\"])", hybrid, StringComparison.Ordinal);
+        Assert.Contains("unicodedata.normalize(\"NFKC\"", adapter, StringComparison.Ordinal);
+        Assert.Contains("k1 = 1.5", adapter, StringComparison.Ordinal);
+        Assert.Contains("b = 0.75", adapter, StringComparison.Ordinal);
+        Assert.DoesNotContain("lemmatize_for_bm25", adapter, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ParticipantMutationJournal_StagesThenRedactsDeleteContentFailClosed()
+    {
+        var path = FindRepositoryFile("src", "Modules", "UserMemory", "Tools", "mem0_service.py");
+        var source = File.ReadAllText(path);
+        var journal = source[
+            source.IndexOf("class ParticipantMutationJournal:", StringComparison.Ordinal)..
+            source.IndexOf("class ParticipantMutationLease:", StringComparison.Ordinal)];
+        var finalize = journal[
+            journal.IndexOf("def finalize_delete", StringComparison.Ordinal)..];
+        var mutation = source[
+            source.IndexOf("def handle_participant_mutation", StringComparison.Ordinal)..
+            source.IndexOf("def handle_participant_repair", StringComparison.Ordinal)];
+
+        Assert.Contains("_maximum_receipts = 4096", journal, StringComparison.Ordinal);
+        Assert.Contains("_maximum_receipt_bytes = 2 * 1024 * 1024", journal, StringComparison.Ordinal);
+        Assert.Contains("status in {\"committed\", \"rolled_back\"}", journal, StringComparison.Ordinal);
+        Assert.DoesNotContain("tombstone_version", journal, StringComparison.Ordinal);
+        Assert.Contains("receipt.get(\"redacted\") is True", journal, StringComparison.Ordinal);
+        Assert.Contains("now - started > self._rollback_window", journal, StringComparison.Ordinal);
+        Assert.Contains("self._maintain(required_free=1)", journal, StringComparison.Ordinal);
+        Assert.Contains("require_fresh_mutation_request_id", journal, StringComparison.Ordinal);
+        Assert.Contains("outside its 24-hour admission window", journal, StringComparison.Ordinal);
+        Assert.Contains("_quarantine_corrupt_receipt", journal, StringComparison.Ordinal);
+        Assert.Contains("secrets.token_hex(16)", journal, StringComparison.Ordinal);
+        Assert.Contains("os.O_EXCL", journal, StringComparison.Ordinal);
+        Assert.Contains("getattr(os, \"O_NOFOLLOW\", 0)", journal, StringComparison.Ordinal);
+        Assert.Contains("os.path.samestat", journal, StringComparison.Ordinal);
+        Assert.Contains("st_nlink", journal, StringComparison.Ordinal);
+        Assert.Contains("self._content_fields.intersection(persisted)", finalize, StringComparison.Ordinal);
+        Assert.True(
+            finalize.IndexOf("for path, receipt in matching:", StringComparison.Ordinal)
+            < finalize.IndexOf("self._atomic_write(delete_path, tombstone)", StringComparison.Ordinal));
+        Assert.True(
+            mutation.IndexOf("self.bind_expected_record_contract(receipt, metadata)", StringComparison.Ordinal)
+            < mutation.IndexOf("self.memory.add(", StringComparison.Ordinal));
+        var prepared = mutation.IndexOf("\"status\": \"prepared\"", StringComparison.Ordinal);
+        var metadataStart = mutation.IndexOf("metadata = None", prepared, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "self.mutation_journal.save(receipt)",
+            mutation[prepared..metadataStart],
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Persist only after every no-side-effect Add validation succeeds",
+            mutation,
+            StringComparison.Ordinal);
+        Assert.True(
+            mutation.IndexOf("self.require_authenticated_target_actor", metadataStart, StringComparison.Ordinal)
+            < mutation.IndexOf("Persist only after target, access, actor", metadataStart, StringComparison.Ordinal));
+        Assert.True(
+            mutation.IndexOf("Persist only after target, access, actor", metadataStart, StringComparison.Ordinal)
+            < mutation.IndexOf("self.acquire_mutation_lock", metadataStart, StringComparison.Ordinal));
+        Assert.True(
+            mutation.LastIndexOf("receipt[\"status\"] = \"delete_staged\"", StringComparison.Ordinal)
+            < mutation.LastIndexOf("mutationStatus=\"delete_staged\"", StringComparison.Ordinal));
+        Assert.Contains("request.get(\"finalizeDelete\") is True", source, StringComparison.Ordinal);
+        Assert.Contains("deletionFinalized=", source, StringComparison.Ordinal);
+        Assert.Contains("A crash may occur after the active point is deleted", source, StringComparison.Ordinal);
+        Assert.Contains("and receipt.get(\"redacted\") is not True", source, StringComparison.Ordinal);
+        Assert.Contains("if status == \"rollback_started\":", source, StringComparison.Ordinal);
+        Assert.Contains("def resume_started_rollback", source, StringComparison.Ordinal);
+        Assert.Contains("has_other_active_reference", source, StringComparison.Ordinal);
+        Assert.True(
+            source.IndexOf("A crash may occur after the active point is deleted", StringComparison.Ordinal)
+            < source.IndexOf("if status == \"committed\":", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Mem0Transport_DirtiesWorkerBeforeFirstCancellablePipeWrite()
+    {
+        var path = FindRepositoryFile("src", "Modules", "UserMemory", "Mem0ProcessClient.cs");
+        var source = File.ReadAllText(path);
+        var dirty = source.IndexOf("workerPipeMayBeDirty = true;", StringComparison.Ordinal);
+        var write = source.IndexOf("StandardInput.WriteLineAsync", StringComparison.Ordinal);
+        var flush = source.IndexOf("StandardInput.FlushAsync", StringComparison.Ordinal);
+
+        Assert.InRange(dirty, 0, int.MaxValue);
+        Assert.True(dirty < write);
+        Assert.True(dirty < flush);
+        Assert.Contains("if (workerPipeMayBeDirty && process is not null)", source, StringComparison.Ordinal);
+        Assert.Contains("ResetProcess(process);", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -648,26 +801,23 @@ public sealed class UserMemoryArchitectureTests
     [Fact]
     public async Task DeniedNativeMemoryTool_DoesNotExecuteRetryOrMutate()
     {
-        var user = new ActiveUser("person-a", "Alice", false, "explicit-selection");
-        var service = new PersistingMemoryService();
-        var memoryTools = new AliMemoryTools(
-            service,
-            new FakeActiveSession(user),
-            () => new UserMemorySettings(),
-            static () => null);
+        var invoked = false;
         var policy = new AliToolPermissionPolicy(
             static () => null,
             static () => AgentPermissionProfile.LockedDown);
-        var rememberFunction = policy.Apply(AIFunctionFactory.Create(
-            (Func<string, string?, CancellationToken, Task<CoordinatorMemoryWriteResult>>)memoryTools.RememberAsync,
-            AliCapabilityCatalog.RememberCurrentUserName,
-            "Save an explicitly requested memory."));
+        var mutationFunction = policy.Apply(AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<CoordinatorMemoryWriteResult>>)((text, _) =>
+            {
+                invoked = true;
+                return Task.FromResult(new CoordinatorMemoryWriteResult(true, text));
+            }),
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            "Mutate attributable participant memory through the exact approval boundary."));
         using var client = new ScriptedChatClient(
         [
-            ToolCall(AliCapabilityCatalog.RememberCurrentUserName, new Dictionary<string, object?>
+            ToolCall(AliCapabilityCatalog.MutateParticipantMemoryName, new Dictionary<string, object?>
             {
-                ["fact"] = "This must not be saved",
-                ["category"] = "test"
+                ["text"] = "This must not be saved"
             }),
             FinalAnswer("Understood. I did not save that memory because you denied the request.")
         ]);
@@ -681,7 +831,7 @@ public sealed class UserMemoryArchitectureTests
             DisableAgentModeProvider = true,
             ChatOptions = new ChatOptions
             {
-                Tools = [rememberFunction],
+                Tools = [mutationFunction],
                 ToolMode = ChatToolMode.Auto
             }
         });
@@ -703,7 +853,7 @@ public sealed class UserMemoryArchitectureTests
             session,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Null(service.StoredFact);
+        Assert.False(invoked);
         Assert.Contains("did not save", second.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(2, client.CallCount);
         Assert.Empty(second.Messages
@@ -712,7 +862,7 @@ public sealed class UserMemoryArchitectureTests
     }
 
     [Fact]
-    public void McpMemoryPoliciesExposeOnlyCanonicalMemoryToolsAndClassifyThemAsPrivate()
+    public void McpPoliciesDoNotExposeLegacyFileMemoryUnderParticipantToolNames()
     {
         var policies = Ali.Modules.Mcp.McpServerToolCatalog.CreateDefaultPolicies();
         foreach (var name in new[]
@@ -722,13 +872,10 @@ public sealed class UserMemoryArchitectureTests
             AliCapabilityCatalog.ListCurrentUserMemoriesName
         })
         {
-            var policy = Assert.Single(policies, item => item.Name == name);
-            Assert.False(policy.Enabled);
-            Assert.True(policy.ReadsPrivateData);
+            Assert.DoesNotContain(policies, item => item.Name == name);
         }
         Assert.DoesNotContain(policies, item => item.Name == AliCapabilityCatalog.RememberCurrentUserName);
         Assert.DoesNotContain(policies, item => item.Name == AliCapabilityCatalog.CorrectCurrentUserMemoryName);
-        Assert.True(Assert.Single(policies, item => item.Name == AliCapabilityCatalog.ForgetCurrentUserMemoryName).WritesLocalData);
     }
 
     private static string TemporaryRoot()

@@ -44,7 +44,10 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.RunProgrammingGroupChatName,
         AliCapabilityCatalog.RunMagenticOrchestrationName,
         AliCapabilityCatalog.ListRecoverableWorkflowsName,
-        AliCapabilityCatalog.ResumeWorkflowCheckpointName);
+        AliCapabilityCatalog.ResumeWorkflowCheckpointName,
+        AliCapabilityCatalog.RememberCurrentUserName,
+        AliCapabilityCatalog.CorrectCurrentUserMemoryName,
+        AliCapabilityCatalog.ForgetCurrentUserMemoryName);
 
     private static readonly IReadOnlySet<string> ResolvedLanguageTargetToolNames = ToolSet(
         AliCapabilityCatalog.CodingAnalyzeProjectName,
@@ -84,7 +87,7 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.RunAgentSkillScriptName);
 
     private static readonly IReadOnlySet<string> DestructiveToolNames = ToolSet(
-        AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+        AliCapabilityCatalog.MutateParticipantMemoryName,
         AliCapabilityCatalog.FileDeleteName,
         AliCapabilityCatalog.WorkMemoryDeleteName);
 
@@ -179,6 +182,7 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.SearchLocalLibraryName,
         AliCapabilityCatalog.RecallUserMemoryName,
         AliCapabilityCatalog.ListCurrentUserMemoriesName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
         AliCapabilityCatalog.CodingAnalyzeProjectName,
         AliCapabilityCatalog.RunAgentSkillScriptName,
         AliCapabilityCatalog.CodingBuildProjectName,
@@ -223,6 +227,7 @@ public static class AliProductionCapabilityCatalog
 
     private static readonly IReadOnlySet<string> LocalMutationToolNames = ToolSet(
         AliCapabilityCatalog.SearchCurrentWebName,
+        AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
         AliCapabilityCatalog.CreateCalendarEventName,
         AliCapabilityCatalog.WorkMemoryWriteName,
         AliCapabilityCatalog.WorkMemoryReplaceName,
@@ -245,7 +250,9 @@ public static class AliProductionCapabilityCatalog
 
     private static readonly IReadOnlySet<string> ChangesSystemStateToolNames = ToolSet(
         AliCapabilityCatalog.CreateCalendarEventName,
-        AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+        AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+        AliCapabilityCatalog.MutateParticipantMemoryName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
         AliCapabilityCatalog.SetAgentModeName,
         AliCapabilityCatalog.ArduinoInstallCoreName,
         AliCapabilityCatalog.ArduinoInstallLibraryName,
@@ -260,7 +267,8 @@ public static class AliProductionCapabilityCatalog
 
     private static readonly IReadOnlySet<string> AdditionalProcessStartingToolNames = ToolSet(
         AliCapabilityCatalog.CreateCalendarEventName,
-        AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+        AliCapabilityCatalog.MutateParticipantMemoryName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
         AliCapabilityCatalog.CodingFormatProjectName,
         AliCapabilityCatalog.DotNetCreateProjectName,
         AliCapabilityCatalog.ArduinoCreateCompileName,
@@ -284,6 +292,10 @@ public static class AliProductionCapabilityCatalog
     private static readonly IReadOnlySet<string> AdditionalLocalReadingToolNames = ToolSet(
         AliCapabilityCatalog.SearchCurrentWebName,
         AliCapabilityCatalog.ResearchWebName,
+        AliCapabilityCatalog.RecallUserMemoryName,
+        AliCapabilityCatalog.MutateParticipantMemoryName,
+        AliCapabilityCatalog.ListCurrentUserMemoriesName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
         AliCapabilityCatalog.FileListName,
         AliCapabilityCatalog.FileSearchName,
         AliCapabilityCatalog.FileReplaceLinesName,
@@ -314,13 +326,15 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.SearchLocalLibraryName,
         AliCapabilityCatalog.RecallUserMemoryName,
         AliCapabilityCatalog.ListCurrentUserMemoriesName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
         AliCapabilityCatalog.CodingAnalyzeProjectName,
         AliCapabilityCatalog.RunAgentSkillScriptName);
 
     private static readonly IReadOnlySet<string> AdditionalNetworkUsingToolNames = ToolSet(
         AliCapabilityCatalog.RecallUserMemoryName,
-        AliCapabilityCatalog.ForgetCurrentUserMemoryName,
-        AliCapabilityCatalog.ListCurrentUserMemoriesName);
+        AliCapabilityCatalog.MutateParticipantMemoryName,
+        AliCapabilityCatalog.ListCurrentUserMemoriesName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName);
 
     public static IReadOnlySet<string> KnownToolNames { get; } =
         Definitions.Keys.ToFrozenSet(StringComparer.Ordinal);
@@ -623,7 +637,9 @@ public static class AliProductionCapabilityCatalog
         AddGroup(groups, CapabilityGroupIds.PersonalContextAndMemory,
             AliCapabilityCatalog.GetActiveUserProfileName,
             AliCapabilityCatalog.RecallUserMemoryName,
-            AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
             AliCapabilityCatalog.ListCurrentUserMemoriesName,
             AliCapabilityCatalog.GetAssistantIdentityName,
             AliCapabilityCatalog.GetCurrentLocalTimeName);

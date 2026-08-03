@@ -167,18 +167,57 @@ public sealed class OpenAiCompatibleEmbeddingClient(HttpClient httpClient)
         string input,
         CancellationToken cancellationToken = default)
     {
+        return await CreateEmbeddingCoreAsync(
+            configuration,
+            input,
+            mem0CompatibleRequest: false,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<LocalEmbeddingResult> CreateMem0CompatibleEmbeddingAsync(
+        LocalEmbeddingConfiguration configuration,
+        string input,
+        CancellationToken cancellationToken = default)
+    {
+        return await CreateEmbeddingCoreAsync(
+            configuration,
+            input,
+            mem0CompatibleRequest: true,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<LocalEmbeddingResult> CreateEmbeddingCoreAsync(
+        LocalEmbeddingConfiguration configuration,
+        string input,
+        bool mem0CompatibleRequest,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(input);
 
         try
         {
+            var requestBody = mem0CompatibleRequest
+                ? JsonSerializer.Serialize(new
+                {
+                    model = configuration.Model,
+                    input = new[] { input.Replace("\n", " ", StringComparison.Ordinal) },
+                    encoding_format = "float"
+                }, JsonOptions)
+                : JsonSerializer.Serialize(new { model = configuration.Model, input }, JsonOptions);
             using var request = new HttpRequestMessage(HttpMethod.Post, configuration.Endpoint)
             {
                 Content = new StringContent(
-                    JsonSerializer.Serialize(new { model = configuration.Model, input }, JsonOptions),
+                    requestBody,
                     Encoding.UTF8,
                     "application/json")
             };
+            if (mem0CompatibleRequest)
+            {
+                request.Headers.Authorization = new(
+                    "Bearer",
+                    "ali-local-only");
+            }
             using var response = await httpClient
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);

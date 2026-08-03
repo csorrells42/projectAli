@@ -62,7 +62,8 @@ public sealed class ActiveUserSession : IActiveUserSession
         ActiveUser? changed = null;
         lock (_sync)
         {
-            var previousId = _current?.StableId;
+            var previousUser = _current;
+            var previousAvailable = _available.ToArray();
             var previousRequiresSelection = _current is not null && _requiresSelection;
             var configured = _identityProfiles.GetIdentityReviewItems()
                 .Where(item => item.IsRegisteredUser && !string.IsNullOrWhiteSpace(item.IdentityId))
@@ -102,8 +103,9 @@ public sealed class ActiveUserSession : IActiveUserSession
             {
                 SaveState(selected);
             }
-            if (!string.Equals(previousId, selected.StableId, StringComparison.OrdinalIgnoreCase)
-                || previousRequiresSelection != _requiresSelection)
+            if (previousUser != selected
+                || previousRequiresSelection != _requiresSelection
+                || !SameSecurityRegistry(previousAvailable, configured))
             {
                 _selectionRevision++;
                 changed = selected;
@@ -114,6 +116,25 @@ public sealed class ActiveUserSession : IActiveUserSession
         {
             Changed?.Invoke(this, changed);
         }
+    }
+
+    private static bool SameSecurityRegistry(
+        IReadOnlyList<ActiveUser> left,
+        IReadOnlyList<ActiveUser> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+        var orderedLeft = left
+            .Select(user => user.Normalize())
+            .OrderBy(user => user.StableId, StringComparer.Ordinal)
+            .ToArray();
+        var orderedRight = right
+            .Select(user => user.Normalize())
+            .OrderBy(user => user.StableId, StringComparer.Ordinal)
+            .ToArray();
+        return orderedLeft.SequenceEqual(orderedRight);
     }
 
     public ActiveUser Select(string stableId)

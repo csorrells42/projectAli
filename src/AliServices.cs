@@ -50,6 +50,7 @@ public sealed class AliServices
         McpServerHost mcpServer,
         QdrantServiceManager qdrant,
         IActiveUserSession activeUsers,
+        ParticipantPresenceSnapshotBridge participantPresence,
         Mem0UserMemoryService userMemories,
         AgentToolPermissionStore toolPermissions,
         AliWorkstationFileAccess fileAccess,
@@ -77,6 +78,7 @@ public sealed class AliServices
         McpServer = mcpServer;
         Qdrant = qdrant;
         ActiveUsers = activeUsers;
+        ParticipantPresence = participantPresence;
         UserMemories = userMemories;
         ToolPermissions = toolPermissions;
         FileAccess = fileAccess;
@@ -148,6 +150,8 @@ public sealed class AliServices
     public QdrantServiceManager Qdrant { get; }
 
     public IActiveUserSession ActiveUsers { get; }
+
+    internal ParticipantPresenceSnapshotBridge ParticipantPresence { get; }
 
     public Mem0UserMemoryService UserMemories { get; }
 
@@ -325,20 +329,31 @@ public sealed class AliServices
         var activeUsers = new ActiveUserSession(
             dataRoot,
             Path.Combine(userDataRoot, "Vision"));
+        var participantPresence = new ParticipantPresenceSnapshotBridge();
+        var participantReceiptAuthority = new ParticipantMemoryReceiptAuthority();
+        var participantRosterAuthority = new SelectedParticipantRosterAuthority(
+            activeUsers,
+            profile.ProfileId,
+            participantPresence);
+        var participantAuthentication =
+            new WindowsCredentialParticipantAuthenticationProvider(
+                activeUsers,
+                participantReceiptAuthority,
+                new WindowsCredentialVerifier());
         var mem0Client = new Mem0ProcessClient(
             userDataRoot,
             qdrant,
             () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-            () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot));
+            () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot),
+            new ProbedParticipantMemoryEmbeddingIdentitySource(runtimeHttpClient));
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
-        var initialUserSelection = activeUsers.CaptureSelectionSnapshot();
-        if (initialUserSelection.IsResolved)
-        {
-            userMemories.BeginWarmup(initialUserSelection.SelectedUser!);
-        }
+            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+            participantReceiptAuthority,
+            participantRosterAuthority,
+            activeUsers,
+            participantAuthentication);
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
         var fileAccess = AliWorkstationFileAccess.CreateDefault(
             userDataRoot,
@@ -372,10 +387,8 @@ public sealed class AliServices
             memories,
             reminders,
             profile,
-            userMemories,
-            activeUsers,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-            codingModule);
+            codingModule,
+            fileAccess);
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(CreateSpeechToTextOptions(dataRoot, voiceSettings));
@@ -409,7 +422,10 @@ public sealed class AliServices
                 semanticToolCatalog,
                 shadowObserver,
                 dataRoot,
-                conversations);
+                conversations,
+                userMemories,
+                participantRosterAuthority,
+                participantReceiptAuthority);
             var capabilitySettings = coordinator.CapabilitySettings
                 ?? throw new InvalidOperationException(
                     "Production capability settings were not initialized.");
@@ -442,6 +458,7 @@ public sealed class AliServices
                 mcpServer,
                 qdrant,
                 activeUsers,
+                participantPresence,
                 userMemories,
                 toolPermissions,
                 fileAccess,

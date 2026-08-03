@@ -91,6 +91,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         ITurnPublicationReconciler? publicationReconciler = null,
         EffectNormalizationRegistry? effectNormalizations = null,
         TargetStateRegistry? targetStates = null,
+        AliDurableEffectAdapterRegistry? durableEffects = null,
         AliFrameworkToolOutcomeSidecar? toolOutcomes = null)
     {
         _modelClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
@@ -105,7 +106,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             _assistantProfile.AssistantName,
             publicationReconciler,
             effectNormalizations ?? AliProductionEffectNormalizations.Create(),
-            targetStates ?? AliProductionTargetStateAdapters.Create(fileAccess));
+            targetStates ?? AliProductionTargetStateAdapters.Create(fileAccess),
+            durableEffects ?? AliProductionDurableEffectAdapters.Create());
         try
         {
             _baseTools = catalog.Tools.ToArray();

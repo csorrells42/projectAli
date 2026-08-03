@@ -22,7 +22,6 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
     private readonly HttpClient _runtimeHttpClient;
     private readonly HttpClient _internetHttpClient;
     private readonly QdrantServiceManager _qdrant;
-    private readonly Mem0UserMemoryService _userMemories;
     private readonly AliCodingModule _codingModule;
     private bool _disposed;
 
@@ -31,14 +30,12 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
         HttpClient runtimeHttpClient,
         HttpClient internetHttpClient,
         QdrantServiceManager qdrant,
-        Mem0UserMemoryService userMemories,
         AliCodingModule codingModule)
     {
         Tools = tools;
         _runtimeHttpClient = runtimeHttpClient;
         _internetHttpClient = internetHttpClient;
         _qdrant = qdrant;
-        _userMemories = userMemories;
         _codingModule = codingModule;
     }
 
@@ -86,15 +83,6 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
         var activeUsers = new ActiveUserSession(
             dataRoot,
             Path.Combine(userDataRoot, "Vision"));
-        var mem0Client = new Mem0ProcessClient(
-            userDataRoot,
-            qdrant,
-            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-            () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot));
-        var userMemories = new Mem0UserMemoryService(
-            mem0Client,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot));
         var toolPermissions = new AgentToolPermissionStore(dataRoot);
         var fileAccess = CreateFileAccess(
             userDataRoot,
@@ -120,9 +108,6 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             memories,
             reminders,
             profile,
-            userMemories,
-            activeUsers,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
             codingModule,
             fileAccess);
         var capabilitySettings = toolFactory.CreateCapabilitySettingsOwner(dataRoot, settings);
@@ -138,7 +123,6 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             runtimeHttpClient,
             internetHttpClient,
             qdrant,
-            userMemories,
             codingModule);
     }
 
@@ -179,7 +163,6 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
 
         _disposed = true;
         await _codingModule.DisposeAsync().ConfigureAwait(false);
-        await _userMemories.DisposeAsync().ConfigureAwait(false);
         await _qdrant.DisposeAsync().ConfigureAwait(false);
         _internetHttpClient.Dispose();
         _runtimeHttpClient.Dispose();
