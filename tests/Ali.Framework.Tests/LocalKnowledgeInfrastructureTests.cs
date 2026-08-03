@@ -73,8 +73,12 @@ public sealed class LocalKnowledgeInfrastructureTests
         {
             settings with { EmbeddingProvider = "provider-b" },
             settings with { EmbeddingEndpoint = "http://127.0.0.1:1234/other/embeddings" },
-            settings with { EmbeddingModel = "model-b" },
-            settings with { EmbeddingDimensions = 1024 },
+             settings with { EmbeddingModel = "model-b" },
+             settings with { EmbeddingDimensions = 1024 },
+             settings with { EmbeddingProtocolIdentity = "protocol-b" },
+             settings with { EmbeddingContextTokens = 16_384 },
+             settings with { EmbeddingDocumentPromptMode = Ali.Modules.Embeddings.EmbeddingPromptMode.Plain },
+             settings with { EmbeddingQueryPromptMode = Ali.Modules.Embeddings.EmbeddingPromptMode.Plain },
             settings with { QdrantHost = "localhost" },
             settings with { QdrantHttpPort = 7333 },
               settings with { QdrantGrpcPort = 7334 },
@@ -206,6 +210,7 @@ public sealed class LocalKnowledgeInfrastructureTests
         {
             RootDirectory = library,
             EmbeddingEndpoint = embeddingServer.Endpoint,
+            EmbeddingModel = "fake-test-embedding-model",
             EmbeddingDimensions = 3,
             QdrantHttpPort = httpPort,
             QdrantGrpcPort = grpcPort,

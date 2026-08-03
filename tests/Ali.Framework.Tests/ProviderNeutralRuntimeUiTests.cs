@@ -15,6 +15,10 @@ public sealed class ProviderNeutralRuntimeUiTests
         Assert.Contains("EmbeddingProviderChoices", xaml, StringComparison.Ordinal);
         Assert.Contains("SelectedItem=\"{Binding EmbeddingProvider}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("EmbeddingDimensions", xaml, StringComparison.Ordinal);
+        Assert.Contains("EmbeddingContextTokens", xaml, StringComparison.Ordinal);
+        Assert.Contains("EmbeddingDocumentPromptMode", xaml, StringComparison.Ordinal);
+        Assert.Contains("EmbeddingQueryPromptMode", xaml, StringComparison.Ordinal);
+        Assert.Contains("SemanticToolRetrievalEnabled", xaml, StringComparison.Ordinal);
         Assert.Contains("TestEmbeddingCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("Mem0, semantic tool retrieval, and local knowledge", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Mem0 uses GPT-OSS through Lemonade", xaml, StringComparison.Ordinal);
@@ -26,8 +30,19 @@ public sealed class ProviderNeutralRuntimeUiTests
         Assert.DoesNotContain("EmbeddingEndpoint = EmbeddingEndpoint.Trim()", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("EmbeddingModel = EmbeddingModel.Trim()", viewModel, StringComparison.Ordinal);
         Assert.Contains("RequireSharedEmbeddingConfiguration(settings)", viewModel, StringComparison.Ordinal);
+        Assert.Contains("ProbeConfiguredContextAsync(configuration)", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("RuntimeState = result.Success", viewModel, StringComparison.Ordinal);
         Assert.Contains("HandleEmbeddingError", viewModel, StringComparison.Ordinal);
+
+        var embeddingRuntime = File.ReadAllText(FindRepositoryFile(
+            "src", "Modules", "Embeddings", "LocalEmbeddingRuntime.cs"));
+        Assert.Contains("search_document: ", embeddingRuntime, StringComparison.Ordinal);
+        Assert.Contains("search_query: ", embeddingRuntime, StringComparison.Ordinal);
+        Assert.DoesNotContain("nomic-embed-text", embeddingRuntime, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("127.0.0.1:1234", embeddingRuntime, StringComparison.Ordinal);
+        Assert.DoesNotContain("127.0.0.1:11434", embeddingRuntime, StringComparison.Ordinal);
+        Assert.DoesNotContain("127.0.0.1:8080", embeddingRuntime, StringComparison.Ordinal);
+        Assert.DoesNotContain("127.0.0.1:13305", embeddingRuntime, StringComparison.Ordinal);
     }
 
     [Fact]

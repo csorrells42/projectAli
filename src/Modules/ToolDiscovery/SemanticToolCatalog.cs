@@ -250,6 +250,60 @@ internal sealed class RegistryOnlySemanticToolCatalog : ISemanticToolCatalog
     }
 }
 
+internal sealed class SettingsAwareSemanticToolCatalog : ISemanticToolCatalog
+{
+    private readonly QdrantSemanticToolCatalog _semanticCatalog;
+    private readonly Func<LocalVectorLibrarySettings> _settings;
+
+    internal SettingsAwareSemanticToolCatalog(
+        HttpClient httpClient,
+        QdrantServiceManager qdrant,
+        Func<LocalVectorLibrarySettings> settings)
+    {
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _semanticCatalog = new QdrantSemanticToolCatalog(httpClient, qdrant, settings);
+    }
+
+    public Task<SemanticToolSelection> SelectAsync(
+        string need,
+        IReadOnlyList<AIFunctionDeclaration> liveTools,
+        IReadOnlyCollection<string> retainedToolNames,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var settings = _settings();
+        if (settings.SemanticToolRetrievalEnabled)
+        {
+            return _semanticCatalog.SelectAsync(
+                need,
+                liveTools,
+                retainedToolNames,
+                cancellationToken);
+        }
+
+        var buckets = LiveSemanticToolDirectory.CreateBuckets(liveTools);
+        return Task.FromResult(SafeSemanticToolFallback.Create(
+            liveTools,
+            buckets,
+            retainedToolNames,
+            need,
+            LiveSemanticToolDirectory.BuildBoundedDirectoryFor(liveTools),
+            "Semantic tool retrieval is disabled in settings.",
+            requiresAttention: false));
+    }
+
+    public Task<SemanticToolDiscoveryResult> DiscoverAsync(
+        string need,
+        CancellationToken cancellationToken) =>
+        _settings().SemanticToolRetrievalEnabled
+            ? _semanticCatalog.DiscoverAsync(need, cancellationToken)
+            : Task.FromResult(new SemanticToolDiscoveryResult(
+                need,
+                [],
+                [],
+                "Semantic tool retrieval is disabled in settings."));
+}
+
 /// <summary>
 /// Uses Ali's explicit local embedding endpoint and a separate Qdrant collection to propose a compact
 /// set of tool drawers. Vector similarity generates candidates only; Ali's model remains the
@@ -337,7 +391,11 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                 fingerprint,
                 settings,
                 cancellationToken).ConfigureAwait(false);
-            var query = await CreateEmbeddingAsync(need, settings, cancellationToken).ConfigureAwait(false);
+            var query = await CreateEmbeddingAsync(
+                need,
+                EmbeddingInputRole.RetrievalQuery,
+                settings,
+                cancellationToken).ConfigureAwait(false);
             if (query is null)
             {
                 return SafeSemanticToolFallback.Create(
@@ -445,7 +503,11 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
             var vectors = new List<float[]>(buckets.Count);
             foreach (var bucket in buckets)
             {
-                var vector = await CreateEmbeddingAsync(BuildEmbeddingText(bucket), settings, cancellationToken)
+                var vector = await CreateEmbeddingAsync(
+                        BuildEmbeddingText(bucket),
+                        EmbeddingInputRole.StoredDocument,
+                        settings,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 if (vector is null)
                 {
@@ -480,9 +542,12 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                     ["description"] = bucket.Description,
                     ["registry_fingerprint"] = fingerprint,
                     ["embedding_provider"] = settings.EmbeddingProvider,
-                    ["embedding_endpoint"] = settings.EmbeddingEndpoint,
-                    ["embedding_model"] = settings.EmbeddingModel,
-                    ["embedding_dimensions"] = settings.EmbeddingDimensions
+                     ["embedding_endpoint"] = settings.EmbeddingEndpoint,
+                     ["embedding_model"] = settings.EmbeddingModel,
+                     ["embedding_dimensions"] = settings.EmbeddingDimensions,
+                     ["embedding_protocol"] = settings.EmbeddingProtocolIdentity,
+                     ["embedding_context_tokens"] = settings.EmbeddingContextTokens,
+                     ["embedding_prompt_mode"] = settings.EmbeddingDocumentPromptMode.ToString()
                 }
             }).ToArray();
             await client.UpsertAsync(collectionName, points, wait: true, cancellationToken: cancellationToken)
@@ -498,6 +563,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
 
     private async Task<float[]?> CreateEmbeddingAsync(
         string input,
+        EmbeddingInputRole role,
         LocalVectorLibrarySettings settings,
         CancellationToken cancellationToken)
     {
@@ -507,7 +573,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
             var vectors = new List<float[]>(chunks.Count);
             foreach (var chunk in chunks)
             {
-                var chunkVector = await CreateSingleEmbeddingAsync(chunk, settings, cancellationToken)
+                var chunkVector = await CreateSingleEmbeddingAsync(chunk, role, settings, cancellationToken)
                     .ConfigureAwait(false);
                 if (chunkVector is null)
                 {
@@ -518,12 +584,13 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
             return AverageVectors(vectors);
         }
 
-        return await CreateSingleEmbeddingAsync(chunks[0], settings, cancellationToken)
+        return await CreateSingleEmbeddingAsync(chunks[0], role, settings, cancellationToken)
             .ConfigureAwait(false);
     }
 
     private async Task<float[]?> CreateSingleEmbeddingAsync(
         string input,
+        EmbeddingInputRole role,
         LocalVectorLibrarySettings settings,
         CancellationToken cancellationToken)
     {
@@ -532,6 +599,10 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                 settings.EmbeddingEndpoint,
                 settings.EmbeddingModel,
                 settings.EmbeddingDimensions,
+                settings.EmbeddingProtocolIdentity,
+                settings.EmbeddingContextTokens,
+                settings.EmbeddingDocumentPromptMode,
+                settings.EmbeddingQueryPromptMode,
                 out var configuration,
                 out var failure))
         {
@@ -539,7 +610,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         }
 
         var result = await _embeddingClient
-            .CreateEmbeddingAsync(configuration!, input, cancellationToken)
+            .CreateEmbeddingAsync(configuration!, input, role, cancellationToken)
             .ConfigureAwait(false);
         if (!result.Success || result.Vector is null)
         {
@@ -644,7 +715,9 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         var source = string.Join("\n", liveTools.OrderBy(tool => tool.Name, StringComparer.Ordinal)
                 .Select(CapabilitySchemaIdentity.Calculate))
             + "\n" + string.Join("\n", buckets.Select(BuildEmbeddingText))
-            + $"\n{settings.EmbeddingProvider}|{settings.EmbeddingEndpoint}|{settings.EmbeddingModel}|{settings.EmbeddingDimensions}";
+            + $"\n{settings.EmbeddingProvider}|{settings.EmbeddingEndpoint}|{settings.EmbeddingModel}|{settings.EmbeddingDimensions}"
+            + $"|{settings.EmbeddingProtocolIdentity}|{settings.EmbeddingContextTokens}"
+            + $"|{settings.EmbeddingDocumentPromptMode}|{settings.EmbeddingQueryPromptMode}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
     }
 

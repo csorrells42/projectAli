@@ -253,12 +253,9 @@ public sealed class MainWindowViewModel : ObservableObject
         ResourceMeters.Add(RamMeter);
         ResourceMeters.Add(GpuMeter);
         ResourceMeters.Add(VramMeter);
-        StackComponents.Add(_memoryStackStatus);
-        StackComponents.Add(_ragStackStatus);
         StackComponents.Add(_speechStackStatus);
-        StackComponents.Add(_mcpStackStatus);
-        StackComponents.Add(_bridgeStackStatus);
         _services.Qdrant.StatusChanged += (_, _) => RefreshStackComponentsOnUiThread();
+        McpSettings.PropertyChanged += (_, _) => RefreshStackComponentsOnUiThread();
         McpServerSettings.PropertyChanged += (_, _) => RefreshStackComponentsOnUiThread();
         ConversationBridgeSettings.PropertyChanged += (_, _) => RefreshStackComponentsOnUiThread();
         _services.Orchestrator.BackgroundActivity += OnBackgroundAgentActivity;
@@ -7498,40 +7495,41 @@ public sealed class MainWindowViewModel : ObservableObject
     private void RefreshStackComponents()
     {
         var memorySettings = _services.LoadUserMemorySettings();
-        if (!memorySettings.Enabled)
-        {
-            _memoryStackStatus.Update("Off", "Memory is intentionally disabled.", MediaBrushes.Gray);
-        }
-        else if (_userMemoryRuntimeStatus is { RuntimeAvailable: true } memoryStatus)
+        var ragSettings = _services.LoadLocalVectorLibrarySettings();
+        var qdrantNeeded = memorySettings.Enabled
+            || ragSettings.Enabled
+            || ragSettings.SemanticToolRetrievalEnabled;
+        SynchronizeVisibleStackComponents(
+            memorySettings.Enabled,
+            qdrantNeeded,
+            McpSettings.Enabled || McpServerSettings.Enabled,
+            ConversationBridgeSettings.Enabled);
+
+        if (memorySettings.Enabled && _userMemoryRuntimeStatus is { RuntimeAvailable: true } memoryStatus)
         {
             _memoryStackStatus.Update("Ready", $"Memory ready: {memoryStatus.Message}", MediaBrushes.LimeGreen);
         }
-        else if (_userMemoryRuntimeStatus is { } failedMemoryStatus)
+        else if (memorySettings.Enabled && _userMemoryRuntimeStatus is { } failedMemoryStatus)
         {
             _memoryStackStatus.Update("Unavailable", failedMemoryStatus.Message, MediaBrushes.OrangeRed);
         }
-        else
+        else if (memorySettings.Enabled)
         {
             _memoryStackStatus.Update("Checking", "Memory is starting and its health check is still running.", MediaBrushes.Gold);
         }
 
-        var ragSettings = _services.LoadLocalVectorLibrarySettings();
-        var qdrantNeeded = memorySettings.Enabled || ragSettings.Enabled;
         var qdrantStatus = _services.Qdrant.Status;
-        if (!qdrantNeeded)
-        {
-            _ragStackStatus.Update("Off", "RAG and per-user vector memory are intentionally disabled.", MediaBrushes.Gray);
-        }
-        else if (qdrantStatus.IsReachable)
+        if (qdrantNeeded && qdrantStatus.IsReachable)
         {
             _ragStackStatus.Update("Ready", $"Qdrant ready: {qdrantStatus.Message}", MediaBrushes.LimeGreen);
         }
-        else if (qdrantStatus.State.Contains("start", StringComparison.OrdinalIgnoreCase)
-                 || _userMemoryRuntimeStatus is null)
+        else if (qdrantNeeded && (qdrantStatus.State.Contains("start", StringComparison.OrdinalIgnoreCase)
+                  || _userMemoryRuntimeStatus is null)
+        )
         {
             _ragStackStatus.Update("Starting", qdrantStatus.Message, MediaBrushes.Gold);
         }
-        else
+        else if (qdrantNeeded)
         {
             _ragStackStatus.Update("Unavailable", qdrantStatus.Message, MediaBrushes.OrangeRed);
         }
@@ -7550,38 +7548,61 @@ public sealed class MainWindowViewModel : ObservableObject
             _speechStackStatus.Update("Ready", $"{VoiceStatus}\nSTT: {SttStatus}\nTTS: {TtsStatus}", MediaBrushes.LimeGreen);
         }
 
-        if (!McpServerSettings.Enabled)
-        {
-            _mcpStackStatus.Update("Off", "Ali's MCP server is intentionally disabled. MCP client tools remain available on demand when configured.", MediaBrushes.Gray);
-        }
-        else if (McpServerSettings.IsRunning)
+        if (McpServerSettings.Enabled && McpServerSettings.IsRunning)
         {
             _mcpStackStatus.Update("Ready", $"MCP server ready at {McpServerSettings.Endpoint}. {McpServerSettings.StatusText}", MediaBrushes.LimeGreen);
         }
-        else if (McpServerSettings.RuntimeState.Contains("start", StringComparison.OrdinalIgnoreCase))
+        else if (McpServerSettings.Enabled
+                 && McpServerSettings.RuntimeState.Contains("start", StringComparison.OrdinalIgnoreCase))
         {
             _mcpStackStatus.Update("Starting", McpServerSettings.StatusText, MediaBrushes.Gold);
         }
-        else
+        else if (McpServerSettings.Enabled)
         {
             _mcpStackStatus.Update("Unavailable", McpServerSettings.StatusText, MediaBrushes.OrangeRed);
         }
-
-        if (!ConversationBridgeSettings.Enabled)
+        else if (McpSettings.Enabled)
         {
-            _bridgeStackStatus.Update("Off", "The local debugging bridge is intentionally disabled.", MediaBrushes.Gray);
+            _mcpStackStatus.Update("Configured", McpSettings.StatusText, MediaBrushes.LimeGreen);
         }
-        else if (ConversationBridgeSettings.IsRunning)
+
+        if (ConversationBridgeSettings.Enabled && ConversationBridgeSettings.IsRunning)
         {
             _bridgeStackStatus.Update("Ready", $"Debug bridge ready at {ConversationBridgeSettings.Endpoint}. {ConversationBridgeSettings.StatusText}", MediaBrushes.LimeGreen);
         }
-        else if (ConversationBridgeSettings.RuntimeState.Contains("start", StringComparison.OrdinalIgnoreCase))
+        else if (ConversationBridgeSettings.Enabled
+                 && ConversationBridgeSettings.RuntimeState.Contains("start", StringComparison.OrdinalIgnoreCase))
         {
             _bridgeStackStatus.Update("Starting", ConversationBridgeSettings.StatusText, MediaBrushes.Gold);
         }
-        else
+        else if (ConversationBridgeSettings.Enabled)
         {
             _bridgeStackStatus.Update("Unavailable", ConversationBridgeSettings.StatusText, MediaBrushes.OrangeRed);
+        }
+    }
+
+    private void SynchronizeVisibleStackComponents(
+        bool memoryEnabled,
+        bool ragEnabled,
+        bool mcpEnabled,
+        bool bridgeEnabled)
+    {
+        var desired = new List<StackComponentStatusViewModel>(5);
+        if (memoryEnabled) desired.Add(_memoryStackStatus);
+        if (ragEnabled) desired.Add(_ragStackStatus);
+        desired.Add(_speechStackStatus);
+        if (mcpEnabled) desired.Add(_mcpStackStatus);
+        if (bridgeEnabled) desired.Add(_bridgeStackStatus);
+
+        if (StackComponents.SequenceEqual(desired))
+        {
+            return;
+        }
+
+        StackComponents.Clear();
+        foreach (var component in desired)
+        {
+            StackComponents.Add(component);
         }
     }
 

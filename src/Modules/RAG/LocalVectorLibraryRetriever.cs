@@ -112,7 +112,11 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
                 warnings,
                 cancellationToken).ConfigureAwait(false);
 
-            var queryVector = await CreateEmbeddingAsync(searchText, warnings, cancellationToken).ConfigureAwait(false);
+            var queryVector = await CreateEmbeddingAsync(
+                searchText,
+                EmbeddingInputRole.RetrievalQuery,
+                warnings,
+                cancellationToken).ConfigureAwait(false);
             if (queryVector is null)
             {
                 return new(lexical, warnings, plan.RequiresSourceGrounding);
@@ -497,6 +501,10 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         AppendIdentityValue(identity, settings.EmbeddingEndpoint);
         AppendIdentityValue(identity, settings.EmbeddingModel);
         AppendIdentityValue(identity, settings.EmbeddingDimensions.ToString(CultureInfo.InvariantCulture));
+        AppendIdentityValue(identity, settings.EmbeddingProtocolIdentity);
+        AppendIdentityValue(identity, settings.EmbeddingContextTokens.ToString(CultureInfo.InvariantCulture));
+        AppendIdentityValue(identity, settings.EmbeddingDocumentPromptMode.ToString());
+        AppendIdentityValue(identity, settings.EmbeddingQueryPromptMode.ToString());
         AppendIdentityValue(identity, settings.QdrantHost);
         AppendIdentityValue(identity, settings.QdrantHttpPort.ToString(CultureInfo.InvariantCulture));
         AppendIdentityValue(identity, settings.QdrantGrpcPort.ToString(CultureInfo.InvariantCulture));
@@ -599,7 +607,11 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         var vectors = new List<float[]>(chunks.Length);
         foreach (var chunk in chunks)
         {
-            var vector = await CreateEmbeddingAsync(chunk.Text, warnings, cancellationToken).ConfigureAwait(false);
+            var vector = await CreateEmbeddingAsync(
+                chunk.Text,
+                EmbeddingInputRole.StoredDocument,
+                warnings,
+                cancellationToken).ConfigureAwait(false);
             if (vector is null)
             {
                 return false;
@@ -651,9 +663,12 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
                 ["chunk_index"] = index,
                 ["file_length"] = info.Length,
                 ["last_write_ticks"] = info.LastWriteTimeUtc.Ticks,
-                ["embedding_provider"] = _settings.EmbeddingProvider,
-                ["embedding_model"] = _settings.EmbeddingModel,
-                ["embedding_dimensions"] = _settings.EmbeddingDimensions
+                 ["embedding_provider"] = _settings.EmbeddingProvider,
+                 ["embedding_model"] = _settings.EmbeddingModel,
+                 ["embedding_dimensions"] = _settings.EmbeddingDimensions,
+                 ["embedding_protocol"] = _settings.EmbeddingProtocolIdentity,
+                 ["embedding_context_tokens"] = _settings.EmbeddingContextTokens,
+                 ["embedding_prompt_mode"] = _settings.EmbeddingDocumentPromptMode.ToString()
             }
         }).ToArray();
         try
@@ -667,7 +682,11 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         return true;
     }
 
-    private async Task<float[]?> CreateEmbeddingAsync(string input, List<string> warnings, CancellationToken cancellationToken)
+    private async Task<float[]?> CreateEmbeddingAsync(
+        string input,
+        EmbeddingInputRole role,
+        List<string> warnings,
+        CancellationToken cancellationToken)
     {
         if (!TryGetEmbeddingConfiguration(out var configuration, out var configurationFailure))
         {
@@ -676,7 +695,7 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         }
 
         var result = await _embeddingClient
-            .CreateEmbeddingAsync(configuration!, input, cancellationToken)
+            .CreateEmbeddingAsync(configuration!, input, role, cancellationToken)
             .ConfigureAwait(false);
         if (!result.Success || result.Vector is null)
         {
@@ -694,6 +713,10 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
             _settings.EmbeddingEndpoint,
             _settings.EmbeddingModel,
             _settings.EmbeddingDimensions,
+            _settings.EmbeddingProtocolIdentity,
+            _settings.EmbeddingContextTokens,
+            _settings.EmbeddingDocumentPromptMode,
+            _settings.EmbeddingQueryPromptMode,
             out configuration,
             out failure);
 

@@ -356,19 +356,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 }
             }
 
-            var visionProbeSucceeded = false;
-            if (_options.SupportsVision)
-            {
-                var visionText = await SendNonStreamingPromptAsync(
-                    BuildVisionProbeRequest(),
-                    cancellationToken).ConfigureAwait(false);
-
-                if (string.IsNullOrWhiteSpace(visionText))
-                {
-                    return FailureHealth(started, "Tiny vision prompt returned an empty response.", streamingSupported);
-                }
-                visionProbeSucceeded = true;
-            }
+            var visionProbe = await ProbeVisionCapabilityAdvisoryAsync(cancellationToken)
+                .ConfigureAwait(false);
 
             if (!await CheckCancellationAsync().ConfigureAwait(false))
             {
@@ -378,10 +367,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             var capabilityProfile = _options.CapabilityProbeEnabled
                 ? await ProbeCapabilityProfileAsync(
                         streamingSupported,
-                        visionProbeSucceeded,
+                        visionProbe,
                         cancellationToken)
                     .ConfigureAwait(false)
-                : CreateUnprobedCapabilityProfile(streamingSupported, visionProbeSucceeded);
+                : CreateUnprobedCapabilityProfile(streamingSupported, visionProbe);
             _capabilityProfiles?.Save(capabilityProfile);
             Volatile.Write(ref _capabilityProfile, capabilityProfile);
 
@@ -402,6 +391,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             ActiveProfile = _options.ToModelProfile(isLastKnownGood: true) with
             {
                 SupportsToolCalls = nativeToolsEnabled,
+                SupportsVision = _options.SupportsVision && !visionProbe.TypedStabilityRefusal,
                 ProtocolIdentity = capabilityProfile.ProtocolIdentity,
                 CapabilityProfileIdentity = capabilityProfile.Identity,
                 TokenizerIdentity = capabilityProfile.TokenizerIdentity,
@@ -416,9 +406,16 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             var engineeringProtocol = capabilityProfile.IsEngineeringProtocolSafe
                 ? $" Engineering protocol: {capabilityProfile.ProtocolIdentity}."
                 : " This model is connected for chat, but neither native tools nor the validated structured-decision protocol was proven; autonomous engineering remains disabled.";
+            var visionSummary = _options.SupportsVision
+                ? visionProbe.TypedStabilityRefusal
+                    ? " Vision was refused by a typed endpoint stability response and is disabled for this activation."
+                    : capabilityProfile.Vision.State == RuntimeCapabilityState.Supported
+                        ? " Vision image input was functionally observed."
+                        : " Vision remains enabled by manual override; its advisory probe was inconclusive."
+                : string.Empty;
             return new RuntimeHealthCheck(
                 Succeeded: true,
-                Summary: $"Verified runtime with model '{_options.Model}'.{reasoningVerification}{engineeringProtocol}",
+                Summary: $"Verified runtime with model '{_options.Model}'.{reasoningVerification}{engineeringProtocol}{visionSummary}",
                 CheckedAt: DateTimeOffset.UtcNow,
                 Elapsed: DateTimeOffset.UtcNow - started,
                 Endpoint: _options.Endpoint.ToString(),
@@ -843,7 +840,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException(FormatChatHttpError(response.StatusCode, body));
+            throw new HttpRequestException(
+                FormatChatHttpError(response.StatusCode, body),
+                inner: null,
+                response.StatusCode);
         }
 
         if (isHealthCheck)

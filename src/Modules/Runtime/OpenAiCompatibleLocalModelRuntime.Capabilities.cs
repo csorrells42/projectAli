@@ -39,7 +39,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
 
     private async Task<RuntimeCapabilityProfile> ProbeCapabilityProfileAsync(
         bool streamingSupported,
-        bool visionProbeSucceeded,
+        VisionCapabilityProbeResult visionProbe,
         CancellationToken cancellationToken)
     {
         var observedAt = DateTimeOffset.UtcNow;
@@ -66,27 +66,18 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 streamingSupported ? RuntimeCapabilityState.Supported : RuntimeCapabilityState.Unsupported,
                 "Observed by the bounded streaming health prompt.",
                 observedAt);
-        var vision = !_options.SupportsVision
-            ? new RuntimeCapabilityObservation(
-                RuntimeCapabilityState.Unknown,
-                "Vision is manually disabled; no image was sent during capability probing.",
-                observedAt)
-            : new RuntimeCapabilityObservation(
-                visionProbeSucceeded ? RuntimeCapabilityState.Supported : RuntimeCapabilityState.Unsupported,
-                "Observed by the explicit one-pixel image health prompt.",
-                observedAt);
         return RuntimeCapabilityProfile.Create(
             _options,
             native,
             structured,
             reasoning,
             streaming,
-            vision);
+            visionProbe.Observation);
     }
 
     private RuntimeCapabilityProfile CreateUnprobedCapabilityProfile(
         bool streamingSupported,
-        bool visionProbeSucceeded)
+        VisionCapabilityProbeResult visionProbe)
     {
         var observedAt = DateTimeOffset.UtcNow;
         RuntimeCapabilityObservation Unknown(string detail) => new(
@@ -104,13 +95,78 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                     "Observed by the bounded streaming health prompt.",
                     observedAt)
                 : Unknown("Streaming was disabled or not proven."),
-            _options.SupportsVision && visionProbeSucceeded
-                ? new RuntimeCapabilityObservation(
-                    RuntimeCapabilityState.Supported,
-                    "Observed by the explicit one-pixel image health prompt.",
-                    observedAt)
-                : Unknown("Vision was disabled or not proven."));
+            visionProbe.Observation);
     }
+
+    private async Task<VisionCapabilityProbeResult> ProbeVisionCapabilityAdvisoryAsync(
+        CancellationToken cancellationToken)
+    {
+        var observedAt = DateTimeOffset.UtcNow;
+        if (!_options.SupportsVision)
+        {
+            return new VisionCapabilityProbeResult(
+                new RuntimeCapabilityObservation(
+                    RuntimeCapabilityState.Unknown,
+                    "Vision is manually disabled; no image was sent during capability probing.",
+                    observedAt),
+                TypedStabilityRefusal: false);
+        }
+
+        try
+        {
+            var text = await SendNonStreamingPromptAsync(
+                    BuildVisionProbeRequest(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return string.IsNullOrWhiteSpace(text)
+                ? new VisionCapabilityProbeResult(
+                    new RuntimeCapabilityObservation(
+                        RuntimeCapabilityState.Unknown,
+                        "The advisory image probe returned no content; the manual Vision setting remains enabled.",
+                        observedAt),
+                    TypedStabilityRefusal: false)
+                : new VisionCapabilityProbeResult(
+                    new RuntimeCapabilityObservation(
+                        RuntimeCapabilityState.Supported,
+                        "Observed by the explicit one-pixel image health prompt.",
+                        observedAt),
+                    TypedStabilityRefusal: false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (HttpRequestException exception) when (
+            exception.StatusCode is System.Net.HttpStatusCode.UnsupportedMediaType
+                or System.Net.HttpStatusCode.UnprocessableEntity)
+        {
+            return new VisionCapabilityProbeResult(
+                new RuntimeCapabilityObservation(
+                    RuntimeCapabilityState.Unsupported,
+                    "The endpoint returned a typed HTTP stability refusal for image content.",
+                    observedAt,
+                    $"HTTP {(int)exception.StatusCode.Value}"),
+                TypedStabilityRefusal: true);
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+                                              or JsonException
+                                              or InvalidOperationException
+                                              or IOException
+                                              or NotSupportedException)
+        {
+            return new VisionCapabilityProbeResult(
+                new RuntimeCapabilityObservation(
+                    RuntimeCapabilityState.Unknown,
+                    "The advisory image probe failed; the manual Vision setting remains enabled.",
+                    observedAt,
+                    exception.GetType().Name),
+                TypedStabilityRefusal: false);
+        }
+    }
+
+    private sealed record VisionCapabilityProbeResult(
+        RuntimeCapabilityObservation Observation,
+        bool TypedStabilityRefusal);
 
     private async Task<RuntimeCapabilityObservation> ProbeNativeToolCallingAsync(
         DateTimeOffset observedAt,
