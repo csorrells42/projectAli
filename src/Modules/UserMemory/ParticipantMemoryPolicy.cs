@@ -125,12 +125,26 @@ internal static class ParticipantMemoryPolicy
                     ParticipantMemoryFailureCode.InvalidProposal,
                     $"Memory text must contain between 1 and {ParticipantMemoryLimits.MaximumMemoryTextLength} characters.");
             }
+            if (ContainsUnsupportedContentControl(text))
+            {
+                return ParticipantMemoryValidationResult.Rejected(
+                    request,
+                    ParticipantMemoryFailureCode.InvalidProposal,
+                    "Memory text contains an unsupported control character.");
+            }
             if (category.Length is 0 or > ParticipantMemoryLimits.MaximumCategoryLength)
             {
                 return ParticipantMemoryValidationResult.Rejected(
                     request,
                     ParticipantMemoryFailureCode.InvalidProposal,
                     $"Memory category must contain between 1 and {ParticipantMemoryLimits.MaximumCategoryLength} characters.");
+            }
+            if (ContainsUnsupportedContentControl(category))
+            {
+                return ParticipantMemoryValidationResult.Rejected(
+                    request,
+                    ParticipantMemoryFailureCode.InvalidProposal,
+                    "Memory category contains an unsupported control character.");
             }
         }
 
@@ -277,7 +291,17 @@ internal static class ParticipantMemoryPolicy
                 ParticipantMemoryFailureCode.InvalidProposal,
                 $"Memory provenance is invalid: {ex.Message}");
         }
-        if (JsonSerializer.Serialize(provenance, WorkerJsonOptions).Length > 4_096
+        if (provenance.CapturedUtc == default
+            || new[]
+                {
+                    provenance.SourceTurnId,
+                    provenance.SourceMessageId,
+                    provenance.SourceChannel,
+                    provenance.ReportedByParticipantReference
+                }
+                .Where(value => value is not null)
+                .Any(value => value!.Length > 128 || value.Any(char.IsControl))
+            || JsonSerializer.Serialize(provenance, WorkerJsonOptions).Length > 4_096
             || JsonSerializer.Serialize(request.ConsentReceipts ?? [], WorkerJsonOptions).Length > 16_384)
         {
             return ParticipantMemoryValidationResult.Rejected(
@@ -347,6 +371,10 @@ internal static class ParticipantMemoryPolicy
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }
+
+    private static bool ContainsUnsupportedContentControl(string value) =>
+        value.Any(character => char.IsControl(character)
+            && character is not ('\r' or '\n' or '\t'));
 
     public static IReadOnlyList<string> BuildRecordAccessKeys(ParticipantMemoryRecord record)
     {
@@ -630,6 +658,34 @@ internal static class ParticipantMemoryPolicy
         }
 
         var receipts = request.ConsentReceipts ?? [];
+        static bool Reference(string? value, int maximum = 128) =>
+            !string.IsNullOrWhiteSpace(value)
+            && value.Length <= maximum
+            && !value.Any(char.IsControl);
+        static bool References(IReadOnlyList<string>? values) =>
+            values is not null
+            && values.Count <= ParticipantMemoryLimits.MaximumAudienceKeys
+            && values.All(value => Reference(value))
+            && values.Distinct(IdComparer).Count() == values.Count;
+        if (receipts.Any(receipt => receipt is null
+                || !Reference(receipt.ReceiptId)
+                || !Reference(receipt.GrantedByParticipantReference)
+                || !Reference(receipt.Operation)
+                || !Reference(receipt.ProposalFingerprint, 256)
+                || !Reference(receipt.ConsentSessionId)
+                || !Reference(receipt.SourceTurnId)
+                || receipt.GrantedUtc == default
+                || !Enum.IsDefined(receipt.Visibility)
+                || !References(receipt.AudienceParticipantReferences)
+                || (receipt.ExpiresUtc is not null
+                    && receipt.ExpiresUtc <= receipt.GrantedUtc)))
+        {
+            return Failure(
+                ParticipantMemoryFailureCode.ConsentRequired,
+                request.Proposal.Operation.ToString(),
+                request.RequestId,
+                "Consent receipts contain malformed or unbounded authority fields.");
+        }
         var required = new HashSet<string>(roleReferences, IdComparer);
         required.UnionWith(audience.Where(reference => roster.Find(reference) is not null));
         var requestingPrincipal = NormalizeOptional(

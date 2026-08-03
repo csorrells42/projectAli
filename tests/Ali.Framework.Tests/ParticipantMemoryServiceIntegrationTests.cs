@@ -71,6 +71,52 @@ public sealed class ParticipantMemoryServiceIntegrationTests
     }
 
     [Fact]
+    public async Task Recall_RejectsANullWorkerRecordWithoutDereferencingIt()
+    {
+        var receipts = new ParticipantMemoryReceiptAuthority();
+        var roster = Roster();
+        var permission = receipts.IssuePermission(
+            "alice",
+            ["Read"],
+            "call-null-read",
+            "test",
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(1));
+        var authority = new ParticipantMemoryAuthorityContext("alice", null, [])
+        {
+            Permission = permission
+        };
+        var transport = new ScriptedTransport(Space, (_, _) => Task.FromResult(new Mem0Response(
+            "worker-null",
+            true,
+            "malformed",
+            null,
+            1,
+            null,
+            EmbeddingSpaceId: Space.Id,
+            RosterRevision: roster.Revision,
+            ParticipantMemories: [null!])));
+        await using var service = new Mem0UserMemoryService(
+            transport,
+            static () => new UserMemorySettings(),
+            receipts,
+            new MutableRosterAuthority());
+
+        var result = await service.RecallParticipantsAsync(
+            new ParticipantMemoryRecallRequest(
+                "recall-null-record",
+                roster,
+                authority,
+                "Alice's exact preference",
+                4,
+                Space.Id),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(ParticipantMemoryFailureCode.ProtocolFailure, result.Failure?.Code);
+    }
+
+    [Fact]
     public async Task Mutation_ReconcilesInDoubtReceiptWithoutReapplying()
     {
         var receipts = new ParticipantMemoryReceiptAuthority();
@@ -126,6 +172,96 @@ public sealed class ParticipantMemoryServiceIntegrationTests
         Assert.Equal(
             ["participant_mutate", "participant_reconcile_mutation"],
             transport.Requests.Select(request => request.GetProperty("operation").GetString()));
+    }
+
+    [Fact]
+    public async Task Mutation_RejectsANullCommittedWorkerRecordWithoutDereferencingIt()
+    {
+        var receipts = new ParticipantMemoryReceiptAuthority();
+        var roster = Roster();
+        const string requestId = "null-committed-record";
+        var mutation = CreateAddRequest(receipts, roster, requestId);
+        var transport = new ScriptedTransport(Space, (_, _) => Task.FromResult(new Mem0Response(
+            "worker-null",
+            true,
+            "committed",
+            null,
+            1,
+            null,
+            EmbeddingSpaceId: Space.Id,
+            RosterRevision: roster.Revision,
+            ParticipantMemories: [null!],
+            MutationStatus: "committed",
+            MutationRequestId: requestId,
+            MutationOperation: "add",
+            Reconciled: false)));
+        await using var service = new Mem0UserMemoryService(
+            transport,
+            static () => new UserMemorySettings(),
+            receipts,
+            new MutableRosterAuthority());
+
+        var result = await service.MutateParticipantsAsync(
+            mutation,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(ParticipantMemoryFailureCode.ProtocolFailure, result.Failure?.Code);
+    }
+
+    [Fact]
+    public async Task Mutation_AllowsNewlinesAndTabsConsistentlyBeforeAndAfterDispatch()
+    {
+        var receipts = new ParticipantMemoryReceiptAuthority();
+        var roster = Roster();
+        const string requestId = "multiline-committed-record";
+        var original = CreateAddRequest(receipts, roster, requestId);
+        var proposal = original.Proposal with
+        {
+            Text = "Alice prefers\nblue\tworkspaces."
+        };
+        var now = DateTimeOffset.UtcNow;
+        var consent = receipts.IssueConsent(
+            original.Authority.Permission!,
+            "Add",
+            ParticipantMemoryProposalFingerprint.Create(proposal, roster.TenantId),
+            $"multiline-consent:{Guid.NewGuid():N}",
+            proposal.Visibility,
+            proposal.AudienceParticipantReferences,
+            roster.TurnId,
+            now,
+            TimeSpan.FromMinutes(1));
+        var mutation = original with
+        {
+            Proposal = proposal,
+            ConsentReceipts = [consent]
+        };
+        var transport = new ScriptedTransport(Space, (_, _) => Task.FromResult(new Mem0Response(
+            "worker-multiline",
+            true,
+            "committed",
+            null,
+            1,
+            null,
+            EmbeddingSpaceId: Space.Id,
+            RosterRevision: roster.Revision,
+            ParticipantMemories: [Record(mutation)],
+            MutationStatus: "committed",
+            MutationRequestId: requestId,
+            MutationOperation: "add",
+            Reconciled: false)));
+        await using var service = new Mem0UserMemoryService(
+            transport,
+            static () => new UserMemorySettings(),
+            receipts,
+            new MutableRosterAuthority());
+
+        var result = await service.MutateParticipantsAsync(
+            mutation,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.Failure?.SafeMessage);
+        Assert.Equal(proposal.Text, Assert.Single(result.Records).Text);
     }
 
     [Fact]
@@ -282,13 +418,17 @@ public sealed class ParticipantMemoryServiceIntegrationTests
     }
 
     [Fact]
-    public async Task Reconcile_RejectsCommittedCorrectionWithoutExactLineage()
+    public async Task Reconcile_RejectsCommittedCorrectionWithSelfReferentialLineage()
     {
         var receipts = new ParticipantMemoryReceiptAuthority();
         var roster = Roster();
         const string mutationRequestId = "malformed-correction-receipt";
-        var recordWithoutCorrectionLineage = Record(
-            CreateAddRequest(receipts, roster, "record-origin"));
+        var recordWithSelfReferentialLineage = Record(
+            CreateAddRequest(receipts, roster, "record-origin")) with
+        {
+            CorrectsMemoryId = "memory-1",
+            SupersedesMemoryId = "memory-1"
+        };
         var transport = new ScriptedTransport(Space, (_, _) => Task.FromResult(new Mem0Response(
             "worker-reconcile",
             true,
@@ -298,7 +438,7 @@ public sealed class ParticipantMemoryServiceIntegrationTests
             null,
             EmbeddingSpaceId: Space.Id,
             RosterRevision: roster.Revision,
-            ParticipantMemories: [recordWithoutCorrectionLineage],
+            ParticipantMemories: [recordWithSelfReferentialLineage],
             MutationStatus: "committed",
             MutationRequestId: mutationRequestId,
             MutationOperation: "correct",
@@ -378,6 +518,38 @@ public sealed class ParticipantMemoryServiceIntegrationTests
         Assert.Equal("rolled_back", result.MutationStatus);
         Assert.Equal(ParticipantMemoryFailureCode.ConsentRequired, result.Failure?.Code);
         Assert.Equal(1, transport.ResolveCalls);
+        Assert.Empty(transport.Requests);
+    }
+
+    [Fact]
+    public async Task Mutation_RejectsOversizedProvenanceFieldBeforeTransport()
+    {
+        var receipts = new ParticipantMemoryReceiptAuthority();
+        var roster = Roster();
+        var original = CreateAddRequest(receipts, roster, "oversized-provenance-request");
+        var mutation = original with
+        {
+            Provenance = original.Provenance with
+            {
+                SourceMessageId = new string('x', 129)
+            }
+        };
+        var transport = new ScriptedTransport(
+            Space,
+            (_, _) => throw new InvalidOperationException(
+                "Oversized provenance must not cross the worker boundary."));
+        await using var service = new Mem0UserMemoryService(
+            transport,
+            static () => new UserMemorySettings(),
+            receipts,
+            new MutableRosterAuthority());
+
+        var result = await service.MutateParticipantsAsync(
+            mutation,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(ParticipantMemoryFailureCode.InvalidProposal, result.Failure?.Code);
         Assert.Empty(transport.Requests);
     }
 
@@ -630,8 +802,6 @@ public sealed class ParticipantMemoryServiceIntegrationTests
         public ParticipantRosterSnapshot CaptureAtAdmission(
             string turnId,
             string conversationId,
-            ActiveUserSelectionSnapshot selection,
-            string selectionGeneration,
             DateTimeOffset capturedUtc) =>
             throw new NotSupportedException();
 

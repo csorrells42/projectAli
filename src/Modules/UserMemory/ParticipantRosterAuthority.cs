@@ -10,8 +10,6 @@ public interface IParticipantRosterAuthority
     ParticipantRosterSnapshot CaptureAtAdmission(
         string turnId,
         string conversationId,
-        ActiveUserSelectionSnapshot selection,
-        string selectionGeneration,
         DateTimeOffset capturedUtc);
 
     ParticipantRosterFreshness CheckCurrent(ParticipantRosterSnapshot admittedRoster);
@@ -43,19 +41,33 @@ public sealed class SelectedParticipantRosterAuthority : IParticipantRosterAutho
         _presence = presence ?? new EmptyParticipantPresenceSnapshotSource();
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         _tenantId = tenantId.Trim();
+        if (_tenantId.Length > 128 || _tenantId.Any(char.IsControl))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(tenantId),
+                "A participant-memory tenant ID must be at most 128 non-control characters.");
+        }
     }
 
     public ParticipantRosterSnapshot CaptureAtAdmission(
         string turnId,
         string conversationId,
-        ActiveUserSelectionSnapshot selection,
-        string selectionGeneration,
         DateTimeOffset capturedUtc)
     {
+        var selectionGeneration = _activeUsers.CaptureSelectionRevision();
+        var selection = _activeUsers.CaptureSelectionSnapshot();
         var session = ResolveSession(conversationId);
         var registered = _activeUsers.AvailableUsers
             .Select(user => user.Normalize().StableId)
             .ToHashSet(StringComparer.Ordinal);
+        if (!string.Equals(
+                selectionGeneration,
+                _activeUsers.CaptureSelectionRevision(),
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Participant identity state changed during roster admission.");
+        }
         var presence = _presence.Capture().Normalize();
         return ParticipantRosterFactory.Capture(
             _tenantId,
@@ -76,12 +88,17 @@ public sealed class SelectedParticipantRosterAuthority : IParticipantRosterAutho
         var selectionGeneration = _activeUsers.CaptureSelectionRevision();
         var selection = _activeUsers.CaptureSelectionSnapshot();
         var presence = _presence.Capture().Normalize();
+        var finalSelectionGeneration = _activeUsers.CaptureSelectionRevision();
         var selectedReference = selection.IsResolved
             ? selection.SelectedUser!.Normalize().StableId
             : null;
         var current = string.Equals(
-                admittedRoster.SelectionGeneration,
                 selectionGeneration,
+                finalSelectionGeneration,
+                StringComparison.Ordinal)
+            && string.Equals(
+                admittedRoster.SelectionGeneration,
+                finalSelectionGeneration,
                 StringComparison.Ordinal)
             && string.Equals(
                 admittedRoster.PresenceGeneration,
@@ -91,7 +108,7 @@ public sealed class SelectedParticipantRosterAuthority : IParticipantRosterAutho
                 admittedRoster.SelectedParticipantReference,
                 selectedReference,
                 StringComparison.Ordinal);
-        return new(current, selectionGeneration, presence.Generation);
+        return new(current, finalSelectionGeneration, presence.Generation);
     }
 
     private ParticipantRosterSessionScope ResolveSession(string conversationId)

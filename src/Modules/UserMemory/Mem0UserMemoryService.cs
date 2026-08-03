@@ -2603,49 +2603,51 @@ public sealed class Mem0UserMemoryService :
             failure = $"The selected profile is invalid: {ex.Message}";
             return false;
         }
-        var selection = _activeUsers.CaptureSelectionSnapshot();
-        ActiveUser selectedUser;
         try
         {
-            selectedUser = selection.SelectedUser?.Normalize()!;
-        }
-        catch (Exception ex) when (ex is ArgumentException or ArgumentOutOfRangeException)
-        {
-            failure = $"The authoritative selected profile is invalid: {ex.Message}";
-            return false;
-        }
-        if (!selection.IsResolved
-            || !string.Equals(
-                selectedUser.StableId,
-                normalized.StableId,
-                StringComparison.Ordinal))
-        {
-            failure = "The memory-settings profile must exactly match the current explicit selection.";
-            return false;
-        }
+            var selectionGeneration = _activeUsers.CaptureSelectionRevision();
+            var selection = _activeUsers.CaptureSelectionSnapshot();
+            var selectedUser = selection.SelectedUser?.Normalize()!;
+            if (!selection.IsResolved
+                || !string.Equals(
+                    selectedUser.StableId,
+                    normalized.StableId,
+                    StringComparison.Ordinal))
+            {
+                failure = "The memory-settings profile must exactly match the current explicit selection.";
+                return false;
+            }
 
-        var availableUsers = _activeUsers.AvailableUsers
-            .Select(candidate => candidate.Normalize())
-            .ToArray();
-        var isAuthoritativeGeneratedTestProfile = selectedUser.IsTestProfile
-            && string.Equals(
-                selectedUser.ResolutionMethod,
-                "identity-test-profile",
-                StringComparison.Ordinal)
-            && availableUsers.Length == 1
-            && availableUsers[0] == selectedUser;
+            var availableUsers = _activeUsers.AvailableUsers
+                .Select(candidate => candidate.Normalize())
+                .ToArray();
+            if (!string.Equals(
+                    selectionGeneration,
+                    _activeUsers.CaptureSelectionRevision(),
+                    StringComparison.Ordinal))
+            {
+                failure = "The participant identity state changed during desktop admission.";
+                return false;
+            }
+            var isAuthoritativeGeneratedTestProfile = selectedUser.IsTestProfile
+                && string.Equals(
+                    selectedUser.ResolutionMethod,
+                    "identity-test-profile",
+                    StringComparison.Ordinal)
+                && availableUsers.Length == 1
+                && availableUsers[0] == selectedUser;
 
-        var now = DateTimeOffset.UtcNow;
-        var requestId = $"participant-desktop:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:{Guid.NewGuid():N}";
-        try
-        {
+            var now = DateTimeOffset.UtcNow;
+            var requestId = $"participant-desktop:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:{Guid.NewGuid():N}";
             var roster = _rosterAuthority.CaptureAtAdmission(
                 requestId,
                 "desktop-memory-settings",
-                selection,
-                _activeUsers.CaptureSelectionRevision(),
                 now);
             if (!string.Equals(
+                    roster.SelectionGeneration,
+                    selectionGeneration,
+                    StringComparison.Ordinal)
+                || !string.Equals(
                     roster.SelectedParticipantReference,
                     selectedUser.StableId,
                     StringComparison.Ordinal))
@@ -3247,29 +3249,34 @@ public sealed class Mem0UserMemoryService :
 
     private static bool ParticipantRecordHasBoundedShape(ParticipantMemoryRecord? record)
     {
-        static bool Required(string? value, int maximum = 128) =>
+        static bool Reference(string? value, int maximum = 128) =>
             !string.IsNullOrWhiteSpace(value)
             && value.Length <= maximum
             && !value.Any(char.IsControl);
-        static bool Optional(string? value, int maximum = 128) =>
-            value is null || Required(value, maximum);
+        static bool Content(string? value, int maximum) =>
+            !string.IsNullOrWhiteSpace(value)
+            && value.Length <= maximum
+            && !value.Any(character => char.IsControl(character)
+                && character is not ('\r' or '\n' or '\t'));
+        static bool OptionalReference(string? value, int maximum = 128) =>
+            value is null || Reference(value, maximum);
         static bool References(IReadOnlyList<string>? values, int maximum) =>
             values is not null
             && values.Count <= maximum
-            && values.All(value => Required(value))
+            && values.All(value => Reference(value))
             && values.Distinct(StringComparer.Ordinal).Count() == values.Count;
 
         if (record is null
-            || !Required(record.MemoryId)
-            || !Required(record.TenantId)
-            || !Required(record.EmbeddingSpaceId, 256)
-            || !Required(record.Text, ParticipantMemoryLimits.MaximumMemoryTextLength)
-            || !Required(record.Category, ParticipantMemoryLimits.MaximumCategoryLength)
-            || !Optional(record.SpeakerParticipantReference)
-            || !Optional(record.SharedEventReference)
-            || !Optional(record.CorrectsMemoryId)
-            || !Optional(record.SupersedesMemoryId)
-            || !Optional(record.DisputesMemoryId)
+            || !Reference(record.MemoryId)
+            || !Reference(record.TenantId)
+            || !Reference(record.EmbeddingSpaceId, 256)
+            || !Content(record.Text, ParticipantMemoryLimits.MaximumMemoryTextLength)
+            || !Content(record.Category, ParticipantMemoryLimits.MaximumCategoryLength)
+            || !OptionalReference(record.SpeakerParticipantReference)
+            || !OptionalReference(record.SharedEventReference)
+            || !OptionalReference(record.CorrectsMemoryId)
+            || !OptionalReference(record.SupersedesMemoryId)
+            || !OptionalReference(record.DisputesMemoryId)
             || !References(
                 record.SubjectParticipantReferences,
                 ParticipantMemoryLimits.MaximumReferencesPerRole)
@@ -3280,25 +3287,27 @@ public sealed class Mem0UserMemoryService :
                 record.AudienceParticipantReferences,
                 ParticipantMemoryLimits.MaximumAudienceKeys)
             || record.Provenance is null
-            || !Required(record.Provenance.SourceTurnId)
-            || !Required(record.Provenance.SourceMessageId)
-            || !Required(record.Provenance.SourceChannel)
-            || !Optional(record.Provenance.ReportedByParticipantReference)
+            || !Reference(record.Provenance.SourceTurnId)
+            || !Reference(record.Provenance.SourceMessageId)
+            || !Reference(record.Provenance.SourceChannel)
+            || !OptionalReference(record.Provenance.ReportedByParticipantReference)
+            || record.Provenance.CapturedUtc == default
             || record.ConsentReceipts is null
             || record.ConsentReceipts.Count > ParticipantMemoryLimits.MaximumParticipantsPerTurn
             || record.ConsentReceipts.Any(receipt => receipt is null
-                || !Required(receipt.ReceiptId)
-                || !Required(receipt.GrantedByParticipantReference)
-                || !Required(receipt.Operation)
-                || !Required(receipt.ProposalFingerprint, 256)
-                || !Required(receipt.ConsentSessionId)
-                || !Required(receipt.SourceTurnId)
+                || !Reference(receipt.ReceiptId)
+                || !Reference(receipt.GrantedByParticipantReference)
+                || !Reference(receipt.Operation)
+                || !Reference(receipt.ProposalFingerprint, 256)
+                || !Reference(receipt.ConsentSessionId)
+                || !Reference(receipt.SourceTurnId)
+                || receipt.GrantedUtc == default
                 || !Enum.IsDefined(receipt.Visibility)
                 || !References(
                     receipt.AudienceParticipantReferences,
                     ParticipantMemoryLimits.MaximumAudienceKeys)
-                || receipt.ExpiresUtc is not null
-                    && receipt.ExpiresUtc <= receipt.GrantedUtc)
+                || (receipt.ExpiresUtc is not null
+                    && receipt.ExpiresUtc <= receipt.GrantedUtc))
             || !Enum.IsDefined(record.ClaimKind)
             || !Enum.IsDefined(record.EvidenceKind)
             || !Enum.IsDefined(record.Visibility)
@@ -3308,9 +3317,14 @@ public sealed class Mem0UserMemoryService :
             || record.AttributionConfidence is < 0 or > 1
             || record.CreatedUtc == default
             || record.State == ParticipantMemoryState.Confirmed && record.ConfirmedUtc is null
-            || record.Score is not null && !double.IsFinite(record.Score.Value)
-            || record.SemanticScore is not null && !double.IsFinite(record.SemanticScore.Value)
-            || record.KeywordScore is not null && !double.IsFinite(record.KeywordScore.Value))
+            || record.Score is not null
+                && (!double.IsFinite(record.Score.Value) || record.Score.Value is < 0 or > 1)
+            || record.SemanticScore is not null
+                && (!double.IsFinite(record.SemanticScore.Value)
+                    || record.SemanticScore.Value is < 0 or > 1)
+            || record.KeywordScore is not null
+                && (!double.IsFinite(record.KeywordScore.Value)
+                    || record.KeywordScore.Value is < 0 or > 1))
         {
             return false;
         }

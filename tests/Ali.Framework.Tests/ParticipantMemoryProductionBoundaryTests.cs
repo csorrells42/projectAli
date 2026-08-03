@@ -908,8 +908,6 @@ public sealed class ParticipantMemoryProductionBoundaryTests
         public ParticipantRosterSnapshot CaptureAtAdmission(
             string turnId,
             string conversationId,
-            ActiveUserSelectionSnapshot selection,
-            string selectionGeneration,
             DateTimeOffset capturedUtc) =>
             throw new NotSupportedException();
 

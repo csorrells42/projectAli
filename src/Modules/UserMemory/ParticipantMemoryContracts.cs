@@ -70,6 +70,23 @@ public sealed record ParticipantRosterSnapshot(
         ArgumentException.ThrowIfNullOrWhiteSpace(SelectionGeneration);
         ArgumentException.ThrowIfNullOrWhiteSpace(PresenceGeneration);
         ArgumentNullException.ThrowIfNull(Participants);
+        var tenantId = TenantId.Trim();
+        if (tenantId.Length > 128 || tenantId.Any(char.IsControl))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(TenantId),
+                "A participant-memory tenant ID must be at most 128 non-control characters.");
+        }
+        var selectionGeneration = SelectionGeneration.Trim();
+        var presenceGeneration = PresenceGeneration.Trim();
+        if (selectionGeneration.Any(char.IsControl)
+            || presenceGeneration.Any(char.IsControl)
+            || $"{selectionGeneration}:{presenceGeneration}".Length > 256)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(SelectionGeneration),
+                "Participant-memory generations must form a bounded non-control revision.");
+        }
 
         var normalized = Participants.Select(participant => participant.Normalize()).ToArray();
         if (normalized.Length > ParticipantMemoryLimits.MaximumParticipantsPerTurn)
@@ -103,11 +120,11 @@ public sealed record ParticipantRosterSnapshot(
 
         return this with
         {
-            TenantId = TenantId.Trim(),
+            TenantId = tenantId,
             TurnId = TurnId.Trim(),
             ConversationId = ConversationId.Trim(),
-            SelectionGeneration = SelectionGeneration.Trim(),
-            PresenceGeneration = PresenceGeneration.Trim(),
+            SelectionGeneration = selectionGeneration,
+            PresenceGeneration = presenceGeneration,
             SelectedParticipantReference = selected,
             Participants = normalized
         };
