@@ -160,6 +160,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
             var unchangedExpansionFingerprints = new HashSet<string>(StringComparer.Ordinal);
             var seenPagingFingerprints = new HashSet<string>(StringComparer.Ordinal);
             var unchangedBlockedActionFingerprints = new HashSet<string>(StringComparer.Ordinal);
+            var staleDispatchRetryAvailable = true;
 
             while (true)
             {
@@ -245,6 +246,26 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                 {
                     response = await dispatch.ChatClient
                         .GetResponseAsync(planningMessages, planningOptions, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (StaleBoundModelDispatchException exception)
+                {
+                    if (staleDispatchRetryAvailable)
+                    {
+                        staleDispatchRetryAvailable = false;
+                        continue;
+                    }
+
+                    return await SuspendPlanningAsync(
+                        active,
+                        source: null,
+                        FailureFingerprint(
+                            "stale-bound-dispatch",
+                            exception.Message),
+                        cancellationToken,
+                        reasonCode: "runtime-dispatch-repeatedly-stale",
+                        visibleMessage:
+                        "Ali paused because the selected model runtime changed repeatedly before a request could begin. The request was preserved and no model action ran.")
                         .ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)

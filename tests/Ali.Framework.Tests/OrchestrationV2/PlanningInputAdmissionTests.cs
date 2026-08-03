@@ -370,12 +370,16 @@ public sealed class PlanningInputAdmissionTests
             .ToArray();
         var attachments = AliPlanningAttachmentProjection.Capture(
             [new DataContent(attachmentBytes, "application/octet-stream") { Name = "exact.bin" }]);
-        var smallProfile = PlanningTestModelProfile.GptOss65K() with
+        var largerProfile = PlanningTestModelProfile.GptOss65K() with
+        {
+            ProtocolIdentity = RuntimeProtocolIdentities.NativeOpenAiTools,
+            CapabilityProfileIdentity = "test-probed-native-tools-v1"
+        };
+        var smallProfile = largerProfile with
         {
             ContextTokens = 4_096,
             OutputTokenLimit = 1_024
         };
-        var largerProfile = PlanningTestModelProfile.GptOss65K();
         using var coordinator = new AliPlanningStateCoordinator(directory.Path, "profile");
         await using (var initialTurn = await coordinator.BeginTurnAsync(
                          Turn(identity),
@@ -696,7 +700,11 @@ public sealed class PlanningInputAdmissionTests
                 "test-client",
                 profile.RuntimeKind,
                 profile.RuntimeLocation,
-                profile.RuntimeEndpoint),
+                profile.RuntimeEndpoint)
+            {
+                ProtocolIdentity = profile.ProtocolIdentity,
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundModelBindingMaterial(
                 profile.ProfileId,
                 profile.PackageId,
@@ -704,7 +712,10 @@ public sealed class PlanningInputAdmissionTests
                 profile.Size,
                 profile.Quantization,
                 profile.SupportsVision,
-                profile.SupportsToolCalls),
+                profile.SupportsToolCalls)
+            {
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundGenerationSettingsBindingMaterial(
                 profile.ContextTokens,
                 profile.OutputTokenLimit,
@@ -713,7 +724,10 @@ public sealed class PlanningInputAdmissionTests
                 StreamingEnabled: profile.StreamingEnabled,
                 ThinkingControl: "test",
                 ThinkingEnabled: false,
-                ReasoningEffort: "low"));
+                ReasoningEffort: "low")
+            {
+                ProtocolIdentity = profile.ProtocolIdentity
+            });
 
     private static string Digest(string value) =>
         TurnStateIntegrity.Digest(Encoding.UTF8.GetBytes(value));

@@ -60,27 +60,27 @@ internal sealed class AliToolCatalog
             : null;
         Func<string, bool, CancellationToken, Task<CoordinatorMemoryResult>> recallMemory =
             ParticipantMemoryTools is null
-                ? ((_, _, _) => Task.FromResult(new CoordinatorMemoryResult(
+                ? ((query, includeSensitive, cancellationToken) => Task.FromResult(new CoordinatorMemoryResult(
                     "Participant-aware memory recall is unavailable without a trusted admitted roster.",
                     [],
                     ["No legacy memory store was read."])))
                 : ParticipantMemoryTools.RecallAsync;
         Func<bool, CancellationToken, Task<CoordinatorMemoryResult>> listMemories =
             ParticipantMemoryTools is null
-                ? ((_, _) => Task.FromResult(new CoordinatorMemoryResult(
+                ? ((includeSensitive, cancellationToken) => Task.FromResult(new CoordinatorMemoryResult(
                     "Participant-aware memory inventory is unavailable without a trusted admitted roster.",
                     [],
                     ["No legacy memory store was read."])))
                 : ParticipantMemoryTools.ListAsync;
         Func<ParticipantMemoryProposal, CancellationToken, Task<CoordinatorMemoryWriteResult>> mutateMemory =
             ParticipantMemoryTools is null
-            ? ((_, _) => Task.FromResult(new CoordinatorMemoryWriteResult(
+            ? ((proposal, cancellationToken) => Task.FromResult(new CoordinatorMemoryWriteResult(
                 false,
                 "Participant-aware memory mutation is unavailable without a trusted admitted roster.")))
             : ParticipantMemoryTools.MutateAsync;
         Func<ParticipantMemoryProposal, CancellationToken, Task<CoordinatorParticipantMemoryConsentResult>> consentMemory =
             ParticipantMemoryTools is null
-                ? ((_, _) => Task.FromResult(new CoordinatorParticipantMemoryConsentResult(
+                ? ((proposal, cancellationToken) => Task.FromResult(new CoordinatorParticipantMemoryConsentResult(
                     false,
                     false,
                     "Participant-aware memory consent is unavailable without a trusted admitted roster.",
@@ -89,7 +89,7 @@ internal sealed class AliToolCatalog
                 : ParticipantMemoryTools.ConsentAsync;
         Func<string, CancellationToken, Task<CoordinatorMemoryReconciliationResult>> reconcileMemory =
             ParticipantMemoryTools is null
-                ? ((requestId, _) => Task.FromResult(new CoordinatorMemoryReconciliationResult(
+                ? ((requestId, cancellationToken) => Task.FromResult(new CoordinatorMemoryReconciliationResult(
                     false,
                     "Participant-aware memory reconciliation is unavailable without a trusted admitted roster.",
                     requestId ?? string.Empty,

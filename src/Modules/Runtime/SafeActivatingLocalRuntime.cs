@@ -5,6 +5,14 @@ using Ali.Modules.Runtime;
 
 namespace Ali.Modules.Runtime;
 
+internal sealed class StaleBoundModelDispatchException : InvalidOperationException
+{
+    internal StaleBoundModelDispatchException(string message)
+        : base(message)
+    {
+    }
+}
+
 public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
 {
     private readonly ILocalModelRuntime _fallbackRuntime;
@@ -303,7 +311,7 @@ public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IRe
     {
         if (!ReferenceEquals(Volatile.Read(ref _activeRuntime), pinnedRuntime))
         {
-            throw new InvalidOperationException(
+            throw new StaleBoundModelDispatchException(
                 "The bound model dispatch is stale because the active runtime changed. Capture a fresh dispatch before retrying.");
         }
 

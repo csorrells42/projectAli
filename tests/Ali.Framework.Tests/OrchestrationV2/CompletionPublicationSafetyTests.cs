@@ -258,7 +258,11 @@ public sealed class CompletionPublicationSafetyTests
                 "test-client",
                 profile.RuntimeKind,
                 profile.RuntimeLocation,
-                profile.RuntimeEndpoint),
+                profile.RuntimeEndpoint)
+            {
+                ProtocolIdentity = profile.ProtocolIdentity,
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundModelBindingMaterial(
                 profile.ProfileId,
                 profile.PackageId,
@@ -266,7 +270,10 @@ public sealed class CompletionPublicationSafetyTests
                 profile.Size,
                 profile.Quantization,
                 profile.SupportsVision,
-                profile.SupportsToolCalls),
+                profile.SupportsToolCalls)
+            {
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundGenerationSettingsBindingMaterial(
                 profile.ContextTokens,
                 profile.OutputTokenLimit,
@@ -275,7 +282,10 @@ public sealed class CompletionPublicationSafetyTests
                 StreamingEnabled: profile.StreamingEnabled,
                 ThinkingControl: "test",
                 ThinkingEnabled: false,
-                ReasoningEffort: "low"));
+                ReasoningEffort: "low")
+            {
+                ProtocolIdentity = profile.ProtocolIdentity
+            });
     }
 
     private sealed class SingleResponseChatClient(ChatResponse response) : IChatClient

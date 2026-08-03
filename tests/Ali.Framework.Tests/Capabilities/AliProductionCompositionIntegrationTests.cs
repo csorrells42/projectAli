@@ -96,7 +96,9 @@ public sealed class AliProductionCompositionIntegrationTests
             AliCapabilityCatalog.DotNetDebugStopName,
             AliCapabilityCatalog.DotNetPerformanceMeasureName,
             AliCapabilityCatalog.DotNetPerformanceTraceName,
-            AliCapabilityCatalog.ForgetCurrentUserMemoryName,
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
             AliCapabilityCatalog.GitBlameName,
             AliCapabilityCatalog.GitHistoryName,
             AliCapabilityCatalog.ListCurrentUserMemoriesName,
@@ -119,7 +121,7 @@ public sealed class AliProductionCompositionIntegrationTests
         }.ToHashSet(StringComparer.Ordinal);
 
     [Fact]
-    public async Task ActualProductionComposition_Builds117TaskToolsPlusTheRequiredProtocol_Offline()
+    public async Task ActualProductionComposition_Builds119TaskToolsPlusTheRequiredProtocol_Offline()
     {
         using var fixture = new CompositionFixture();
         var runtime = new DevelopmentLocalModelRuntime();
@@ -160,10 +162,10 @@ public sealed class AliProductionCompositionIntegrationTests
 
         var production = AliProductionCapabilityCatalog.Build(activeDeclarations);
 
-        Assert.Equal(117, declarations.Length);
-        Assert.Equal(117, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(118, activeDeclarations.Length);
-        Assert.Equal(118, production.Registry.Descriptors.Count);
+        Assert.Equal(119, declarations.Length);
+        Assert.Equal(119, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(120, activeDeclarations.Length);
+        Assert.Equal(120, production.Registry.Descriptors.Count);
         Assert.True(AliProductionCapabilityCatalog.KnownToolNames.SetEquals(
             production.Registry.Descriptors
                 .Where(descriptor => descriptor.Tier == CapabilityTier.Task)
@@ -213,9 +215,9 @@ public sealed class AliProductionCompositionIntegrationTests
         var deliberatelyUnavailableDescriptors = requiredDurableDescriptors
             .Where(descriptor => !effectRegistry.TryResolve(descriptor, out _))
             .ToArray();
-        Assert.Equal(88, requiredDurableDescriptors.Length);
+        Assert.Equal(90, requiredDurableDescriptors.Length);
         Assert.Equal(44, adapterBackedDescriptors.Length);
-        Assert.Equal(44, deliberatelyUnavailableDescriptors.Length);
+        Assert.Equal(46, deliberatelyUnavailableDescriptors.Length);
         Assert.True(ExpectedDurableAdapterToolNames.SetEquals(
             adapterBackedDescriptors.Select(descriptor => descriptor.ToolName)));
         Assert.True(ExpectedDeliberatelyUnavailableToolNames.SetEquals(
@@ -235,7 +237,7 @@ public sealed class AliProductionCompositionIntegrationTests
         }
 
         var inventory = CapabilityTerminalToolInventory.Create(activeDeclarations, production.Registry);
-        Assert.Equal(118, inventory.FunctionDeclarationCount);
+        Assert.Equal(120, inventory.FunctionDeclarationCount);
         Assert.Empty(inventory.Issues);
         var stagedRuntime = CapabilityRuntimeAvailabilityFactory.Create(
             inventory,
@@ -346,7 +348,7 @@ public sealed class AliProductionCompositionIntegrationTests
         var externalMcpRow = Assert.Single(
             settingsEnvelope.Rows,
             row => row.GroupId == CapabilityGroupIds.ExternalMcp);
-        Assert.Equal(117, settingsEnvelope.DeclaredTaskToolCount);
+        Assert.Equal(119, settingsEnvelope.DeclaredTaskToolCount);
         Assert.Equal(1, settingsEnvelope.CallableProtocolToolCount);
         Assert.Equal(0, settingsEnvelope.UnavailableProtocolToolCount);
         Assert.Equal(0, externalMcpRow.DeclaredToolCount);
@@ -361,8 +363,8 @@ public sealed class AliProductionCompositionIntegrationTests
             .Select(descriptor => descriptor.ToolName)
             .Where(toolName => !ExpectedDurableAdapterToolNames.Contains(toolName))
             .ToHashSet(StringComparer.Ordinal);
-        Assert.Equal(88, requiredDurableDescriptors.Length);
-        Assert.Equal(44, deliberatelyUnavailableToolNames.Count);
+        Assert.Equal(90, requiredDurableDescriptors.Length);
+        Assert.Equal(46, deliberatelyUnavailableToolNames.Count);
         Assert.True(ExpectedDeliberatelyUnavailableToolNames.SetEquals(
             deliberatelyUnavailableToolNames));
         foreach (var toolName in deliberatelyUnavailableToolNames)

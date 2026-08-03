@@ -209,7 +209,7 @@ public sealed class RuntimeBindingGateTests
         var stale = ((IBoundModelDispatchSource)switching).CaptureBoundModelDispatch();
 
         Assert.True(switching.ActivateLastHealthChecked());
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAnyAsync<InvalidOperationException>(() =>
             stale.ChatClient.GetResponseAsync(
                 [],
                 new ChatOptions(),
@@ -378,7 +378,7 @@ public sealed class RuntimeBindingGateTests
         Assert.Equal(0, candidate.RequestCount);
         candidate.ReleaseShutdown();
         await transition;
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => staleCall);
+        var exception = await Assert.ThrowsAnyAsync<InvalidOperationException>(() => staleCall);
 
         Assert.Contains("active runtime changed", exception.Message, StringComparison.Ordinal);
         Assert.Equal(0, candidate.RequestCount);
@@ -625,7 +625,11 @@ public sealed class RuntimeBindingGateTests
                 "test-client",
                 profile.RuntimeKind,
                 profile.RuntimeLocation,
-                profile.RuntimeEndpoint),
+                profile.RuntimeEndpoint)
+            {
+                ProtocolIdentity = profile.ProtocolIdentity,
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundModelBindingMaterial(
                 profile.ProfileId,
                 profile.PackageId,
@@ -633,7 +637,10 @@ public sealed class RuntimeBindingGateTests
                 profile.Size,
                 profile.Quantization,
                 profile.SupportsVision,
-                profile.SupportsToolCalls),
+                profile.SupportsToolCalls)
+            {
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundGenerationSettingsBindingMaterial(
                 profile.ContextTokens,
                 profile.OutputTokenLimit,
@@ -642,7 +649,10 @@ public sealed class RuntimeBindingGateTests
                 StreamingEnabled: profile.StreamingEnabled,
                 ThinkingControl: "test",
                 ThinkingEnabled: false,
-                ReasoningEffort: "low"));
+                ReasoningEffort: "low")
+            {
+                ProtocolIdentity = profile.ProtocolIdentity
+            });
     }
 
     private static string Digest(string value) =>

@@ -1,3 +1,4 @@
+using Ali.Modules.Runtime;
 using Ali.Modules.Runtime.Models;
 
 namespace Ali.Framework.Tests.OrchestrationV2;
@@ -20,5 +21,9 @@ internal static class PlanningTestModelProfile
         StreamingEnabled: false,
         SupportsVision: true,
         SupportsToolCalls: true,
-        IsLastKnownGood: true);
+        IsLastKnownGood: true)
+    {
+        ProtocolIdentity = RuntimeProtocolIdentities.StructuredDecision,
+        CapabilityProfileIdentity = "test-probed-engineering-profile-v1"
+    };
 }

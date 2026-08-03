@@ -26,7 +26,11 @@ public sealed class AgentHarnessFinishReasonIntegrationTests
     public async Task NativeProtocolToolCalls_FullHarnessPublishesExactAnswerWithStopFinishReason()
     {
         using var fixture = new HarnessFixture();
-        var profile = PlanningTestModelProfile.GptOss65K();
+        var profile = PlanningTestModelProfile.GptOss65K() with
+        {
+            ProtocolIdentity = RuntimeProtocolIdentities.NativeOpenAiTools,
+            CapabilityProfileIdentity = "test-probed-native-tools-v1"
+        };
         var runtime = new NativeProtocolRuntime(profile, "Native harness answer.");
         var assistant = AssistantProfile.Create("Ali harness finish reason test");
         var mcpClients = new McpClientManager(fixture.Root);
@@ -155,7 +159,11 @@ public sealed class AgentHarnessFinishReasonIntegrationTests
                     "native-protocol-test-client",
                     ActiveProfile.RuntimeKind,
                     ActiveProfile.RuntimeLocation,
-                    ActiveProfile.RuntimeEndpoint),
+                    ActiveProfile.RuntimeEndpoint)
+                {
+                    ProtocolIdentity = ActiveProfile.ProtocolIdentity,
+                    CapabilityProfileIdentity = ActiveProfile.CapabilityProfileIdentity
+                },
                 new BoundModelBindingMaterial(
                     ActiveProfile.ProfileId,
                     ActiveProfile.PackageId,
@@ -163,7 +171,10 @@ public sealed class AgentHarnessFinishReasonIntegrationTests
                     ActiveProfile.Size,
                     ActiveProfile.Quantization,
                     ActiveProfile.SupportsVision,
-                    ActiveProfile.SupportsToolCalls),
+                    ActiveProfile.SupportsToolCalls)
+                {
+                    CapabilityProfileIdentity = ActiveProfile.CapabilityProfileIdentity
+                },
                 new BoundGenerationSettingsBindingMaterial(
                     ActiveProfile.ContextTokens,
                     ActiveProfile.OutputTokenLimit,
@@ -172,7 +183,10 @@ public sealed class AgentHarnessFinishReasonIntegrationTests
                     StreamingEnabled: ActiveProfile.StreamingEnabled,
                     ThinkingControl: "test",
                     ThinkingEnabled: false,
-                    ReasoningEffort: "low"));
+                    ReasoningEffort: "low")
+                {
+                    ProtocolIdentity = ActiveProfile.ProtocolIdentity
+                });
 
         public async IAsyncEnumerable<ModelToken> StreamChatAsync(
             ChatRequest request,

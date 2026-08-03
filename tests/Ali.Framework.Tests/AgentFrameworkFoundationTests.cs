@@ -62,7 +62,7 @@ public sealed class AgentFrameworkFoundationTests
             });
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(117, names.Length);
+        Assert.Equal(119, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
         var retiredNames = new[]
         {
