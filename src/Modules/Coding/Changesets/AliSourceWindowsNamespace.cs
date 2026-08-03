@@ -83,7 +83,7 @@ internal sealed class AliSourceWindowsNamespace : IDisposable
     private const int ErrorPathNotFound = 3;
     private const int FileIdInfoClass = 18;
     private const int FileStandardInfoClass = 1;
-    private const int FileRenameInfoClass = 3;
+    private const int FileRenameInformationClass = 10;
     private const int FileDispositionInfoClass = 4;
     private const int FileIdExtdDirectoryInfoClass = 19;
     private const int FileIdExtdDirectoryRestartInfoClass = 20;
@@ -1066,28 +1066,43 @@ internal sealed class AliSourceWindowsNamespace : IDisposable
         string destinationLeaf,
         bool replaceExisting)
     {
-        var fileNameBytes = checked(destinationLeaf.Length * sizeof(char));
-        var rootOffset = IntPtr.Size;
-        var lengthOffset = checked(IntPtr.Size * 2);
-        var nameOffset = checked(lengthOffset + sizeof(uint));
-        var totalBytes = checked(nameOffset + fileNameBytes);
+        var fileNameBytes = Encoding.Unicode.GetBytes(destinationLeaf);
+        var fileNameOffset = Marshal.OffsetOf<FileRenameInformationHeader>(
+                nameof(FileRenameInformationHeader.FileNameLength))
+            .ToInt32() + sizeof(uint);
+        var totalBytes = checked(
+            Marshal.SizeOf<FileRenameInformationHeader>() + fileNameBytes.Length);
         var buffer = Marshal.AllocHGlobal(totalBytes);
         var addedRef = false;
         try
         {
             Marshal.Copy(new byte[totalBytes], 0, buffer, totalBytes);
-            Marshal.WriteByte(buffer, replaceExisting ? (byte)1 : (byte)0);
             destinationParent.DangerousAddRef(ref addedRef);
-            Marshal.WriteIntPtr(buffer, rootOffset, destinationParent.DangerousGetHandle());
-            Marshal.WriteInt32(buffer, lengthOffset, fileNameBytes);
-            Marshal.Copy(destinationLeaf.ToCharArray(), 0, buffer + nameOffset, destinationLeaf.Length);
-            if (!SetFileInformationByHandle(
+            Marshal.StructureToPtr(
+                new FileRenameInformationHeader
+                {
+                    ReplaceIfExists = replaceExisting ? 1u : 0u,
+                    RootDirectory = destinationParent.DangerousGetHandle(),
+                    FileNameLength = checked((uint)fileNameBytes.Length)
+                },
+                buffer,
+                fDeleteOld: false);
+            Marshal.Copy(
+                fileNameBytes,
+                0,
+                IntPtr.Add(buffer, fileNameOffset),
+                fileNameBytes.Length);
+            var status = NtSetInformationFile(
                     file,
-                    FileRenameInfoClass,
+                    out _,
                     buffer,
-                    (uint)totalBytes))
+                    checked((uint)totalBytes),
+                    FileRenameInformationClass);
+            if (status < 0)
             {
-                ThrowIo("The exact source leaf could not be renamed.", Marshal.GetLastWin32Error());
+                ThrowIo(
+                    "The exact source leaf could not be renamed.",
+                    checked((int)RtlNtStatusToDosError(status)));
             }
         }
         finally
@@ -1096,6 +1111,7 @@ internal sealed class AliSourceWindowsNamespace : IDisposable
             {
                 destinationParent.DangerousRelease();
             }
+            CryptographicOperations.ZeroMemory(fileNameBytes);
             Marshal.FreeHGlobal(buffer);
         }
     }
@@ -1168,6 +1184,14 @@ internal sealed class AliSourceWindowsNamespace : IDisposable
     {
         public IntPtr Status;
         public UIntPtr Information;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileRenameInformationHeader
+    {
+        public uint ReplaceIfExists;
+        public IntPtr RootDirectory;
+        public uint FileNameLength;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1244,6 +1268,14 @@ internal sealed class AliSourceWindowsNamespace : IDisposable
         uint createOptions,
         IntPtr eaBuffer,
         uint eaLength);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtSetInformationFile(
+        SafeFileHandle fileHandle,
+        out IoStatusBlock ioStatusBlock,
+        IntPtr fileInformation,
+        uint length,
+        int fileInformationClass);
 
     [DllImport("ntdll.dll")]
     private static extern uint RtlNtStatusToDosError(int status);

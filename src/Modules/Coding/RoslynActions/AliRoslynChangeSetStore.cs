@@ -64,7 +64,14 @@ internal sealed class AliRoslynChangeSetStore(
                 ?? throw new InvalidOperationException("The canonical Roslyn project disappeared during preview.");
             var newProject = staged.GetProject(projectChange.ProjectId)
                 ?? throw new InvalidOperationException("The staged Roslyn project disappeared during preview.");
-            RejectNonDocumentProjectChanges(oldProject, newProject);
+            var hasAnalyzerConfigDocumentDelta =
+                projectChange.GetChangedAnalyzerConfigDocuments().Any()
+                || projectChange.GetAddedAnalyzerConfigDocuments().Any()
+                || projectChange.GetRemovedAnalyzerConfigDocuments().Any();
+            RejectNonDocumentProjectChanges(
+                oldProject,
+                newProject,
+                hasAnalyzerConfigDocumentDelta);
 
             await AddChangedAsync(
                 oldProject,
@@ -740,7 +747,10 @@ internal sealed class AliRoslynChangeSetStore(
     private static string NormalizeRelative(string root, string path) =>
         Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/');
 
-    private static void RejectNonDocumentProjectChanges(Project oldProject, Project newProject)
+    private static void RejectNonDocumentProjectChanges(
+        Project oldProject,
+        Project newProject,
+        bool hasAnalyzerConfigDocumentDelta)
     {
         if (!string.Equals(oldProject.Name, newProject.Name, StringComparison.Ordinal)
             || !string.Equals(oldProject.AssemblyName, newProject.AssemblyName, StringComparison.Ordinal)
@@ -750,7 +760,10 @@ internal sealed class AliRoslynChangeSetStore(
             || !PathComparer.Equals(oldProject.OutputRefFilePath, newProject.OutputRefFilePath)
             || !string.Equals(oldProject.DefaultNamespace, newProject.DefaultNamespace, StringComparison.Ordinal)
             || oldProject.IsSubmission != newProject.IsSubmission
-            || !Equals(oldProject.CompilationOptions, newProject.CompilationOptions)
+            || !DurableCompilationOptionsEqual(
+                oldProject.CompilationOptions,
+                newProject.CompilationOptions,
+                hasAnalyzerConfigDocumentDelta)
             || !Equals(oldProject.ParseOptions, newProject.ParseOptions)
             || !oldProject.ProjectReferences.SequenceEqual(newProject.ProjectReferences)
             || !oldProject.MetadataReferences.SequenceEqual(newProject.MetadataReferences)
@@ -758,6 +771,59 @@ internal sealed class AliRoslynChangeSetStore(
         {
             throw new InvalidOperationException(
                 "This Roslyn action changes project or reference metadata; use an explicit project-document changeset.");
+        }
+    }
+
+    private static bool DurableCompilationOptionsEqual(
+        CompilationOptions? oldOptions,
+        CompilationOptions? newOptions,
+        bool hasAnalyzerConfigDocumentDelta)
+    {
+        if (Equals(oldOptions, newOptions))
+        {
+            return true;
+        }
+        if (!hasAnalyzerConfigDocumentDelta
+            || oldOptions is null
+            || newOptions is null
+            || oldOptions.GetType() != newOptions.GetType())
+        {
+            return false;
+        }
+
+        return Equals(
+            WithoutSyntaxTreeOptionsProvider(oldOptions),
+            WithoutSyntaxTreeOptionsProvider(newOptions));
+    }
+
+    private static CompilationOptions WithoutSyntaxTreeOptionsProvider(CompilationOptions options)
+    {
+        var method = options.GetType().GetMethod(
+            "CommonWithSyntaxTreeOptionsProvider",
+            System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            [typeof(SyntaxTreeOptionsProvider)],
+            modifiers: null);
+        if (method is null
+            || !typeof(CompilationOptions).IsAssignableFrom(method.ReturnType))
+        {
+            throw new InvalidDataException(
+                "The pinned Roslyn 5.6 compilation-option normalization surface changed.");
+        }
+
+        try
+        {
+            return method.Invoke(options, [null]) as CompilationOptions
+                ?? throw new InvalidDataException(
+                    "The pinned Roslyn 5.6 compilation-option normalization returned no options.");
+        }
+        catch (System.Reflection.TargetInvocationException exception)
+        {
+            throw new InvalidDataException(
+                "The pinned Roslyn 5.6 compilation-option normalization failed.",
+                exception.InnerException ?? exception);
         }
     }
 

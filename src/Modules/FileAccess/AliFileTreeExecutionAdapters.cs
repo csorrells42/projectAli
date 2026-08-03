@@ -53,6 +53,7 @@ internal enum AliFileTreeExecutionCheckpoint
     DeleteBeforeHandleRename,
     DirectoryCreateBeforeHandleRename,
     RecoveryBeforeHandleRollback,
+    TestOnlyAfterNativeRootRenameBeforeDescendantReseal,
     CopyAfterHandleRename,
     MoveAfterHandleRename,
     DeleteAfterHandleRename,
@@ -161,7 +162,7 @@ internal static class AliFileTreeWindowsBoundary
     private const uint FileSynchronousIoNonAlert = 0x00000020;
     private const uint FileNonDirectoryFile = 0x00000040;
     private const uint FileOpenReparsePoint = 0x00200000;
-    private const int FileRenameInfo = 3;
+    private const int FileRenameInformation = 10;
     private const int FileDispositionInfo = 4;
     private const int FileIdInfo = 18;
     private const int ErrorFileNotFound = 2;
@@ -393,57 +394,12 @@ internal static class AliFileTreeWindowsBoundary
             handles.Add(rootLease);
             RequireIdentity(rootLease, root.Kind, root.Identity);
 
-            if (string.Equals(root.Kind, "directory", StringComparison.Ordinal))
-            {
-                var pending = new Stack<(SafeFileHandle Handle, string Path)>();
-                pending.Push((rootLease, rootPath));
-                var entries = 0;
-                long bytes = 0;
-                while (pending.Count > 0)
-                {
-                    var directory = pending.Pop();
-                    var children = Directory.EnumerateFileSystemEntries(directory.Path)
-                        .OrderBy(path => Path.GetFileName(path), StringComparer.Ordinal)
-                        .ToArray();
-                    foreach (var childPath in children)
-                    {
-                        if (++entries > AliFileTreeSnapshotter.MaximumEntries)
-                        {
-                            throw new IOException(
-                                $"An exact file-tree target cannot exceed {AliFileTreeSnapshotter.MaximumEntries} entries.");
-                        }
-                        var attributes = File.GetAttributes(childPath);
-                        if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Device)) != 0)
-                        {
-                            throw new InvalidDataException(
-                                "The exact tree closure contains a reparse point or device entry.");
-                        }
-                        var kind = (attributes & FileAttributes.Directory) != 0
-                            ? "directory"
-                            : "file";
-                        var child = OpenOrCreateRelative(
-                            directory.Handle,
-                            Path.GetFileName(childPath),
-                            kind,
-                            FileOpen,
-                            renameable: false,
-                            writableDirectory: false,
-                            shareOverride: FileShare.Read);
-                        handles.Add(child);
-                        if (string.Equals(kind, "directory", StringComparison.Ordinal))
-                        {
-                            pending.Push((child, childPath));
-                            continue;
-                        }
-                        bytes = checked(bytes + RandomAccess.GetLength(child));
-                        if (bytes > AliFileTreeSnapshotter.MaximumBytes)
-                        {
-                            throw new IOException(
-                                $"An exact file-tree target cannot exceed {AliFileTreeSnapshotter.MaximumBytes} bytes.");
-                        }
-                    }
-                }
-            }
+            ResealExactTreeLease(
+                handles,
+                rootLease,
+                root.Kind,
+                root.Identity,
+                rootPath);
 
             var lease = new AliFileTreeExactTreeLease(
                 handles,
@@ -457,6 +413,94 @@ internal static class AliFileTreeWindowsBoundary
             for (var index = handles.Count - 1; index >= 0; index--)
             {
                 handles[index].Dispose();
+            }
+            throw;
+        }
+    }
+
+    internal static void ResealExactTreeLease(
+        List<SafeFileHandle> handles,
+        SafeFileHandle rootHandle,
+        string rootKind,
+        string rootIdentity,
+        string rootPath)
+    {
+        ArgumentNullException.ThrowIfNull(handles);
+        ArgumentNullException.ThrowIfNull(rootHandle);
+        RequireKind(rootKind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootIdentity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        if (!PathMatchesIdentity(rootPath, rootKind, rootIdentity))
+        {
+            throw new IOException(
+                "The exact tree root path does not name the held filesystem object before descendant reseal.");
+        }
+        if (!string.Equals(rootKind, "directory", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var initialCount = handles.Count;
+        try
+        {
+            var pending = new Stack<(SafeFileHandle Handle, string Path)>();
+            pending.Push((rootHandle, Path.GetFullPath(rootPath)));
+            var entries = 0;
+            long bytes = 0;
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                var children = Directory.EnumerateFileSystemEntries(directory.Path)
+                    .OrderBy(path => Path.GetFileName(path), StringComparer.Ordinal)
+                    .ToArray();
+                foreach (var childPath in children)
+                {
+                    if (++entries > AliFileTreeSnapshotter.MaximumEntries)
+                    {
+                        throw new IOException(
+                            $"An exact file-tree target cannot exceed {AliFileTreeSnapshotter.MaximumEntries} entries.");
+                    }
+                    var attributes = File.GetAttributes(childPath);
+                    if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Device)) != 0)
+                    {
+                        throw new InvalidDataException(
+                            "The exact tree closure contains a reparse point or device entry.");
+                    }
+                    var kind = (attributes & FileAttributes.Directory) != 0
+                        ? "directory"
+                        : "file";
+                    var child = OpenOrCreateRelative(
+                        directory.Handle,
+                        Path.GetFileName(childPath),
+                        kind,
+                        FileOpen,
+                        renameable: false,
+                        writableDirectory: false,
+                        shareOverride: FileShare.Read);
+                    handles.Add(child);
+                    if (string.Equals(kind, "directory", StringComparison.Ordinal))
+                    {
+                        pending.Push((child, childPath));
+                        continue;
+                    }
+                    bytes = checked(bytes + RandomAccess.GetLength(child));
+                    if (bytes > AliFileTreeSnapshotter.MaximumBytes)
+                    {
+                        throw new IOException(
+                            $"An exact file-tree target cannot exceed {AliFileTreeSnapshotter.MaximumBytes} bytes.");
+                    }
+                }
+            }
+        }
+        catch
+        {
+            for (var index = handles.Count - 1; index >= initialCount; index--)
+            {
+                handles[index].Dispose();
+            }
+            if (handles.Count > initialCount)
+            {
+                handles.RemoveRange(initialCount, handles.Count - initialCount);
             }
             throw;
         }
@@ -683,13 +727,14 @@ internal static class AliFileTreeWindowsBoundary
         var fileNameOffset = Marshal.OffsetOf<FileRenameInformationHeader>(
                 nameof(FileRenameInformationHeader.FileNameLength))
             .ToInt32() + sizeof(uint);
-        var size = Math.Max(
-            Marshal.SizeOf<FileRenameInformationHeader>(),
-            checked(fileNameOffset + fileName.Length));
+        var size = checked(
+            Marshal.SizeOf<FileRenameInformationHeader>() + fileName.Length);
         var buffer = Marshal.AllocHGlobal(size);
+        var addedRef = false;
         try
         {
             Marshal.Copy(new byte[size], 0, buffer, size);
+            destinationParent.ParentHandle.DangerousAddRef(ref addedRef);
             var header = new FileRenameInformationHeader
             {
                 Flags = 0,
@@ -698,19 +743,25 @@ internal static class AliFileTreeWindowsBoundary
             };
             Marshal.StructureToPtr(header, buffer, fDeleteOld: false);
             Marshal.Copy(fileName, 0, IntPtr.Add(buffer, fileNameOffset), fileName.Length);
-            if (!SetFileInformationByHandle(
+            var status = NtSetInformationFile(
                     source.Handle,
-                    FileRenameInfo,
+                    out _,
                     buffer,
-                    checked((uint)size)))
+                    checked((uint)size),
+                    FileRenameInformation);
+            if (status < 0)
             {
                 ThrowIo(
                     "The exact file-tree object could not be renamed through its held parent handle.",
-                    Marshal.GetLastWin32Error());
+                    checked((int)RtlNtStatusToDosError(status)));
             }
         }
         finally
         {
+            if (addedRef)
+            {
+                destinationParent.ParentHandle.DangerousRelease();
+            }
             CryptographicOperations.ZeroMemory(fileName);
             Marshal.FreeHGlobal(buffer);
         }
@@ -721,15 +772,29 @@ internal static class AliFileTreeWindowsBoundary
         string currentPath)
     {
         ArgumentNullException.ThrowIfNull(item);
-        if (!PathMatchesIdentity(currentPath, item.Kind, item.Identity))
+        return CaptureBoundSnapshot(
+            item.Handle,
+            item.Kind,
+            item.Identity,
+            currentPath);
+    }
+
+    internal static AliFileTreeItemSnapshot CaptureBoundSnapshot(
+        SafeFileHandle handle,
+        string kind,
+        string identity,
+        string currentPath)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        if (!PathMatchesIdentity(currentPath, kind, identity))
         {
             throw new IOException(
                 "The exact file-tree path no longer names its held filesystem object.");
         }
-        if (string.Equals(item.Kind, "directory", StringComparison.Ordinal))
+        if (string.Equals(kind, "directory", StringComparison.Ordinal))
         {
             var snapshot = AliFileTreeSnapshotter.CaptureStable(currentPath);
-            if (!PathMatchesIdentity(currentPath, item.Kind, item.Identity))
+            if (!PathMatchesIdentity(currentPath, kind, identity))
             {
                 throw new IOException(
                     "The exact file-tree directory identity changed during recapture.");
@@ -737,14 +802,14 @@ internal static class AliFileTreeWindowsBoundary
             return snapshot;
         }
 
-        var first = CaptureBoundRegularFile(item.Handle);
-        var second = CaptureBoundRegularFile(item.Handle);
+        var first = CaptureBoundRegularFile(handle);
+        var second = CaptureBoundRegularFile(handle);
         if (first != second)
         {
             throw new IOException(
                 "The exact held file changed during authenticated recapture.");
         }
-        if (!PathMatchesIdentity(currentPath, item.Kind, item.Identity))
+        if (!PathMatchesIdentity(currentPath, kind, identity))
         {
             throw new IOException(
                 "The exact file-tree file identity changed during recapture.");
@@ -1250,6 +1315,14 @@ internal static class AliFileTreeWindowsBoundary
         uint eaLength);
 
     [DllImport("ntdll.dll")]
+    private static extern int NtSetInformationFile(
+        SafeFileHandle fileHandle,
+        out IoStatusBlock ioStatusBlock,
+        IntPtr fileInformation,
+        uint length,
+        int fileInformationClass);
+
+    [DllImport("ntdll.dll")]
     private static extern uint RtlNtStatusToDosError(int status);
 }
 
@@ -1306,10 +1379,10 @@ internal sealed class AliFileTreeBoundObject(
 }
 
 /// <summary>
-/// Keeps every no-follow descendant handle open across the final authenticated snapshot,
-/// handle-relative publication, and immediate postimage/rollback decision. Directory handles
-/// deny write/delete sharing and file handles deny write/delete sharing, closing the last
-/// nested-content interposition window without changing the bounded snapshot contract.
+/// Keeps every no-follow descendant handle open through the final authenticated snapshot.
+/// Windows cannot rename a directory while its descendants remain open, so a root rename
+/// releases only those descendants after the final check and immediately reseals and verifies
+/// the same held root at its destination before any success or post-rename checkpoint.
 /// </summary>
 internal sealed class AliFileTreeExactTreeLease(
     List<SafeFileHandle> handles,
@@ -1318,6 +1391,7 @@ internal sealed class AliFileTreeExactTreeLease(
 {
     private readonly List<SafeFileHandle> _handles = handles;
     private bool _disposed;
+    private bool _rootRenamePrepared;
 
     internal void RequireStable(
         string currentRootPath,
@@ -1326,18 +1400,69 @@ internal sealed class AliFileTreeExactTreeLease(
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(currentRootPath);
         ArgumentNullException.ThrowIfNull(expected);
-        if (!AliFileTreeWindowsBoundary.PathMatchesIdentity(
-                currentRootPath,
+        if (AliFileTreeWindowsBoundary.CaptureBoundSnapshot(
+                _handles[0],
                 rootKind,
-                rootIdentity))
-        {
-            throw new IOException(
-                "The exact tree closure root path no longer names its held object.");
-        }
-        if (AliFileTreeSnapshotter.CaptureStable(currentRootPath) != expected)
+                rootIdentity,
+                currentRootPath) != expected)
         {
             throw new IOException(
                 "The complete held file-tree closure does not match its authenticated state.");
+        }
+    }
+
+    internal void PrepareForRootRename(
+        string currentRootPath,
+        AliFileTreeItemSnapshot expected)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_rootRenamePrepared)
+        {
+            throw new InvalidOperationException(
+                "The exact file-tree closure is already prepared for a root rename.");
+        }
+        RequireStable(currentRootPath, expected);
+        ReleaseDescendants();
+        _rootRenamePrepared = true;
+    }
+
+    internal void ResealAfterRootRename(
+        string currentRootPath,
+        AliFileTreeItemSnapshot expected)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_rootRenamePrepared)
+        {
+            throw new InvalidOperationException(
+                "The exact file-tree closure was not prepared for a root rename.");
+        }
+        AliFileTreeWindowsBoundary.ResealExactTreeLease(
+            _handles,
+            _handles[0],
+            rootKind,
+            rootIdentity,
+            currentRootPath);
+        try
+        {
+            RequireStable(currentRootPath, expected);
+            _rootRenamePrepared = false;
+        }
+        catch
+        {
+            ReleaseDescendants();
+            throw;
+        }
+    }
+
+    private void ReleaseDescendants()
+    {
+        for (var index = _handles.Count - 1; index >= 1; index--)
+        {
+            _handles[index].Dispose();
+        }
+        if (_handles.Count > 1)
+        {
+            _handles.RemoveRange(1, _handles.Count - 1);
         }
     }
 
@@ -1348,10 +1473,8 @@ internal sealed class AliFileTreeExactTreeLease(
             return;
         }
         _disposed = true;
-        for (var index = _handles.Count - 1; index >= 0; index--)
-        {
-            _handles[index].Dispose();
-        }
+        ReleaseDescendants();
+        _handles[0].Dispose();
     }
 }
 
@@ -3512,10 +3635,14 @@ internal sealed class AliFileTreeMutationCoordinator
         AliFileTreeExactTreeLease treeLease,
         CancellationToken cancellationToken)
     {
-        AliFileTreeWindowsBoundary.RenameNoReplace(
+        RenameAndReseal(
             item,
+            treeLease,
+            originalPath,
             destinationParent,
-            Path.GetFileName(destinationPath));
+            destinationPath,
+            expectedPostimage,
+            "publication");
         try
         {
             _executionFaultHook?.Invoke(afterRenameCheckpoint);
@@ -3532,10 +3659,14 @@ internal sealed class AliFileTreeMutationCoordinator
             try
             {
                 RequireAbsent(originalPath, "rollback destination");
-                AliFileTreeWindowsBoundary.RenameNoReplace(
+                RenameAndReseal(
                     item,
+                    treeLease,
+                    destinationPath,
                     originalParent,
-                    Path.GetFileName(originalPath));
+                    originalPath,
+                    expectedPostimage,
+                    "rollback");
                 if (!AliFileTreeWindowsBoundary.PathMatchesIdentity(
                         originalPath,
                         item.Kind,
@@ -3553,6 +3684,58 @@ internal sealed class AliFileTreeMutationCoordinator
                     new AggregateException(commitException, rollbackException));
             }
             throw;
+        }
+    }
+
+    private void RenameAndReseal(
+        AliFileTreeBoundObject item,
+        AliFileTreeExactTreeLease treeLease,
+        string originalPath,
+        AliFileTreeDirectorySpine destinationParent,
+        string destinationPath,
+        AliFileTreeItemSnapshot expectedPostimage,
+        string operation)
+    {
+        treeLease.PrepareForRootRename(originalPath, expectedPostimage);
+        try
+        {
+            AliFileTreeWindowsBoundary.RenameNoReplace(
+                item,
+                destinationParent,
+                Path.GetFileName(destinationPath));
+        }
+        catch (Exception renameException)
+        {
+            try
+            {
+                treeLease.ResealAfterRootRename(originalPath, expectedPostimage);
+            }
+            catch (Exception resealException)
+            {
+                throw new IOException(
+                    $"The exact file-tree {operation} rename failed and its original tree could not be resealed.",
+                    new AggregateException(renameException, resealException));
+            }
+            throw;
+        }
+
+        // This internal hook exists only for adversarial interruption and interposition tests.
+        // Production composition supplies no execution-fault hook.
+        if (string.Equals(item.Kind, "directory", StringComparison.Ordinal))
+        {
+            _executionFaultHook?.Invoke(
+                AliFileTreeExecutionCheckpoint.TestOnlyAfterNativeRootRenameBeforeDescendantReseal);
+        }
+
+        try
+        {
+            treeLease.ResealAfterRootRename(destinationPath, expectedPostimage);
+        }
+        catch (Exception resealException)
+        {
+            throw new IOException(
+                $"The exact file-tree {operation} moved its held root but could not authenticate and reseal the destination tree; durable reconciliation is required.",
+                resealException);
         }
     }
 
@@ -4110,12 +4293,14 @@ internal sealed class AliFileTreeMutationCoordinator
             RequireAbsent(rollbackPath, "identity-bound restart rollback destination");
             _executionFaultHook?.Invoke(
                 AliFileTreeExecutionCheckpoint.RecoveryBeforeHandleRollback);
-            publishedClosure.RequireStable(publishedPath, expectedSnapshot);
-            AliFileTreeWindowsBoundary.RenameNoReplace(
+            RenameAndReseal(
                 item,
+                publishedClosure,
+                publishedPath,
                 rollbackParent,
-                Path.GetFileName(rollbackPath));
-            publishedClosure.RequireStable(rollbackPath, expectedSnapshot);
+                rollbackPath,
+                expectedSnapshot,
+                "restart rollback");
             return AliFileTreeWindowsBoundary.PathMatchesIdentity(
                 rollbackPath,
                 kind,

@@ -276,7 +276,7 @@ public sealed class AliCodingProcessExecutionAdapterTests
     }
 
     [Fact]
-    public async Task Selected_source_root_cannot_be_substituted_at_the_delegate_boundary()
+    public async Task Selected_source_root_substitution_is_blocked_or_detected_at_the_delegate_boundary()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -294,6 +294,7 @@ public sealed class AliCodingProcessExecutionAdapterTests
             Path.Combine(replacement, "Program.cs"),
             "substituted-root",
             TestContext.Current.CancellationToken);
+        var namespaceChanged = false;
         var replacementBlocked = false;
         var coordinator = new AliCodingProcessExecutionCoordinator(
             fixture.Bindings,
@@ -306,6 +307,7 @@ public sealed class AliCodingProcessExecutionAdapterTests
                 try
                 {
                     Directory.Move(fixture.ProjectDirectory, displaced);
+                    namespaceChanged = true;
                     Directory.Move(replacement, fixture.ProjectDirectory);
                 }
                 catch (IOException)
@@ -335,36 +337,53 @@ public sealed class AliCodingProcessExecutionAdapterTests
         var delegateObservedOriginal = false;
         try
         {
-            await using var activation = new AliExecutionInvocationScope(Grant(intent))
-                .Enter(functionArguments);
-            var result = await coordinator.ExecuteProviderAnalyzeAsync(
-                fixture.ProjectVirtualPath,
-                async _ =>
-                {
-                    delegateObservedOriginal = (await File.ReadAllTextAsync(
-                            fixture.ProgramPath,
-                            TestContext.Current.CancellationToken))
-                        .Contains("Console.WriteLine", StringComparison.Ordinal);
-                    return new AliLanguageOperationResult(
-                        true,
-                        "dotnet-roslyn",
-                        "analyze",
-                        "Analysis completed.",
-                        0,
-                        1,
-                        string.Empty,
-                        []);
-                },
-                TestContext.Current.CancellationToken);
-            await activation.CompleteAsync(result, CancellationToken.None);
+            var executionException = await Record.ExceptionAsync(async () =>
+            {
+                await using var activation = new AliExecutionInvocationScope(Grant(intent))
+                    .Enter(functionArguments);
+                var result = await coordinator.ExecuteProviderAnalyzeAsync(
+                    fixture.ProjectVirtualPath,
+                    async _ =>
+                    {
+                        delegateObservedOriginal = (await File.ReadAllTextAsync(
+                                fixture.ProgramPath,
+                                TestContext.Current.CancellationToken))
+                            .Contains("Console.WriteLine", StringComparison.Ordinal);
+                        return new AliLanguageOperationResult(
+                            true,
+                            "dotnet-roslyn",
+                            "analyze",
+                            "Analysis completed.",
+                            0,
+                            1,
+                            string.Empty,
+                            []);
+                    },
+                    TestContext.Current.CancellationToken);
+                await activation.CompleteAsync(result, CancellationToken.None);
+            });
 
-            Assert.True(replacementBlocked);
-            Assert.True(delegateObservedOriginal);
+            if (namespaceChanged)
+            {
+                Assert.IsAssignableFrom<IOException>(executionException);
+                Assert.False(delegateObservedOriginal);
+            }
+            else
+            {
+                Assert.True(replacementBlocked);
+                Assert.Null(executionException);
+                Assert.True(delegateObservedOriginal);
+            }
         }
         finally
         {
-            if (Directory.Exists(displaced) && !Directory.Exists(fixture.ProjectDirectory))
+            if (Directory.Exists(displaced))
             {
+                if (Directory.Exists(fixture.ProjectDirectory)
+                    && !Directory.Exists(replacement))
+                {
+                    Directory.Move(fixture.ProjectDirectory, replacement);
+                }
                 Directory.Move(displaced, fixture.ProjectDirectory);
             }
         }
@@ -492,6 +511,21 @@ public sealed class AliCodingProcessExecutionAdapterTests
         Assert.Equal(
             "coding-invocation-failed-state-unproven",
             reconciled.OutcomeCode);
+    }
+
+    [Fact]
+    public async Task DotNetBuildBindsTheExactDotNetHostForExecution()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var binding = fixture.Bindings.Resolve(
+            AliCodingInvocationKind.DotNetBuild,
+            fixture.Arguments(AliCapabilityCatalog.DotNetBuildName));
+
+        var host = Assert.IsType<AliBoundExecutionFile>(
+            binding.RuntimeBinding.DotNetHost);
+        Assert.Equal(host.PhysicalPath, AliExactDotNetHost.Revalidate(host));
+        Assert.Equal(host.Identity, binding.ExecutionAssets[host.PhysicalPath]);
     }
 
     [Fact]

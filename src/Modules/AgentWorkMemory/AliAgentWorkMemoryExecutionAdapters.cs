@@ -52,7 +52,8 @@ internal enum AliWorkMemoryPublicationCheckpoint
     BeforeStagedFileWriteSwap,
     BeforeStagedFileDeleteDisposition,
     BeforeDurableCompletion,
-    AfterClassificationSnapshot
+    AfterClassificationSnapshot,
+    AfterRootRenameBeforeReseal
 }
 
 internal sealed class AliWorkMemorySimulatedInterruptionException(
@@ -468,7 +469,7 @@ internal static class AliWorkMemoryWindowsFileIdentity
     private const uint FileSynchronousIoNonAlert = 0x00000020;
     private const uint FileNonDirectoryFile = 0x00000040;
     private const uint FileOpenReparsePoint = 0x00200000;
-    private const int FileRenameInfo = 3;
+    private const int FileRenameInformation = 10;
     private const int FileDispositionInfo = 4;
     private const int FileIdInfo = 18;
     private const int ErrorFileNotFound = 2;
@@ -700,13 +701,22 @@ internal static class AliWorkMemoryWindowsFileIdentity
         string leaf,
         string expectedIdentity)
     {
-        using var child = OpenBoundChildDirectory(parent, leaf, expectedIdentity);
+        ArgumentNullException.ThrowIfNull(parent);
+        RequireLeaf(leaf);
+        using var child = OpenDirectoryRelative(
+            parent.ParentHandle,
+            leaf,
+            FileListDirectory | FileReadAttributes | Synchronize,
+            FileShare.ReadWrite | FileShare.Delete);
+        RequireLiteralLeaf(child, leaf);
+        RequireIdentity(child, expectedIdentity);
+        var childPath = Path.Combine(parent.ParentPath, leaf);
         var result = parent.Bindings.ToList();
         var anchor = result[0].PhysicalPath;
         result.Add(new AliWorkMemoryNamespaceBinding(
-            Path.GetRelativePath(anchor, child.Path).Replace('\\', '/'),
-            child.Path,
-            child.Identity));
+            Path.GetRelativePath(anchor, childPath).Replace('\\', '/'),
+            childPath,
+            expectedIdentity));
         return result;
     }
 
@@ -827,6 +837,65 @@ internal static class AliWorkMemoryWindowsFileIdentity
         {
             throw new IOException(
                 "The exact sealed work-memory root changed during verification.");
+        }
+    }
+
+    internal static void PrepareTreeClosureForRootRename(
+        AliWorkMemoryTreeClosure closure,
+        string currentPath,
+        AliFileTreeItemSnapshot expected)
+    {
+        ArgumentNullException.ThrowIfNull(closure);
+        ArgumentException.ThrowIfNullOrWhiteSpace(currentPath);
+        ArgumentNullException.ThrowIfNull(expected);
+        if (CaptureBoundSnapshot(closure, currentPath) != expected)
+        {
+            throw new IOException(
+                "The exact sealed work-memory tree changed before its root rename.");
+        }
+        closure.ReleaseChildrenForRootRename();
+    }
+
+    internal static void ResealTreeClosureAfterRootRename(
+        AliWorkMemoryTreeClosure closure,
+        string currentPath,
+        AliFileTreeItemSnapshot expected)
+    {
+        ArgumentNullException.ThrowIfNull(closure);
+        ArgumentException.ThrowIfNullOrWhiteSpace(currentPath);
+        ArgumentNullException.ThrowIfNull(expected);
+        if (!closure.RootRenamePrepared)
+        {
+            throw new InvalidOperationException(
+                "The exact work-memory tree was not prepared for a root rename.");
+        }
+        if (!PathMatchesDirectoryIdentity(currentPath, closure.RootIdentity))
+        {
+            throw new IOException(
+                "The renamed work-memory root path does not resolve to its held directory identity.");
+        }
+
+        var count = 0;
+        var children = CaptureClosureChildren(
+            closure.RootHandle,
+            currentPath,
+            closure.RootIdentity,
+            ref count,
+            depth: 0);
+        closure.ReplaceChildrenAfterRootRename(children);
+        try
+        {
+            if (CaptureBoundSnapshot(closure, currentPath) != expected)
+            {
+                throw new IOException(
+                    "The exact work-memory tree changed while its renamed root was resealed.");
+            }
+            closure.CompleteRootRename();
+        }
+        catch
+        {
+            closure.ReleaseChildrenForFailedReseal();
+            throw;
         }
     }
 
@@ -1103,7 +1172,12 @@ internal static class AliWorkMemoryWindowsFileIdentity
                     parent.Identity,
                     leaf);
                 renamed = true;
-                using var published = OpenBoundChildEntry(parent, leaf, deleteAccess: false);
+                using var published = OpenBoundChildEntry(
+                    parent.Handle,
+                    parent.Path,
+                    leaf,
+                    deleteAccess: false,
+                    share: FileShare.ReadWrite | FileShare.Delete);
                 published.RequireFile();
                 if (!string.Equals(
                         published.Identity,
@@ -1604,7 +1678,19 @@ internal static class AliWorkMemoryWindowsFileIdentity
         SafeFileHandle parent,
         string parentPath,
         string leaf,
-        bool deleteAccess)
+        bool deleteAccess) => OpenBoundChildEntry(
+        parent,
+        parentPath,
+        leaf,
+        deleteAccess,
+        FileShare.Read);
+
+    private static AliWorkMemoryBoundEntry OpenBoundChildEntry(
+        SafeFileHandle parent,
+        string parentPath,
+        string leaf,
+        bool deleteAccess,
+        FileShare share)
     {
         RequireLeaf(leaf);
         var handle = OpenOrCreateRelativeEntry(
@@ -1615,7 +1701,7 @@ internal static class AliWorkMemoryWindowsFileIdentity
             | FileListDirectory | FileReadAttributes | Synchronize,
             directoryOnly: false,
             fileOnly: false,
-            share: FileShare.Read);
+            share);
         try
         {
             RequireLiteralLeaf(handle, leaf);
@@ -1766,41 +1852,54 @@ internal static class AliWorkMemoryWindowsFileIdentity
             throw new IOException(
                 "The exact work-memory handle rename cannot cross filesystem volumes.");
         }
-        var fileName = Encoding.Unicode.GetBytes(destinationLeaf);
+        var fileNameBytes = Encoding.Unicode.GetBytes(destinationLeaf);
         var fileNameOffset = Marshal.OffsetOf<FileRenameInformationHeader>(
                 nameof(FileRenameInformationHeader.FileNameLength))
             .ToInt32() + sizeof(uint);
-        var size = Math.Max(
-            Marshal.SizeOf<FileRenameInformationHeader>(),
-            checked(fileNameOffset + fileName.Length));
+        var size = checked(
+            Marshal.SizeOf<FileRenameInformationHeader>() + fileNameBytes.Length);
         var buffer = Marshal.AllocHGlobal(size);
+        var addedRef = false;
         try
         {
             Marshal.Copy(new byte[size], 0, buffer, size);
+            // Replacement is deliberately forbidden. The variable-length native rename buffer
+            // binds the exact simple leaf to the held destination directory handle.
+            destinationParent.DangerousAddRef(ref addedRef);
             Marshal.StructureToPtr(
                 new FileRenameInformationHeader
                 {
                     ReplaceIfExists = 0,
                     RootDirectory = destinationParent.DangerousGetHandle(),
-                    FileNameLength = checked((uint)fileName.Length)
+                    FileNameLength = checked((uint)fileNameBytes.Length)
                 },
                 buffer,
                 fDeleteOld: false);
-            Marshal.Copy(fileName, 0, IntPtr.Add(buffer, fileNameOffset), fileName.Length);
-            if (!SetFileInformationByHandle(
+            Marshal.Copy(
+                fileNameBytes,
+                0,
+                IntPtr.Add(buffer, fileNameOffset),
+                fileNameBytes.Length);
+            var status = NtSetInformationFile(
                     source,
-                    FileRenameInfo,
+                    out _,
                     buffer,
-                    checked((uint)size)))
+                    checked((uint)size),
+                    FileRenameInformation);
+            if (status < 0)
             {
                 ThrowIo(
                     "The exact work-memory entry could not be renamed through its held destination parent.",
-                    Marshal.GetLastWin32Error());
+                    checked((int)RtlNtStatusToDosError(status)));
             }
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(fileName);
+            if (addedRef)
+            {
+                destinationParent.DangerousRelease();
+            }
+            CryptographicOperations.ZeroMemory(fileNameBytes);
             Marshal.FreeHGlobal(buffer);
         }
     }
@@ -2054,7 +2153,7 @@ internal static class AliWorkMemoryWindowsFileIdentity
         if (information.NumberOfLinks != 1)
         {
             throw new InvalidDataException(
-                "The exact work-memory file is multiply linked and cannot be mutated safely.");
+                "The exact work-memory file has a hard-link alias (is multiply linked) and cannot be mutated safely.");
         }
     }
 
@@ -2227,14 +2326,6 @@ internal static class AliWorkMemoryWindowsFileIdentity
     private static extern bool SetFileInformationByHandle(
         SafeFileHandle file,
         int fileInformationClass,
-        IntPtr fileInformation,
-        uint bufferSize);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetFileInformationByHandle(
-        SafeFileHandle file,
-        int fileInformationClass,
         ref FileDispositionInformation fileInformation,
         uint bufferSize);
 
@@ -2251,6 +2342,14 @@ internal static class AliWorkMemoryWindowsFileIdentity
         uint createOptions,
         IntPtr eaBuffer,
         uint eaLength);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtSetInformationFile(
+        SafeFileHandle fileHandle,
+        out IoStatusBlock ioStatusBlock,
+        IntPtr fileInformation,
+        uint length,
+        int fileInformationClass);
 
     [DllImport("ntdll.dll")]
     private static extern uint RtlNtStatusToDosError(int status);
@@ -2347,21 +2446,71 @@ internal sealed class AliWorkMemoryTreeClosure(
     string rootIdentity,
     IReadOnlyList<AliWorkMemoryTreeClosureNode> children) : IDisposable
 {
+    private IReadOnlyList<AliWorkMemoryTreeClosureNode> _children = children;
+    private bool _rootRenamePrepared;
+
     internal SafeFileHandle RootHandle { get; } = rootHandle;
 
     internal string RootIdentity { get; } = rootIdentity;
 
-    internal IReadOnlyList<AliWorkMemoryTreeClosureNode> Children { get; } = children;
+    internal IReadOnlyList<AliWorkMemoryTreeClosureNode> Children => _children;
+
+    internal bool RootRenamePrepared => _rootRenamePrepared;
 
     internal AliFileTreeItemSnapshot InitialSnapshot { get; set; } =
         AliFileTreeItemSnapshot.Absent;
 
+    internal void ReleaseChildrenForRootRename()
+    {
+        if (_rootRenamePrepared)
+        {
+            throw new InvalidOperationException(
+                "The exact work-memory tree is already prepared for a root rename.");
+        }
+        DisposeChildren();
+        _rootRenamePrepared = true;
+    }
+
+    internal void ReplaceChildrenAfterRootRename(
+        IReadOnlyList<AliWorkMemoryTreeClosureNode> children)
+    {
+        ArgumentNullException.ThrowIfNull(children);
+        if (!_rootRenamePrepared || _children.Count != 0)
+        {
+            throw new InvalidOperationException(
+                "The exact work-memory tree cannot accept a resealed closure in its current state.");
+        }
+        _children = children;
+    }
+
+    internal void CompleteRootRename()
+    {
+        if (!_rootRenamePrepared)
+        {
+            throw new InvalidOperationException(
+                "The exact work-memory tree has no prepared root rename to complete.");
+        }
+        _rootRenamePrepared = false;
+    }
+
+    internal void ReleaseChildrenForFailedReseal()
+    {
+        DisposeChildren();
+        _rootRenamePrepared = true;
+    }
+
     public void Dispose()
     {
-        foreach (var child in Children)
+        DisposeChildren();
+    }
+
+    private void DisposeChildren()
+    {
+        foreach (var child in _children)
         {
             child.Dispose();
         }
+        _children = Array.Empty<AliWorkMemoryTreeClosureNode>();
     }
 }
 
@@ -3229,10 +3378,13 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
                        "workspace",
                        stagingWorkspaceIdentity))
             {
+                var authenticatedStagedPreimage = captured.WorkspaceBefore.Exists
+                    ? captured.WorkspaceBefore
+                    : AliFileTreeSnapshotter.EmptyDirectory;
                 if (AliWorkMemoryWindowsFileIdentity.CaptureBoundSnapshot(
                         stagedWorkspace,
                         staging)
-                    != captured.WorkspaceBefore)
+                    != authenticatedStagedPreimage)
                 {
                     throw new IOException(
                         "The exact staged work-memory source changed before durable preparation.");
@@ -3907,10 +4059,14 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
             backupSource.Path,
             domain.BackupAfter,
             "prepared backup");
-        AliWorkMemoryWindowsFileIdentity.RenameNoReplace(
+        RenameAndReseal(
             backupSource,
+            backupSourceClosure,
+            backupSource.Path,
             backupParent,
-            Path.GetFileName(domain.BackupWorkspacePath));
+            domain.BackupWorkspacePath,
+            domain.BackupAfter,
+            "backup publication");
         RequireBoundSnapshot(
             backupSourceClosure,
             domain.BackupWorkspacePath,
@@ -3952,10 +4108,14 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
             domain.BackupWorkspacePath,
             domain.BackupAfter,
             "sealed publication backup after the final publication seam");
-        AliWorkMemoryWindowsFileIdentity.RenameNoReplace(
+        RenameAndReseal(
             staging,
+            stagingClosure,
+            domain.StagingWorkspacePath,
             canonicalParent,
-            Path.GetFileName(domain.CanonicalWorkspacePath));
+            domain.CanonicalWorkspacePath,
+            domain.WorkspaceAfter,
+            "canonical publication");
         _publicationFaultHook?.Invoke(
             AliWorkMemoryPublicationCheckpoint.AfterStagingToCanonical);
         RequireBoundSnapshot(
@@ -3972,6 +4132,61 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
             domain.BackupWorkspacePath,
             domain.BackupAfter,
             "authenticated publication backup");
+    }
+
+    private void RenameAndReseal(
+        AliWorkMemoryBoundDirectory source,
+        AliWorkMemoryTreeClosure closure,
+        string originalPath,
+        AliWorkMemoryDirectorySpine destinationParent,
+        string destinationPath,
+        AliFileTreeItemSnapshot expected,
+        string operation)
+    {
+        AliWorkMemoryWindowsFileIdentity.PrepareTreeClosureForRootRename(
+            closure,
+            originalPath,
+            expected);
+        try
+        {
+            AliWorkMemoryWindowsFileIdentity.RenameNoReplace(
+                source,
+                destinationParent,
+                Path.GetFileName(destinationPath));
+        }
+        catch (Exception renameException)
+        {
+            try
+            {
+                AliWorkMemoryWindowsFileIdentity.ResealTreeClosureAfterRootRename(
+                    closure,
+                    originalPath,
+                    expected);
+            }
+            catch (Exception resealException)
+            {
+                throw new IOException(
+                    $"The exact work-memory {operation} rename failed and its original tree could not be resealed.",
+                    new AggregateException(renameException, resealException));
+            }
+            throw;
+        }
+
+        _publicationFaultHook?.Invoke(
+            AliWorkMemoryPublicationCheckpoint.AfterRootRenameBeforeReseal);
+        try
+        {
+            AliWorkMemoryWindowsFileIdentity.ResealTreeClosureAfterRootRename(
+                closure,
+                destinationPath,
+                expected);
+        }
+        catch (Exception resealException)
+        {
+            throw new IOException(
+                $"The exact work-memory {operation} moved its held root but could not authenticate and reseal the destination tree; durable reconciliation is required.",
+                resealException);
+        }
     }
 
     private static void RequireSealedPublishedState(
@@ -4129,10 +4344,14 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
                 return AliWorkMemoryClassification.Unknown;
             }
             var canonicalIdentity = canonical.Identity;
-            AliWorkMemoryWindowsFileIdentity.RenameNoReplace(
+            RenameAndReseal(
                 canonical,
+                canonicalClosure!,
+                domain.CanonicalWorkspacePath,
                 backupParent,
-                quarantineLeaf);
+                Path.Combine(backupParent.ParentPath, quarantineLeaf),
+                canonicalClosure.InitialSnapshot,
+                "recovery quarantine");
             var quarantinePath = Path.Combine(backupParent.ParentPath, quarantineLeaf);
             if (!AliWorkMemoryWindowsFileIdentity.PathMatchesDirectoryIdentity(
                     quarantinePath,
@@ -4158,10 +4377,14 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
         }
         if (domain.WorkspaceBefore.Exists)
         {
-            AliWorkMemoryWindowsFileIdentity.RenameNoReplace(
+            RenameAndReseal(
                 backup,
+                backupClosure,
+                domain.BackupWorkspacePath,
                 canonicalParent,
-                Path.GetFileName(domain.CanonicalWorkspacePath));
+                domain.CanonicalWorkspacePath,
+                domain.BackupAfter,
+                "recovery restore");
             if (!AliWorkMemoryWindowsFileIdentity.PathMatchesDirectoryIdentity(
                     domain.CanonicalWorkspacePath,
                     executionBinding.BackupWorkspaceIdentity)
@@ -4448,10 +4671,19 @@ internal sealed class AliAgentWorkMemoryExecutionCoordinator
                 using var staleParentSeed = AliWorkMemoryWindowsFileIdentity
                     .TryOpenBoundChildDirectory(
                         transaction,
-                        Path.GetFileName(domain.BackupParentSeedPath));
+                        Path.GetFileName(domain.BackupParentSeedPath),
+                        domain.BackupParentSeedIdentity);
                 if (staleParentSeed is not null)
                 {
-                    return;
+                    if (AliWorkMemoryWindowsFileIdentity.CaptureBoundSnapshot(
+                            staleParentSeed,
+                            domain.BackupParentSeedPath)
+                        != AliFileTreeSnapshotter.EmptyDirectory)
+                    {
+                        return;
+                    }
+                    AliWorkMemoryWindowsFileIdentity.DeleteEmptyBoundDirectory(
+                        staleParentSeed);
                 }
             }
 

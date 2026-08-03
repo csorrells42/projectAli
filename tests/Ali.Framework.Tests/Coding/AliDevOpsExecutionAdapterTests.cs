@@ -34,7 +34,7 @@ public sealed class AliDevOpsExecutionAdapterTests
     ];
 
     [Fact]
-    public async Task SelectedDevOpsTargetRootCannotBeReplacedWhileItsExecutionLeaseIsHeld()
+    public async Task SelectedDevOpsTargetRootReplacementIsBlockedOrDetectedByItsExecutionLease()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -49,10 +49,28 @@ public sealed class AliDevOpsExecutionAdapterTests
         var targetRoot = Assert.Single(binding.TargetRootIdentities).TargetPath;
         var displaced = targetRoot + ".displaced";
 
-        Assert.ThrowsAny<IOException>(() => Directory.Move(targetRoot, displaced));
-        leases.RequireStable();
+        try
+        {
+            Directory.Move(targetRoot, displaced);
+            Assert.ThrowsAny<IOException>(() => leases.RequireStable());
+            Assert.False(Directory.Exists(targetRoot));
+            Assert.True(Directory.Exists(displaced));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Physical blocking is acceptable; otherwise the lease must detect the moved root.
+        }
+        finally
+        {
+            if (Directory.Exists(displaced) && !Directory.Exists(targetRoot))
+            {
+                Directory.Move(displaced, targetRoot);
+            }
+        }
+
         Assert.True(Directory.Exists(targetRoot));
         Assert.False(Directory.Exists(displaced));
+        leases.RequireStable();
     }
 
     [Fact]

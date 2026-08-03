@@ -352,6 +352,7 @@ public sealed class AliGitExecutionAdapterTests
             ".git",
             "hooks",
             "pre-commit");
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
         await File.WriteAllTextAsync(
             hookPath,
             "#!/bin/sh\nprintf invoked > hook-invoked.txt\nexit 73\n",
@@ -586,11 +587,16 @@ public sealed class AliGitExecutionAdapterTests
         var linkedWorktree = Path.Combine(fixture.WorkspaceRoot, "Linked");
         var externalApp = Path.Combine(externalRepository, "App");
         Directory.CreateDirectory(externalApp);
-        await Fixture.RunGitAtAsync(externalRepository, ["init", "-b", "main"]);
         await Fixture.RunGitAtAsync(
+            fixture.SourceControl.ProviderPin,
+            externalRepository,
+            ["init", "-b", "main"]);
+        await Fixture.RunGitAtAsync(
+            fixture.SourceControl.ProviderPin,
             externalRepository,
             ["config", "user.name", "Ali Test"]);
         await Fixture.RunGitAtAsync(
+            fixture.SourceControl.ProviderPin,
             externalRepository,
             ["config", "user.email", "ali@example.invalid"]);
         await File.WriteAllTextAsync(
@@ -601,11 +607,16 @@ public sealed class AliGitExecutionAdapterTests
             Path.Combine(externalApp, "Program.cs"),
             "Console.WriteLine(\"Linked\");",
             TestContext.Current.CancellationToken);
-        await Fixture.RunGitAtAsync(externalRepository, ["add", "."]);
         await Fixture.RunGitAtAsync(
+            fixture.SourceControl.ProviderPin,
+            externalRepository,
+            ["add", "."]);
+        await Fixture.RunGitAtAsync(
+            fixture.SourceControl.ProviderPin,
             externalRepository,
             ["commit", "-m", "External initial commit"]);
         await Fixture.RunGitAtAsync(
+            fixture.SourceControl.ProviderPin,
             externalRepository,
             ["worktree", "add", linkedWorktree, "-b", "cp7-linked"]);
         var arguments = JsonSerializer.SerializeToElement(new AIFunctionArguments
@@ -994,6 +1005,7 @@ public sealed class AliGitExecutionAdapterTests
 
         internal static async Task<Fixture> CreateAsync()
         {
+            var provider = AliGitProviderIdentity.Pin();
             var root = Path.Combine(
                 TestRepository.Root,
                 "bin",
@@ -1004,12 +1016,12 @@ public sealed class AliGitExecutionAdapterTests
             var bareRemote = Path.Combine(workspace, "Remote.git");
             var app = Path.Combine(repository, "App");
             Directory.CreateDirectory(workspace);
-            await RunGitAtAsync(workspace, ["init", "--bare", bareRemote]);
+            await RunGitAtAsync(provider, workspace, ["init", "--bare", bareRemote]);
             Directory.CreateDirectory(repository);
-            await RunGitAtAsync(repository, ["init", "-b", "main"]);
-            await RunGitAtAsync(repository, ["config", "user.name", "Ali Test"]);
-            await RunGitAtAsync(repository, ["config", "user.email", "ali@example.invalid"]);
-            await RunGitAtAsync(repository, ["remote", "add", "origin", bareRemote]);
+            await RunGitAtAsync(provider, repository, ["init", "-b", "main"]);
+            await RunGitAtAsync(provider, repository, ["config", "user.name", "Ali Test"]);
+            await RunGitAtAsync(provider, repository, ["config", "user.email", "ali@example.invalid"]);
+            await RunGitAtAsync(provider, repository, ["remote", "add", "origin", bareRemote]);
             Directory.CreateDirectory(app);
             var projectPath = Path.Combine(app, "App.csproj");
             var programPath = Path.Combine(app, "Program.cs");
@@ -1021,9 +1033,9 @@ public sealed class AliGitExecutionAdapterTests
                 programPath,
                 "Console.WriteLine(\"Ali\");",
                 TestContext.Current.CancellationToken);
-            await RunGitAtAsync(repository, ["add", "."]);
-            await RunGitAtAsync(repository, ["commit", "-m", "Initial commit"]);
-            await RunGitAtAsync(repository, ["push", "-u", "origin", "main"]);
+            await RunGitAtAsync(provider, repository, ["add", "."]);
+            await RunGitAtAsync(provider, repository, ["commit", "-m", "Initial commit"]);
+            await RunGitAtAsync(provider, repository, ["push", "-u", "origin", "main"]);
 
             var permissions = new AgentToolPermissionStore(root);
             var fileStore = new AliWorkstationFileStore(
@@ -1034,7 +1046,7 @@ public sealed class AliGitExecutionAdapterTests
                 new AgentFileActionAuditStore(root, activeUsers: null),
                 permissions);
             var resolver = new AliCodingProjectResolver(access);
-            var sourceControl = new AliSourceControlEngineering(resolver);
+            var sourceControl = new AliSourceControlEngineering(resolver, provider);
             var bindings = new AliGitInvocationBindingResolver(
                 resolver,
                 sourceControl.ProviderPin);
@@ -1149,21 +1161,30 @@ public sealed class AliGitExecutionAdapterTests
         }
 
         internal Task<string> RunGitAsync(params string[] arguments) =>
-            RunGitAtAsync(RepositoryRoot, arguments);
+            RunGitAtAsync(SourceControl.ProviderPin, RepositoryRoot, arguments);
 
         internal Task<string> RunBareGitAsync(params string[] arguments) =>
-            RunGitAtAsync(BareRemoteRoot, arguments);
+            RunGitAtAsync(SourceControl.ProviderPin, BareRemoteRoot, arguments);
 
         internal static async Task<string> RunGitAtAsync(
+            AliGitProviderPin provider,
             string workingDirectory,
             IReadOnlyList<string> arguments)
         {
+            provider.RequireStableIdentity();
+            var providerStartInfo = provider.CreateStartInfo(workingDirectory);
+            var providerEnvironment = providerStartInfo.Environment.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
             var result = await AliBoundedProcessRunner.RunAsync(
-                "git",
+                providerStartInfo.FileName,
                 workingDirectory,
                 arguments,
                 TimeSpan.FromSeconds(30),
-                TestContext.Current.CancellationToken);
+                TestContext.Current.CancellationToken,
+                providerEnvironment);
+            provider.RequireStableIdentity();
             Assert.True(result.Success, result.Output);
             return result.Output;
         }

@@ -11,7 +11,7 @@ public sealed class AliDirectDotNetProcessLeaseTests
     [Fact]
     public async Task EngineeringTestHoldsExactHostAcrossProcessStartInterposition()
     {
-        var root = CreateRoot(nameof(EngineeringTestHoldsExactHostAcrossProcessStartInterposition));
+        var root = CreateRoot();
         try
         {
             var workspace = Path.Combine(root, "workspace");
@@ -65,7 +65,7 @@ public sealed class AliDirectDotNetProcessLeaseTests
     [Fact]
     public async Task RunHoldsFullApplicationClosureThroughInterpositionAndUntilExactExit()
     {
-        var root = CreateRoot(nameof(RunHoldsFullApplicationClosureThroughInterpositionAndUntilExactExit));
+        var root = CreateRoot();
         int? processId = null;
         AliRoslynCodingTools? tools = null;
         try
@@ -199,13 +199,11 @@ public sealed class AliDirectDotNetProcessLeaseTests
             Environment.GetFolderPath(Environment.SpecialFolder.System),
             fileName);
 
-    private static string CreateRoot(string testName)
+    private static string CreateRoot()
     {
         var root = Path.Combine(
-            TestRepository.Root,
-            "bin",
-            nameof(AliDirectDotNetProcessLeaseTests),
-            testName,
+            Path.GetTempPath(),
+            "Ali-Cp7-DotNet-Lease",
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return root;

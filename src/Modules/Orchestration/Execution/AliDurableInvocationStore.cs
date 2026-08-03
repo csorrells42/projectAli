@@ -518,6 +518,9 @@ internal sealed class AliDurableInvocationStore
                         protectedBytes,
                         CancellationToken.None)
                     .ConfigureAwait(false);
+                var writableTemporary = temporary;
+                temporary = null;
+                temporary = namespaceLease.ReopenFlushedForPublication(writableTemporary);
                 _testHook?.Invoke(
                     AliDurableInvocationStoreCheckpoint.TemporaryFlushed,
                     artifactKind);
@@ -741,6 +744,9 @@ internal sealed class AliDurableInvocationStore
                     protectedBytes,
                     cancellationToken)
                 .ConfigureAwait(false);
+            var writableJournal = journal;
+            journal = null;
+            journal = namespaceLease.ReopenFlushedForPublication(writableJournal);
             namespaceLease.RenameForPublication(
                 journal,
                 ReplacementJournalLeaf);
@@ -1355,6 +1361,31 @@ internal sealed class AliDurableInvocationNamespaceLease(
             allowMissing: false)
         ?? throw new IOException("The durable invocation temporary file could not be created.");
 
+    internal AliDurableInvocationBoundFile ReopenFlushedForPublication(
+        AliDurableInvocationBoundFile writable)
+    {
+        ArgumentNullException.ThrowIfNull(writable);
+        var leaf = writable.Leaf;
+        var expectedIdentity = writable.Identity;
+        writable.Dispose();
+
+        var reopened = OpenFile(
+            leaf,
+            AliDurableInvocationNativeAccess.Read | AliDurableInvocationNativeAccess.Delete,
+            AliDurableInvocationWindowsNamespace.FileOpen,
+            FileShare.Read,
+            allowMissing: false)
+            ?? throw new IOException(
+                "The flushed durable invocation temporary could not be reopened for publication.");
+        if (!expectedIdentity.SameObject(reopened.Identity))
+        {
+            reopened.Dispose();
+            throw new InvalidDataException(
+                "The durable invocation temporary identity changed while its publication handle was reopened.");
+        }
+        return reopened;
+    }
+
     internal AliDurableInvocationBoundFile? TryOpenExistingFile(
         string leaf,
         AliDurableInvocationNativeAccess access,
@@ -1490,10 +1521,15 @@ internal sealed class AliDurableInvocationNamespaceLease(
             destinationLeaf,
             AliDurableInvocationNativeAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
-        if (published is null || !renamed.SameObject(published.Identity))
+        if (published is null)
         {
             throw new InvalidDataException(
-                "The durable invocation publication is not bound to its exact destination name.");
+                "The durable invocation publication is missing from its exact destination name.");
+        }
+        if (!renamed.SameObject(published.Identity))
+        {
+            throw new InvalidDataException(
+                "The durable invocation publication destination names a different physical object.");
         }
     }
 
@@ -1661,7 +1697,7 @@ internal static class AliDurableInvocationWindowsNamespace
     private const uint FileSynchronousIoNonAlert = 0x00000020;
     private const uint FileNonDirectoryFile = 0x00000040;
     private const uint FileOpenReparsePoint = 0x00200000;
-    private const int FileRenameInfo = 3;
+    private const int FileRenameInformation = 10;
     private const int FileDispositionInfo = 4;
     private const int FileIdInfo = 18;
     private const int ErrorFileNotFound = 2;
@@ -1957,16 +1993,17 @@ internal static class AliDurableInvocationWindowsNamespace
         var fileNameOffset = Marshal.OffsetOf<FileRenameInformationHeader>(
                 nameof(FileRenameInformationHeader.FileNameLength))
             .ToInt32() + sizeof(uint);
-        var size = Math.Max(
-            Marshal.SizeOf<FileRenameInformationHeader>(),
-            checked(fileNameOffset + fileNameBytes.Length));
+        var size = checked(
+            Marshal.SizeOf<FileRenameInformationHeader>() + fileNameBytes.Length);
         var buffer = Marshal.AllocHGlobal(size);
         var addedRef = false;
         try
         {
             Marshal.Copy(new byte[size], 0, buffer, size);
             // Replacement is deliberately forbidden. Existing durable leaves are first moved by
-            // their exact held handle to a recovery name, then publication uses no-replace.
+            // their exact held handle to a recovery name, then publication uses no-replace. The
+            // native FileRenameInformation contract binds the simple leaf to the held destination
+            // directory handle rather than resolving it through the process working directory.
             destinationParent.DangerousAddRef(ref addedRef);
             Marshal.StructureToPtr(
                 new FileRenameInformationHeader
@@ -1982,15 +2019,17 @@ internal static class AliDurableInvocationWindowsNamespace
                 0,
                 IntPtr.Add(buffer, fileNameOffset),
                 fileNameBytes.Length);
-            if (!SetFileInformationByHandle(
+            var status = NtSetInformationFile(
                     source,
-                    FileRenameInfo,
+                    out _,
                     buffer,
-                    checked((uint)size)))
+                    checked((uint)size),
+                    FileRenameInformation);
+            if (status < 0)
             {
                 ThrowIo(
                     "The durable invocation artifact could not be published by exact handle.",
-                    Marshal.GetLastWin32Error());
+                    checked((int)RtlNtStatusToDosError(status)));
             }
         }
         finally
@@ -2522,6 +2561,14 @@ internal static class AliDurableInvocationWindowsNamespace
         uint createOptions,
         IntPtr eaBuffer,
         uint eaLength);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtSetInformationFile(
+        SafeFileHandle fileHandle,
+        out IoStatusBlock ioStatusBlock,
+        IntPtr fileInformation,
+        uint length,
+        int fileInformationClass);
 
     [DllImport("ntdll.dll")]
     private static extern uint RtlNtStatusToDosError(int status);

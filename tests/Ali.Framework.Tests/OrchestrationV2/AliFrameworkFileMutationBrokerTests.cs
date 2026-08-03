@@ -226,7 +226,7 @@ public sealed class AliFrameworkFileMutationBrokerTests
     public async Task CrashReconciliation_ClassifiesCommittedRolledBackAndInDoubt_WithoutReplaying()
     {
         await AssertCrashClassificationAsync(
-            AliSourceTransactionBoundary.OperationMutationCompleted,
+            AliSourceTransactionBoundary.OperationAppliedPersisted,
             tamperAfterCrash: false,
             ActionReconciliationDisposition.Applied,
             expectedContent: "postimage");
@@ -237,6 +237,11 @@ public sealed class AliFrameworkFileMutationBrokerTests
             expectedContent: null);
         await AssertCrashClassificationAsync(
             AliSourceTransactionBoundary.OperationMutationCompleted,
+            tamperAfterCrash: false,
+            ActionReconciliationDisposition.Unknown,
+            expectedContent: "postimage");
+        await AssertCrashClassificationAsync(
+            AliSourceTransactionBoundary.OperationAppliedPersisted,
             tamperAfterCrash: true,
             ActionReconciliationDisposition.Unknown,
             expectedContent: "unrecognized external content");
@@ -505,7 +510,9 @@ public sealed class AliFrameworkFileMutationBrokerTests
             Intent(adapter, arguments, prepared),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(expectedDisposition, reconciled.Disposition);
+        Assert.True(
+            reconciled.Disposition == expectedDisposition,
+            $"Expected {expectedDisposition}, received {reconciled.Disposition}: {reconciled.OutcomeCode}");
         if (expectedContent is null)
         {
             Assert.False(File.Exists(fixture.PhysicalPath("crash.txt")));

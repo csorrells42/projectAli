@@ -23,9 +23,9 @@ Treat the checkpoint-6 behavior in `docs/reviews/CP6-EXTERNAL-READ-ONLY-REVIEW-B
 3. **Shared transactional source engine.** Typed add/replace/delete/rename changesets bind exact pre/postimages, encodings, relative paths, protected blobs/backups, authenticated manifests, per-root publication leases, a write-ahead operation/rollback journal, terminal receipts, and deterministic committed/rolled-back/in-doubt reconciliation.
 4. **Roslyn Action Deck.** `roslyn_inspect_target`, `roslyn_list_actions`, `roslyn_preview_action`, `roslyn_verify_changeset`, and `roslyn_apply_action` replace the retired direct preview/apply rename surface. Action title alone is not executable identity.
 5. **Canonical-versus-preview workspaces.** `MSBuildWorkspace` loads canonical state. A separate `AdhocWorkspace` clones exact projects, documents, options, references, analyzers, and analyzer-config data. Physical references are hash-bound; an exact semantic fingerprint mismatch blocks preview.
-6. **Public provider bridge.** Production explicitly supplies public `CodeFixProvider` and `CodeRefactoringProvider` instances; no MEF scan, reflection invocation, or internal Roslyn service is used. Provider concrete type, assembly version, and assembly-file hash enter action identity. Nested actions have deterministic ordinal/equivalence-key identities and hard bounds.
+6. **Public provider bridge.** Production explicitly supplies public `CodeFixProvider` and `CodeRefactoringProvider` instances; provider discovery and invocation use no MEF scan, reflection invocation, or internal Roslyn service. Semantic fingerprinting and analyzer-config reconstruction separately inspect a fail-closed, version-pinned Roslyn 5.6 internal surface. Provider concrete type, assembly version, and assembly-file hash enter action identity. Nested actions have deterministic ordinal/equivalence-key identities and hard bounds.
 7. **Explicit provider set.** The Action Deck always adds the built-in semantic rename provider, while the production-owned public catalog supplies an unambiguous `CS0246` namespace-import fix and exact whole-document formatting. Provider exceptions are isolated and reported without partially retaining that provider's actions.
-8. **Exact durable Roslyn delta.** Regular, additional, and analyzer-config document add/replace/delete/rename/rename-and-replace changes are reconstructable from protected source operations. Unrepresented project/reference/compilation metadata changes fail closed rather than being silently omitted.
+8. **Exact durable Roslyn delta.** Regular, additional, and analyzer-config document add/replace/delete/rename/rename-and-replace changes are reconstructable from protected source operations. When and only when an analyzer-config delta exists, its Roslyn-derived `SyntaxTreeOptionsProvider` is removed from both compilation options through the pinned surface before every remaining option is compared. Unrepresented project/reference/independent compilation metadata changes fail closed rather than being silently omitted.
 9. **Staged semantic/build/test gate.** Verification compares compiler plus project-analyzer diagnostic identities, materializes a bounded no-follow temporary tree, evaluates the staged MSBuild graph, builds the smallest affected roots, and runs dependency-related test projects. Timeout, failed build/test, selected zero-test result, missing reference, stale fingerprint, or diagnostic regression prevents verification.
 10. **Protected expiring handles.** Preview and verification state, requested values, paths, exact document deltas, and receipts are stored in current-user-protected handles with revision-checked one-way state transitions. Preview lasts two hours; successful preverification lasts at most 30 minutes.
 11. **All-or-reconciled Roslyn publication.** Apply requires the exact verified handle and unchanged canonical fingerprint. Canonical source is published through the shared transaction, then reloaded and compared with the verified staged semantic fingerprint. Recovery never republishes; it classifies the source receipt and protected handle, then postverifies or reports applied-needs-review.
@@ -34,14 +34,11 @@ Treat the checkpoint-6 behavior in `docs/reviews/CP6-EXTERNAL-READ-ONLY-REVIEW-B
 14. **Seven brokered Roslyn semantic queries.** Analyze, symbol search, completions, solution/document/position inspection, and references resolve exact target/document hashes and consume a one-use root-bound grant. Their recovery classification is safe-to-repeat/absent because they publish no source or durable domain state.
 15. **Recovery-display claim.** Recovered interim/final text is marked display-in-doubt durably before redisplay; the UI acknowledgment must match its digest and claim revision. A crash after the claim cannot silently trigger another automatic display.
 16. **Adjacent boundary hardening.** Suppressed `ExecutionContext` no longer inherits a process-wide turn fallback; process timeouts kill the tree and remain distinct from caller cancellation; workstation target hashes reject reparse paths; outgoing non-interactive MCP publication rejects every mutating/system-changing capability.
+17. **Windows directory-root publication boundary.** Windows requires descendant handles to close before a held directory root can be renamed. File-tree and conversation work-memory mutation therefore authenticate the complete no-follow tree, release descendants while retaining the identity-bound root and parent-spine handles, perform a native no-replace rename, then immediately reseal and verify the destination before success. Persistent gap mutation fails closed and reconciles `Unknown`; clean interruption with the exact authenticated poststate reconciles `Applied`. This is detection and recovery, not an OS-enforced exclusion claim against an owner-operated same-user process that can restore the exact path/content snapshot before reseal.
 
 ## Exact adapter-coverage release gate
 
-This is a required review, not an assumption. The CP7 source introduces a broad `RequiresDurableEffectAdapter` predicate. The explicitly implemented adapter families visible during development were:
-
-- five Action Deck tools;
-- seven Roslyn semantic-query tools;
-- three Agent Framework file-mutation tools.
+This is a required review, not an assumption. The CP7 source introduces a broad `RequiresDurableEffectAdapter` predicate. The final production partition must cover all 44 exact adapters: three Agent Framework text mutations, four workstation file-tree mutations, four conversation work-memory mutations, five Action Deck tools, seven Roslyn semantic-query tools, 10 coding/process tools, five Git tools, and six DevOps tools.
 
 For the supplied final commit, enumerate every descriptor for which the predicate is true and prove exactly one of these outcomes:
 
@@ -89,6 +86,8 @@ Do not report these as checkpoint-7 defects unless the code claims they are comp
 - Can a copied/replayed/tampered manifest, blob, backup, receipt, journal line, authorization digest, or handle bind to another changeset/call/root?
 - Can case-insensitive path collisions, alternate separators, `..`, ADS/device names, symlinks, junctions, hard links, or a parent swapped after validation escape the approved root?
 - Are add/replace/delete/rename and rollback operations durable in their real Windows crash model, including directory-entry durability and locked files?
+- During directory-root publication, can a persistent mutation between native rename and descendant reseal ever report success or reconcile `Applied`; can a clean interruption at that exact seam fail to reconcile the authenticated poststate; and does a concurrently created destination remain protected by the native no-replace operation?
+- Does any documentation or test incorrectly claim that open directory handles prevent same-user child creation, rather than proving final-snapshot drift detection and fail-closed publication?
 - Can materialization exclusions omit a changed file yet still authorize verification?
 
 ### Roslyn semantic fidelity
@@ -136,7 +135,12 @@ Do not report these as checkpoint-7 defects unless the code claims they are comp
 - `src/Modules/Coding/Changesets/`
 - `src/Modules/Coding/RoslynActions/`
 - `src/Modules/Coding/RoslynQueries/`
+- `src/Modules/Coding/Execution/`
+- `src/Modules/Coding/SourceControl/`
 - `src/Modules/Coding/AliCodingModule.cs`
+- `src/Modules/AgentWorkMemory/AliAgentWorkMemoryExecutionAdapters.cs`
+- `src/Modules/FileAccess/AliFileTreeExecutionAdapters.cs`
+- `src/Modules/Orchestration/Execution/AliDurableInvocationStore.cs`
 - `src/Modules/FileAccess/AliBrokeredFrameworkFileStore.cs`
 - `src/Modules/FileAccess/AliFrameworkFileExecutionAdapter.cs`
 - `src/Modules/FileAccess/AliFrameworkFileMutationPlan.cs`

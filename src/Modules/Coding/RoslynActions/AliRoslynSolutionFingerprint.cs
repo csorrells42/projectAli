@@ -394,8 +394,38 @@ internal sealed class AliRoslynSolutionFingerprint(AliRoslynTargetReferenceResol
                     metadataService,
                     "Microsoft.CodeAnalysis.Host.MetadataServiceFactory+MetadataService",
                     "Microsoft.CodeAnalysis.Workspaces");
-                RequireExactFieldSurface(metadataService.GetType(), []);
+                RequireExactFieldSurface(metadataService.GetType(), ["_metadataCache"]);
+                var metadataCache = RequirePinnedField(
+                    metadataService,
+                    metadataService.GetType().FullName!,
+                    "_metadataCache",
+                    "Microsoft.CodeAnalysis.Host.MetadataReferenceCache");
+                RequireExactRuntimeType(
+                    metadataCache,
+                    "Microsoft.CodeAnalysis.Host.MetadataReferenceCache",
+                    "Microsoft.CodeAnalysis.Workspaces");
+                RequireExactFieldSurface(
+                    metadataCache.GetType(),
+                    ["_createReference", "_referenceSets"]);
+                _ = RequirePinnedField(
+                    metadataCache,
+                    metadataCache.GetType().FullName!,
+                    "_createReference",
+                    "System.Func`3[[System.String, System.Private.CoreLib],"
+                    + "[Microsoft.CodeAnalysis.MetadataReferenceProperties, Microsoft.CodeAnalysis],"
+                    + "[Microsoft.CodeAnalysis.MetadataReference, Microsoft.CodeAnalysis]]",
+                    matchAssemblyQualifiedGeneric: true);
+                _ = RequirePinnedField(
+                    metadataCache,
+                    metadataCache.GetType().FullName!,
+                    "_referenceSets",
+                    "System.Collections.Immutable.ImmutableDictionary`2"
+                    + "[[System.String, System.Private.CoreLib],"
+                    + "[Microsoft.CodeAnalysis.Host.MetadataReferenceCache+ReferenceSet, "
+                    + "Microsoft.CodeAnalysis.Workspaces]]",
+                    matchAssemblyQualifiedGeneric: true);
                 Add(hash, metadataService.GetType().AssemblyQualifiedName);
+                Add(hash, metadataCache.GetType().AssemblyQualifiedName);
                 AddRelativePathResolver(
                     hash,
                     RequirePinnedField(
@@ -475,6 +505,17 @@ internal sealed class AliRoslynSolutionFingerprint(AliRoslynTargetReferenceResol
                         typeof(string).FullName!) as string);
                 return;
 
+            case "Microsoft.CodeAnalysis.AssemblyIdentityComparer":
+                RequireProviderType(type, "Microsoft.CodeAnalysis");
+                RequireExactFieldSurface(type, []);
+                if (!ReferenceEquals(provider, AssemblyIdentityComparer.Default))
+                {
+                    throw new InvalidDataException(
+                        "The pinned Roslyn 5.6 assembly identity comparer is not the exact default singleton.");
+                }
+                AddNamed(hash, "DefaultSingleton", true);
+                return;
+
             case "Microsoft.CodeAnalysis.DesktopAssemblyIdentityComparer":
                 RequireProviderType(type, "Microsoft.CodeAnalysis");
                 RequireExactFieldSurface(type, ["policy"]);
@@ -550,7 +591,7 @@ internal sealed class AliRoslynSolutionFingerprint(AliRoslynTargetReferenceResol
         RequireExactRuntimeType(
             resolver,
             "Microsoft.CodeAnalysis.RelativePathResolver",
-            "Microsoft.CodeAnalysis");
+            "Microsoft.CodeAnalysis.Workspaces");
         RequireExactFieldSurface(
             resolver.GetType(),
             ["<BaseDirectory>k__BackingField", "<SearchPaths>k__BackingField"]);

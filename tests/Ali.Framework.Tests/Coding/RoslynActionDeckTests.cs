@@ -83,6 +83,59 @@ public sealed class RoslynActionDeckTests
     }
 
     [Fact]
+    public async Task DefaultAssemblyIdentityComparerUsesPinnedStatelessSingletonSerializer()
+    {
+        await using var fixture = new ActionDeckFixture(buildSucceeds: true);
+        using var workspace = new AdhocWorkspace();
+        var graph = CreateDocumentGraph(workspace, fixture);
+        var project = Assert.Single(graph.Canonical.Projects);
+        var options = Assert.IsType<CSharpCompilationOptions>(project.CompilationOptions);
+        var comparer = options.AssemblyIdentityComparer;
+
+        Assert.Same(AssemblyIdentityComparer.Default, comparer);
+        Assert.Equal(typeof(AssemblyIdentityComparer), comparer.GetType());
+        Assert.Empty(comparer.GetType().GetFields(
+            System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.DeclaredOnly));
+
+        var fingerprint = await fixture.Fingerprint.CaptureAsync(
+            graph.Canonical,
+            TestContext.Current.CancellationToken);
+        Assert.Matches("^[0-9A-F]{64}$", fingerprint.Sha256);
+    }
+
+    [Fact]
+    public async Task SeparateStatelessAssemblyIdentityComparerInstanceFailsClosed()
+    {
+        await using var fixture = new ActionDeckFixture(buildSucceeds: true);
+        using var workspace = new AdhocWorkspace();
+        var graph = CreateDocumentGraph(workspace, fixture);
+        var project = Assert.Single(graph.Canonical.Projects);
+        var options = Assert.IsType<CSharpCompilationOptions>(project.CompilationOptions);
+        var constructor = typeof(AssemblyIdentityComparer).GetConstructor(
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+            binder: null,
+            Type.EmptyTypes,
+            modifiers: null);
+        Assert.NotNull(constructor);
+        var separate = Assert.IsType<AssemblyIdentityComparer>(constructor.Invoke(null));
+        Assert.NotSame(AssemblyIdentityComparer.Default, separate);
+        var changedOptions = Assert.IsType<CSharpCompilationOptions>(
+            options.WithAssemblyIdentityComparer(separate));
+        Assert.Same(separate, changedOptions.AssemblyIdentityComparer);
+        var changed = graph.Canonical.WithProjectCompilationOptions(project.Id, changedOptions);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            fixture.Fingerprint.CaptureAsync(
+                changed,
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("default singleton", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RealMsBuildWorkspaceClonePreservesTheExactSemanticFingerprint()
     {
         await using var fixture = new ActionDeckFixture(buildSucceeds: true);
@@ -99,6 +152,95 @@ public sealed class RoslynActionDeckTests
         Assert.Equal(canonical.SemanticFingerprint, isolated.CanonicalFingerprint);
         Assert.Equal(isolated.CanonicalFingerprint, isolated.IsolatedFingerprint);
         Assert.NotSame(canonical.Solution.Workspace, isolated.Solution.Workspace);
+    }
+
+    [Fact]
+    public async Task WorkspaceMetadataServiceUsesTheExactPinnedRoslyn56CacheSurface()
+    {
+        const System.Reflection.BindingFlags fields =
+            System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.DeclaredOnly;
+        await using var fixture = new ActionDeckFixture(buildSucceeds: true);
+        using var canonical = await fixture.WorkspaceLoader.LoadAsync(
+            fixture.TargetVirtualPath,
+            TestContext.Current.CancellationToken);
+        var project = Assert.Single(canonical.Solution.Projects);
+        var options = Assert.IsType<CSharpCompilationOptions>(project.CompilationOptions);
+        var resolver = options.MetadataReferenceResolver;
+        Assert.NotNull(resolver);
+        var resolverType = resolver.GetType();
+        Assert.Equal(
+            "Microsoft.CodeAnalysis.Host.WorkspaceMetadataFileReferenceResolver",
+            resolverType.FullName);
+        var pathResolverField = resolverType.GetField("PathResolver", fields);
+        Assert.NotNull(pathResolverField);
+        var pathResolver = pathResolverField.GetValue(resolver);
+        Assert.NotNull(pathResolver);
+        Assert.Equal("Microsoft.CodeAnalysis.RelativePathResolver", pathResolver.GetType().FullName);
+        Assert.Equal("Microsoft.CodeAnalysis.Workspaces", pathResolver.GetType().Assembly.GetName().Name);
+        Assert.Equal(
+            ["<BaseDirectory>k__BackingField", "<SearchPaths>k__BackingField"],
+            pathResolver.GetType().GetFields(fields)
+                .Select(field => field.Name)
+                .OrderBy(name => name, StringComparer.Ordinal));
+
+        var metadataServiceField = resolverType.GetField("_metadataService", fields);
+        Assert.NotNull(metadataServiceField);
+        var metadataService = metadataServiceField.GetValue(resolver);
+        Assert.NotNull(metadataService);
+        var metadataServiceType = metadataService.GetType();
+        Assert.Equal(
+            "Microsoft.CodeAnalysis.Host.MetadataServiceFactory+MetadataService",
+            metadataServiceType.FullName);
+        Assert.Equal(
+            ["_metadataCache"],
+            metadataServiceType.GetFields(fields)
+                .Select(field => field.Name)
+                .OrderBy(name => name, StringComparer.Ordinal));
+
+        var metadataCacheField = metadataServiceType.GetField("_metadataCache", fields);
+        Assert.NotNull(metadataCacheField);
+        Assert.True(metadataCacheField.IsPrivate);
+        Assert.True(metadataCacheField.IsInitOnly);
+        Assert.Equal(
+            "Microsoft.CodeAnalysis.Host.MetadataReferenceCache",
+            metadataCacheField.FieldType.FullName);
+        var metadataCache = metadataCacheField.GetValue(metadataService);
+        Assert.NotNull(metadataCache);
+        Assert.Equal(metadataCacheField.FieldType, metadataCache.GetType());
+        Assert.True(metadataCache.GetType().IsSealed);
+        Assert.Equal(
+            ["_createReference", "_referenceSets"],
+            metadataCache.GetType().GetFields(fields)
+                .Select(field => field.Name)
+                .OrderBy(name => name, StringComparer.Ordinal));
+
+        var createReference = metadataCache.GetType().GetField("_createReference", fields);
+        Assert.NotNull(createReference);
+        Assert.Equal(typeof(Func<,,>), createReference.FieldType.GetGenericTypeDefinition());
+        Assert.Equal(
+            [
+                typeof(string).FullName,
+                typeof(MetadataReferenceProperties).FullName,
+                typeof(MetadataReference).FullName
+            ],
+            createReference.FieldType.GetGenericArguments().Select(type => type.FullName));
+        var referenceSets = metadataCache.GetType().GetField("_referenceSets", fields);
+        Assert.NotNull(referenceSets);
+        Assert.Equal(typeof(ImmutableDictionary<,>), referenceSets.FieldType.GetGenericTypeDefinition());
+        Assert.Equal(
+            [
+                typeof(string).FullName,
+                "Microsoft.CodeAnalysis.Host.MetadataReferenceCache+ReferenceSet"
+            ],
+            referenceSets.FieldType.GetGenericArguments().Select(type => type.FullName));
+
+        var fingerprint = await fixture.Fingerprint.CaptureAsync(
+            canonical.Solution,
+            TestContext.Current.CancellationToken);
+        Assert.Matches("^[0-9A-F]{64}$", fingerprint.Sha256);
     }
 
     [Fact]
@@ -761,6 +903,33 @@ public sealed class RoslynActionDeckTests
         using var workspace = new AdhocWorkspace();
         var graph = CreateDocumentGraph(workspace, fixture);
         var target = fixture.Resolver.ResolveExistingTarget(fixture.TargetVirtualPath);
+        var canonicalProject = Assert.Single(graph.Canonical.Projects);
+        var stagedProject = Assert.Single(graph.Staged.Projects);
+        var canonicalOptions = Assert.IsType<CSharpCompilationOptions>(canonicalProject.CompilationOptions);
+        var stagedOptions = Assert.IsType<CSharpCompilationOptions>(stagedProject.CompilationOptions);
+        Assert.Equal(
+            [
+                "Microsoft.CodeAnalysis.CompilationOptions.<SyntaxTreeOptionsProvider>k__BackingField",
+                "Microsoft.CodeAnalysis.CompilationOptions._lazyErrors"
+            ],
+            DifferingInstanceFields(canonicalOptions, stagedOptions)
+                .Where(name => !name.EndsWith("._hashCode", StringComparison.Ordinal))
+                .OrderBy(name => name, StringComparer.Ordinal));
+        var normalization = canonicalOptions.GetType().GetMethod(
+            "CommonWithSyntaxTreeOptionsProvider",
+            System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic,
+            binder: null,
+            [typeof(SyntaxTreeOptionsProvider)],
+            modifiers: null);
+        Assert.NotNull(normalization);
+        Assert.True(typeof(CompilationOptions).IsAssignableFrom(normalization.ReturnType));
+        var canonicalDurableOptions = normalization.Invoke(canonicalOptions, [null]);
+        var stagedDurableOptions = normalization.Invoke(stagedOptions, [null]);
+        Assert.NotNull(canonicalDurableOptions);
+        Assert.NotNull(stagedDurableOptions);
+        Assert.Equal(canonicalDurableOptions, stagedDurableOptions);
 
         var prepared = await fixture.RoslynChangeSets.CreateAsync(
             graph.Canonical,
@@ -829,6 +998,31 @@ public sealed class RoslynActionDeckTests
             fixture.RoslynChangeSets.CreateAsync(
                 graph.Canonical,
                 staged,
+                target,
+                TestContext.Current.CancellationToken));
+
+        Assert.Contains("project or reference metadata", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnalyzerConfigDeltaStillRejectsIndependentCompilationMetadataChanges()
+    {
+        await using var fixture = new ActionDeckFixture(buildSucceeds: true);
+        using var workspace = new AdhocWorkspace();
+        var graph = CreateDocumentGraph(workspace, fixture);
+        var canonicalProject = Assert.Single(graph.Canonical.Projects);
+        var stagedProject = Assert.Single(graph.Staged.Projects);
+        var canonicalOptions = Assert.IsType<CSharpCompilationOptions>(canonicalProject.CompilationOptions);
+        var stagedOptions = Assert.IsType<CSharpCompilationOptions>(stagedProject.CompilationOptions);
+        var stagedWithRealOptionMutation = graph.Staged.WithProjectCompilationOptions(
+            stagedProject.Id,
+            stagedOptions.WithAllowUnsafe(!canonicalOptions.AllowUnsafe));
+        var target = fixture.Resolver.ResolveExistingTarget(fixture.TargetVirtualPath);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.RoslynChangeSets.CreateAsync(
+                graph.Canonical,
+                stagedWithRealOptionMutation,
                 target,
                 TestContext.Current.CancellationToken));
 
@@ -1638,6 +1832,25 @@ public sealed class RoslynActionDeckTests
             SourceText.From(content, new UTF8Encoding(false, true)),
             filePath: path);
         return id;
+    }
+
+    private static IEnumerable<string> DifferingInstanceFields(object left, object right)
+    {
+        Assert.Equal(left.GetType(), right.GetType());
+        for (var type = left.GetType(); type is not null; type = type.BaseType)
+        {
+            foreach (var field in type.GetFields(
+                         System.Reflection.BindingFlags.Public
+                         | System.Reflection.BindingFlags.NonPublic
+                         | System.Reflection.BindingFlags.Instance
+                         | System.Reflection.BindingFlags.DeclaredOnly))
+            {
+                if (!Equals(field.GetValue(left), field.GetValue(right)))
+                {
+                    yield return $"{type.FullName}.{field.Name}";
+                }
+            }
+        }
     }
 
     private sealed record DocumentGraph(Solution Canonical, Solution Staged);

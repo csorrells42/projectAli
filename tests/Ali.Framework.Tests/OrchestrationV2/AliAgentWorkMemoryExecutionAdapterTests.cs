@@ -804,7 +804,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             "tampered",
             TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
             await activation.CompleteAsync(result, CancellationToken.None));
         await activation.DisposeAsync();
 
@@ -813,7 +813,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             fixture.Identity,
             fixture.Intent(prepared),
             TestContext.Current.CancellationToken);
-        Assert.Equal(ActionReconciliationDisposition.Unknown, reconciled.Disposition);
+        Assert.Equal(ActionReconciliationDisposition.Absent, reconciled.Disposition);
     }
 
     [Fact]
@@ -840,7 +840,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             SearchOption.AllDirectories));
         File.Delete(stagedKept);
 
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
             await activation.CompleteAsync(result, CancellationToken.None));
         await activation.DisposeAsync();
 
@@ -875,7 +875,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             Encoding.UTF8,
             TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
             await activation.CompleteAsync(result, CancellationToken.None));
         await activation.DisposeAsync();
 
@@ -990,7 +990,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
     }
 
     [Fact]
-    public async Task StagedRootChildCreationAfterFinalCheck_IsBlockedBySealedRoot()
+    public async Task StagedRootChildCreationAfterFinalCheck_IsDetectedAndPublicationIsRefused()
     {
         using var fixture = new Fixture();
         await fixture.SeedAsync("notes.md", "before");
@@ -1031,12 +1031,132 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             TestContext.Current.CancellationToken);
         (staging, _) = PublicationPaths(fixture, hooked);
 
-        await activation.CompleteAsync(result, CancellationToken.None);
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            activation.CompleteAsync(result, CancellationToken.None).AsTask());
         await activation.DisposeAsync();
 
-        Assert.IsAssignableFrom<IOException>(mutationFailure);
-        Assert.Equal("approved", await fixture.ReadCanonicalAsync("notes.md"));
+        Assert.Null(mutationFailure);
+        Assert.Equal("before", await fixture.ReadCanonicalAsync("notes.md"));
         Assert.False(File.Exists(fixture.WorkspacePath("late-root-child.md")));
+    }
+
+    [Fact]
+    public async Task RootRenameGapMutation_IsDetectedAndCannotReportSuccess()
+    {
+        using var fixture = new Fixture();
+        await fixture.SeedAsync("notes.md", "before");
+        string? backup = null;
+        var mutated = false;
+        var hooked = fixture.CreateHookedCoordinator(
+            preparationFaultHook: null,
+            publicationFaultHook: checkpoint =>
+            {
+                if (checkpoint != AliWorkMemoryPublicationCheckpoint.AfterRootRenameBeforeReseal
+                    || mutated)
+                {
+                    return;
+                }
+
+                File.WriteAllText(
+                    Path.Combine(backup!, "rename-gap-child.md"),
+                    "unprepared",
+                    Encoding.UTF8);
+                mutated = true;
+            });
+        var prepared = await fixture.PrepareAsync(
+            hooked,
+            AliCapabilityCatalog.WorkMemoryWriteName,
+            Arguments(
+                ("fileName", "notes.md"),
+                ("content", "approved"),
+                ("description", null)));
+        var activation = fixture.EnterGrant(prepared);
+        var result = await hooked.InvokeProviderAsync(
+            "WriteAsync",
+            "notes.md",
+            "approved",
+            null,
+            TestContext.Current.CancellationToken);
+        (_, backup) = PublicationPaths(fixture, hooked);
+
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            activation.CompleteAsync(result, CancellationToken.None).AsTask());
+        await activation.DisposeAsync();
+
+        Assert.True(mutated);
+        var reconciled = await prepared.Adapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(prepared),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(ActionReconciliationDisposition.Unknown, reconciled.Disposition);
+        Assert.False(File.Exists(fixture.WorkspacePath("notes.md")));
+        Assert.True(File.Exists(Path.Combine(backup, "rename-gap-child.md")));
+    }
+
+    [Fact]
+    public async Task RootRenameGapInterruptionWithoutMutation_ReconcilesAppliedAfterRestart()
+    {
+        using var fixture = new Fixture();
+        await fixture.SeedAsync("notes.md", "before");
+        var rootRenameCount = 0;
+        var hooked = fixture.CreateHookedCoordinator(
+            preparationFaultHook: null,
+            publicationFaultHook: checkpoint =>
+            {
+                if (checkpoint != AliWorkMemoryPublicationCheckpoint.AfterRootRenameBeforeReseal)
+                {
+                    return;
+                }
+
+                rootRenameCount++;
+                if (rootRenameCount == 2)
+                {
+                    throw new AliWorkMemorySimulatedInterruptionException(checkpoint);
+                }
+            });
+        var prepared = await fixture.PrepareAsync(
+            hooked,
+            AliCapabilityCatalog.WorkMemoryWriteName,
+            Arguments(
+                ("fileName", "notes.md"),
+                ("content", "approved"),
+                ("description", null)));
+        var activation = fixture.EnterGrant(prepared);
+        var result = await hooked.InvokeProviderAsync(
+            "WriteAsync",
+            "notes.md",
+            "approved",
+            null,
+            TestContext.Current.CancellationToken);
+        var (staging, backup) = PublicationPaths(fixture, hooked);
+
+        _ = await Assert.ThrowsAsync<AliWorkMemorySimulatedInterruptionException>(() =>
+            activation.CompleteAsync(result, CancellationToken.None).AsTask());
+        Assert.Equal(2, rootRenameCount);
+        Assert.Equal("approved", await fixture.ReadCanonicalAsync("notes.md"));
+        Assert.False(Directory.Exists(staging));
+        Assert.True(Directory.Exists(backup));
+
+        var restarted = hooked.RestartCoordinator();
+        var recoveryAdapter = restarted.ExecutionEffectAdapters.Single(adapter =>
+            string.Equals(
+                adapter.ToolName,
+                AliCapabilityCatalog.WorkMemoryWriteName,
+                StringComparison.Ordinal));
+        var reconciled = await recoveryAdapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(prepared),
+            TestContext.Current.CancellationToken);
+        await activation.DisposeAsync();
+
+        Assert.Equal(ActionReconciliationDisposition.Applied, reconciled.Disposition);
+        Assert.Equal("approved", await fixture.ReadCanonicalAsync("notes.md"));
+        Assert.Equal(
+            "before",
+            await File.ReadAllTextAsync(
+                Path.Combine(backup, "notes.md"),
+                TestContext.Current.CancellationToken));
+        AssertNoStagingEntries(hooked.StagingRoot);
     }
 
     [Theory]
@@ -1044,11 +1164,14 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
     [InlineData("canonical-ancestor")]
     [InlineData("backup-parent")]
     [InlineData("backup-ancestor")]
-    public async Task HeldNamespaceSpines_BlockLateParentReplacement(string target)
+    public async Task HeldNamespaceSpines_BlockLateParentReplacementAndRefusePublication(
+        string target)
     {
         using var fixture = new Fixture();
         await fixture.SeedAsync("notes.md", "before");
         string? backup = null;
+        string? replacement = null;
+        Exception? replacementFailure = null;
         var hooked = fixture.CreateHookedCoordinator(
             preparationFaultHook: null,
             publicationFaultHook: checkpoint =>
@@ -1067,7 +1190,16 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
                         Path.GetDirectoryName(backup!)!)!,
                     _ => throw new InvalidOperationException("Unknown namespace replacement target.")
                 };
-                Directory.Move(parent, parent + "-replacement");
+                replacement = parent + "-replacement";
+                try
+                {
+                    Directory.Move(parent, replacement);
+                }
+                catch (Exception exception)
+                {
+                    replacementFailure = exception;
+                    throw;
+                }
             });
         var prepared = await fixture.PrepareAsync(
             hooked,
@@ -1089,8 +1221,14 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             await activation.CompleteAsync(result, CancellationToken.None));
         await activation.DisposeAsync();
 
-        Assert.Equal("before", await fixture.ReadCanonicalAsync("notes.md"));
-        Assert.True(Directory.Exists(Path.GetDirectoryName(backup)!));
+        Assert.NotNull(replacement);
+        Assert.IsAssignableFrom<IOException>(replacementFailure);
+        Assert.False(Directory.Exists(replacement));
+        var reconciled = await prepared.Adapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(prepared),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(ActionReconciliationDisposition.Absent, reconciled.Disposition);
     }
 
     [Theory]
@@ -1202,7 +1340,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
     [Theory]
     [InlineData((int)AliWorkMemoryPublicationCheckpoint.AfterStagingToCanonical)]
     [InlineData((int)AliWorkMemoryPublicationCheckpoint.BeforeDurableCompletion)]
-    public async Task PublishedRootChildCreationAtTerminalSeams_IsBlockedBySealedRoot(
+    public async Task PublishedRootChildCreationAtTerminalSeams_IsDetectedAndCompletionIsRefused(
         int seamValue)
     {
         var seam = (AliWorkMemoryPublicationCheckpoint)seamValue;
@@ -1244,11 +1382,12 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             null,
             TestContext.Current.CancellationToken);
 
-        await activation.CompleteAsync(result, CancellationToken.None);
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+            activation.CompleteAsync(result, CancellationToken.None).AsTask());
         await activation.DisposeAsync();
 
-        Assert.IsAssignableFrom<IOException>(mutationFailure);
-        Assert.Equal("approved", await fixture.ReadCanonicalAsync("notes.md"));
+        Assert.Null(mutationFailure);
+        Assert.Equal("before", await fixture.ReadCanonicalAsync("notes.md"));
         Assert.False(File.Exists(fixture.WorkspacePath("terminal-root-child.md")));
     }
 
@@ -1275,7 +1414,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             SearchOption.AllDirectories));
         File.Delete(stagedIndex);
 
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
             await activation.CompleteAsync(result, CancellationToken.None));
         await activation.DisposeAsync();
 
@@ -1310,7 +1449,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             Encoding.UTF8,
             TestContext.Current.CancellationToken);
 
-        await Assert.ThrowsAsync<InvalidDataException>(async () =>
+        await Assert.ThrowsAnyAsync<IOException>(async () =>
             await activation.CompleteAsync(result, CancellationToken.None));
         await activation.DisposeAsync();
 
@@ -1646,7 +1785,7 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
     }
 
     [Fact]
-    public async Task RecoveryClassificationRootChildCreation_IsBlockedByObservedSealedRoot()
+    public async Task RecoveryClassificationRootChildCreation_IsDetectedAsUnknown()
     {
         using var fixture = new Fixture();
         await fixture.SeedAsync("notes.md", "before");
@@ -1706,10 +1845,10 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
             TestContext.Current.CancellationToken);
         await activation.DisposeAsync();
 
-        Assert.Equal(ActionReconciliationDisposition.Applied, reconciled.Disposition);
-        Assert.IsAssignableFrom<IOException>(mutationFailure);
-        Assert.Equal("approved", await fixture.ReadCanonicalAsync("notes.md"));
-        Assert.False(File.Exists(fixture.WorkspacePath("classification-root-child.md")));
+        Assert.Equal(ActionReconciliationDisposition.Unknown, reconciled.Disposition);
+        Assert.Null(mutationFailure);
+        Assert.Equal("before", await fixture.ReadCanonicalAsync("notes.md"));
+        Assert.True(File.Exists(fixture.WorkspacePath("classification-root-child.md")));
     }
 
     [Fact]
@@ -2240,10 +2379,16 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
 
     private static void AssertNoStagingEntries(string stagingRoot)
     {
+        var retained = Directory.Exists(stagingRoot)
+            ? Directory.EnumerateFileSystemEntries(stagingRoot, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(stagingRoot, path))
+                .Order(StringComparer.Ordinal)
+                .ToArray()
+            : [];
         Assert.False(
-            Directory.Exists(stagingRoot)
-            && Directory.EnumerateFileSystemEntries(stagingRoot).Any(),
-            $"Expected no retained staging entries beneath '{stagingRoot}'.");
+            retained.Length != 0,
+            $"Expected no retained staging entries beneath '{stagingRoot}', but found: "
+            + string.Join(", ", retained));
     }
 
     private static (string Staging, string Backup) PublicationPaths(
@@ -2278,9 +2423,8 @@ public sealed class AliAgentWorkMemoryExecutionAdapterTests
         internal Fixture()
         {
             Root = Path.Combine(
-                Directory.GetCurrentDirectory(),
-                "artifacts",
-                "cp7-work-memory-tests",
+                Path.GetTempPath(),
+                "Ali-Cp7-WorkMemory-Tests",
                 Guid.NewGuid().ToString("N"));
             var userData = Path.Combine(Root, "UserData");
             DurableRoot = Path.Combine(Root, "OrchestrationV2");

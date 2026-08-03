@@ -1256,27 +1256,20 @@ public sealed class AliFileTreeExecutionAdapterTests
     }
 
     [Fact]
-    public async Task DirectoryCreateBeforeHandleRename_CompleteStagingClosureBlocksNestedFileInjection()
+    public async Task DirectoryCreateBeforeHandleRename_NewChildInjectionIsDetectedAndCanonicalPublicationFailsClosed()
     {
         string? staging = null;
-        var injectionBlocked = false;
+        var injectionSucceeded = false;
         using var fixture = new Fixture(checkpoint =>
         {
             if (checkpoint != AliFileTreeExecutionCheckpoint.DirectoryCreateBeforeHandleRename)
             {
                 return;
             }
-            try
-            {
-                File.WriteAllText(
-                    Path.Combine(staging!, "middle", "leaf", "injected.txt"),
-                    "directory-interposition");
-            }
-            catch (Exception exception) when (exception is IOException
-                                               or UnauthorizedAccessException)
-            {
-                injectionBlocked = true;
-            }
+            File.WriteAllText(
+                Path.Combine(staging!, "middle", "leaf", "injected.txt"),
+                "directory-interposition");
+            injectionSucceeded = true;
         });
         var arguments = Arguments(("path", "Workspace/outer/middle/leaf"));
         var adapter = fixture.Adapter(AliCapabilityCatalog.FileCreateDirectoryName);
@@ -1288,13 +1281,170 @@ public sealed class AliFileTreeExecutionAdapterTests
             .CreateDirectoryAsync(
                 "Workspace/outer/middle/leaf",
                 TestContext.Current.CancellationToken);
-        Assert.True(result.Success, result.Message);
+        Assert.False(result.Success);
         await activation.CompleteAsync(result, CancellationToken.None);
         await activation.DisposeAsync();
 
-        Assert.True(injectionBlocked);
-        Assert.True(Directory.Exists(fixture.PhysicalPath("outer/middle/leaf")));
-        Assert.False(File.Exists(fixture.PhysicalPath("outer/middle/leaf/injected.txt")));
+        Assert.True(injectionSucceeded);
+        Assert.False(Directory.Exists(fixture.PhysicalPath("outer")));
+        var reconciled = await adapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(adapter, arguments, prepared),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(ActionReconciliationDisposition.Unknown, reconciled.Disposition);
+    }
+
+    [Fact]
+    public async Task CopyTree_PostNativeRenameGapMutationCannotReportSuccessAndReconcilesUnknown()
+    {
+        Fixture? fixtureReference = null;
+        var mutationSucceeded = false;
+        using var fixture = new Fixture(checkpoint =>
+        {
+            if (checkpoint
+                != AliFileTreeExecutionCheckpoint.TestOnlyAfterNativeRootRenameBeforeDescendantReseal)
+            {
+                return;
+            }
+            File.WriteAllText(
+                fixtureReference!.PhysicalPath("copied/nested/value.txt"),
+                "same-user-gap-mutation");
+            mutationSucceeded = true;
+        });
+        fixtureReference = fixture;
+        Directory.CreateDirectory(fixture.PhysicalPath("source/nested"));
+        await File.WriteAllTextAsync(
+            fixture.PhysicalPath("source/nested/value.txt"),
+            "authenticated",
+            TestContext.Current.CancellationToken);
+        var arguments = Arguments(
+            ("sourcePath", "Workspace/source"),
+            ("destinationPath", "Workspace/copied"));
+        var adapter = fixture.Adapter(AliCapabilityCatalog.FileCopyName);
+        var prepared = await fixture.PrepareAsync(adapter, arguments);
+        var staging = await fixture.SingleStagingPathAsync();
+
+        var activation = fixture.EnterGrant(adapter, arguments, prepared);
+        var result = await new AliWorkstationFileUtilities(fixture.Access).CopyAsync(
+            "Workspace/source",
+            "Workspace/copied",
+            TestContext.Current.CancellationToken);
+        Assert.False(result.Success);
+        await activation.CompleteAsync(result, CancellationToken.None);
+        await activation.DisposeAsync();
+
+        Assert.True(mutationSucceeded);
+        Assert.True(Directory.Exists(fixture.PhysicalPath("copied")));
+        Assert.False(Directory.Exists(staging));
+        Assert.Equal(
+            "same-user-gap-mutation",
+            await File.ReadAllTextAsync(
+                fixture.PhysicalPath("copied/nested/value.txt"),
+                TestContext.Current.CancellationToken));
+        var reconciled = await adapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(adapter, arguments, prepared),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(ActionReconciliationDisposition.Unknown, reconciled.Disposition);
+    }
+
+    [Fact]
+    public async Task CopyTree_PostNativeRenameGapInterruptionWithoutMutationReconcilesApplied()
+    {
+        using var fixture = new Fixture(checkpoint =>
+        {
+            if (checkpoint
+                == AliFileTreeExecutionCheckpoint.TestOnlyAfterNativeRootRenameBeforeDescendantReseal)
+            {
+                throw new AliFileTreeSimulatedInterruptionException(checkpoint);
+            }
+        });
+        Directory.CreateDirectory(fixture.PhysicalPath("source/nested"));
+        await File.WriteAllTextAsync(
+            fixture.PhysicalPath("source/nested/value.txt"),
+            "authenticated",
+            TestContext.Current.CancellationToken);
+        var arguments = Arguments(
+            ("sourcePath", "Workspace/source"),
+            ("destinationPath", "Workspace/copied"));
+        var adapter = fixture.Adapter(AliCapabilityCatalog.FileCopyName);
+        var prepared = await fixture.PrepareAsync(adapter, arguments);
+        var staging = await fixture.SingleStagingPathAsync();
+        var activation = fixture.EnterGrant(adapter, arguments, prepared);
+
+        var interruption = await Assert.ThrowsAsync<AliFileTreeSimulatedInterruptionException>(() =>
+            new AliWorkstationFileUtilities(fixture.Access).CopyAsync(
+                "Workspace/source",
+                "Workspace/copied",
+                TestContext.Current.CancellationToken));
+        Assert.True(Directory.Exists(fixture.PhysicalPath("copied")));
+        Assert.False(Directory.Exists(staging));
+
+        var restarted = fixture.CreateRestartCoordinator();
+        var restartedAdapter = restarted.ExecutionEffectAdapters.Single(candidate =>
+            candidate.ToolName == AliCapabilityCatalog.FileCopyName);
+        var reconciled = await restartedAdapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(restartedAdapter, arguments, prepared),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(ActionReconciliationDisposition.Applied, reconciled.Disposition);
+        Assert.Equal(
+            "authenticated",
+            await File.ReadAllTextAsync(
+                fixture.PhysicalPath("copied/nested/value.txt"),
+                TestContext.Current.CancellationToken));
+        await activation.FailAsync(interruption, CancellationToken.None);
+        await activation.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Copy_NativeRenameDoesNotReplaceDestinationCreatedAfterPreparation()
+    {
+        Fixture? fixtureReference = null;
+        using var fixture = new Fixture(checkpoint =>
+        {
+            if (checkpoint == AliFileTreeExecutionCheckpoint.CopyBeforeHandleRename)
+            {
+                File.WriteAllText(
+                    fixtureReference!.PhysicalPath("copied.txt"),
+                    "external-destination");
+            }
+        });
+        fixtureReference = fixture;
+        await File.WriteAllTextAsync(
+            fixture.PhysicalPath("source.txt"),
+            "authenticated",
+            TestContext.Current.CancellationToken);
+        var arguments = Arguments(
+            ("sourcePath", "Workspace/source.txt"),
+            ("destinationPath", "Workspace/copied.txt"));
+        var adapter = fixture.Adapter(AliCapabilityCatalog.FileCopyName);
+        var prepared = await fixture.PrepareAsync(adapter, arguments);
+        var staging = await fixture.SingleStagingPathAsync();
+
+        var activation = fixture.EnterGrant(adapter, arguments, prepared);
+        var result = await new AliWorkstationFileUtilities(fixture.Access).CopyAsync(
+            "Workspace/source.txt",
+            "Workspace/copied.txt",
+            TestContext.Current.CancellationToken);
+        Assert.False(result.Success);
+        await activation.CompleteAsync(result, CancellationToken.None);
+        await activation.DisposeAsync();
+
+        Assert.Equal(
+            "external-destination",
+            await File.ReadAllTextAsync(
+                fixture.PhysicalPath("copied.txt"),
+                TestContext.Current.CancellationToken));
+        Assert.True(File.Exists(staging));
+        Assert.Equal(
+            "authenticated",
+            await File.ReadAllTextAsync(staging, TestContext.Current.CancellationToken));
+        var reconciled = await adapter.ReconcileAsync(
+            fixture.Identity,
+            fixture.Intent(adapter, arguments, prepared),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(ActionReconciliationDisposition.Unknown, reconciled.Disposition);
     }
 
     [Fact]
@@ -1584,9 +1734,8 @@ public sealed class AliFileTreeExecutionAdapterTests
             string? trashRootRelativePath = null)
         {
             Root = Path.Combine(
-                Directory.GetCurrentDirectory(),
-                "artifacts",
-                "cp7-file-tree-tests",
+                Path.GetTempPath(),
+                "Ali-Cp7-FileTree-Tests",
                 Guid.NewGuid().ToString("N"));
             _workspace = Directory.CreateDirectory(Path.Combine(Root, "Workspace")).FullName;
             var trashRoot = string.IsNullOrWhiteSpace(trashRootRelativePath)

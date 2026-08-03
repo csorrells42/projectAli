@@ -332,7 +332,9 @@ internal sealed class AliCodingInvocationBindingResolver
                 var target = _dotNetResolver.ResolveExistingTarget(targetPath);
                 physicalTarget = target.PhysicalPath;
                 targetRoot = target.RootDirectory;
-                executorIdentity = DotNetExecutorIdentity(kind, executionAssets);
+                executorIdentity = BindDotNetHostExecutor(
+                    executionAssets,
+                    out runtimeBinding);
                 exactArguments["projectPath"] = targetPath;
                 exactArguments["configuration"] = OptionalString(arguments, "configuration")
                     ?? "<null>";
@@ -699,10 +701,6 @@ internal sealed class AliCodingInvocationBindingResolver
         AliCodingInvocationKind.RoslynFormat =>
             "roslyn:" + AssemblyIdentity(
                 typeof(AliRoslynCodingTools).Assembly.Location,
-                executionAssets),
-        AliCodingInvocationKind.DotNetBuild =>
-            "msbuild-api:" + AssemblyIdentity(
-                typeof(AliMsBuildProjectExecutor).Assembly.Location,
                 executionAssets),
         AliCodingInvocationKind.DependencyApply =>
             "ali-xml-package-reference:" + AssemblyIdentity(

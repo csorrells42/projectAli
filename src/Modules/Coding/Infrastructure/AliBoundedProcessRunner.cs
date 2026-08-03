@@ -33,6 +33,28 @@ internal static class AliBoundedProcessRunner
                 cancellationToken,
                 environment,
                 outputLine,
+                allowedExecutableHardLinkRoot: null,
+                exactDotNetHost: null,
+                beforeProcessStart: null)
+            .ConfigureAwait(false);
+
+    internal static async Task<BoundedProcessResult> RunAsync(
+        string executable,
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment,
+        string allowedExecutableHardLinkRoot) =>
+        await RunCoreAsync(
+                executable,
+                workingDirectory,
+                arguments,
+                timeout,
+                cancellationToken,
+                environment,
+                outputLine: null,
+                allowedExecutableHardLinkRoot,
                 exactDotNetHost: null,
                 beforeProcessStart: null)
             .ConfigureAwait(false);
@@ -52,6 +74,7 @@ internal static class AliBoundedProcessRunner
                 cancellationToken,
                 environment: null,
                 outputLine: null,
+                allowedExecutableHardLinkRoot: null,
                 exactDotNetHost,
                 beforeProcessStart: null)
             .ConfigureAwait(false);
@@ -72,6 +95,7 @@ internal static class AliBoundedProcessRunner
                 cancellationToken,
                 environment: null,
                 outputLine: null,
+                allowedExecutableHardLinkRoot: null,
                 exactExecutable,
                 beforeProcessStart ?? throw new ArgumentNullException(nameof(beforeProcessStart)))
             .ConfigureAwait(false);
@@ -84,6 +108,7 @@ internal static class AliBoundedProcessRunner
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string>? environment,
         Action<string, bool>? outputLine,
+        string? allowedExecutableHardLinkRoot,
         AliBoundExecutionFile? exactDotNetHost,
         Action? beforeProcessStart)
     {
@@ -102,22 +127,25 @@ internal static class AliBoundedProcessRunner
             arguments);
         using var executedAssetLeases =
             AliCodingInvocationExecutionContext.AcquireExecutedAssetLeases(arguments);
+        var allowedHardLinkRoot =
+            AliCodingExecutionAssetFingerprint.ResolveAllowedWindowsExecutableHardLinkRoot(
+                resolvedExecutable,
+                allowedExecutableHardLinkRoot);
         var expectedExecutable = exactDotNetHost
             ?? AliCodingExecutionAssetFingerprint.CaptureRequiredExecutable(
                 resolvedExecutable,
-                "The validated bounded process executable");
-        var allowedExecutableHardLinkRoot =
-            AliCodingExecutionAssetFingerprint.ResolveAllowedWindowsExecutableHardLinkRoot(
-                expectedExecutable.PhysicalPath);
+                "The validated bounded process executable",
+                allowedHardLinkRoot);
         using var executableLease = AliExecutionFileLease.Acquire(
             expectedExecutable.PhysicalPath,
             "The exact bounded process executable",
-            allowedExecutableHardLinkRoot,
+            allowedHardLinkRoot,
             () =>
             {
                 var current = AliCodingExecutionAssetFingerprint.CaptureRequiredExecutable(
                     expectedExecutable.PhysicalPath,
-                    "The exact bounded process executable");
+                    "The exact bounded process executable",
+                    allowedHardLinkRoot);
                 if (current != expectedExecutable)
                 {
                     throw new InvalidOperationException(

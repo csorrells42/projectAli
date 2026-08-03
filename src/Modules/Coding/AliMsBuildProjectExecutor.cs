@@ -1,8 +1,7 @@
+using System.Diagnostics;
 using System.Text;
-using Microsoft.Build.Evaluation;
-using Microsoft.Build.Exceptions;
-using Microsoft.Build.Execution;
-using Microsoft.Build.Framework;
+using Ali.Modules.Coding.Execution;
+using Ali.Modules.Coding.Infrastructure;
 
 namespace Ali.Modules.Coding;
 
@@ -14,12 +13,13 @@ internal sealed record MsBuildExecutionResult(
     bool TimedOut = false);
 
 /// <summary>
-/// Executes restore/build through Microsoft's in-process MSBuild API. This class is
-/// deliberately separated so its MSBuild types are not loaded until after Locator has
-/// registered the installed SDK.
+/// Executes restore/build through the exact authorized dotnet host and Microsoft's SDK
+/// MSBuild entry point. Restore and build are separate fixed commands so Build always
+/// reevaluates the post-restore SDK graph before compiling.
 /// </summary>
 internal static class AliMsBuildProjectExecutor
 {
+    private static readonly TimeSpan BuildTimeout = TimeSpan.FromMinutes(20);
     private static readonly SemaphoreSlim BuildLock = new(1, 1);
 
     public static async Task<MsBuildExecutionResult> BuildAsync(
@@ -44,97 +44,65 @@ internal static class AliMsBuildProjectExecutor
         await BuildLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var manager = new BuildManager("Ali Roslyn/MSBuild");
-            using var cancelRegistration = cancellationToken.Register(manager.CancelAllSubmissions);
-            var logger = new CapturingLogger();
-            var globalProperties = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            var exactHost = AliCodingInvocationExecutionContext
+                .ResolveDotNetHostBindingForExecution();
+            var workingDirectory = Path.GetDirectoryName(Path.GetFullPath(targetPath))
+                ?? throw new InvalidDataException(
+                    "The selected MSBuild target has no parent directory.");
+            var output = new StringBuilder();
+            foreach (var target in targets)
             {
-                ["Configuration"] = configuration,
-                ["RestoreIgnoreFailedSources"] = "true"
-            };
-            var request = new BuildRequestData(
-                targetPath,
-                globalProperties,
-                toolsVersion: null,
-                targetsToBuild: targets.ToArray(),
-                hostServices: null,
-                flags: BuildRequestDataFlags.ClearCachesAfterBuild);
-            var parameters = new BuildParameters(ProjectCollection.GlobalProjectCollection)
-            {
-                Loggers = [logger],
-                EnableNodeReuse = false,
-                MaxNodeCount = 1,
-                ShutdownInProcNodeOnBuildFinish = true,
-                DetailedSummary = false
-            };
-
-            try
-            {
-                var result = await Task.Run(
-                        () => manager.Build(parameters, request),
-                        CancellationToken.None)
+                IReadOnlyList<string> arguments = target switch
+                {
+                    "Restore" =>
+                    [
+                        "restore",
+                        targetPath,
+                        "--ignore-failed-sources",
+                        "--nologo"
+                    ],
+                    "Build" =>
+                    [
+                        "build",
+                        targetPath,
+                        "--configuration",
+                        configuration,
+                        "--no-restore",
+                        "--nologo"
+                    ],
+                    _ => throw new UnreachableException()
+                };
+                var result = await AliBoundedProcessRunner.RunAsync(
+                        exactHost,
+                        workingDirectory,
+                        arguments,
+                        BuildTimeout,
+                        cancellationToken)
                     .ConfigureAwait(false);
-                var success = result.OverallResult == BuildResultCode.Success;
-                return new MsBuildExecutionResult(success, success ? 0 : 1, logger.Output, toolsetPath);
+                if (!string.IsNullOrWhiteSpace(result.Output))
+                {
+                    output.AppendLine(result.Output.Trim());
+                }
+                if (!result.Success)
+                {
+                    return new MsBuildExecutionResult(
+                        false,
+                        result.ExitCode,
+                        output.ToString().Trim(),
+                        toolsetPath,
+                        result.TimedOut);
+                }
             }
-            catch (BuildAbortedException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw new OperationCanceledException(cancellationToken);
-            }
+
+            return new MsBuildExecutionResult(
+                true,
+                0,
+                output.ToString().Trim(),
+                toolsetPath);
         }
         finally
         {
             BuildLock.Release();
-        }
-    }
-
-    private sealed class CapturingLogger : ILogger
-    {
-        private readonly StringBuilder _output = new();
-
-        public LoggerVerbosity Verbosity { get; set; } = LoggerVerbosity.Minimal;
-
-        public string? Parameters { get; set; }
-
-        public string Output => _output.ToString().Trim();
-
-        public void Initialize(IEventSource eventSource)
-        {
-            eventSource.ErrorRaised += (_, args) => Append("error", args.File, args.LineNumber, args.Code, args.Message ?? "Unknown MSBuild error.");
-            eventSource.WarningRaised += (_, args) => Append("warning", args.File, args.LineNumber, args.Code, args.Message ?? "Unknown MSBuild warning.");
-            eventSource.MessageRaised += (_, args) =>
-            {
-                if (args.Importance == MessageImportance.High && !string.IsNullOrWhiteSpace(args.Message))
-                {
-                    _output.AppendLine(args.Message.Trim());
-                }
-            };
-        }
-
-        public void Shutdown()
-        {
-        }
-
-        private void Append(string severity, string? file, int line, string? code, string message)
-        {
-            if (!string.IsNullOrWhiteSpace(file))
-            {
-                _output.Append(file);
-                if (line > 0)
-                {
-                    _output.Append('(').Append(line).Append(')');
-                }
-
-                _output.Append(": ");
-            }
-
-            _output.Append(severity);
-            if (!string.IsNullOrWhiteSpace(code))
-            {
-                _output.Append(' ').Append(code);
-            }
-
-            _output.Append(": ").AppendLine(message);
         }
     }
 }

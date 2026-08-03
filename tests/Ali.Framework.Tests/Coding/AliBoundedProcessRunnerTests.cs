@@ -115,6 +115,69 @@ public sealed class AliBoundedProcessRunnerTests
     }
 
     [Fact]
+    public async Task Pinned_provider_root_accepts_only_its_complete_hard_link_alias_set()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var root = Path.Combine(
+            TestRepository.Root,
+            "bin",
+            nameof(AliBoundedProcessRunnerTests),
+            Guid.NewGuid().ToString("N"));
+        var providerRoot = Path.Combine(root, "provider");
+        var outsideRoot = Path.Combine(root, "outside");
+        Directory.CreateDirectory(providerRoot);
+        Directory.CreateDirectory(outsideRoot);
+        try
+        {
+            var executable = Path.Combine(providerRoot, "provider-tool.exe");
+            var internalAlias = Path.Combine(providerRoot, "provider-tool-alias.exe");
+            var outsideAlias = Path.Combine(outsideRoot, "provider-tool-alias.exe");
+            File.Copy(
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "cmd.exe"),
+                executable);
+            Assert.True(
+                CreateHardLinkW(internalAlias, executable, IntPtr.Zero),
+                "The internal provider executable hard link could not be created.");
+
+            var result = await AliBoundedProcessRunner.RunAsync(
+                executable,
+                providerRoot,
+                ["/d", "/c", "echo pinned-provider-ran"],
+                TimeSpan.FromSeconds(15),
+                TestContext.Current.CancellationToken,
+                environment: null,
+                allowedExecutableHardLinkRoot: providerRoot);
+
+            Assert.True(result.Success, result.Output);
+            Assert.Contains("pinned-provider-ran", result.Output, StringComparison.Ordinal);
+
+            Assert.True(
+                CreateHardLinkW(outsideAlias, executable, IntPtr.Zero),
+                "The external provider executable hard link could not be created.");
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                AliBoundedProcessRunner.RunAsync(
+                    executable,
+                    providerRoot,
+                    ["/d", "/c", "exit 0"],
+                    TimeSpan.FromSeconds(15),
+                    TestContext.Current.CancellationToken,
+                    environment: null,
+                    allowedExecutableHardLinkRoot: providerRoot));
+
+            Assert.Contains("leaves the pinned provider root", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Exact_executable_cannot_be_substituted_between_validation_and_process_start()
     {
         if (!OperatingSystem.IsWindows())

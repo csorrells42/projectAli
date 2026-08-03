@@ -222,14 +222,46 @@ internal sealed class AliGnuNativeTools(
         string root,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken) =>
-        AliBoundedProcessRunner.RunAsync(
-            Require(AliDeveloperToolPaths.Gxx, "MSYS2 UCRT64 G++"),
-            root,
-            arguments,
-            timeout,
-            cancellationToken,
-            NativeEnvironment(null));
+        CancellationToken cancellationToken)
+    {
+        var executable = Require(AliDeveloperToolPaths.Gxx, "MSYS2 UCRT64 G++");
+        var environment = NativeEnvironment(null);
+        var managedRoot = ResolveAliManagedMsys2Root(executable);
+        return managedRoot is null
+            ? AliBoundedProcessRunner.RunAsync(
+                executable,
+                root,
+                arguments,
+                timeout,
+                cancellationToken,
+                environment)
+            : AliBoundedProcessRunner.RunAsync(
+                executable,
+                root,
+                arguments,
+                timeout,
+                cancellationToken,
+                environment,
+                managedRoot);
+    }
+
+    private static string? ResolveAliManagedMsys2Root(string executable)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+        var managedRoot = Path.GetFullPath(Path.Combine(
+            AliDeveloperToolPaths.ToolchainRoot,
+            "msys64"));
+        var selected = Path.GetFullPath(executable);
+        return string.Equals(managedRoot, selected, StringComparison.OrdinalIgnoreCase)
+               || selected.StartsWith(
+                   managedRoot + Path.DirectorySeparatorChar,
+                   StringComparison.OrdinalIgnoreCase)
+            ? managedRoot
+            : null;
+    }
 
     private string? ResolveCMake() => locator.Resolve("cmake.exe")
         ?? AliDeveloperToolPaths.DiscoverVisualStudio().Select(item => item.CMake).FirstOrDefault(File.Exists);

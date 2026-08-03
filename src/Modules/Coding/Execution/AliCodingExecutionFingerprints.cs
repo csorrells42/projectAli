@@ -516,12 +516,23 @@ internal static class AliCodingExecutionAssetFingerprint
     internal static AliBoundExecutionFile CaptureRequiredExecutable(
         string path,
         string description) =>
+        CaptureRequiredExecutable(path, description, allowedHardLinkRoot: null);
+
+    internal static AliBoundExecutionFile CaptureRequiredExecutable(
+        string path,
+        string description,
+        string? allowedHardLinkRoot) =>
         CaptureRequiredFile(
             path,
             description,
-            ResolveAllowedWindowsExecutableHardLinkRoot(path));
+            ResolveAllowedWindowsExecutableHardLinkRoot(path, allowedHardLinkRoot));
 
-    internal static string? ResolveAllowedWindowsExecutableHardLinkRoot(string path)
+    internal static string? ResolveAllowedWindowsExecutableHardLinkRoot(string path) =>
+        ResolveAllowedWindowsExecutableHardLinkRoot(path, allowedHardLinkRoot: null);
+
+    internal static string? ResolveAllowedWindowsExecutableHardLinkRoot(
+        string path,
+        string? allowedHardLinkRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         if (!OperatingSystem.IsWindows())
@@ -530,6 +541,21 @@ internal static class AliCodingExecutionAssetFingerprint
         }
 
         var fullPath = NormalizePath(path);
+        if (allowedHardLinkRoot is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(allowedHardLinkRoot);
+            var pinnedRoot = NormalizePath(allowedHardLinkRoot);
+            ValidateRegularDirectoryNoFollow(
+                pinnedRoot,
+                "The pinned executable provider root is not a regular local directory.");
+            if (!IsWithin(pinnedRoot, fullPath))
+            {
+                throw new InvalidDataException(
+                    "The selected executable leaves its pinned provider root.");
+            }
+            return pinnedRoot;
+        }
+
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         if (string.IsNullOrWhiteSpace(windows))
         {
