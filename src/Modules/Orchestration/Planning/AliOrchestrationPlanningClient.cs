@@ -883,12 +883,58 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
             ?? throw new InvalidOperationException(
                 "The planning binding factory returned no exact binding snapshot.");
         bindings.Validate();
+        var supportsNativeToolCalls = RequireBoundEngineeringProtocol(exact);
         return new PlanningPassDispatch(
             exact.ChatClient,
             exact.Profile,
-            exact.Profile.SupportsToolCalls,
+            supportsNativeToolCalls,
             bindings,
             exact.GenerationSettingsBinding.ReasoningEffort);
+    }
+
+    internal static bool RequireBoundEngineeringProtocol(BoundModelDispatchSnapshot exact)
+    {
+        ArgumentNullException.ThrowIfNull(exact);
+        var protocol = exact.GenerationSettingsBinding.ProtocolIdentity;
+        if (!string.Equals(protocol, exact.RuntimeBinding.ProtocolIdentity, StringComparison.Ordinal)
+            || !string.Equals(protocol, exact.Profile.ProtocolIdentity, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The bound runtime, model profile, and generation settings disagree about the engineering protocol identity.");
+        }
+
+        var capabilityIdentity = exact.RuntimeBinding.CapabilityProfileIdentity;
+        if (string.Equals(capabilityIdentity, "unprobed", StringComparison.Ordinal)
+            || !string.Equals(
+                capabilityIdentity,
+                exact.ModelBinding.CapabilityProfileIdentity,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                capabilityIdentity,
+                exact.Profile.CapabilityProfileIdentity,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Autonomous engineering requires one exact, functionally probed capability profile bound across the runtime, model, and generation settings.");
+        }
+
+        if (string.Equals(protocol, RuntimeProtocolIdentities.NativeOpenAiTools, StringComparison.Ordinal))
+        {
+            if (!exact.Profile.SupportsToolCalls || !exact.ModelBinding.SupportsToolCalls)
+            {
+                throw new InvalidOperationException(
+                    "The bound native-tool protocol is not enabled consistently by the exact model profile.");
+            }
+            return true;
+        }
+
+        if (string.Equals(protocol, RuntimeProtocolIdentities.StructuredDecision, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        throw new InvalidOperationException(
+            "Autonomous engineering is disabled because neither native tools nor Ali's validated structured-decision protocol was functionally proven for the exact endpoint/model binding.");
     }
 
     private static bool IsPlanningResponseComplete(ChatResponse response, bool native)

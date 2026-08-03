@@ -1435,7 +1435,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 modelDispatch.RuntimeBinding.Implementation,
                 modelDispatch.RuntimeBinding.RuntimeKind,
                 modelDispatch.RuntimeBinding.RuntimeLocation,
-                modelDispatch.RuntimeBinding.RuntimeEndpoint
+                modelDispatch.RuntimeBinding.RuntimeEndpoint,
+                modelDispatch.RuntimeBinding.ProtocolIdentity,
+                modelDispatch.RuntimeBinding.CapabilityProfileIdentity
             }),
             DigestCanonical(new
             {
@@ -1445,7 +1447,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 modelDispatch.ModelBinding.Size,
                 modelDispatch.ModelBinding.Quantization,
                 modelDispatch.ModelBinding.SupportsVision,
-                modelDispatch.ModelBinding.SupportsToolCalls
+                modelDispatch.ModelBinding.SupportsToolCalls,
+                modelDispatch.ModelBinding.CapabilityProfileIdentity
             }),
             DigestCanonical(new
             {
@@ -1456,7 +1459,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 modelDispatch.GenerationSettingsBinding.StreamingEnabled,
                 modelDispatch.GenerationSettingsBinding.ThinkingControl,
                 modelDispatch.GenerationSettingsBinding.ThinkingEnabled,
-                modelDispatch.GenerationSettingsBinding.ReasoningEffort
+                modelDispatch.GenerationSettingsBinding.ReasoningEffort,
+                modelDispatch.GenerationSettingsBinding.TokenizerIdentity,
+                modelDispatch.GenerationSettingsBinding.RollingWindowMode,
+                modelDispatch.GenerationSettingsBinding.ProtocolIdentity
             }),
             DigestCanonical(new
             {

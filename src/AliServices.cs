@@ -28,7 +28,10 @@ public sealed class AliServices
     private const string LegacyLocalAliRootFolderName = "Ali";
 
     private readonly HttpClient _runtimeHttpClient;
+    private readonly HttpClient _remoteRuntimeHttpClient;
     private readonly HttpClient _internetHttpClient;
+    private readonly RuntimeCredentialStore _runtimeCredentials;
+    private readonly RuntimeCapabilityProfileStore _runtimeCapabilityProfiles;
 
     public AliServices(
         string dataRoot,
@@ -38,6 +41,7 @@ public sealed class AliServices
         SafeActivatingLocalRuntime runtimeController,
         ConversationOrchestrator orchestrator,
         HttpClient runtimeHttpClient,
+        HttpClient remoteRuntimeHttpClient,
         HttpClient internetHttpClient,
         IVoiceRecorder voiceRecorder,
         ISpeechToTextProvider speechToText,
@@ -65,7 +69,10 @@ public sealed class AliServices
         RuntimeController = runtimeController;
         Orchestrator = orchestrator;
         _runtimeHttpClient = runtimeHttpClient;
+        _remoteRuntimeHttpClient = remoteRuntimeHttpClient;
         _internetHttpClient = internetHttpClient;
+        _runtimeCredentials = new RuntimeCredentialStore(DataRoot);
+        _runtimeCapabilityProfiles = new RuntimeCapabilityProfileStore(DataRoot);
         VoiceRecorder = voiceRecorder;
         SpeechToText = speechToText;
         TextToSpeech = textToSpeech;
@@ -172,6 +179,20 @@ public sealed class AliServices
     public void SaveRuntimeSettings(OpenAiCompatibleRuntimeOptions options) =>
         RuntimeSettingsStore.Save(DataRoot, options);
 
+    public string? LoadRuntimeApiKey() =>
+        _runtimeCredentials.LoadApiKey();
+
+    public void SaveRuntimeApiKey(string? apiKey) =>
+        _runtimeCredentials.SaveApiKey(apiKey);
+
+    internal string? ResolveRuntimeApiKey(OpenAiCompatibleRuntimeOptions options) =>
+        _runtimeCredentials.ResolveApiKey(options.ApiKeyEnvironmentVariable);
+
+    internal HttpClient SelectRuntimeHttpClient(OpenAiCompatibleRuntimeOptions options) =>
+        LocalEndpointPolicy.IsRemote(options.Endpoint)
+            ? _remoteRuntimeHttpClient
+            : _runtimeHttpClient;
+
     public LocalVectorLibrarySettings LoadLocalVectorLibrarySettings() =>
         LocalVectorLibrarySettingsStore.LoadOrDefault(DataRoot);
 
@@ -211,7 +232,12 @@ public sealed class AliServices
     public void ConfigureRuntimeCandidate(OpenAiCompatibleRuntimeOptions options)
     {
         ILocalModelRuntime? candidateRuntime = options.Enabled
-            ? new OpenAiCompatibleLocalModelRuntime(_runtimeHttpClient, options, AssistantProfile)
+            ? new OpenAiCompatibleLocalModelRuntime(
+                SelectRuntimeHttpClient(options),
+                options,
+                AssistantProfile,
+                () => ResolveRuntimeApiKey(options),
+                _runtimeCapabilityProfiles)
             : null;
 
         RuntimeController.ConfigureCandidate(candidateRuntime);
@@ -320,7 +346,10 @@ public sealed class AliServices
         var fallbackRuntime = new DevelopmentLocalModelRuntime();
         var configuredOptions = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot);
         var runtimeHttpClient = LocalOnlyHttpClientFactory.Create("AliLocalDesktop/1.0");
+        var remoteRuntimeHttpClient = RemoteRuntimeHttpClientFactory.Create("AliRemoteRuntime/1.0");
         var internetHttpClient = InternetHttpClientFactory.CreateClient();
+        var runtimeCredentials = new RuntimeCredentialStore(dataRoot);
+        var runtimeCapabilityProfiles = new RuntimeCapabilityProfileStore(dataRoot);
         var qdrant = new QdrantServiceManager(dataRoot);
         var activeUsers = new ActiveUserSession(
             dataRoot,
@@ -354,7 +383,14 @@ public sealed class AliServices
         // run inside a model planning pass before a lifecycle reconciler owns it.
         var semanticToolCatalog = new RegistryOnlySemanticToolCatalog();
         var candidateRuntime = configuredOptions is { Enabled: true }
-            ? new OpenAiCompatibleLocalModelRuntime(runtimeHttpClient, configuredOptions, profile)
+            ? new OpenAiCompatibleLocalModelRuntime(
+                LocalEndpointPolicy.IsRemote(configuredOptions.Endpoint)
+                    ? remoteRuntimeHttpClient
+                    : runtimeHttpClient,
+                configuredOptions,
+                profile,
+                () => runtimeCredentials.ResolveApiKey(configuredOptions.ApiKeyEnvironmentVariable),
+                runtimeCapabilityProfiles)
             : null;
 
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
@@ -430,6 +466,7 @@ public sealed class AliServices
                 runtime,
                 orchestrator,
                 runtimeHttpClient,
+                remoteRuntimeHttpClient,
                 internetHttpClient,
                 voiceRecorder,
                 speechToText,

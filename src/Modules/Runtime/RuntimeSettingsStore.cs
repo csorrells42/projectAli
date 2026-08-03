@@ -33,7 +33,8 @@ public static class RuntimeSettingsStore
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false)
         {
-            Engine = LocalRuntimeEngines.LmStudio
+            Engine = LocalRuntimeEngines.LmStudio,
+            CapabilityProbeEnabled = true
         };
 
     public static OpenAiCompatibleRuntimeOptions LoadOrDefault(string dataDirectory) =>
@@ -81,12 +82,36 @@ public static class RuntimeSettingsStore
             SupportsToolCalls: ReadBoolEnvironment("ALI_OPENAI_SUPPORTS_TOOL_CALLS", false),
             AllowPrivateLanEndpoint: ReadBoolEnvironment("ALI_ALLOW_PRIVATE_LAN_RUNTIME", false))
         {
-            Engine = Environment.GetEnvironmentVariable("ALI_RUNTIME_ENGINE") ?? string.Empty
+            Engine = Environment.GetEnvironmentVariable("ALI_RUNTIME_ENGINE") ?? string.Empty,
+            ThinkingControl = ReadThinkingControlEnvironment("ALI_OPENAI_THINKING_CONTROL"),
+            AllowRemoteHttpsEndpoint = ReadBoolEnvironment("ALI_ALLOW_REMOTE_HTTPS_RUNTIME", false),
+            ApiKeyEnvironmentVariable = Environment.GetEnvironmentVariable("ALI_OPENAI_API_KEY_ENVIRONMENT_VARIABLE")
+                ?? RuntimeCredentialStore.DefaultApiKeyEnvironmentVariable,
+            TokenizerIdentity = Environment.GetEnvironmentVariable("ALI_OPENAI_TOKENIZER_IDENTITY")
+                ?? "provider-reported-or-unknown",
+            RollingWindowMode = Environment.GetEnvironmentVariable("ALI_OPENAI_ROLLING_WINDOW_MODE")
+                ?? "provider-managed",
+            CapabilityProbeEnabled = true
         });
     }
 
     public static void Save(string dataDirectory, OpenAiCompatibleRuntimeOptions options)
     {
+        var normalized = OllamaRuntimeSafetyPolicy.Normalize(options);
+        var endpointPolicy = LocalEndpointPolicy.Validate(
+            normalized.Endpoint,
+            normalized.AllowPrivateLanEndpoint,
+            normalized.AllowRemoteHttpsEndpoint);
+        if (!endpointPolicy.IsAllowed)
+        {
+            throw new InvalidDataException(endpointPolicy.Reason);
+        }
+        if (LocalEndpointPolicy.IsRemote(normalized.Endpoint)
+            && LocalRuntimeEngines.Normalize(normalized.Engine) != LocalRuntimeEngines.GenericOpenAi)
+        {
+            throw new InvalidDataException(
+                "Remote endpoints require the explicit OpenAI-compatible/Custom engine.");
+        }
         Directory.CreateDirectory(dataDirectory);
         var filePath = GetSettingsPath(dataDirectory);
         var temporaryPath = $"{filePath}.{Guid.NewGuid():N}.tmp";
@@ -94,7 +119,7 @@ public static class RuntimeSettingsStore
         {
             File.WriteAllText(
                 temporaryPath,
-                JsonSerializer.Serialize(OllamaRuntimeSafetyPolicy.Normalize(options), JsonOptions));
+                JsonSerializer.Serialize(normalized, JsonOptions));
             File.Move(temporaryPath, filePath, overwrite: true);
         }
         finally
@@ -173,7 +198,8 @@ public static class RuntimeSettingsStore
             SupportsToolCalls: false,
             AllowPrivateLanEndpoint: false)
         {
-            Engine = LocalRuntimeEngines.LmStudio
+            Engine = LocalRuntimeEngines.LmStudio,
+            CapabilityProbeEnabled = true
         };
 
         File.WriteAllText(filePath, JsonSerializer.Serialize(options, JsonOptions));
@@ -190,5 +216,13 @@ public static class RuntimeSettingsStore
 
     private static bool ReadBoolEnvironment(string name, bool defaultValue) =>
         bool.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : defaultValue;
+
+    private static ModelThinkingControl ReadThinkingControlEnvironment(string name) =>
+        Enum.TryParse<ModelThinkingControl>(
+            Environment.GetEnvironmentVariable(name),
+            ignoreCase: true,
+            out var value)
+            ? value
+            : ModelThinkingControl.None;
 }
 

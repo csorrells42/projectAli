@@ -199,7 +199,7 @@ public sealed class UserMemoryEmbeddingSettingsTests
 
         var fingerprint = Mem0ProcessClient.BuildProcessConfigurationFingerprint(
             runtime,
-            ModelThinkingPolicy.Resolve(runtime.Model, runtime.Family),
+            runtime.ThinkingControl,
             embedding,
             vectorSettings,
             space);

@@ -18,6 +18,14 @@ public sealed record ModelProfile(
     bool SupportsToolCalls,
     bool IsLastKnownGood)
 {
+    public string ProtocolIdentity { get; init; } = RuntimeProtocolIdentities.ChatOnly;
+
+    public string CapabilityProfileIdentity { get; init; } = "unprobed";
+
+    public string TokenizerIdentity { get; init; } = "provider-reported-or-unknown";
+
+    public string RollingWindowMode { get; init; } = "provider-managed";
+
     public static ModelProfile UnconfiguredFactorySafe() =>
         new(
             ProfileId: "factory-safe-unconfigured",

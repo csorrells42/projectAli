@@ -15,9 +15,10 @@ using AIChatRole = Microsoft.Extensions.AI.ChatRole;
 namespace Ali.Modules.Coordinator;
 
 /// <summary>
-/// Lets a local OpenAI-compatible model participate in a standard Extensions.AI tool loop even
-/// when its server does not emit native tool_calls. The tool catalog remains dynamic; GPT-OSS
-/// chooses one next action and this adapter translates that decision to FunctionCallContent.
+/// Lets an OpenAI-compatible model participate in a standard Extensions.AI tool loop even when
+/// its server does not emit native tool_calls. The tool catalog remains dynamic; the configured
+/// model chooses one next action and this adapter translates a validated structured decision to
+/// FunctionCallContent.
 /// </summary>
 internal sealed class AliToolCallingChatClient(
     IChatClient inner,
@@ -59,7 +60,7 @@ internal sealed class AliToolCallingChatClient(
         var existing = Interlocked.CompareExchange(ref _activeTurn, turn, null);
         if (existing is not null && !ReferenceEquals(existing, turn))
         {
-            throw new InvalidOperationException("Ali's local connector already has an active visible turn.");
+            throw new InvalidOperationException("Ali's model connector already has an active visible turn.");
         }
 
         return new ActiveTurnScope(this, turn);

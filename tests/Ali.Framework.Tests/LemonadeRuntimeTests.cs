@@ -120,7 +120,11 @@ public sealed class LemonadeRuntimeTests
                 false,
                 false,
                 false)
-            { Engine = LocalRuntimeEngines.Lemonade, ReasoningEffort = "high" });
+            {
+                Engine = LocalRuntimeEngines.Lemonade,
+                ReasoningEffort = "high",
+                ThinkingControl = ModelThinkingControl.GptOssReasoningEffort
+            });
         var options = new ChatOptions
         {
             MaxOutputTokens = 64,
@@ -200,16 +204,14 @@ public sealed class LemonadeRuntimeTests
     }
 
     [Theory]
-    [InlineData("Qwen3-14B", "Qwen", ModelThinkingControl.QwenTemplateToggle)]
-    [InlineData("Qwen3-Coder-30B-A3B-Instruct-GGUF", "Qwen", ModelThinkingControl.None)]
-    [InlineData("Qwen3.6-27B-A3B-Coder", "Qwen", ModelThinkingControl.None)]
-    [InlineData("Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M", "Qwen", ModelThinkingControl.None)]
-    public void ThinkingProtocol_IsSelectedFromModelCapability(
-        string model,
-        string family,
-        ModelThinkingControl expected)
+    [InlineData(ModelThinkingControl.QwenTemplateToggle, "chat_template_kwargs.enable_thinking=true")]
+    [InlineData(ModelThinkingControl.GptOssReasoningEffort, "chat_template_kwargs.reasoning_effort=low")]
+    [InlineData(ModelThinkingControl.None, "no thinking control required; no thinking field sent")]
+    public void ThinkingProtocol_UsesTheExplicitCapabilitySetting(
+        ModelThinkingControl control,
+        string expected)
     {
-        Assert.Equal(expected, ModelThinkingPolicy.Resolve(model, family));
+        Assert.Equal(expected, ModelThinkingPolicy.Describe(control, true, "low"));
     }
 
     [Fact]
@@ -441,7 +443,12 @@ public sealed class LemonadeRuntimeTests
             {
                 Engine = LocalRuntimeEngines.Lemonade,
                 ReasoningEffort = "low",
-                ThinkingEnabled = thinkingEnabled
+                ThinkingEnabled = thinkingEnabled,
+                ThinkingControl = family.Equals("gpt-oss", StringComparison.OrdinalIgnoreCase)
+                    ? ModelThinkingControl.GptOssReasoningEffort
+                    : family.Equals("Gemma", StringComparison.OrdinalIgnoreCase)
+                        ? ModelThinkingControl.GemmaSystemPromptToken
+                        : ModelThinkingControl.None
             });
 
     private sealed class RecordingHandler(

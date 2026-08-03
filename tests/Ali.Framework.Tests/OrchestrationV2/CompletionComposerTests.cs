@@ -393,7 +393,8 @@ public sealed class CompletionComposerTests
         {
             Engine = LocalRuntimeEngines.LmStudio,
             ReasoningEffort = "high",
-            ThinkingEnabled = true
+            ThinkingEnabled = true,
+            ThinkingControl = ModelThinkingControl.GptOssReasoningEffort
         };
         using var httpClient = new HttpClient();
         using var runtime = new OpenAiCompatibleLocalModelRuntime(httpClient, options);
@@ -438,7 +439,8 @@ public sealed class CompletionComposerTests
         {
             Engine = LocalRuntimeEngines.LmStudio,
             ReasoningEffort = "high",
-            ThinkingEnabled = true
+            ThinkingEnabled = true,
+            ThinkingControl = ModelThinkingControl.GptOssReasoningEffort
         };
         using var runtime = new OpenAiCompatibleLocalModelRuntime(httpClient, options);
         var snapshot = ((IBoundModelDispatchSource)runtime).CaptureBoundModelDispatch();

@@ -200,7 +200,8 @@ public sealed class AliToolCallingChatClientTests
         var qwen = RuntimeModelChoice.FromModelId(
             "Qwen2.5-Coder-14B-Instruct-GGUF-Q4_K_M",
             "test");
-        Assert.Equal("14B", qwen.Size);
+        Assert.Equal("provider-reported-or-unknown", qwen.Size);
+        Assert.Equal(ModelThinkingControl.None, qwen.ThinkingControl);
         Assert.Equal(choice.ContextTokens, qwen.ContextTokens);
         Assert.Equal(choice.OutputTokenLimits, qwen.OutputTokenLimits);
     }

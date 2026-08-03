@@ -62,7 +62,10 @@ public sealed record RuntimeHealthCheck(
     int? OutputTokenLimit = null,
     double? Temperature = null,
     bool? StreamingSupported = null,
-    string? ErrorText = null);
+    string? ErrorText = null)
+{
+    public RuntimeCapabilityProfile? CapabilityProfile { get; init; }
+}
 
 public interface ILocalModelRuntime
 {
@@ -106,7 +109,12 @@ internal sealed record BoundRuntimeBindingMaterial(
     string Implementation,
     string RuntimeKind,
     string RuntimeLocation,
-    string RuntimeEndpoint);
+    string RuntimeEndpoint)
+{
+    public string ProtocolIdentity { get; init; } = RuntimeProtocolIdentities.ChatOnly;
+
+    public string CapabilityProfileIdentity { get; init; } = "unprobed";
+}
 
 internal sealed record BoundModelBindingMaterial(
     string ProfileId,
@@ -115,7 +123,10 @@ internal sealed record BoundModelBindingMaterial(
     string Size,
     string Quantization,
     bool SupportsVision,
-    bool SupportsToolCalls);
+    bool SupportsToolCalls)
+{
+    public string CapabilityProfileIdentity { get; init; } = "unprobed";
+}
 
 internal sealed record BoundGenerationSettingsBindingMaterial(
     int ContextTokens,
@@ -125,7 +136,14 @@ internal sealed record BoundGenerationSettingsBindingMaterial(
     bool? StreamingEnabled,
     string ThinkingControl,
     bool? ThinkingEnabled,
-    string ReasoningEffort);
+    string ReasoningEffort)
+{
+    public string TokenizerIdentity { get; init; } = "provider-reported-or-unknown";
+
+    public string RollingWindowMode { get; init; } = "provider-managed";
+
+    public string ProtocolIdentity { get; init; } = RuntimeProtocolIdentities.ChatOnly;
+}
 
 /// <summary>
 /// One immutable dispatch view of a concrete model client and every setting that can change the

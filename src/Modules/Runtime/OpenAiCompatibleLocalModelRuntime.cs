@@ -38,22 +38,40 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     private readonly OpenAiCompatibleRuntimeOptions _options;
     private readonly AssistantProfile _assistantProfile;
     private readonly EndpointValidationResult _endpointValidation;
+    private readonly Func<string?> _apiKeyResolver;
+    private readonly RuntimeCapabilityProfileStore? _capabilityProfiles;
     private readonly SemaphoreSlim _lemonadeLoadGate = new(1, 1);
     private string _reasoningEffort;
     private int? _lastHealthProbeCompletionTokens;
     private bool _nativeToolCallingAdvertised;
     private int _lemonadeModelPrepared;
     private int _requestInFlight;
+    private RuntimeCapabilityProfile? _capabilityProfile;
 
     public OpenAiCompatibleLocalModelRuntime(
         HttpClient httpClient,
         OpenAiCompatibleRuntimeOptions options,
         AssistantProfile? assistantProfile = null)
+        : this(httpClient, options, assistantProfile, null, null)
     {
-        _httpClient = httpClient;
-        _options = options;
+    }
+
+    internal OpenAiCompatibleLocalModelRuntime(
+        HttpClient httpClient,
+        OpenAiCompatibleRuntimeOptions options,
+        AssistantProfile? assistantProfile,
+        Func<string?>? apiKeyResolver = null,
+        RuntimeCapabilityProfileStore? capabilityProfiles = null)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
         _assistantProfile = (assistantProfile ?? AssistantProfile.CreateDefault()).Normalize();
-        _endpointValidation = LocalEndpointPolicy.Validate(options.Endpoint, options.AllowPrivateLanEndpoint);
+        _endpointValidation = LocalEndpointPolicy.Validate(
+            options.Endpoint,
+            options.AllowPrivateLanEndpoint,
+            options.AllowRemoteHttpsEndpoint);
+        _apiKeyResolver = apiKeyResolver ?? (() => null);
+        _capabilityProfiles = capabilityProfiles;
         _reasoningEffort = OllamaRuntimeSafetyPolicy.ResolveReasoningEffort(options);
         ActiveProfile = options.ToModelProfile(isLastKnownGood: false);
     }
@@ -67,8 +85,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     public void SetReasoningEffort(string effort)
     {
-        if (!OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Model)
-            && !OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Family))
+        if (ThinkingControl != ModelThinkingControl.GptOssReasoningEffort)
         {
             return;
         }
@@ -81,6 +98,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     BoundModelDispatchSnapshot IBoundModelDispatchSource.CaptureBoundModelDispatch()
     {
         var profile = ActiveProfile with { };
+        var capabilityProfile = Volatile.Read(ref _capabilityProfile);
+        var protocolIdentity = capabilityProfile?.ProtocolIdentity
+            ?? profile.ProtocolIdentity;
+        var capabilityProfileIdentity = capabilityProfile?.Identity
+            ?? profile.CapabilityProfileIdentity;
         var reasoningEffort = ReasoningEffort;
         return new BoundModelDispatchSnapshot(
             this,
@@ -90,7 +112,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 GetType().FullName ?? GetType().Name,
                 profile.RuntimeKind,
                 profile.RuntimeLocation,
-                _options.Endpoint.ToString()),
+                _options.Endpoint.ToString())
+            {
+                ProtocolIdentity = protocolIdentity,
+                CapabilityProfileIdentity = capabilityProfileIdentity
+            },
             new BoundModelBindingMaterial(
                 profile.ProfileId,
                 _options.Model,
@@ -98,7 +124,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 _options.Size,
                 _options.Quantization,
                 _options.SupportsVision,
-                _options.SupportsToolCalls),
+                profile.SupportsToolCalls)
+            {
+                CapabilityProfileIdentity = capabilityProfileIdentity
+            },
             new BoundGenerationSettingsBindingMaterial(
                 _options.ContextTokens,
                 _options.OutputTokenLimit,
@@ -107,7 +136,12 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 _options.StreamingEnabled,
                 ThinkingControl.ToString(),
                 _options.ThinkingEnabled,
-                reasoningEffort));
+                reasoningEffort)
+            {
+                TokenizerIdentity = _options.TokenizerIdentity,
+                RollingWindowMode = _options.RollingWindowMode,
+                ProtocolIdentity = protocolIdentity
+            });
     }
 
     public async IAsyncEnumerable<ModelToken> StreamChatAsync(
@@ -184,7 +218,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             isHealthCheck,
             isHealthCheck ? HealthProbeOutputTokenLimit : null);
 
-        using var response = await _httpClient.SendAsync(
+        using var response = await SendRuntimeAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);
@@ -322,6 +356,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 }
             }
 
+            var visionProbeSucceeded = false;
             if (_options.SupportsVision)
             {
                 var visionText = await SendNonStreamingPromptAsync(
@@ -332,6 +367,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 {
                     return FailureHealth(started, "Tiny vision prompt returned an empty response.", streamingSupported);
                 }
+                visionProbeSucceeded = true;
             }
 
             if (!await CheckCancellationAsync().ConfigureAwait(false))
@@ -339,23 +375,50 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 return FailureHealth(started, "Cancellation probe did not cancel cleanly.", streamingSupported);
             }
 
+            var capabilityProfile = _options.CapabilityProbeEnabled
+                ? await ProbeCapabilityProfileAsync(
+                        streamingSupported,
+                        visionProbeSucceeded,
+                        cancellationToken)
+                    .ConfigureAwait(false)
+                : CreateUnprobedCapabilityProfile(streamingSupported, visionProbeSucceeded);
+            _capabilityProfiles?.Save(capabilityProfile);
+            Volatile.Write(ref _capabilityProfile, capabilityProfile);
+
+            if (_options.SupportsToolCalls
+                && capabilityProfile.NativeToolCalling.State != RuntimeCapabilityState.Supported)
+            {
+                return FailureHealth(
+                    started,
+                    "Native tool calls were enabled in settings, but the exact endpoint/model probe did not return the required typed tool call.",
+                    streamingSupported) with
+                {
+                    CapabilityProfile = capabilityProfile
+                };
+            }
+
+            var nativeToolsEnabled = _options.SupportsToolCalls
+                && capabilityProfile.NativeToolCalling.State == RuntimeCapabilityState.Supported;
             ActiveProfile = _options.ToModelProfile(isLastKnownGood: true) with
             {
-                // Server metadata is advisory. Native tool calling is enabled only
-                // when the saved runtime configuration explicitly opts into it.
-                // Otherwise Ali's compatibility connector owns validation, repair,
-                // continuation, and tool execution end to end.
-                SupportsToolCalls = _options.SupportsToolCalls
+                SupportsToolCalls = nativeToolsEnabled,
+                ProtocolIdentity = capabilityProfile.ProtocolIdentity,
+                CapabilityProfileIdentity = capabilityProfile.Identity,
+                TokenizerIdentity = capabilityProfile.TokenizerIdentity,
+                RollingWindowMode = capabilityProfile.RollingWindowMode
             };
-            var reasoningVerification = IsGptOssRuntime()
-                ? $" GPT-OSS reasoning effort '{ReasoningEffort}' was sent explicitly"
+            var reasoningVerification = ThinkingControl != ModelThinkingControl.None
+                ? $" Reasoning control '{ThinkingControl}' was sent explicitly"
                   + (_lastHealthProbeCompletionTokens.HasValue
                       ? $"; the tiny probe used {_lastHealthProbeCompletionTokens.Value:N0} completion tokens."
                       : ".")
                 : string.Empty;
+            var engineeringProtocol = capabilityProfile.IsEngineeringProtocolSafe
+                ? $" Engineering protocol: {capabilityProfile.ProtocolIdentity}."
+                : " This model is connected for chat, but neither native tools nor the validated structured-decision protocol was proven; autonomous engineering remains disabled.";
             return new RuntimeHealthCheck(
                 Succeeded: true,
-                Summary: $"Verified local runtime with model '{_options.Model}'.{reasoningVerification}",
+                Summary: $"Verified runtime with model '{_options.Model}'.{reasoningVerification}{engineeringProtocol}",
                 CheckedAt: DateTimeOffset.UtcNow,
                 Elapsed: DateTimeOffset.UtcNow - started,
                 Endpoint: _options.Endpoint.ToString(),
@@ -363,12 +426,21 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 ContextTokens: _options.ContextTokens,
                 OutputTokenLimit: _options.OutputTokenLimit,
                 Temperature: _options.Temperature,
-                StreamingSupported: streamingSupported);
+                StreamingSupported: streamingSupported)
+            {
+                CapabilityProfile = capabilityProfile
+            };
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException
+                                      or TaskCanceledException
+                                      or OperationCanceledException
+                                      or IOException
+                                      or UnauthorizedAccessException
+                                      or JsonException
+                                      or InvalidOperationException)
         {
             WriteHealthLog($"exception type={ex.GetType().Name} message={ex.Message}");
-            return FailureHealth(started, $"Local runtime health check failed: {ex.Message}", streamingSupported);
+            return FailureHealth(started, $"Runtime health check failed: {ex.Message}", streamingSupported);
         }
     }
 
@@ -428,7 +500,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             var healthUri = BuildServerRootUri("api/v1/health");
             string? healthBody = null;
             using (var healthRequest = new HttpRequestMessage(HttpMethod.Get, healthUri))
-            using (var healthResponse = await _httpClient.SendAsync(healthRequest, cancellationToken).ConfigureAwait(false))
+            using (var healthResponse = await SendRuntimeAsync(healthRequest, cancellationToken).ConfigureAwait(false))
             {
                 if (healthResponse.IsSuccessStatusCode)
                 {
@@ -475,7 +547,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await SendRuntimeAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -501,7 +573,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         };
 
         WriteHealthLog($"runtime operation='{operation}' request runtime={RuntimeIdentity} endpoint={uri}");
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        using var response = await SendRuntimeAsync(request, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -522,7 +594,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         while (true)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, statusUri);
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await SendRuntimeAsync(request, cancellationToken).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             var releaseVerified = false;
             if (response.IsSuccessStatusCode)
@@ -621,7 +693,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         var uri = LocalRuntimeModelInventory.BuildModelsUri(_options.Endpoint);
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         WriteHealthLog($"request GET {uri}");
-        using var response = await _httpClient.SendAsync(
+        using var response = await SendRuntimeAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken).ConfigureAwait(false);
@@ -762,7 +834,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
         WriteRequestMetadata(uri, request, stream: false, isHealthCheck, maxTokens);
 
-        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        using var response = await SendRuntimeAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (isHealthCheck)
         {
@@ -793,7 +865,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private string? ValidateReasoningControlHealthProbe()
     {
-        if (!IsGptOssRuntime() || !string.Equals(ReasoningEffort, "low", StringComparison.OrdinalIgnoreCase))
+        if (ThinkingControl != ModelThinkingControl.GptOssReasoningEffort
+            || !string.Equals(ReasoningEffort, "low", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -894,7 +967,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, BuildUri("models"));
-            using var _ = await _httpClient.SendAsync(request, cancellation.Token).ConfigureAwait(false);
+            using var _ = await SendRuntimeAsync(request, cancellation.Token).ConfigureAwait(false);
             return false;
         }
         catch (OperationCanceledException)
@@ -1064,8 +1137,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private string ResolveOpenAiThinkingDescription() =>
         ModelThinkingPolicy.Describe(
-            _options.Model,
-            _options.Family,
+            ThinkingControl,
             _options.ThinkingEnabled,
             ReasoningEffort);
 
@@ -1379,6 +1451,12 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         {
             throw new InvalidOperationException(_endpointValidation.Reason);
         }
+        if (LocalEndpointPolicy.IsRemote(_options.Endpoint)
+            && LocalRuntimeEngines.Normalize(_options.Engine) != LocalRuntimeEngines.GenericOpenAi)
+        {
+            throw new InvalidOperationException(
+                "Remote endpoints require the explicit OpenAI-compatible/Custom engine.");
+        }
     }
 
     private static bool IsLengthFinish(string? finishReason) =>
@@ -1430,16 +1508,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         IsSourcePlannerRequest(request)
         || IsSourceAnswerVerifierRequest(request);
 
-    private ModelThinkingControl ThinkingControl =>
-        ModelThinkingPolicy.Resolve(_options.Model, _options.Family);
+    private ModelThinkingControl ThinkingControl => _options.ThinkingControl;
 
     private bool ShouldDisableThinking() =>
         ThinkingControl == ModelThinkingControl.QwenTemplateToggle
         && !_options.ThinkingEnabled;
-
-    private bool IsGptOssRuntime() =>
-        OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Model)
-        || OllamaRuntimeSafetyPolicy.IsGptOssModel(_options.Family);
 
     private string BuildPrimarySystemInstruction(string content) =>
         ThinkingControl == ModelThinkingControl.GemmaSystemPromptToken

@@ -8,6 +8,7 @@ namespace Ali.UI;
 public partial class SettingsWindow : Window
 {
     private bool syncingGeminiApiKey;
+    private bool syncingRuntimeApiKey;
 
     public SettingsWindow()
     {
@@ -355,6 +356,7 @@ public partial class SettingsWindow : Window
     private void SettingsWindowLoaded(object sender, RoutedEventArgs e)
     {
         SyncGeminiApiKeyFromViewModel();
+        SyncRuntimeApiKeyFromViewModel();
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.RefreshGeminiUsageStatus();
@@ -377,6 +379,16 @@ public partial class SettingsWindow : Window
         }
 
         viewModel.InternetGeminiApiKeyText = GeminiApiKeyPasswordBox.Password;
+    }
+
+    private void RuntimeApiKeyPasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (syncingRuntimeApiKey || DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.RuntimeApiKeyText = RuntimeApiKeyPasswordBox.Password;
     }
 
     private void GoogleBillingProtectionClicked(object sender, RoutedEventArgs e)
@@ -463,6 +475,20 @@ public partial class SettingsWindow : Window
         finally
         {
             syncingGeminiApiKey = false;
+        }
+    }
+
+    private void SyncRuntimeApiKeyFromViewModel()
+    {
+        if (DataContext is not MainWindowViewModel viewModel) return;
+        syncingRuntimeApiKey = true;
+        try
+        {
+            RuntimeApiKeyPasswordBox.Password = viewModel.RuntimeApiKeyText;
+        }
+        finally
+        {
+            syncingRuntimeApiKey = false;
         }
     }
 }
