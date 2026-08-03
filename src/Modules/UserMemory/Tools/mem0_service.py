@@ -1,8 +1,8 @@
-"""Local stdio Mem0 worker owned by Ali.
+"""Private stdio Mem0 worker owned by Ali.
 
 Every admitted operation carries an exact participant tenant, roster revision, and
 embedding-space identity. The worker never listens on a network interface, rejects
-non-loopback providers, and rejects the legacy active-user protocol in this collection.
+unapproved providers, and rejects the legacy active-user protocol in this collection.
 """
 
 from __future__ import annotations
@@ -111,16 +111,12 @@ SCRIPT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_ROOT))
 os.environ["MEM0_TELEMETRY"] = "false"
 os.environ["POSTHOG_DISABLED"] = "true"
-os.environ["OPENAI_API_KEY"] = "ali-local-only"
-os.environ["NO_PROXY"] = "127.0.0.1,localhost,::1"
-os.environ["HTTP_PROXY"] = "http://127.0.0.1:1"
-os.environ["HTTPS_PROXY"] = "http://127.0.0.1:1"
 
 from mem0 import Memory  # noqa: E402
 from mem0.configs.llms.openai import OpenAIConfig  # noqa: E402
 from mem0.embeddings.base import EmbeddingBase  # noqa: E402
 from mem0.utils.factory import LlmFactory, VectorStoreFactory  # noqa: E402
-from openai import OpenAI  # noqa: E402
+from openai import DefaultHttpxClient, OpenAI  # noqa: E402
 
 
 EXTRACTION_INSTRUCTIONS = """
@@ -145,6 +141,99 @@ def require_loopback(value: str, name: str) -> str:
     if parsed.scheme.lower() != "http" or not loopback or parsed.username or parsed.password:
         raise ValueError(f"{name} must be a loopback HTTP endpoint")
     return normalized
+
+
+_CUSTOM_OPENAI_ENGINE = "OpenAI-compatible/Custom"
+_AMBIENT_OPENAI_ROUTING_VARIABLES = (
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_API_BASE",
+    "OPENROUTER_BASE_URL",
+)
+
+
+def consume_llm_api_key() -> str | None:
+    """Remove the dedicated secret and ambient provider redirects from the worker."""
+
+    api_key = os.environ.pop("ALI_MEM0_LLM_API_KEY", None)
+    for name in _AMBIENT_OPENAI_ROUTING_VARIABLES:
+        os.environ.pop(name, None)
+    return api_key
+
+
+def is_private_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Match LocalEndpointPolicy's exact private-address ranges."""
+
+    packed = address.packed
+    if isinstance(address, ipaddress.IPv4Address):
+        return (
+            packed[0] == 10
+            or (packed[0] == 172 and 16 <= packed[1] <= 31)
+            or (packed[0] == 192 and packed[1] == 168)
+            or (packed[0] == 169 and packed[1] == 254)
+        )
+    return address.is_link_local or (packed[0] & 0xFE) == 0xFC
+
+
+def require_llm_endpoint(
+    value: str,
+    engine: str,
+    allow_private_lan: bool,
+    allow_remote_https: bool,
+) -> tuple[str, bool]:
+    """Validate an LLM base URL and return it with its remote/public classification."""
+
+    endpoint = str(value or "").strip()
+    if not endpoint or any(unicodedata.category(character) == "Cc" for character in endpoint):
+        raise ValueError("LLM endpoint must be a valid absolute URI")
+    try:
+        parsed = urlsplit(endpoint)
+        # Accessing port forces malformed ports through this validation boundary.
+        parsed.port
+    except ValueError as error:
+        raise ValueError("LLM endpoint must be a valid absolute URI") from error
+
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname or ""
+    if scheme not in {"http", "https"} or not parsed.netloc or not host:
+        raise ValueError("LLM endpoint must be an absolute HTTP or HTTPS URI")
+    if parsed.query or parsed.fragment or "?" in endpoint or "#" in endpoint:
+        raise ValueError("LLM endpoint must be a base URL without a query string or fragment")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("LLM endpoint credentials must not be placed in the URL")
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+
+    if host.lower() == "localhost" or (address is not None and address.is_loopback):
+        return endpoint.rstrip("/"), False
+
+    if address is not None and is_private_address(address):
+        if not allow_private_lan:
+            raise ValueError("Private LAN LLM endpoints require explicit private-LAN permission")
+        return endpoint.rstrip("/"), False
+
+    if not allow_remote_https:
+        raise ValueError("Public or domain LLM endpoints require explicit remote-HTTPS permission")
+    if scheme != "https":
+        raise ValueError("Remote OpenAI-compatible LLM endpoints must use HTTPS")
+    if str(engine or "").strip().casefold() != _CUSTOM_OPENAI_ENGINE.casefold():
+        raise ValueError("Remote LLM endpoints require the OpenAI-compatible/Custom engine")
+    return endpoint.rstrip("/"), True
+
+
+def exact_openai_llm_client(endpoint: str, api_key: str) -> OpenAI:
+    # Redirects are refused; DefaultHttpxClient otherwise retains normal TLS
+    # certificate validation and the OpenAI SDK's standard transport defaults.
+    return OpenAI(
+        api_key=api_key,
+        base_url=endpoint,
+        http_client=DefaultHttpxClient(follow_redirects=False),
+    )
 
 
 def participant_item(value: dict, embedding_space_id: str) -> dict:
@@ -195,7 +284,11 @@ class RoleAwareOpenAIEmbedding(EmbeddingBase):
         query_prompt_mode: str,
     ):
         super().__init__(None)
-        self.client = OpenAI(api_key="ali-local-only", base_url=api_base)
+        self.client = OpenAI(
+            api_key="ali-local-only",
+            base_url=api_base,
+            http_client=DefaultHttpxClient(follow_redirects=False),
+        )
         self.model = model
         self.dimensions = dimensions
         self.document_prompt_mode = document_prompt_mode
@@ -1291,7 +1384,19 @@ def require_prompt_configuration(mode_value, prefix_value, role: str) -> tuple[s
 
 class Worker:
     def __init__(self, args):
-        llm_endpoint = require_loopback(args.llm_endpoint, "LLM endpoint")
+        supplied_llm_api_key = consume_llm_api_key()
+        llm_endpoint, remote_llm = require_llm_endpoint(
+            args.llm_endpoint,
+            args.llm_engine,
+            args.allow_private_lan_llm == "true",
+            args.allow_remote_https_llm == "true",
+        )
+        if remote_llm:
+            if supplied_llm_api_key is None or not supplied_llm_api_key.strip():
+                raise ValueError("Remote HTTPS LLM endpoints require ALI_MEM0_LLM_API_KEY")
+            llm_api_key = supplied_llm_api_key
+        else:
+            llm_api_key = "ali-local-only"
         embedding_api_base = require_loopback(args.embedding_api_base, "embedding API base")
         if args.embedding_protocol != "openai-compatible-embeddings-v1":
             raise ValueError("Unsupported embedding protocol identity")
@@ -1357,7 +1462,7 @@ class Worker:
                     "provider": "openai",
                     "config": {
                         "model": args.llm_model,
-                        "api_key": "ali-local-only",
+                        "api_key": llm_api_key,
                         "openai_base_url": llm_endpoint,
                         "temperature": 0.1,
                         "max_tokens": args.llm_output_tokens,
@@ -1378,6 +1483,12 @@ class Worker:
                 },
             }
         )
+        previous_llm_client = self.memory.llm.client
+        self.memory.llm.client = exact_openai_llm_client(llm_endpoint, llm_api_key)
+        try:
+            previous_llm_client.close()
+        except Exception:
+            pass
         self.mutation_journal = ParticipantMutationJournal(
             args.data_root,
             self.embedding_space_id,
@@ -3378,6 +3489,9 @@ def main() -> int:
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--collection", required=True)
     parser.add_argument("--llm-endpoint", required=True)
+    parser.add_argument("--llm-engine", required=True)
+    parser.add_argument("--allow-private-lan-llm", choices=("true", "false"), required=True)
+    parser.add_argument("--allow-remote-https-llm", choices=("true", "false"), required=True)
     parser.add_argument("--llm-model", required=True)
     parser.add_argument("--llm-output-tokens", type=int, required=True)
     parser.add_argument("--embedding-provider", required=True)

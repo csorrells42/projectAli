@@ -377,7 +377,8 @@ public sealed class AliServices
             () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
             () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot),
-            new ProbedParticipantMemoryEmbeddingIdentitySource(runtimeHttpClient));
+            new ProbedParticipantMemoryEmbeddingIdentitySource(runtimeHttpClient),
+            options => runtimeCredentials.ResolveApiKey(options.ApiKeyEnvironmentVariable));
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),

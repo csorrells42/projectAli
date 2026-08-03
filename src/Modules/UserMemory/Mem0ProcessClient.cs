@@ -12,6 +12,8 @@ namespace Ali.Modules.UserMemory;
 internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
 {
     internal const string LoopbackNoProxy = "127.0.0.1,localhost,::1";
+    internal const string DeadProxyUri = "http://127.0.0.1:1";
+    internal const string WorkerApiKeyEnvironmentVariable = "ALI_MEM0_LLM_API_KEY";
     internal const string ProtocolIdentity = "ali-participant-memory-stdio-v2";
     internal static readonly string FreshRelativeDataRoot =
         Path.Combine("Memory", "ParticipantAware", "Mem0");
@@ -22,6 +24,8 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
     private readonly Func<UserMemorySettings> _settings;
     private readonly Func<OpenAiCompatibleRuntimeOptions?> _runtimeSettings;
     private readonly IParticipantMemoryEmbeddingIdentitySource _embeddingIdentitySource;
+    private readonly Func<OpenAiCompatibleRuntimeOptions, string?> _runtimeCredentialResolver;
+    private readonly byte[] _credentialFingerprintKey = RandomNumberGenerator.GetBytes(32);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Queue<string> _stderr = new();
     private Process? _process;
@@ -36,7 +40,8 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         Func<LocalVectorLibrarySettings> qdrantSettings,
         Func<UserMemorySettings> settings,
         Func<OpenAiCompatibleRuntimeOptions?> runtimeSettings,
-        IParticipantMemoryEmbeddingIdentitySource? embeddingIdentitySource = null)
+        IParticipantMemoryEmbeddingIdentitySource? embeddingIdentitySource = null,
+        Func<OpenAiCompatibleRuntimeOptions, string?>? runtimeCredentialResolver = null)
     {
         _dataRoot = Path.Combine(userDataRoot, FreshRelativeDataRoot);
         _qdrant = qdrant;
@@ -45,6 +50,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         _runtimeSettings = runtimeSettings;
         _embeddingIdentitySource = embeddingIdentitySource
             ?? new ConfiguredParticipantMemoryEmbeddingIdentitySource();
+        _runtimeCredentialResolver = runtimeCredentialResolver ?? (_ => null);
     }
 
     internal string DataRoot => _dataRoot;
@@ -203,11 +209,18 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         var vectorSettings = _vectorSettings();
         var settings = _settings().Normalize();
         var runtime = _runtimeSettings()
-            ?? throw new InvalidOperationException("Mem0 requires Ali's selected local runtime settings.");
+            ?? throw new InvalidOperationException("Mem0 requires Ali's selected runtime settings.");
         if (!runtime.Enabled || string.IsNullOrWhiteSpace(runtime.Model))
         {
-            throw new InvalidOperationException("Mem0 requires an enabled selected local runtime model.");
+            throw new InvalidOperationException("Mem0 requires an enabled selected runtime model.");
         }
+
+        var authorization = ResolveRuntimeAuthorization(
+            runtime,
+            LocalEndpointPolicy.IsRemote(runtime.Endpoint)
+                ? _runtimeCredentialResolver(runtime)
+                : null,
+            _credentialFingerprintKey);
 
         // Resolve and validate the shared embedding settings before touching
         // Qdrant or attempting to create the private Python worker.
@@ -234,7 +247,8 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
             thinkingControl,
             embedding,
             vectorSettings,
-            embeddingSpace);
+            embeddingSpace,
+            authorization.CredentialRevision);
         if (_process is { HasExited: false } running
             && string.Equals(_processConfiguration, processConfiguration, StringComparison.Ordinal))
         {
@@ -284,9 +298,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         start.Environment["FASTEMBED_CACHE_PATH"] = Path.Combine(AppContext.BaseDirectory, "runtime", "fastembed-cache");
         start.Environment["HF_HUB_OFFLINE"] = "1";
         start.Environment["HF_HUB_DISABLE_TELEMETRY"] = "1";
-        start.Environment["NO_PROXY"] = LoopbackNoProxy;
-        start.Environment["HTTP_PROXY"] = "http://127.0.0.1:1";
-        start.Environment["HTTPS_PROXY"] = "http://127.0.0.1:1";
+        ApplyRuntimeEnvironment(start, runtime, authorization);
         start.Environment["ALI_MEM0_THINKING_CONTROL"] = thinkingControl.ToString();
         start.Environment["ALI_MEM0_THINKING_ENABLED"] = runtime.ThinkingEnabled.ToString();
         start.Environment["ALI_MEM0_REASONING_EFFORT"] = runtime.ReasoningEffort ?? string.Empty;
@@ -451,6 +463,136 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
             Path.Combine(mem0DataRoot, "embedding-spaces", embeddingSpaceId));
     }
 
+    internal static Mem0RuntimeAuthorization ResolveRuntimeAuthorization(
+        OpenAiCompatibleRuntimeOptions runtime,
+        string? apiKey,
+        ReadOnlySpan<byte> fingerprintKey)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        if (!runtime.Enabled || string.IsNullOrWhiteSpace(runtime.Model))
+        {
+            throw new InvalidOperationException(
+                "Participant memory requires an enabled selected runtime model.");
+        }
+
+        var endpointValidation = LocalEndpointPolicy.Validate(
+            runtime.Endpoint,
+            runtime.AllowPrivateLanEndpoint,
+            runtime.AllowRemoteHttpsEndpoint);
+        if (!endpointValidation.IsAllowed)
+        {
+            throw new InvalidOperationException(endpointValidation.Reason);
+        }
+
+        var isRemote = LocalEndpointPolicy.IsRemote(runtime.Endpoint);
+        if (isRemote
+            && LocalRuntimeEngines.Normalize(runtime.Engine)
+            != LocalRuntimeEngines.GenericOpenAi)
+        {
+            throw new InvalidOperationException(
+                "Remote participant-memory inference requires the explicit OpenAI-compatible/Custom engine.");
+        }
+
+        if (!isRemote)
+        {
+            return new Mem0RuntimeAuthorization(
+                isRemote: false,
+                apiKey: null,
+                credentialRevision: "local-no-credential");
+        }
+
+        var normalizedApiKey = apiKey?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedApiKey))
+        {
+            throw new InvalidOperationException(
+                "The selected remote runtime requires an API key from Ali's protected credential store or configured environment variable before participant memory can start.");
+        }
+        if (fingerprintKey.IsEmpty)
+        {
+            throw new ArgumentException(
+                "A non-empty in-memory credential fingerprint key is required.",
+                nameof(fingerprintKey));
+        }
+
+        var secretBytes = Encoding.UTF8.GetBytes(normalizedApiKey);
+        byte[] digest = [];
+        try
+        {
+            digest = HMACSHA256.HashData(fingerprintKey, secretBytes);
+            return new Mem0RuntimeAuthorization(
+                isRemote: true,
+                normalizedApiKey,
+                Convert.ToHexString(digest.AsSpan(0, 16)).ToLowerInvariant());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secretBytes);
+            CryptographicOperations.ZeroMemory(digest);
+        }
+    }
+
+    internal static void ApplyRuntimeEnvironment(
+        ProcessStartInfo start,
+        OpenAiCompatibleRuntimeOptions runtime,
+        Mem0RuntimeAuthorization authorization)
+    {
+        ArgumentNullException.ThrowIfNull(start);
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(authorization);
+        if (authorization.IsRemote != LocalEndpointPolicy.IsRemote(runtime.Endpoint))
+        {
+            throw new InvalidOperationException(
+                "The participant-memory runtime authorization does not match the selected endpoint.");
+        }
+
+        foreach (var variable in new[]
+                 {
+                     "OPENAI_API_KEY",
+                     "OPENAI_BASE_URL",
+                     "OPENAI_API_BASE",
+                     "OPENROUTER_API_KEY",
+                     "OPENROUTER_API_BASE",
+                     "OPENROUTER_BASE_URL"
+                 })
+        {
+            start.Environment.Remove(variable);
+        }
+        var configuredCredentialVariable = runtime.ApiKeyEnvironmentVariable?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredCredentialVariable)
+            && !string.Equals(
+                configuredCredentialVariable,
+                WorkerApiKeyEnvironmentVariable,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            start.Environment.Remove(configuredCredentialVariable);
+        }
+
+        if (authorization.IsRemote)
+        {
+            start.Environment[WorkerApiKeyEnvironmentVariable] = authorization.ApiKey
+                ?? throw new InvalidOperationException(
+                    "Remote participant-memory authorization contains no API key.");
+            start.Environment["NO_PROXY"] = LoopbackNoProxy;
+            return;
+        }
+
+        start.Environment.Remove(WorkerApiKeyEnvironmentVariable);
+        start.Environment["NO_PROXY"] = runtime.Endpoint.IsLoopback
+            ? LoopbackNoProxy
+            : MergeNoProxy(LoopbackNoProxy, runtime.Endpoint.Host);
+        start.Environment["HTTP_PROXY"] = DeadProxyUri;
+        start.Environment["HTTPS_PROXY"] = DeadProxyUri;
+        start.Environment["ALL_PROXY"] = DeadProxyUri;
+    }
+
+    private static string MergeNoProxy(params string?[] values) =>
+        string.Join(",", values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .SelectMany(value => value!.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            .Select(value => value.Trim())
+            .Where(value => value.Length != 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+
     internal static IReadOnlyList<string> BuildWorkerArgumentList(
         string script,
         Mem0EmbeddingSpaceConfiguration embeddingSpace,
@@ -470,8 +612,11 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
             "--data-root", embeddingSpace.DataRoot,
             "--collection", embeddingSpace.CollectionName,
             "--llm-endpoint", runtime.Endpoint.ToString().TrimEnd('/'),
+            "--llm-engine", LocalRuntimeEngines.Normalize(runtime.Engine),
             "--llm-model", runtime.Model,
             "--llm-output-tokens", runtime.OutputTokenLimit.ToString(),
+            "--allow-private-lan-llm", runtime.AllowPrivateLanEndpoint ? "true" : "false",
+            "--allow-remote-https-llm", runtime.AllowRemoteHttpsEndpoint ? "true" : "false",
             "--embedding-provider", embedding.Provider,
             "--embedding-api-base", embedding.ApiBaseUri.AbsoluteUri,
             "--embedding-model", embedding.Model,
@@ -498,14 +643,19 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         ModelThinkingControl thinkingControl,
         Mem0EmbeddingProcessConfiguration embedding,
         LocalVectorLibrarySettings vectorSettings,
-        Mem0EmbeddingSpaceConfiguration embeddingSpace) =>
+        Mem0EmbeddingSpaceConfiguration embeddingSpace,
+        string credentialRevision = "local-no-credential") =>
         JsonSerializer.Serialize(new
         {
             runtime.Endpoint,
+            Engine = LocalRuntimeEngines.Normalize(runtime.Engine),
             runtime.Model,
             runtime.OutputTokenLimit,
             runtime.ReasoningEffort,
             runtime.ThinkingEnabled,
+            runtime.AllowPrivateLanEndpoint,
+            runtime.AllowRemoteHttpsEndpoint,
+            CredentialRevision = credentialRevision,
             ThinkingControl = thinkingControl,
             ProtocolIdentity,
             EmbeddingProvider = embedding.Provider,
@@ -571,6 +721,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         {
             _gate.Release();
             _gate.Dispose();
+            CryptographicOperations.ZeroMemory(_credentialFingerprintKey);
             if (_embeddingIdentitySource is IDisposable disposableIdentitySource)
             {
                 disposableIdentitySource.Dispose();
@@ -597,6 +748,28 @@ internal sealed record Mem0EmbeddingSpaceConfiguration(
     string BaseCollectionName,
     string CollectionName,
     string DataRoot);
+
+internal sealed class Mem0RuntimeAuthorization
+{
+    internal Mem0RuntimeAuthorization(
+        bool isRemote,
+        string? apiKey,
+        string credentialRevision)
+    {
+        IsRemote = isRemote;
+        ApiKey = apiKey;
+        CredentialRevision = credentialRevision;
+    }
+
+    internal bool IsRemote { get; }
+
+    internal string? ApiKey { get; }
+
+    internal string CredentialRevision { get; }
+
+    public override string ToString() =>
+        $"Mem0RuntimeAuthorization {{ IsRemote = {IsRemote}, ApiKey = [redacted], CredentialRevision = {CredentialRevision} }}";
+}
 
 internal sealed record Mem0Response(
     string Id,

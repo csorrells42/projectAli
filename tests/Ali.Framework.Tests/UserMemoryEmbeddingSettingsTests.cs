@@ -490,7 +490,7 @@ public sealed class UserMemoryEmbeddingSettingsTests
         Assert.Contains("search_document: ", worker, StringComparison.Ordinal);
         Assert.Contains("search_query: ", worker, StringComparison.Ordinal);
         Assert.Contains("memory_action == \"search\"", worker, StringComparison.Ordinal);
-        Assert.Contains("127.0.0.1,localhost,::1", worker, StringComparison.Ordinal);
+        Assert.Contains("require_loopback", worker, StringComparison.Ordinal);
         Assert.Contains("qdrant_config[\"api_key\"] = qdrant_api_key", worker, StringComparison.Ordinal);
         Assert.Contains("\"https\": args.qdrant_use_tls == \"true\"", worker, StringComparison.Ordinal);
         Assert.Contains("openai_compatible_llm.LocalOpenAICompatibleLLM", worker, StringComparison.Ordinal);
